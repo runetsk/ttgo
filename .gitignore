@@ -54,6 +54,10 @@ frontend/multi_select_verification.png
 .specify/
 .worktrees/
 
-# Internal docs & specs — kept locally, not shared in the public repo
-/docs/
+# Internal docs & specs — kept locally, not shared in the public repo.
+# Exception: docs/images/ holds the screenshots embedded in README.md, so it
+# must stay tracked and public. (Use /docs/* + a negation, not /docs/, because
+# a child cannot be re-included once its parent directory is fully excluded.)
+/docs/*
+!/docs/images/
 /specs/
