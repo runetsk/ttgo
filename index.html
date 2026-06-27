@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TTGO — Self-hosted, source-available test management</title>
+  <meta name="description" content="TTGO is a modern, self-hosted, source-available test management platform — rich test cases, run execution, analytics, AI test generation and a first-class CLI, all from a single Go binary and one SQLite file." />
+  <meta name="theme-color" content="#0b0b12" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="TTGO — Self-hosted test management" />
+  <meta property="og:description" content="Own your data, automate everything. A modern self-hosted alternative to TestRail, Xray and qTest." />
+  <meta property="og:image" content="images/01-test-library.png" />
+
+  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22&gt;&lt;text y=%22.9em%22 font-size=%2290%22&gt;🧪&lt;/text&gt;&lt;/svg&gt;" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- ───────────────────────── Nav ───────────────────────── -->
+  <header class="nav" id="nav">
+    <div class="container nav__inner">
+      <a href="#top" class="brand" aria-label="TTGO home">
+        <span class="brand__mark" aria-hidden="true">🧪</span>
+        <span class="brand__name">TTGO</span>
+      </a>
+      <nav class="nav__links" id="navLinks" aria-label="Primary">
+        <a href="#features">Features</a>
+        <a href="#compare">Compare</a>
+        <a href="#tech">Tech</a>
+        <a class="btn btn--ghost btn--sm" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">
+          <span aria-hidden="true">★</span> GitHub
+        </a>
+      </nav>
+      <button class="nav__toggle" id="navToggle" aria-label="Toggle menu" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ───────────────────────── Hero ───────────────────────── -->
+    <section class="hero">
+      <div class="hero__glow" aria-hidden="true"></div>
+      <div class="container hero__inner">
+        <p class="eyebrow reveal">Self-hosted · Source-available</p>
+        <h1 class="hero__title reveal">Test management that's<br /><span class="grad">actually yours.</span></h1>
+        <p class="hero__sub reveal">
+          TTGO is a modern, self-hosted test management platform — rich test cases, run
+          execution, analytics, AI test generation and a first-class CLI, all running as a
+          single Go binary against one SQLite file. <strong>Own your data, automate everything.</strong>
+        </p>
+        <div class="hero__cta reveal">
+          <a class="btn btn--primary" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">View on GitHub →</a>
+          <a class="btn btn--ghost" href="mailto:runetskiril@gmail.com?subject=TTGO%20commercial%20license">Commercial license</a>
+        </div>
+        <div class="hero__shot reveal">
+          <div class="browser">
+            <div class="browser__bar"><span></span><span></span><span></span></div>
+            <img src="images/01-test-library.png" alt="TTGO test library — hierarchical folder tree, a filterable test grid and categories" loading="eager" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Highlights ───────────────────────── -->
+    <section class="section" aria-label="Highlights">
+      <div class="container">
+        <div class="cards">
+          <article class="card reveal">
+            <div class="card__icon">🏠</div>
+            <h3>Self-hosted — own your data</h3>
+            <p>Runs entirely on your infrastructure as a single Go binary and one SQLite file. Source-available under PolyForm Shield — no per-seat SaaS bills, nothing leaving your network.</p>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon">🤖</div>
+            <h3>AI test generation</h3>
+            <p>Draft test cases from requirements using your own LLM provider (bring your own key). A review-and-approve flow means nothing is saved until you accept it.</p>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon">⌨️</div>
+            <h3>CLI &amp; Claude Code automation</h3>
+            <p>A first-class <code>ttgo</code> CLI drives tests, runs and analytics from the terminal or CI — and a bundled Claude Code skill lets you operate TTGO in plain English.</p>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon">⚡</div>
+            <h3>Real-time collaboration</h3>
+            <p>WebSocket-powered live sync keeps every open tab and teammate up to date as runs are executed and test cases change.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Feature tour ───────────────────────── -->
+    <section class="section" id="features">
+      <div class="container">
+        <header class="section__head reveal">
+          <h2>A complete QA workflow</h2>
+          <p>Everything teams expect from commercial test management — without the per-seat bill or the data leaving your network.</p>
+        </header>
+
+        <div class="feature reveal">
+          <div class="feature__text">
+            <h3>Rich test cases</h3>
+            <p>TipTap rich-text descriptions, ordered steps with expected results, and full version history with a diff view. Tabs for runs, defects and linked requirements keep everything in one place.</p>
+          </div>
+          <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/02-test-case-detail.png" alt="TTGO test case detail — rich-text description, ordered steps and version history" loading="lazy" /></div></div>
+        </div>
+
+        <div class="feature feature--rev reveal">
+          <div class="feature__text">
+            <h3>Run execution</h3>
+            <p>Snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. Group results live by status, AI verdict or error signature.</p>
+          </div>
+          <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/03-test-run-execution.png" alt="TTGO run execution — per-result pass/fail, defect classification and durations" loading="lazy" /></div></div>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature__text">
+            <h3>Analytics</h3>
+            <p>Pass-rate trends, flaky-test detection, slowest tests, component health and side-by-side run comparison across any date range — so you know where quality is actually moving.</p>
+          </div>
+          <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/04-analytics-dashboard.png" alt="TTGO analytics dashboard — pass-rate trends and flaky-test detection" loading="lazy" /></div></div>
+        </div>
+
+        <div class="feature feature--rev reveal">
+          <div class="feature__text">
+            <h3>Requirements &amp; traceability</h3>
+            <p>A coverage-at-a-glance matrix links requirements to test cases and surfaces the gaps. Import requirements from Jira or Confluence and keep traceability honest.</p>
+          </div>
+          <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/05-traceability-matrix.png" alt="TTGO traceability matrix — requirements linked to test cases with coverage gaps" loading="lazy" /></div></div>
+        </div>
+
+        <div class="feature reveal">
+          <div class="feature__text">
+            <h3>AI test generation</h3>
+            <p>Pick a requirement for context, describe what you want, and let your configured model draft test cases for review. Nothing is saved until you approve it — your key, your data.</p>
+          </div>
+          <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/06-ai-generate.png" alt="TTGO AI test generation studio — draft test cases from a requirement" loading="lazy" /></div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Comparison ───────────────────────── -->
+    <section class="section section--alt" id="compare">
+      <div class="container">
+        <header class="section__head reveal">
+          <h2>How TTGO compares</h2>
+          <p>Against popular commercial and self-hosted test management tools.</p>
+        </header>
+        <div class="table-wrap reveal">
+          <table class="compare">
+            <thead>
+              <tr>
+                <th scope="col" class="compare__cap">Capability</th>
+                <th scope="col" class="compare__ttgo">TTGO</th>
+                <th scope="col">TestRail</th>
+                <th scope="col">Xray</th>
+                <th scope="col">qTest</th>
+                <th scope="col">Kiwi&nbsp;TCMS</th>
+                <th scope="col">Qase</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Self-hosted / on-prem</th><td class="y c">✓</td><td class="p">~</td><td class="p">~</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td></tr>
+              <tr><th scope="row">Source-available / open source</th><td class="y c">✓</td><td class="n">✕</td><td class="n">✕</td><td class="n">✕</td><td class="y">✓</td><td class="n">✕</td></tr>
+              <tr><th scope="row">Free to self-host (no per-seat license)</th><td class="y c">✓</td><td class="n">✕</td><td class="n">✕</td><td class="n">✕</td><td class="y">✓</td><td class="n">✕</td></tr>
+              <tr><th scope="row">Built-in AI test generation</th><td class="y c">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">✕</td><td class="y">✓</td></tr>
+              <tr><th scope="row">First-class CLI</th><td class="y c">✓</td><td class="y">✓</td><td class="n">✕</td><td class="n">✕</td><td class="p">~</td><td class="y">✓</td></tr>
+              <tr><th scope="row">REST API</th><td class="y c">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td></tr>
+              <tr><th scope="row">Webhooks / push notifications</th><td class="y c">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="p">~</td><td class="p">~</td></tr>
+              <tr><th scope="row">Requirements &amp; traceability matrix</th><td class="y c">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td></tr>
+              <tr><th scope="row">Native Jira integration</th><td class="y c">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="compare__legend"><span class="y">✓</span> yes &nbsp;·&nbsp; <span class="p">~</span> partial, paid-tier-only or caveated &nbsp;·&nbsp; <span class="n">✕</span> no</p>
+        <p class="compare__note">Competitor capabilities are summarized from public documentation as of mid-2026 and change frequently — verify current details with each vendor.</p>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Tech stack ───────────────────────── -->
+    <section class="section" id="tech">
+      <div class="container">
+        <header class="section__head reveal">
+          <h2>Built on a boring, reliable stack</h2>
+          <p>One Go binary, one SQLite file, a React front end. Easy to run, easy to trust.</p>
+        </header>
+        <ul class="chips reveal">
+          <li>Go 1.25</li><li>GORM</li><li>SQLite</li><li>net/http + routegroup</li>
+          <li>Gorilla WebSocket</li><li>React 19.2</li><li>Vite</li><li>TipTap</li>
+          <li>Recharts</li><li>@dnd-kit</li><li>Cobra CLI</li><li>Docker</li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── CTA ───────────────────────── -->
+    <section class="section cta">
+      <div class="container cta__inner reveal">
+        <h2>Run it yourself in minutes</h2>
+        <p>Clone the repo, drop in your admin credentials, and bring it up with Docker.</p>
+        <pre class="code"><code><span class="tok-c"># clone &amp; configure</span>
+git clone https://github.com/runetsk/ttgo.git &amp;&amp; cd ttgo
+cp .env.example .env   <span class="tok-c"># set ADMIN_EMAIL and ADMIN_PASSWORD</span>
+
+<span class="tok-c"># build &amp; start (served on port 80)</span>
+docker compose up -d --build</code></pre>
+        <div class="cta__btns">
+          <a class="btn btn--primary" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">View on GitHub →</a>
+          <a class="btn btn--ghost" href="mailto:runetskiril@gmail.com?subject=TTGO%20commercial%20license">Get a commercial license</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ───────────────────────── Footer ───────────────────────── -->
+  <footer class="footer">
+    <div class="container footer__inner">
+      <div class="footer__brand">
+        <span class="brand__mark" aria-hidden="true">🧪</span>
+        <strong>TTGO</strong>
+        <span class="footer__tag">Self-hosted, source-available test management.</span>
+      </div>
+      <div class="footer__meta">
+        <a href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">GitHub</a>
+        <span>Licensed under <a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield 1.0.0</a></span>
+        <span>Commercial use: <a href="mailto:runetskiril@gmail.com">runetskiril@gmail.com</a></span>
+      </div>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
+</body>
+</html>
