@@ -1,0 +1,28 @@
+{
+    "spaces": [
+        { "id": "SPACE1", "key": "REQ", "name": "Requirements", "type": "global" },
+        { "id": "SPACE2", "key": "ARCH", "name": "Architecture", "type": "global" }
+    ],
+    "pages": {
+        "SPACE1": [
+            { "id": "pg-001", "title": "Login Requirements", "spaceId": "SPACE1", "status": "current", "_links": { "webui": "/spaces/REQ/pages/pg-001" } },
+            { "id": "pg-002", "title": "Dashboard Requirements", "spaceId": "SPACE1", "status": "current", "_links": { "webui": "/spaces/REQ/pages/pg-002" } }
+        ]
+    },
+    "pageDetails": {
+        "pg-001": {
+            "id": "pg-001",
+            "title": "Login Requirements",
+            "spaceId": "SPACE1",
+            "body": { "storage": { "value": "<p>Users must authenticate with email and password.</p>" } },
+            "_links": { "webui": "/spaces/REQ/pages/pg-001" }
+        },
+        "pg-002": {
+            "id": "pg-002",
+            "title": "Dashboard Requirements",
+            "spaceId": "SPACE1",
+            "body": { "storage": { "value": "<p>Dashboard shows summary cards and recent activity.</p>" } },
+            "_links": { "webui": "/spaces/REQ/pages/pg-002" }
+        }
+    }
+}

@@ -1,0 +1,12 @@
+tracker.db
+tracker.db.bak
+ttgo.db
+backups/
+uploads/
+*.log
+server.log
+backend_debug.log
+ttgo-linux
+debug_*
+test-results/
+e2e/

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/ttgo-icon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TTGO</title>
+
+    <!-- Preconnect to Google Fonts CDN for faster font loading -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Inline critical styles so the loading skeleton paints instantly -->
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #0f0f10;
+        color: #ededed;
+        font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      }
+      .app-loading {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+      }
+      .app-loading-header {
+        height: 64px;
+        background: #161618;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+        display: flex;
+        align-items: center;
+        padding: 0 20px;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .app-loading-logo {
+        width: 30px;
+        height: 30px;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 160' fill='none'%3E%3Cpolygon points='80,18 122,40 122,84 80,106 38,84 38,40' fill='%233B82F6' opacity='0.9' transform='translate(-6, 4)'/%3E%3Cpolygon points='80,18 122,40 122,84 80,106 38,84 38,40' fill='%23F97316' opacity='0.85' transform='translate(14, 30)'/%3E%3Crect x='68' y='58' width='24' height='24' rx='2' fill='%2334D399' transform='rotate(45, 80, 70)'/%3E%3C/svg%3E");
+        background-size: contain;
+        background-repeat: no-repeat;
+      }
+      .app-loading-text {
+        font-weight: 700;
+        font-size: 0.95rem;
+        background: linear-gradient(120deg, #ededed 0%, rgba(165,168,255,0.85) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+      }
+      .app-loading-body {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #b0b0b0;
+        font-size: 0.85rem;
+      }
+      @keyframes app-loading-fade {
+        0%, 100% { opacity: 0.4; }
+        50% { opacity: 1; }
+      }
+      .app-loading-dot {
+        animation: app-loading-fade 1.2s ease-in-out infinite;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <!-- Loading skeleton — visible until React mounts, then replaced -->
+      <div class="app-loading">
+        <div class="app-loading-header">
+          <div class="app-loading-logo"></div>
+          <span class="app-loading-text">TTGO</span>
+        </div>
+        <div class="app-loading-body">
+          <span class="app-loading-dot">Loading…</span>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

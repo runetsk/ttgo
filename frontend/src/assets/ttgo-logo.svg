@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-65 -70 130 170" fill="none">
+  <!-- Mark -->
+  <polygon points="-10,-57 32,-35 32,9 -10,31 -52,9 -52,-35" fill="#3B82F6" opacity="0.9"/>
+  <polygon points="10,-31 52,-9 52,35 10,57 -32,35 -32,-9" fill="#F97316" opacity="0.85"/>
+  <rect x="-12" y="-12" width="24" height="24" rx="2" fill="#34D399" transform="rotate(45 0 0)"/>
+  <!-- Wordmark "ttgo" — geometric vector paths, no font dependency -->
+  <g fill="currentColor">
+    <!-- t (cell -32 to -19) -->
+    <path d="M-28 63L-25 63L-25 69L-19 69L-19 72L-25 72L-25 80L-28 80L-28 72L-32 72L-32 69L-28 69Z"/>
+    <!-- t (cell -15 to -2) -->
+    <path d="M-11 63L-8 63L-8 69L-2 69L-2 72L-8 72L-8 80L-11 80L-11 72L-15 72L-15 69L-11 69Z"/>
+    <!-- g (cell 2 to 15) — outer + counter hole -->
+    <path d="M2 69L15 69L15 86L2 86L2 83L12 83L12 80L2 80Z M5 72L5 77L12 77L12 72Z"/>
+    <!-- o (cell 19 to 32) — outer + counter hole -->
+    <path d="M19 69L32 69L32 80L19 80Z M22 72L22 77L29 77L29 72Z"/>
+  </g>
+</svg>

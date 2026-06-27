@@ -1,0 +1,173 @@
+/* Google Fonts loaded via <link> in index.html for non-blocking delivery */
+
+:root {
+  /* Common variables */
+  --accent-indigo: #6366f1;
+  --accent-teal: #14b8a6;
+  --accent-red: #ef4444;
+  --accent-green: #22c55e;
+  --success-color: var(--accent-green);
+  --error-color: var(--accent-red);
+  --warning-color: #eab308;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+
+  /* Dark Theme (Default) */
+  --bg-primary: #0f0f10;
+  --bg-secondary: #161618;
+  --bg-tertiary: #1f1f22;
+  --text-primary: #ededed;
+  --text-secondary: #b0b0b0;
+  --border-color: rgba(255, 255, 255, 0.1);
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+
+  /* Sidebar tree palette */
+  --sidebar-bg: #141416;
+  --sidebar-border: rgba(255, 255, 255, 0.06);
+  --sidebar-row-hover: rgba(255, 255, 255, 0.04);
+  --sidebar-selected-bg: rgba(99, 102, 241, 0.18);
+  --sidebar-selected-fg: #c7d2fe;
+  --sidebar-selected-icon: #a5b4fc;
+  --sidebar-muted: #7a7a80;
+  --sidebar-count-bg: rgba(255, 255, 255, 0.05);
+
+  /* AI Generate Studio tokens */
+  --aig-surface-tint: rgba(255, 255, 255, 0.04);
+  --aig-surface-tint-strong: rgba(255, 255, 255, 0.08);
+  --aig-surface-hover: rgba(255, 255, 255, 0.06);
+  --aig-surface-sunken: rgba(0, 0, 0, 0.22);
+  --aig-surface-footer: rgba(0, 0, 0, 0.12);
+  --aig-indigo-soft: #a5b4fc;
+  --aig-indigo-strong: #818cf8;
+  --aig-scale-track: rgba(255, 255, 255, 0.08);
+  --aig-scale-dim: rgba(255, 255, 255, 0.18);
+  --aig-fade-color: rgba(17, 17, 20, 0.92);
+  --aig-modal-backdrop: rgba(10, 10, 12, 0.72);
+  --aig-accent-soft-bg: rgba(99, 102, 241, 0.14);
+  --aig-accent-soft-border: rgba(99, 102, 241, 0.35);
+  --aig-success-bg: rgba(34, 197, 94, 0.12);
+  --aig-success-border: rgba(34, 197, 94, 0.35);
+  --aig-success-fg: #86efac;
+  --aig-danger-bg: rgba(239, 68, 68, 0.1);
+  --aig-danger-border: rgba(239, 68, 68, 0.3);
+  --aig-danger-fg: #fca5a5;
+
+  /* Category tone foregrounds — readable on dark bg */
+  --aig-tone-red-fg: #fca5a5;
+  --aig-tone-indigo-fg: #a5b4fc;
+  --aig-tone-amber-fg: #fde047;
+  --aig-tone-teal-fg: #5eead4;
+  --aig-tone-green-fg: #86efac;
+  --aig-tone-purple-fg: #d8b4fe;
+}
+
+[data-theme='light'] {
+  --bg-primary: #f8fafc;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f1f5f9;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --border-color: rgba(0, 0, 0, 0.08);
+  --glass-bg: rgba(255, 255, 255, 0.7);
+  --glass-border: rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+
+  /* Sidebar tree palette — light */
+  --sidebar-bg: #f9fafb;
+  --sidebar-border: rgba(0, 0, 0, 0.06);
+  --sidebar-row-hover: rgba(0, 0, 0, 0.04);
+  --sidebar-selected-bg: rgba(99, 102, 241, 0.12);
+  --sidebar-selected-fg: #4338ca;
+  --sidebar-selected-icon: #4f46e5;
+  --sidebar-muted: #64748b;
+  --sidebar-count-bg: rgba(0, 0, 0, 0.05);
+
+  /* AI Generate Studio tokens — light */
+  --aig-surface-tint: rgba(15, 23, 42, 0.04);
+  --aig-surface-tint-strong: rgba(15, 23, 42, 0.07);
+  --aig-surface-hover: rgba(15, 23, 42, 0.06);
+  --aig-surface-sunken: rgba(15, 23, 42, 0.05);
+  --aig-surface-footer: rgba(15, 23, 42, 0.035);
+  --aig-indigo-soft: #4338ca;
+  --aig-indigo-strong: #4f46e5;
+  --aig-scale-track: rgba(15, 23, 42, 0.08);
+  --aig-scale-dim: rgba(15, 23, 42, 0.2);
+  --aig-fade-color: rgba(248, 250, 252, 0.95);
+  --aig-modal-backdrop: rgba(15, 23, 42, 0.4);
+  --aig-accent-soft-bg: rgba(99, 102, 241, 0.1);
+  --aig-accent-soft-border: rgba(79, 70, 229, 0.3);
+  --aig-success-bg: rgba(34, 197, 94, 0.14);
+  --aig-success-border: rgba(21, 128, 61, 0.45);
+  --aig-success-fg: #15803d;
+  --aig-danger-bg: rgba(239, 68, 68, 0.1);
+  --aig-danger-border: rgba(185, 28, 28, 0.4);
+  --aig-danger-fg: #b91c1c;
+
+  /* Category tone foregrounds — readable on light bg */
+  --aig-tone-red-fg: #b91c1c;
+  --aig-tone-indigo-fg: #4338ca;
+  --aig-tone-amber-fg: #a16207;
+  --aig-tone-teal-fg: #0f766e;
+  --aig-tone-green-fg: #15803d;
+  --aig-tone-purple-fg: #7e22ce;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.2s ease;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-primary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--bg-tertiary);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-secondary);
+}
+
+/* Tables inside rendered HTML descriptions */
+.req-description-html table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+}
+
+.req-description-html th,
+.req-description-html td {
+  border: 1px solid var(--border-color, rgba(255,255,255,0.12));
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 0.85rem;
+}
+
+.req-description-html th {
+  background: rgba(99,102,241,0.08);
+  font-weight: 600;
+}

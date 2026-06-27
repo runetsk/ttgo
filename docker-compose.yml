@@ -1,0 +1,33 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      DB_PATH: /data/tracker.db
+      ADMIN_EMAIL: ${ADMIN_EMAIL}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost}
+      LISTEN_ADDR: :8080
+    volumes:
+      - db_data:/data
+      - uploads:/app/uploads
+    expose:
+      - "8080"
+
+  nginx:
+    build:
+      context: .
+      dockerfile: nginx/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - uploads:/opt/ttgo/uploads:ro
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+  uploads:

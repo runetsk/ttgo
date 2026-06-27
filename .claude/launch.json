@@ -1,0 +1,29 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "backend",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server/main.go"],
+      "cwd": "backend",
+      "port": 8080,
+      "env": { "ADMIN_EMAIL": "admin@example.com", "ADMIN_PASSWORD": "changeme123" }
+    },
+    {
+      "name": "frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "frontend",
+      "port": 5173,
+      "autoPort": false
+    },
+    {
+      "name": "frontend-preview",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "preview"],
+      "cwd": "frontend",
+      "port": 4173,
+      "autoPort": false
+    }
+  ]
+}

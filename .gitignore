@@ -1,0 +1,59 @@
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/playwright-report/
+frontend/test-results/
+frontend/e2e/.auth-state.json
+frontend/test_output.log
+
+# Go build artifacts
+backend/*.exe
+backend/*.out
+backend/*.test
+backend/vendor/
+backend/tracker.db
+
+# Encryption key (at-rest secret encryption) and backup data dir — never commit.
+# NOTE: do not use a bare "backups/" — it would also ignore the source package
+# internal/api/backups. Backup *.db files are already covered by *.db above.
+secret.key
+backend/secret.key
+/backend/backups/
+backend/tracker.db.bak
+backend/backend_debug.log
+backend/test-results/
+backend/server
+backend/ttgo-linux
+backend/uploads/
+backend/server.log
+*.db
+*.db-shm
+*.db-wal
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+backend/.env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+
+# Debug artifacts
+frontend/debug_*
+frontend/*.log
+frontend/multi_select_verification.png
+
+# Tool internals
+.superpowers/
+.specify/
+.worktrees/
+
+# Internal docs & specs — kept locally, not shared in the public repo
+/docs/
+/specs/

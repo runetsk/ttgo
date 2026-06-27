@@ -1,0 +1,26 @@
+{
+    "PROJ-101": {
+        "key": "PROJ-101",
+        "fields": {
+            "summary": "User login should validate email format",
+            "description": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "As a user I want email validation on login." }] }] },
+            "status": { "name": "Open" }
+        }
+    },
+    "PROJ-102": {
+        "key": "PROJ-102",
+        "fields": {
+            "summary": "Dashboard should show recent activity",
+            "description": { "type": "doc", "content": [{ "type": "paragraph", "content": [{ "type": "text", "text": "Show last 10 activities on dashboard." }] }] },
+            "status": { "name": "In Progress" }
+        }
+    },
+    "PROJ-103": {
+        "key": "PROJ-103",
+        "fields": {
+            "summary": "Export report to PDF",
+            "description": null,
+            "status": { "name": "Done" }
+        }
+    }
+}
