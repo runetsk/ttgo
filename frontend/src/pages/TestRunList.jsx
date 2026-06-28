@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { getTestRuns, getCategories, getRunFolders } from '../api';
 import CreateRunModal from '../components/CreateRunModal';
 import Modal from '../components/Modal';
+import DateRangeFilter from '../components/filters/DateRangeFilter';
+import CategoryFilter from '../components/filters/CategoryFilter';
 import ColumnPicker from '../components/ColumnPicker';
 import { useColumnPreference } from '../hooks/useColumnPreference';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -37,7 +39,9 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
     const [showModal, setShowModal] = useState(false);
     const [modal, setModal] = useState(null);
     const [filterStatus, setFilterStatus] = useState("");
-    const [filterCategory, setFilterCategory] = useState("");
+    const [filterCategoryIds, setFilterCategoryIds] = useState([]);
+    const [filterCreated, setFilterCreated] = useState({ from: null, to: null });
+    const [filterUpdated, setFilterUpdated] = useState({ from: null, to: null });
     const [sortBy, setSortBy] = useState("created_at");
     const [sortOrder, setSortOrder] = useState("DESC");
     const [page, setPage] = useState(1);
@@ -61,7 +65,10 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
     }, [resetColumns, resetWidths]);
 
     const loadRuns = useCallback((resetSelection = false) => {
-        getTestRuns(filterCategory, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId)
+        getTestRuns(filterCategoryIds, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId, {
+            createdFrom: filterCreated.from, createdTo: filterCreated.to,
+            updatedFrom: filterUpdated.from, updatedTo: filterUpdated.to,
+        })
             .then(data => {
                 const loadedRuns = data.runs || [];
                 setRuns(loadedRuns);
@@ -75,7 +82,7 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                 if (resetSelection) setSelectedRunIds([]);
                 if (onRunsLoaded) onRunsLoaded([]);
             });
-    }, [filterCategory, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId, onRunsLoaded]);
+    }, [filterCategoryIds, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId, filterCreated, filterUpdated, onRunsLoaded]);
 
     useEffect(() => {
         getCategories()
@@ -104,7 +111,7 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
     // Reset page when filters change (including folder selection)
     useEffect(() => {
         setPage(1);
-    }, [filterCategory, filterStatus, sortBy, sortOrder, selectedFolderId]);
+    }, [filterCategoryIds, filterStatus, sortBy, sortOrder, selectedFolderId, filterCreated, filterUpdated]);
 
     const handleCreateSuccess = () => {
         setShowModal(false);
@@ -384,20 +391,33 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                                 {isVisible('folder')  && <th></th>}
                                 {isVisible('category') && (
                                     <th>
-                                        <select
-                                            className="col-filter-select"
-                                            value={filterCategory}
-                                            onChange={e => { setFilterCategory(e.target.value); setPage(1); }}
-                                            data-testid="filter-category-select"
-                                        >
-                                            <option value="">All</option>
-                                            {(categories || []).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-                                        </select>
+                                        <CategoryFilter
+                                            categories={categories}
+                                            value={filterCategoryIds}
+                                            onChange={(ids) => { setFilterCategoryIds(ids); setPage(1); }}
+                                            testId="filter-run-category"
+                                        />
                                     </th>
                                 )}
                                 {isVisible('comments') && <th></th>}
-                                {isVisible('created_at') && <th></th>}
-                                {isVisible('updated_at') && <th></th>}
+                                {isVisible('created_at') && (
+                                    <th>
+                                        <DateRangeFilter
+                                            value={filterCreated}
+                                            onChange={(v) => { setFilterCreated(v); setPage(1); }}
+                                            testId="filter-run-created_at"
+                                        />
+                                    </th>
+                                )}
+                                {isVisible('updated_at') && (
+                                    <th>
+                                        <DateRangeFilter
+                                            value={filterUpdated}
+                                            onChange={(v) => { setFilterUpdated(v); setPage(1); }}
+                                            testId="filter-run-updated_at"
+                                        />
+                                    </th>
+                                )}
                             </tr>
                         )}
                     </thead>

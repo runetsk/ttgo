@@ -99,13 +99,18 @@ export const exportTests = (ids, fields) =>
     });
 export const assignCategory = (testId, categoryId) => api.post(`/tests/${testId}/categories`, { category_id: categoryId });
 
-export const getTestRuns = (categoryId, status, sortBy, order, page = 1, pageSize = 20, folderID = null) => {
+export const getTestRuns = (categoryIds, status, sortBy, order, page = 1, pageSize = 20, folderID = null, dateFilters = {}) => {
     let params = new URLSearchParams();
-    if (categoryId) params.append('category_id', categoryId);
+    if (Array.isArray(categoryIds) && categoryIds.length > 0) params.append('category_ids', categoryIds.join(','));
+    else if (typeof categoryIds === 'string' && categoryIds) params.append('category_id', categoryIds);
     if (status) params.append('status', status);
     if (sortBy) params.append('sort_by', sortBy);
     if (order) params.append('order', order);
     if (folderID !== null && folderID !== undefined) params.append('run_folder_id', folderID);
+    if (dateFilters.createdFrom) params.append('created_from', dateFilters.createdFrom);
+    if (dateFilters.createdTo) params.append('created_to', dateFilters.createdTo);
+    if (dateFilters.updatedFrom) params.append('updated_from', dateFilters.updatedFrom);
+    if (dateFilters.updatedTo) params.append('updated_to', dateFilters.updatedTo);
 
     const offset = (page - 1) * pageSize;
     params.append('limit', pageSize);
