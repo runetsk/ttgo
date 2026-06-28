@@ -437,6 +437,18 @@
     border-color: rgba(255, 255, 255, 0.15);
 }
 
+/* Clickable test-case name inside run results — signal it's a link on hover */
+.result-test-link {
+    color: var(--accent-indigo);
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+.result-test-link:hover {
+    color: var(--aig-indigo-strong);
+    text-decoration: underline;
+}
+
 /* Inline filter row inside thead */
 .filter-row th {
     padding: 0 16px 8px 16px;

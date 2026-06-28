@@ -855,7 +855,7 @@ export default function TestRunDetail() {
                                             <Link
                                                 to={`/library/tests/${result.test_case_id}`}
                                                 onClick={e => e.stopPropagation()}
-                                                style={{ color: 'var(--accent-indigo)', textDecoration: 'none' }}
+                                                className="result-test-link"
                                             >
                                                 {result.test_name_snapshot}
                                             </Link>

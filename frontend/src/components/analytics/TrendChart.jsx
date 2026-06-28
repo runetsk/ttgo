@@ -28,7 +28,7 @@ function CustomTooltip({ active, payload, label }) {
 
 export default function TrendChart({ data, onTimeRangeChange }) {
     const navigate = useNavigate();
-    const [chartType, setChartType] = useState('area');
+    const [chartType, setChartType] = useState('bar');
     const [hiddenSeries, setHiddenSeries] = useState({});
 
     const points = data?.points || [];

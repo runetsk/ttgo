@@ -286,6 +286,12 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                                     <div className={`col-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={(e) => startResize('failed', e)} onDoubleClick={(e) => { e.stopPropagation(); resetColumnWidth('failed'); }} />
                                 </th>
                             )}
+                            {isVisible('retried') && (
+                                <th className="col-resize-th" style={{ width: columnWidths['retried'], cursor: 'pointer', userSelect: 'none' }}>
+                                    Passed after retry
+                                    <div className={`col-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={(e) => startResize('retried', e)} onDoubleClick={(e) => { e.stopPropagation(); resetColumnWidth('retried'); }} />
+                                </th>
+                            )}
                             {isVisible('defect_types') && (
                                 <th className="col-resize-th" style={{ width: columnWidths['defect_types'], cursor: 'pointer', userSelect: 'none' }}>
                                     Defect Types
@@ -369,6 +375,7 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                                 )}
                                 {isVisible('passed')       && <th></th>}
                                 {isVisible('failed')       && <th></th>}
+                                {isVisible('retried')      && <th></th>}
                                 {isVisible('defect_types') && <th></th>}
                                 {isVisible('defect_links') && <th></th>}
                                 {isVisible('skipped')      && <th></th>}
