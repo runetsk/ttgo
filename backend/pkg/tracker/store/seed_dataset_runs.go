@@ -231,7 +231,7 @@ type runResultEnrichment struct {
 // on selected failing results so the demo showcases the full RunResult schema.
 func enrichDemoRunResults(results []models.RunResult) []models.RunResult {
 	assertionStory := runResultEnrichment{
-		Screenshots: `["https://demo.ttgo.test/artifacts/run2/login-before.png","https://demo.ttgo.test/artifacts/run2/login-failure.png"]`,
+		Screenshots: `["/demo-failure.svg","/demo-failure.svg"]`,
 		Video:       "https://demo.ttgo.test/artifacts/run2/session-expires.mp4",
 		TraceURL:    "https://demo.ttgo.test/artifacts/run2/session-expires.zip",
 		LogText: "2026-04-22T09:14:02.103Z INFO  launching chromium\n" +
@@ -247,7 +247,7 @@ func enrichDemoRunResults(results []models.RunResult) []models.RunResult {
 		Browser: "Chrome 124", OS: "macOS 14.4", Environment: "staging", AppVersion: "2026.04.3",
 	}
 	timeoutStory := runResultEnrichment{
-		Screenshots: `["https://demo.ttgo.test/artifacts/run2/checkout-timeout.png"]`,
+		Screenshots: `["/demo-failure.svg"]`,
 		TraceURL:    "https://demo.ttgo.test/artifacts/run2/coupon.zip",
 		LogText: "2026-04-22T09:18:10.001Z INFO  page.goto https://demo.shop.test/checkout\n" +
 			"2026-04-22T09:18:15.002Z ERROR waitForSelector(#payment-frame) timed out after 5000ms\n",
@@ -260,7 +260,7 @@ func enrichDemoRunResults(results []models.RunResult) []models.RunResult {
 		Browser: "Firefox 125", OS: "Ubuntu 22.04", Environment: "staging", AppVersion: "2026.04.3",
 	}
 	lockoutStory := runResultEnrichment{
-		Screenshots: `["https://demo.ttgo.test/artifacts/run3/account-lockout.png"]`,
+		Screenshots: `["/demo-failure.svg"]`,
 		TraceURL:    "https://demo.ttgo.test/artifacts/run3/account-lockout.zip",
 		LogText: "2026-04-22T09:18:10.001Z INFO  page.goto https://demo.shop.test/login\n" +
 			"2026-04-22T09:18:15.002Z ERROR waitForSelector(#lockout-banner) timed out after 5000ms\n",
@@ -273,7 +273,7 @@ func enrichDemoRunResults(results []models.RunResult) []models.RunResult {
 		Browser: "Chrome 124", OS: "Windows 11", Environment: "staging", AppVersion: "2026.04.3",
 	}
 	networkStory := runResultEnrichment{
-		Screenshots: `["https://demo.ttgo.test/artifacts/run6/search-network.png"]`,
+		Screenshots: `["/demo-failure.svg"]`,
 		TraceURL:    "https://demo.ttgo.test/artifacts/run6/checkout.zip",
 		LogText: "2026-04-22T09:22:30.000Z INFO  page.click [data-testid=search-submit]\n" +
 			"2026-04-22T09:23:00.004Z ERROR network request timed out after 30000ms\n",

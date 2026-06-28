@@ -34,6 +34,8 @@ func TestCreateAnalysisVersionUnderConcurrentWrites(t *testing.T) {
 	dir := t.TempDir()
 	s, err := New(dir + "/test.db")
 	require.NoError(t, err)
+	// Close the DB before t.TempDir() removal: Windows can't delete an open SQLite file.
+	t.Cleanup(func() { _ = s.Close() })
 	rr := seedFailingResult(t, s)
 
 	const N = 10

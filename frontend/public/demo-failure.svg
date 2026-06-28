@@ -1,0 +1,38 @@
+<svg width="1000" height="625" viewBox="0 0 1000 625" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Sample screenshot of a failed automated test, used as a demo placeholder">
+<title>Demo failure screenshot</title>
+<desc>Placeholder screenshot of a web application showing a red "Test failed" error banner. Referenced by demo test-run results so the screenshot panel is not blank.</desc>
+<rect x="2" y="2" width="996" height="621" rx="14" fill="#ffffff" stroke="#d0d7e2" stroke-width="2"/>
+<path d="M2 16 A14 14 0 0 1 16 2 L984 2 A14 14 0 0 1 998 16 L998 50 L2 50 Z" fill="#f1f4f8"/>
+<line x1="2" y1="50" x2="998" y2="50" stroke="#e2e8f1" stroke-width="1"/>
+<circle cx="32" cy="26" r="7" fill="#ff5f57"/>
+<circle cx="56" cy="26" r="7" fill="#febc2e"/>
+<circle cx="80" cy="26" r="7" fill="#28c840"/>
+<rect x="150" y="13" width="620" height="26" rx="13" fill="#ffffff" stroke="#dbe2ec"/>
+<rect x="166" y="22" width="9" height="8" rx="1.5" fill="#aab4c2"/>
+<path d="M168 22 v-2 a2.5 2.5 0 0 1 5 0 v2" fill="none" stroke="#aab4c2" stroke-width="1.5"/>
+<text x="186" y="31" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13" fill="#8893a4">app.demo.test/checkout</text>
+<rect x="2" y="50" width="996" height="48" fill="#ffffff"/>
+<line x1="2" y1="98" x2="998" y2="98" stroke="#eef1f5" stroke-width="1"/>
+<text x="40" y="80" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="16" font-weight="500" fill="#2a3340">Acme Shop</text>
+<rect x="812" y="66" width="52" height="16" rx="8" fill="#eef1f5"/>
+<rect x="876" y="66" width="42" height="16" rx="8" fill="#eef1f5"/>
+<circle cx="952" cy="74" r="14" fill="#dde4ec"/>
+<rect x="40" y="128" width="920" height="96" rx="12" fill="#fdecec" stroke="#f3c0c0" stroke-width="1.5"/>
+<circle cx="90" cy="176" r="22" fill="#e5484d"/>
+<path d="M80 166 L100 186 M100 166 L80 186" stroke="#ffffff" stroke-width="3.5" stroke-linecap="round"/>
+<text x="130" y="171" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="20" font-weight="500" fill="#a92e22">Test failed</text>
+<text x="130" y="199" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="14" fill="#9a4038">Expected element was not visible before the step timed out.</text>
+<rect x="40" y="270" width="520" height="16" rx="6" fill="#eef1f5"/>
+<rect x="40" y="302" width="440" height="16" rx="6" fill="#eef1f5"/>
+<rect x="40" y="334" width="500" height="16" rx="6" fill="#eef1f5"/>
+<rect x="40" y="366" width="380" height="16" rx="6" fill="#eef1f5"/>
+<rect x="40" y="420" width="300" height="16" rx="6" fill="#eef1f5"/>
+<rect x="600" y="262" width="360" height="210" rx="12" fill="#f7f9fc" stroke="#eaeef4"/>
+<rect x="624" y="292" width="200" height="14" rx="6" fill="#e6ebf2"/>
+<rect x="624" y="320" width="280" height="14" rx="6" fill="#e6ebf2"/>
+<rect x="624" y="348" width="240" height="14" rx="6" fill="#e6ebf2"/>
+<rect x="624" y="410" width="150" height="40" rx="8" fill="#c9d3df"/>
+<rect x="40" y="470" width="130" height="42" rx="8" fill="#c9d3df"/>
+<rect x="184" y="470" width="130" height="42" rx="8" fill="#ffffff" stroke="#dde4ec"/>
+<text x="960" y="600" text-anchor="end" font-family="Segoe UI, system-ui, -apple-system, sans-serif" font-size="12" fill="#b3bcc8">TTGO · sample screenshot</text>
+</svg>

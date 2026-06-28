@@ -6,9 +6,18 @@ import (
 	"testing"
 )
 
+// setIsolatedHome points config path resolution at dir so tests never read or
+// write the developer's real ~/.ttgo/config.json. os.UserHomeDir() reads $HOME on
+// Unix but %USERPROFILE% on Windows, so set both to stay hermetic on every OS.
+func setIsolatedHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
+}
+
 func TestLoadDefault(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
+	setIsolatedHome(t, dir)
 	t.Setenv("TTGO_SERVER_URL", "")
 	t.Setenv("TTGO_API_TOKEN", "")
 
@@ -26,7 +35,7 @@ func TestLoadDefault(t *testing.T) {
 
 func TestSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
+	setIsolatedHome(t, dir)
 	t.Setenv("TTGO_SERVER_URL", "")
 	t.Setenv("TTGO_API_TOKEN", "")
 
@@ -49,7 +58,7 @@ func TestSaveAndLoad(t *testing.T) {
 
 func TestEnvOverrides(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
+	setIsolatedHome(t, dir)
 	t.Setenv("TTGO_SERVER_URL", "http://env-server:1234")
 	t.Setenv("TTGO_API_TOKEN", "env-token-abc")
 
@@ -72,7 +81,7 @@ func TestEnvOverrides(t *testing.T) {
 
 func TestConfigFilePath(t *testing.T) {
 	dir := t.TempDir()
-	t.Setenv("HOME", dir)
+	setIsolatedHome(t, dir)
 
 	cfg := &Config{ServerURL: "http://localhost:8080", APIToken: "tok"}
 	if err := Save(cfg); err != nil {

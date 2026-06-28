@@ -311,6 +311,20 @@ func (s *Store) DB() *gorm.DB {
 	return s.db
 }
 
+// Close closes the underlying database connection, releasing the SQLite file
+// handle (and its WAL/SHM sidecars). Tests that back the store with a temp-file
+// DB should call this via t.Cleanup before the temp dir is removed: on Windows an
+// open handle prevents t.TempDir() cleanup from deleting the file.
+func (s *Store) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return fmt.Errorf("failed to get underlying sql.DB: %w", err)
+	}
+	return sqlDB.Close()
+}
+
 // ReopenDB closes the current database connection and reopens it at the given DSN.
 // This is used after a restore operation replaces the database file on disk.
 // Thread-safe: acquires an exclusive lock to prevent concurrent DB access during swap.
