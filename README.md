@@ -242,8 +242,6 @@ PolyForm Shield is a standard source-available license. In plain terms:
 
 If you want to use this project in a way the license doesn't permit (SaaS, white-label, competing product, etc.), you need a commercial license.
 
-📩 Contact: runetskiril@gmail.com
-
 ### Why this license?
 
 We want this project to be:
