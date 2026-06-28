@@ -252,7 +252,8 @@ export default function TestRunDetail() {
             if (idQ && !(r.id || '').toLowerCase().includes(idQ)) return false;
             if (f.status && r.status !== f.status) return false;
             if (f.defect_type) {
-                const dt = r.defect_type || 'to_investigate';
+                const isFailed = r.status === 'FAIL' || r.status === 'ERROR';
+                const dt = isFailed ? (r.defect_type || 'to_investigate') : '';
                 if (dt !== f.defect_type) return false;
             }
             if (f.categories.length > 0) {
