@@ -504,6 +504,7 @@ func TestGetTestRunsFilterByCategoryIDs(t *testing.T) {
 	runs, total, err := s.GetTestRuns(RunFilter{CategoryIDs: []string{catA.ID, catB.ID}, Limit: 50})
 	require.NoError(t, err)
 	assert.Equal(t, int64(2), total)
+	require.Len(t, runs, 2)
 	names := []string{runs[0].Name, runs[1].Name}
 	assert.ElementsMatch(t, []string{"Run A", "Run B"}, names)
 }
