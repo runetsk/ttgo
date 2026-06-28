@@ -378,7 +378,7 @@ func TestGetTestRunsAggregationLatestAttemptOnly(t *testing.T) {
 	}))
 
 	// Get runs — should show 1 passed, 0 failed (latest attempt wins)
-	runs, _, err := s.GetTestRuns("", "", "", "", 50, 0, "")
+	runs, _, err := s.GetTestRuns(RunFilter{Limit: 50})
 	require.NoError(t, err)
 	require.Len(t, runs, 1)
 	assert.Equal(t, 1, runs[0].PassedResults)
@@ -485,4 +485,50 @@ func TestListLatestFailingResultsIncludesOrphans(t *testing.T) {
 	got, err := s.ListLatestFailingResults(run.ID)
 	require.NoError(t, err)
 	require.Len(t, got, 1, "orphan FAIL should be included")
+}
+
+func TestGetTestRunsFilterByCategoryIDs(t *testing.T) {
+	s := newTestStore(t)
+	catA, err := s.CreateCategory("Smoke", "")
+	require.NoError(t, err)
+	catB, err := s.CreateCategory("Regression", "")
+	require.NoError(t, err)
+
+	r1 := &models.TestRun{Name: "Run A", CategoryID: &catA.ID}
+	r2 := &models.TestRun{Name: "Run B", CategoryID: &catB.ID}
+	r3 := &models.TestRun{Name: "Run C"} // no category
+	require.NoError(t, s.CreateTestRun(r1))
+	require.NoError(t, s.CreateTestRun(r2))
+	require.NoError(t, s.CreateTestRun(r3))
+
+	runs, total, err := s.GetTestRuns(RunFilter{CategoryIDs: []string{catA.ID, catB.ID}, Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	names := []string{runs[0].Name, runs[1].Name}
+	assert.ElementsMatch(t, []string{"Run A", "Run B"}, names)
+}
+
+func TestGetTestRunsFilterByCreatedRange(t *testing.T) {
+	s := newTestStore(t)
+	old := &models.TestRun{Name: "Old"}
+	require.NoError(t, s.CreateTestRun(old))
+	// Force an old created_at directly via the DB.
+	require.NoError(t, s.DB().Model(old).Update("created_at", time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC)).Error)
+
+	recent := &models.TestRun{Name: "Recent"}
+	require.NoError(t, s.CreateTestRun(recent)) // created_at ~ now
+
+	// Only runs created on/after 2021-01-01 → just "Recent".
+	runs, total, err := s.GetTestRuns(RunFilter{CreatedFrom: "2021-01-01", Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "Recent", runs[0].Name)
+
+	// Inclusive upper bound: created on/before 2020-01-01 → just "Old".
+	runs, total, err = s.GetTestRuns(RunFilter{CreatedTo: "2020-01-01", Limit: 50})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, runs, 1)
+	assert.Equal(t, "Old", runs[0].Name)
 }

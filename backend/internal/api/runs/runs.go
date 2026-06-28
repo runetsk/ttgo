@@ -12,6 +12,7 @@ import (
 	"ttgo/internal/api/httpx"
 	apiws "ttgo/internal/api/websocket"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/store"
 
 	"gorm.io/gorm"
 )
@@ -61,29 +62,64 @@ func (h *Handler) CreateTestRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, run)
 }
 
+// GetTestRuns returns a paginated, filtered list of test runs.
+//
+// @Summary      List test runs
+// @Description  Returns test runs with optional filtering by category list, status, date ranges, and folder.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        category_ids  query     string  false  "Comma-separated list of category IDs to filter by (OR logic)"
+// @Param        category_id   query     string  false  "Single category ID (backward-compatible alias; overridden by category_ids)"
+// @Param        status        query     string  false  "Filter by run status (e.g. PENDING, PASS, FAIL)"
+// @Param        created_from  query     string  false  "Include runs created on or after this date (YYYY-MM-DD, UTC)"
+// @Param        created_to    query     string  false  "Include runs created on or before this date inclusive (YYYY-MM-DD, UTC)"
+// @Param        updated_from  query     string  false  "Include runs updated on or after this date (YYYY-MM-DD, UTC)"
+// @Param        updated_to    query     string  false  "Include runs updated on or before this date inclusive (YYYY-MM-DD, UTC)"
+// @Param        sort_by       query     string  false  "Sort column: name, status, created_at, updated_at"
+// @Param        order         query     string  false  "Sort direction: ASC or DESC (default DESC)"
+// @Param        limit         query     int     false  "Page size (default 50)"
+// @Param        offset        query     int     false  "Page offset"
+// @Param        run_folder_id query     string  false  "Filter by folder ID; use 'uncategorised' for runs with no folder"
+// @Success      200  {object}  object{runs=[]models.TestRun,total=int}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs [get]
 func (h *Handler) GetTestRuns(w http.ResponseWriter, r *http.Request) {
-	categoryID := r.URL.Query().Get("category_id")
-	status := r.URL.Query().Get("status")
-	limitStr := r.URL.Query().Get("limit")
-	offsetStr := r.URL.Query().Get("offset")
-	sortBy := r.URL.Query().Get("sort_by")
-	sortDir := r.URL.Query().Get("order")
-	folderID := r.URL.Query().Get("run_folder_id")
+	q := r.URL.Query()
+	status := q.Get("status")
+	sortBy := q.Get("sort_by")
+	sortDir := q.Get("order")
+	folderID := q.Get("run_folder_id")
+
+	var categoryIDs []string
+	if v := q.Get("category_ids"); v != "" {
+		categoryIDs = strings.Split(v, ",")
+	} else if v := q.Get("category_id"); v != "" { // backward-compatible single value
+		categoryIDs = []string{v}
+	}
 
 	limit := 50
-	if limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil {
-			limit = l
-		}
+	if l, err := strconv.Atoi(q.Get("limit")); err == nil {
+		limit = l
 	}
 	offset := 0
-	if offsetStr != "" {
-		if o, err := strconv.Atoi(offsetStr); err == nil {
-			offset = o
-		}
+	if o, err := strconv.Atoi(q.Get("offset")); err == nil {
+		offset = o
 	}
 
-	runs, total, err := h.store.GetTestRuns(categoryID, status, sortBy, sortDir, limit, offset, folderID)
+	runs, total, err := h.store.GetTestRuns(store.RunFilter{
+		CategoryIDs: categoryIDs,
+		Status:      status,
+		CreatedFrom: q.Get("created_from"),
+		CreatedTo:   q.Get("created_to"),
+		UpdatedFrom: q.Get("updated_from"),
+		UpdatedTo:   q.Get("updated_to"),
+		SortBy:      sortBy,
+		SortDir:     sortDir,
+		Limit:       limit,
+		Offset:      offset,
+		FolderID:    folderID,
+	})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "failed to get test runs", "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)

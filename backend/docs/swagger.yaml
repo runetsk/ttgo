@@ -49,6 +49,9 @@ definitions:
         type: integer
       id:
         type: string
+      signature:
+        description: HMAC over the file bytes (F-017)
+        type: string
       status:
         description: '"in_progress", "completed", or "failed"'
         type: string
@@ -2079,6 +2082,50 @@ paths:
       summary: Batch get qTest mappings
       tags:
       - qtest
+  /qtest/bulk-unlink:
+    post:
+      consumes:
+      - application/json
+      description: Remove qTest test-case links for every supplied test case ID.
+      parameters:
+      - description: Bulk unlink parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            test_case_ids:
+              items:
+                type: string
+              type: array
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              deleted:
+                type: integer
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Bulk unlink qTest mappings
+      tags:
+      - qtest
   /qtest/enabled-projects:
     get:
       description: Return locally enabled qTest projects.
@@ -2425,6 +2472,51 @@ paths:
       security:
       - BearerAuth: []
       summary: List qTest test cases
+      tags:
+      - qtest
+  /qtest/unlink-folder:
+    post:
+      consumes:
+      - application/json
+      description: Remove qTest test-case links for a folder, optionally recursing
+        into subfolders.
+      parameters:
+      - description: Unlink parameters
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            folder_id:
+              type: string
+            recursive:
+              type: boolean
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              deleted:
+                type: integer
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Unlink folder from qTest
       tags:
       - qtest
   /qtest/upload:
@@ -3285,6 +3377,88 @@ paths:
       summary: Move a run folder
       tags:
       - run-folders
+  /runs:
+    get:
+      consumes:
+      - application/json
+      description: Returns test runs with optional filtering by category list, status,
+        date ranges, and folder.
+      parameters:
+      - description: Comma-separated list of category IDs to filter by (OR logic)
+        in: query
+        name: category_ids
+        type: string
+      - description: Single category ID (backward-compatible alias; overridden by
+          category_ids)
+        in: query
+        name: category_id
+        type: string
+      - description: Filter by run status (e.g. PENDING, PASS, FAIL)
+        in: query
+        name: status
+        type: string
+      - description: Include runs created on or after this date (YYYY-MM-DD, UTC)
+        in: query
+        name: created_from
+        type: string
+      - description: Include runs created on or before this date inclusive (YYYY-MM-DD,
+          UTC)
+        in: query
+        name: created_to
+        type: string
+      - description: Include runs updated on or after this date (YYYY-MM-DD, UTC)
+        in: query
+        name: updated_from
+        type: string
+      - description: Include runs updated on or before this date inclusive (YYYY-MM-DD,
+          UTC)
+        in: query
+        name: updated_to
+        type: string
+      - description: 'Sort column: name, status, created_at, updated_at'
+        in: query
+        name: sort_by
+        type: string
+      - description: 'Sort direction: ASC or DESC (default DESC)'
+        in: query
+        name: order
+        type: string
+      - description: Page size (default 50)
+        in: query
+        name: limit
+        type: integer
+      - description: Page offset
+        in: query
+        name: offset
+        type: integer
+      - description: Filter by folder ID; use 'uncategorised' for runs with no folder
+        in: query
+        name: run_folder_id
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              runs:
+                items:
+                  $ref: '#/definitions/ttgo_pkg_tracker_models.TestRun'
+                type: array
+              total:
+                type: integer
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: List test runs
+      tags:
+      - runs
   /runs/{id}/results/{result_id}/screenshots:
     post:
       consumes:

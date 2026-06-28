@@ -99,26 +99,74 @@ func (s *Store) CreateTestRun(run *models.TestRun) error {
 	})
 }
 
-// GetTestRuns returns a list of test runs, optionally filtered by status, category_id, or run_folder_id.
-// Pass folderID == "uncategorised" to filter runs with run_folder_id IS NULL.
-// Supports pagination (offset/limit) and sorting. Returns (runs, total, error).
-func (s *Store) GetTestRuns(categoryID string, status string, sortBy string, sortDir string, limit int, offset int, folderID string) ([]models.TestRun, int64, error) {
+// RunFilter holds optional filters for GetTestRuns. Zero values mean "no filter".
+type RunFilter struct {
+	CategoryIDs []string // category_id IN (...); empty → no category filter
+	Status      string   // exact match; "" → no filter
+	CreatedFrom string   // "YYYY-MM-DD"; "" → no lower bound
+	CreatedTo   string   // "YYYY-MM-DD" inclusive; "" → no upper bound
+	UpdatedFrom string
+	UpdatedTo   string
+	SortBy      string
+	SortDir     string
+	Limit       int
+	Offset      int
+	FolderID    string
+}
+
+// parseDayStart parses "YYYY-MM-DD" as midnight UTC. ok=false on empty/invalid.
+func parseDayStart(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+// parseDayEndExclusive parses "YYYY-MM-DD" and returns the start of the NEXT
+// day, so "created_at < next-day" includes the entire given day. ok=false on empty/invalid.
+func parseDayEndExclusive(s string) (time.Time, bool) {
+	t, ok := parseDayStart(s)
+	if !ok {
+		return time.Time{}, false
+	}
+	return t.AddDate(0, 0, 1), true
+}
+
+// GetTestRuns returns a list of test runs filtered by f. Date bounds are
+// "YYYY-MM-DD"; the *To bounds are inclusive of the whole day. Returns (runs, total, error).
+func (s *Store) GetTestRuns(f RunFilter) ([]models.TestRun, int64, error) {
 	var runs []models.TestRun
 	var total int64
 	query := s.db.Model(&models.TestRun{})
 
-	if categoryID != "" {
-		query = query.Where("category_id = ?", categoryID)
+	if len(f.CategoryIDs) > 0 {
+		query = query.Where("category_id IN ?", f.CategoryIDs)
 	}
-	if status != "" {
-		query = query.Where("status = ?", status)
+	if f.Status != "" {
+		query = query.Where("status = ?", f.Status)
 	}
-	if folderID == "uncategorised" {
+	if f.FolderID == "uncategorised" {
 		query = query.Where("run_folder_id IS NULL")
-	} else if folderID != "" {
+	} else if f.FolderID != "" {
 		// Include runs from this folder and all descendant subfolders
-		folderIDs := s.getRunFolderDescendantIDs(s.db, folderID)
+		folderIDs := s.getRunFolderDescendantIDs(s.db, f.FolderID)
 		query = query.Where("run_folder_id IN ?", folderIDs)
+	}
+	if t, ok := parseDayStart(f.CreatedFrom); ok {
+		query = query.Where("created_at >= ?", t)
+	}
+	if t, ok := parseDayEndExclusive(f.CreatedTo); ok {
+		query = query.Where("created_at < ?", t)
+	}
+	if t, ok := parseDayStart(f.UpdatedFrom); ok {
+		query = query.Where("updated_at >= ?", t)
+	}
+	if t, ok := parseDayEndExclusive(f.UpdatedTo); ok {
+		query = query.Where("updated_at < ?", t)
 	}
 
 	if err := query.Count(&total).Error; err != nil {
@@ -126,16 +174,18 @@ func (s *Store) GetTestRuns(categoryID string, status string, sortBy string, sor
 	}
 
 	orderClause := "created_at DESC" // Default
-	if sortBy != "" {
+	if f.SortBy != "" {
 		allowedSortColumns := map[string]bool{
 			"name":       true,
 			"status":     true,
 			"created_at": true,
 			"updated_at": true,
 		}
+		sortBy := f.SortBy
 		if !allowedSortColumns[sortBy] {
 			sortBy = "created_at"
 		}
+		sortDir := f.SortDir
 		if sortDir != "ASC" && sortDir != "DESC" {
 			sortDir = "DESC"
 		}
@@ -144,8 +194,8 @@ func (s *Store) GetTestRuns(categoryID string, status string, sortBy string, sor
 
 	query = query.Order(orderClause)
 
-	if limit > 0 {
-		query = query.Limit(limit).Offset(offset)
+	if f.Limit > 0 {
+		query = query.Limit(f.Limit).Offset(f.Offset)
 	}
 
 	if err := query.Find(&runs).Error; err != nil {
