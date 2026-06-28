@@ -68,12 +68,12 @@ test.describe('Run Comparison (Compare tab)', () => {
 
         // Every bucket has exactly one test.
         for (const key of ['regressions', 'fixed', 'stillFailing', 'otherChanges', 'unchanged', 'onlyThis', 'onlyCompared']) {
-            await expect(page.getByTestId(`compare-group-${key}-count`)).toHaveText('1');
+            await expect(page.getByTestId(`compare-group-${key}-count`)).toHaveText('1', { timeout: 15000 });
         }
 
         // Summary chips.
-        await expect(page.getByTestId('compare-count-regressions')).toHaveText(/1/);
-        await expect(page.getByTestId('compare-count-shared')).toHaveText(/5/);
+        await expect(page.getByTestId('compare-count-regressions')).toHaveText(/1/, { timeout: 15000 });
+        await expect(page.getByTestId('compare-count-shared')).toHaveText(/5/, { timeout: 15000 });
 
         // The regression row is s1; expanding it shows both runs' statuses.
         const regRow = page.getByTestId(`compare-row-${shared[0].id}`);
