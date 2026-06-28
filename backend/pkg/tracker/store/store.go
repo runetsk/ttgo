@@ -135,11 +135,6 @@ func (s *Store) bootstrapDB() error {
 	// Dead-code cleanup: drop orphaned executions table (replaced by run_results).
 	db.Exec(`DROP TABLE IF EXISTS executions`)
 
-	// 013-qtest-sync removed: drop the QTest integration tables (config, mappings, projects).
-	db.Exec(`DROP TABLE IF EXISTS qtest_mappings`)
-	db.Exec(`DROP TABLE IF EXISTS qtest_configs`)
-	db.Exec(`DROP TABLE IF EXISTS qtest_projects`)
-
 	// 016-retries: partial unique index for attempt_number (GORM can't do partial indexes via tags)
 	db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_run_results_attempt ON run_results(test_run_id, test_case_id, attempt_number) WHERE test_case_id IS NOT NULL`)
 
