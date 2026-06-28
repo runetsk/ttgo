@@ -213,6 +213,11 @@ export default function TestRunDetail() {
             if (!rr.test_case_id) continue;
             (byTestCase[rr.test_case_id] = byTestCase[rr.test_case_id] || []).push(rr);
         }
+        // Each test case's attempts newest-first, matching the prior derivation —
+        // RunResultDetail's timeline strip reverses this for chronological display.
+        for (const tcId in byTestCase) {
+            byTestCase[tcId].sort((a, b) => (b.attempt_number || 0) - (a.attempt_number || 0));
+        }
         return { latestResults: latestAttempts(run.run_results), attemptsByTestCase: byTestCase };
     }, [run?.run_results]);
 
