@@ -366,7 +366,7 @@ export default function TestRunDetail() {
     const toggleSelectResult = (id, e) => {
         // Shift-click range selection
         if (e?.shiftKey && lastClickedRef.current && lastClickedRef.current !== id) {
-            const ids = sortedResults.map(r => r.id);
+            const ids = filteredResults.map(r => r.id);
             const from = ids.indexOf(lastClickedRef.current);
             const to = ids.indexOf(id);
             if (from !== -1 && to !== -1) {
