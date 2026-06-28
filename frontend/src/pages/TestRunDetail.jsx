@@ -1,6 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getTestRun, deleteTestRun, updateTestRun, deleteRunResult, addRunResult, updateRunResult, retryRunResult, bulkUpdateRunResults, getTests, listRunComments, listRunDefectLinks, analyzeRunFailures } from '../api';
+import { getTestRun, deleteTestRun, updateTestRun, deleteRunResult, addRunResult, updateRunResult, retryRunResult, bulkUpdateRunResults, getTests, listRunComments, listRunDefectLinks, analyzeRunFailures, getCategories } from '../api';
+import DateRangeFilter from '../components/filters/DateRangeFilter';
+import CategoryFilter from '../components/filters/CategoryFilter';
+import { inDateRange } from '../utils/dateFilter';
+import { activeColumns } from '../utils/columnFeatures';
 import { toast } from '../toast';
 
 import RunResultDetail from '../components/RunResultDetail';
@@ -37,7 +41,7 @@ const RESULT_COLUMN_DEFS = [
     { key: 'artifacts',    label: 'Artifacts',    mandatory: false, defaultVisible: false, defaultWidth: 120 },
     { key: 'log_text',     label: 'Log',          mandatory: false, defaultVisible: false, defaultWidth: 120 },
     { key: 'metadata',     label: 'Metadata',     mandatory: false, defaultVisible: false, defaultWidth: 120 },
-    { key: 'ai_verdict',   label: 'AI Verdict',   mandatory: false, defaultVisible: false, defaultWidth: 160 },
+    { key: 'ai_verdict',   label: 'AI Verdict',   mandatory: false, defaultVisible: false, defaultWidth: 160, feature: 'ai' },
     { key: 'updated_at',   label: 'Updated At',   mandatory: false, defaultVisible: false, defaultWidth: 160 },
     { key: 'attempt_number', label: 'Attempt', mandatory: false, defaultVisible: false, defaultWidth: 80 },
 ];
@@ -51,10 +55,8 @@ export default function TestRunDetail() {
     const [run, setRun] = useState(null);
     const [visibleKeys, toggleColumn, resetColumns] = useColumnPreference('run-detail-results', RESULT_COLUMN_DEFS);
     const { columnWidths, startResize, resetWidths, resetColumnWidth, isResizing } = useColumnWidths('run-detail-results', RESULT_COLUMN_DEFS);
-    const isVisible = (key) => {
-        if (key === 'ai_verdict' && !aiFeaturesEnabled) return false;
-        return visibleKeys.has(key);
-    };
+    const featureColumnDefs = activeColumns(RESULT_COLUMN_DEFS, { ai: aiFeaturesEnabled });
+    const isVisible = (key) => visibleKeys.has(key) && featureColumnDefs.some(c => c.key === key);
     const handleResetAll = useCallback(() => { resetColumns(); resetWidths(); }, [resetColumns, resetWidths]);
     const [loading, setLoading] = useState(true);
     const [allTests, setAllTests] = useState([]); // For Add Test dropdown
@@ -75,6 +77,15 @@ export default function TestRunDetail() {
     const [currentAnalyses, setCurrentAnalyses] = useState({});
     const { view, groupBy, setView, setGroupBy } = useRunViewPreference();
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+    const [showFilters, setShowFilters] = useState(false);
+    const [resultCategories, setResultCategories] = useState([]);
+    const [resultFilters, setResultFilters] = useState({
+        test_case: '', status: '', defect_type: '', result_id: '',
+        categories: [],
+        start_time: { from: null, to: null },
+        end_time: { from: null, to: null },
+        updated_at: { from: null, to: null },
+    });
     const toggleGroup = (key) => setCollapsedGroups(prev => {
         const next = new Set(prev);
         if (next.has(key)) next.delete(key); else next.add(key);
@@ -122,6 +133,10 @@ export default function TestRunDetail() {
             }).catch(() => {});
         }
     }, [runId]);
+
+    useEffect(() => {
+        getCategories(1, 200).then(d => setResultCategories(d.categories || [])).catch(() => setResultCategories([]));
+    }, []);
 
     const loadRunDefectLinks = useCallback(() => {
         setDefectsLoading(true);
@@ -228,6 +243,29 @@ export default function TestRunDetail() {
         return sortableItems;
     }, [latestResults, sortConfig]);
 
+    const filteredResults = React.useMemo(() => {
+        const f = resultFilters;
+        const nameQ = f.test_case.toLowerCase();
+        const idQ = f.result_id.toLowerCase();
+        return sortedResults.filter(r => {
+            if (nameQ && !(r.test_name_snapshot || '').toLowerCase().includes(nameQ)) return false;
+            if (idQ && !(r.id || '').toLowerCase().includes(idQ)) return false;
+            if (f.status && r.status !== f.status) return false;
+            if (f.defect_type) {
+                const dt = r.defect_type || 'to_investigate';
+                if (dt !== f.defect_type) return false;
+            }
+            if (f.categories.length > 0) {
+                const cats = r.test_case?.categories || [];
+                if (!cats.some(c => f.categories.includes(c.id))) return false;
+            }
+            if (!inDateRange(r.start_time, f.start_time)) return false;
+            if (!inDateRange(r.end_time, f.end_time)) return false;
+            if (!inDateRange(r.updated_at, f.updated_at)) return false;
+            return true;
+        });
+    }, [sortedResults, resultFilters]);
+
     // Run-results grouping (List vs Grouped view). The ai_verdict dimension is
     // hidden when AI features are off, mirroring the column-visibility gating.
     const groupDimensions = aiFeaturesEnabled
@@ -235,8 +273,8 @@ export default function TestRunDetail() {
         : GROUP_DIMENSIONS.filter(d => d.value !== 'ai_verdict');
     const effectiveGroupBy = (!aiFeaturesEnabled && groupBy === 'ai_verdict') ? 'status' : groupBy;
     const groupedResults = React.useMemo(
-        () => (view === 'grouped' ? groupResults(sortedResults, effectiveGroupBy, currentAnalyses) : []),
-        [view, effectiveGroupBy, sortedResults, currentAnalyses],
+        () => (view === 'grouped' ? groupResults(filteredResults, effectiveGroupBy, currentAnalyses) : []),
+        [view, effectiveGroupBy, filteredResults, currentAnalyses],
     );
     const collapseAll = () => setCollapsedGroups(new Set(groupedResults.map(g => g.key)));
     const expandAll = () => setCollapsedGroups(new Set());
@@ -352,10 +390,10 @@ export default function TestRunDetail() {
     };
 
     const toggleSelectAll = () => {
-        if (selectedResults.size === sortedResults.length) {
+        if (selectedResults.size === filteredResults.length) {
             setSelectedResults(new Set());
         } else {
-            setSelectedResults(new Set(sortedResults.map(r => r.id)));
+            setSelectedResults(new Set(filteredResults.map(r => r.id)));
         }
     };
 
@@ -414,11 +452,19 @@ export default function TestRunDetail() {
                 </select>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
                     <ColumnPicker
-                        columnDefs={RESULT_COLUMN_DEFS}
+                        columnDefs={featureColumnDefs}
                         visibleKeys={visibleKeys}
                         onToggle={toggleColumn}
                         onReset={handleResetAll}
                     />
+                    <button
+                        className={`action-btn ${showFilters ? 'active' : ''}`}
+                        onClick={() => setShowFilters(s => !s)}
+                        style={{ padding: '8px 12px', background: showFilters ? 'var(--bg-tertiary)' : 'transparent' }}
+                        title="Column Filters"
+                    >
+                        {showFilters ? 'Hide Filters' : 'Column Filters'}
+                    </button>
                     <button
                         className="action-btn"
                         onClick={() => setIsAddMode(!isAddMode)}
@@ -676,7 +722,7 @@ export default function TestRunDetail() {
                 onGroupByChange={setGroupBy}
                 onCollapseAll={collapseAll}
                 onExpandAll={expandAll}
-                resultCount={sortedResults.length}
+                resultCount={filteredResults.length}
                 groupCount={groupedResults.length}
                 dimensions={groupDimensions}
             />
@@ -685,17 +731,17 @@ export default function TestRunDetail() {
                     <thead>
                         <tr>
                             <th style={{ width: 32, textAlign: 'center', padding: '6px 0', position: 'relative' }}>
-                                <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: selectedResults.size > 0 ? '2px solid var(--accent-indigo)' : '2px solid var(--border-color)', background: selectedResults.size === sortedResults.length && sortedResults.length > 0 ? 'var(--accent-indigo)' : selectedResults.size > 0 ? 'rgba(99,102,241,0.2)' : 'transparent', transition: 'all 0.15s ease', position: 'relative' }}>
+                                <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: selectedResults.size > 0 ? '2px solid var(--accent-indigo)' : '2px solid var(--border-color)', background: selectedResults.size === filteredResults.length && filteredResults.length > 0 ? 'var(--accent-indigo)' : selectedResults.size > 0 ? 'rgba(99,102,241,0.2)' : 'transparent', transition: 'all 0.15s ease', position: 'relative' }}>
                                     <input
                                         type="checkbox"
-                                        checked={sortedResults.length > 0 && selectedResults.size === sortedResults.length}
+                                        checked={filteredResults.length > 0 && selectedResults.size === filteredResults.length}
                                         onChange={toggleSelectAll}
                                         style={{ position: 'absolute', opacity: 0, width: 0, height: 0 }}
                                     />
-                                    {selectedResults.size === sortedResults.length && sortedResults.length > 0 && (
+                                    {selectedResults.size === filteredResults.length && filteredResults.length > 0 && (
                                         <span style={{ color: '#fff', fontSize: '0.7rem', fontWeight: 700, lineHeight: 1 }}>✓</span>
                                     )}
-                                    {selectedResults.size > 0 && selectedResults.size < sortedResults.length && (
+                                    {selectedResults.size > 0 && selectedResults.size < filteredResults.length && (
                                         <span style={{ color: 'var(--accent-indigo)', fontSize: '0.85rem', fontWeight: 700, lineHeight: 1 }}>—</span>
                                     )}
                                 </label>
@@ -824,6 +870,94 @@ export default function TestRunDetail() {
                             )}
                             <th style={{ width: 76, textAlign: 'center', fontSize: '0.72rem', color: 'var(--text-secondary)' }}>Actions</th>
                         </tr>
+                        {showFilters && (
+                            <tr className="filter-row" style={{ background: 'var(--bg-secondary)' }}>
+                                <th></th>
+                                {/* test_case (mandatory) */}
+                                <th>
+                                    <input className="modern-input" placeholder="Test case…" data-testid="filter-result-test_case"
+                                        style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px' }}
+                                        value={resultFilters.test_case}
+                                        onChange={(e) => setResultFilters(p => ({ ...p, test_case: e.target.value }))} />
+                                </th>
+                                {/* status (mandatory) */}
+                                <th>
+                                    <select className="col-filter-select" data-testid="filter-result-status"
+                                        value={resultFilters.status}
+                                        onChange={(e) => setResultFilters(p => ({ ...p, status: e.target.value }))}>
+                                        <option value="">All</option>
+                                        <option value="PASS">Pass</option>
+                                        <option value="FAIL">Fail</option>
+                                        <option value="ERROR">Error</option>
+                                        <option value="SKIP">Skip</option>
+                                        <option value="PENDING">Pending</option>
+                                    </select>
+                                </th>
+                                {isVisible('defect_type') && (
+                                    <th>
+                                        <select className="col-filter-select" data-testid="filter-result-defect_type"
+                                            value={resultFilters.defect_type}
+                                            onChange={(e) => setResultFilters(p => ({ ...p, defect_type: e.target.value }))}>
+                                            <option value="">All</option>
+                                            <option value="product_bug">Product Bug</option>
+                                            <option value="automation_bug">Automation Bug</option>
+                                            <option value="system_issue">System Issue</option>
+                                            <option value="to_investigate">To Investigate</option>
+                                        </select>
+                                    </th>
+                                )}
+                                {isVisible('defect_links') && <th></th>}
+                                {isVisible('categories') && (
+                                    <th>
+                                        <CategoryFilter categories={resultCategories} value={resultFilters.categories}
+                                            onChange={(ids) => setResultFilters(p => ({ ...p, categories: ids }))}
+                                            testId="filter-result-categories" />
+                                    </th>
+                                )}
+                                {isVisible('result_id') && (
+                                    <th>
+                                        <input className="modern-input" placeholder="Result ID…" data-testid="filter-result-result_id"
+                                            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px' }}
+                                            value={resultFilters.result_id}
+                                            onChange={(e) => setResultFilters(p => ({ ...p, result_id: e.target.value }))} />
+                                    </th>
+                                )}
+                                {isVisible('duration') && <th></th>}
+                                {isVisible('environment') && <th></th>}
+                                {isVisible('browser') && <th></th>}
+                                {isVisible('os') && <th></th>}
+                                {isVisible('app_version') && <th></th>}
+                                {isVisible('start_time') && (
+                                    <th>
+                                        <DateRangeFilter value={resultFilters.start_time}
+                                            onChange={(v) => setResultFilters(p => ({ ...p, start_time: v }))}
+                                            testId="filter-result-start_time" />
+                                    </th>
+                                )}
+                                {isVisible('end_time') && (
+                                    <th>
+                                        <DateRangeFilter value={resultFilters.end_time}
+                                            onChange={(v) => setResultFilters(p => ({ ...p, end_time: v }))}
+                                            testId="filter-result-end_time" />
+                                    </th>
+                                )}
+                                {isVisible('failure_type') && <th></th>}
+                                {isVisible('error_message') && <th></th>}
+                                {isVisible('artifacts') && <th></th>}
+                                {isVisible('log_text') && <th></th>}
+                                {isVisible('metadata') && <th></th>}
+                                {isVisible('ai_verdict') && <th></th>}
+                                {isVisible('updated_at') && (
+                                    <th>
+                                        <DateRangeFilter value={resultFilters.updated_at}
+                                            onChange={(v) => setResultFilters(p => ({ ...p, updated_at: v }))}
+                                            testId="filter-result-updated_at" />
+                                    </th>
+                                )}
+                                {isVisible('attempt_number') && <th></th>}
+                                <th></th>
+                            </tr>
+                        )}
                     </thead>
                     <tbody>
                         {(() => {
@@ -1145,17 +1279,17 @@ export default function TestRunDetail() {
                                 )}
                             </React.Fragment>
                           );
-                          if (!sortedResults || sortedResults.length === 0) {
+                          if (!filteredResults || filteredResults.length === 0) {
                             return (
                                 <tr>
                                     <td colSpan={3 + OPTIONAL_COLUMN_KEYS.filter(k => isVisible(k)).length + 1} style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-secondary)' }}>
-                                        No results logged yet.
+                                        {sortedResults.length === 0 ? 'No results logged yet.' : 'No results match the current filters.'}
                                     </td>
                                 </tr>
                             );
                           }
                           if (view !== 'grouped') {
-                            return sortedResults.map(renderResultRow);
+                            return filteredResults.map(renderResultRow);
                           }
                           const totalCols = 3 + OPTIONAL_COLUMN_KEYS.filter(k => isVisible(k)).length + 1;
                           return groupedResults.map(group => (
