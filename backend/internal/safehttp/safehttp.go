@@ -11,7 +11,7 @@
 //
 //   - Integration (IntegrationClient / ValidateIntegrationURL): denies only the
 //     cloud-metadata / link-local range, but ALLOWS loopback and private hosts.
-//     Use for admin-configured integrations (Jira/Confluence/qTest) that are
+//     Use for admin-configured integrations (Jira/Confluence) that are
 //     frequently self-hosted on a private network.
 package safehttp
 

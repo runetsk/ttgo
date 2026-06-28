@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 
-const ContextMenu = ({ x, y, onClose, onAction, folderName, isMulti, qtestEnabled }) => {
+const ContextMenu = ({ x, y, onClose, onAction, folderName, isMulti }) => {
     const menuRef = useRef(null);
     useEffect(() => {
         const handleClickOutside = (e) => {
@@ -22,16 +22,6 @@ const ContextMenu = ({ x, y, onClose, onAction, folderName, isMulti, qtestEnable
             {!isMulti && (
                 <div className="context-menu-item" onClick={() => onAction('rename')} data-testid="context-menu-rename-folder">
                     <span>✏️</span> Rename
-                </div>
-            )}
-            {!isMulti && qtestEnabled && (
-                <div className="context-menu-item" onClick={() => onAction('qtest-upload')} data-testid="context-menu-qtest-upload">
-                    <span>⬆</span> Upload to QTest
-                </div>
-            )}
-            {!isMulti && qtestEnabled && (
-                <div className="context-menu-item" onClick={() => onAction('qtest-unlink')} data-testid="context-menu-qtest-unlink">
-                    <span>🔗</span> Unlink from QTest
                 </div>
             )}
             <div className="context-menu-item danger" onClick={() => onAction('delete')} data-testid="context-menu-delete-folder">

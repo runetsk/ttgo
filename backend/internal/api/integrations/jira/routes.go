@@ -7,7 +7,7 @@ import (
 )
 
 // Mount registers Jira routes. Writing the integration config (org-wide base URL
-// + credentials, and the SSRF lever) is admin-only, matching qTest; reads stay at
+// + credentials, and the SSRF lever) is admin-only, matching Confluence; reads stay at
 // read scope (F-005).
 func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddleware, requireAdmin routing.AdminMiddleware) {
 	api.HandleFunc("GET /settings/jira", requireAuth("read", h.GetConfig))

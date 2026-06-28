@@ -415,67 +415,6 @@ export const aiGeneration = {
         api.post(`/requirements/${requirementId}/accept-generated-tests`, data).then(res => res.data),
 };
 
-// ── QTest integration (013-qtest-sync) ──
-// Shared qtest config cache: both a persistent result and an in-flight promise,
-// so concurrent mount effects across FolderNode/TestGrid/QTestSyncPanel reuse
-// a single request. Cache is cleared on upsertConfig so Settings edits take
-// effect immediately.
-let _qtestConfigCache = null;       // null means "not yet fetched" or invalidated
-let _qtestConfigInflight = null;
-
-export const qtest = {
-    getConfig: () => {
-        if (_qtestConfigCache !== null) return Promise.resolve(_qtestConfigCache);
-        if (_qtestConfigInflight) return _qtestConfigInflight;
-        _qtestConfigInflight = api.get('/settings/qtest', { _silent: true })
-            .then(res => {
-                _qtestConfigCache = res.data;
-                return res.data;
-            })
-            .finally(() => { _qtestConfigInflight = null; });
-        return _qtestConfigInflight;
-    },
-    upsertConfig: (data) =>
-        api.put('/settings/qtest', data).then(res => {
-            _qtestConfigCache = res.data;  // keep cache in sync with the write
-            return res.data;
-        }),
-    testConnection: () =>
-        api.post('/settings/qtest/test-connection').then(res => res.data),
-    listProjects: () =>
-        api.get('/qtest/projects').then(res => res.data),
-    listModules: (projectId) =>
-        api.get('/qtest/modules', { params: projectId ? { project_id: projectId } : {} }).then(res => res.data),
-    listEnabledProjects: () =>
-        api.get('/qtest/enabled-projects').then(res => res.data),
-    addEnabledProject: (projectId, projectName) =>
-        api.post('/qtest/enabled-projects', { project_id: projectId, project_name: projectName }).then(res => res.data),
-    removeEnabledProject: (projectId) =>
-        api.post('/qtest/enabled-projects/remove', { project_id: projectId }).then(res => res.data),
-    setDefaultProject: (projectId) =>
-        api.post('/qtest/enabled-projects/set-default', { project_id: projectId }).then(res => res.data),
-    listTestCases: (projectId, moduleId, recursive = false) =>
-        api.get('/qtest/test-cases', { params: { project_id: projectId, module_id: moduleId, recursive } }).then(res => res.data),
-    importTestCases: (data) =>
-        api.post('/qtest/import', data).then(res => res.data),
-    upload: (testCaseIds, moduleId, onConflict = 'skip', projectId) =>
-        api.post('/qtest/upload', { test_case_ids: testCaseIds, module_id: moduleId, on_conflict: onConflict, project_id: projectId }).then(res => res.data),
-    uploadFolder: (folderId, projectId, parentModuleId = 0, onConflict = 'skip', recursive = false) =>
-        api.post('/qtest/upload-folder', { folder_id: folderId, project_id: projectId, parent_module_id: parentModuleId, on_conflict: onConflict, recursive }).then(res => res.data),
-    unlinkFolder: (folderId, recursive = true) =>
-        api.post('/qtest/unlink-folder', { folder_id: folderId, recursive }).then(res => res.data),
-    bulkUnlinkMappings: (testCaseIds) =>
-        api.post('/qtest/bulk-unlink', { test_case_ids: testCaseIds }).then(res => res.data),
-    sync: (testCaseIds = []) =>
-        api.post('/qtest/sync', { test_case_ids: testCaseIds }).then(res => res.data),
-    getMapping: (testCaseId) =>
-        api.get(`/tests/${testCaseId}/qtest-mapping`, { _silent: true }).then(res => res.data),
-    batchGetMappings: (testCaseIds) =>
-        api.post('/qtest/batch-mappings', { test_case_ids: testCaseIds }, { _silent: true }).then(res => res.data),
-    unlinkMapping: (testCaseId) =>
-        api.delete(`/tests/${testCaseId}/qtest-mapping`),
-};
-
 // ── AI Test Import (014-ai-test-import) ──
 export const aiImport = {
     parse: (data) =>

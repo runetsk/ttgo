@@ -12,7 +12,6 @@ import (
 	apifolders "ttgo/internal/api/folders"
 	apiconfluence "ttgo/internal/api/integrations/confluence"
 	apijira "ttgo/internal/api/integrations/jira"
-	apiqtest "ttgo/internal/api/integrations/qtest"
 	apirequirements "ttgo/internal/api/requirements"
 	apiruns "ttgo/internal/api/runs"
 	apisearch "ttgo/internal/api/search"
@@ -68,7 +67,6 @@ func mountAPIRoutes(s *Server, api *routegroup.Bundle) {
 	apiwebhooks.Mount(api, apiwebhooks.NewHandler(s.store), s.requireAuth)
 	apibackups.Mount(api, s.backups, s.requireAdmin)
 	apiusers.Mount(api, apiusers.NewHandler(s.store, s.Hub, userFromContext, authHandler.LogAuthEvent), s.requireAdmin)
-	apiqtest.Mount(api, apiqtest.NewHandler(s.store, s.Hub), s.requireAuth, s.requireAdmin)
 	apianalytics.Mount(api, apianalytics.NewHandler(s.store), s.requireAuth)
 
 	// Seed / demo data

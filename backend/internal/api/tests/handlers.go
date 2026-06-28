@@ -62,7 +62,7 @@ func (h *Handler) GetTests(w http.ResponseWriter, r *http.Request) {
 // @Description  Returns the test case whose custom field matches the given name and value
 // @Tags         tests
 // @Produce      json
-// @Param        field  query     string  true  "Custom field name (e.g. QTestId)"
+// @Param        field  query     string  true  "Custom field name (e.g. ExternalId)"
 // @Param        value  query     string  true  "Custom field value to match"
 // @Success      200  {object}  models.TestCase
 // @Failure      400  {object}  map[string]string

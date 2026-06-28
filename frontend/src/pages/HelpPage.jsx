@@ -637,7 +637,6 @@ function SettingsSection() {
                     ['AI Configuration', 'LLM providers, API keys, models, prompt templates.'],
                     ['Jira Integration', 'Issue tracking, defect linking, requirement import.'],
                     ['Confluence', 'Import requirements from Confluence pages.'],
-                    ['qTest Sync', 'Bidirectional test case synchronization with qTest Manager.'],
                     ['Tokens', 'API tokens for programmatic access and CI/CD integration.'],
                     ['Webhooks', 'Event notifications (run completed, defect created, etc.).'],
                 ]} />
@@ -678,7 +677,6 @@ function ShortcutsSection() {
                 <UL items={[
                     'Set up Jira to create defects directly from failed test runs.',
                     'Use Confluence import for automatic requirement extraction.',
-                    'Configure qTest sync for bidirectional test management.',
                     'Use API tokens for CI/CD — trigger runs and report results programmatically.',
                 ]} />
             </Card>

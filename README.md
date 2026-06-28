@@ -36,7 +36,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 - ⌨️ **CLI & Claude Code automation.** A first-class `ttgo` CLI drives tests, runs, analytics and more from the terminal or CI — and a bundled Claude Code skill lets you operate TTGO in plain English.
 - ⚡ **Real-time collaboration.** WebSocket-powered live sync keeps every open tab and teammate up to date as runs are executed and test cases change.
 
-…plus rich-text editing with full version history, scheduled SQLite backups, API tokens & webhooks, and native Jira / Confluence / qTest integrations. See the [full feature list](#features) below.
+…plus rich-text editing with full version history, scheduled SQLite backups, API tokens & webhooks, and native Jira / Confluence integrations. See the [full feature list](#features) below.
 
 ## Feature tour
 
@@ -100,7 +100,6 @@ A self-hosted test case management tool built with Go and React.
 - **Requirements & Traceability** — link test cases to requirements, traceability matrix view
 - **Jira Integration** — create and link Jira defects directly from test runs
 - **Confluence Import** — import requirements from Confluence pages
-- **qTest Sync** — import test cases and modules from qTest
 - **AI Test Generation** — generate test cases from requirements using LLM providers
 - **Database Backups** — manual and scheduled SQLite backups with restore support
 - **API Tokens & Webhooks** — automate runs and receive push notifications

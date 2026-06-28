@@ -39,12 +39,4 @@ test.describe('TestGrid typed column filters', () => {
         await page.getByTestId('filter-created_at-preset-today').click();
         await expect(page.getByTestId('test-row').filter({ hasText: testName })).toBeVisible();
     });
-
-    test('QTest Status column is absent when QTest integration is off', async ({ page }) => {
-        await setupFolderAndTest(page);
-        await page.getByRole('button', { name: 'Columns' }).click();
-        const popover = page.getByRole('dialog', { name: 'Column visibility' });
-        await expect(popover).toBeVisible();
-        await expect(popover.getByText('QTest Status')).toHaveCount(0);
-    });
 });

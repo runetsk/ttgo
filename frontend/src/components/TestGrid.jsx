@@ -1,10 +1,9 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getTests, createTest, getCategories, assignCategory, deleteTest, deleteTests, updateFolder, qtest as qtestApi, exportTests } from '../api';
+import { getTests, createTest, getCategories, assignCategory, deleteTest, deleteTests, updateFolder, exportTests } from '../api';
 import { toast } from '../toast';
 import Modal from './Modal';
 import ColumnPicker from './ColumnPicker';
-import QTestImportModal from './QTestImportModal';
 import { useColumnPreference } from '../hooks/useColumnPreference';
 import { useColumnWidths } from '../hooks/useColumnWidths';
 import { stripHtml } from '../utils/htmlUtils';
@@ -23,43 +22,9 @@ const COLUMN_DEFS = [
     { key: 'reverification_flagged',label: 'Reverification', mandatory: false, defaultVisible: false, defaultWidth: 130 },
     { key: 'open_defects',          label: 'Open Defects',   mandatory: false, defaultVisible: false, defaultWidth: 110 },
     { key: 'linked_requirements',   label: 'Requirements',   mandatory: false, defaultVisible: false, defaultWidth: 150 },
-    { key: 'qtest_status',          label: 'QTest Status',   mandatory: false, defaultVisible: false, defaultWidth: 130, feature: 'qtest' },
     { key: 'created_at',            label: 'Created',        mandatory: false, defaultVisible: true,  defaultWidth: 120 },
     { key: 'updated_at',            label: 'Updated',        mandatory: false, defaultVisible: true,  defaultWidth: 120 },
 ];
-
-function flattenModules(modules, depth = 0) {
-    if (!modules) return [];
-    return modules.flatMap(m => [
-        { id: m.id, name: m.name, depth, hasChildren: !!(m.children && m.children.length > 0) },
-        ...flattenModules(m.children, depth + 1),
-    ]);
-}
-
-function getVisibleModules(flatList, expandedIds) {
-    const result = [];
-    const hiddenDepths = new Set();
-    for (const m of flatList) {
-        // If a parent is collapsed, skip children at deeper depth
-        let hidden = false;
-        for (const d of hiddenDepths) {
-            if (m.depth > d) { hidden = true; break; }
-        }
-        if (hidden) continue;
-        result.push(m);
-        // If this node has children but is not expanded, mark its depth so children are hidden
-        if (m.hasChildren && !expandedIds.has(m.id)) {
-            hiddenDepths.clear();
-            hiddenDepths.add(m.depth);
-        } else {
-            // Clear any hidden depth markers at or above this level
-            for (const d of [...hiddenDepths]) {
-                if (m.depth <= d) hiddenDepths.delete(d);
-            }
-        }
-    }
-    return result;
-}
 
 export default function TestGrid({ selectedFolders, selectedTestId }) {
     const [folderEditName, setFolderEditName] = useState(null); // null = not editing, string = draft value
@@ -73,27 +38,13 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         id: "", name: "", description: "",
         categories: [],                 // selected category IDs (match ANY)
         steps_count: "", reverification_flagged: "", open_defects: "",
-        linked_requirements: "", qtest_status: "",
+        linked_requirements: "",
         created_at: { from: null, to: null },
         updated_at: { from: null, to: null },
     });
     const [showColumnFilters, setShowColumnFilters] = useState(false);
     const [selectedTestIds, setSelectedTestIds] = useState([]);
     const [lastSelectedTestId, setLastSelectedTestId] = useState(null);
-    const [qtestEnabled, setQtestEnabled] = useState(false);
-    const [qtestMappings, setQtestMappings] = useState({});
-    const [showImportDialog, setShowImportDialog] = useState(false);
-    const [showUploadDialog, setShowUploadDialog] = useState(false);
-    const [uploadModuleId, setUploadModuleId] = useState('');
-    const [uploadConflict, setUploadConflict] = useState('skip');
-    const [uploading, setUploading] = useState(false);
-    const [uploadResult, setUploadResult] = useState(null);
-    const [qtestModules, setQtestModules] = useState([]);
-    const [loadingModules, setLoadingModules] = useState(false);
-    const [uploadModuleSearch, setUploadModuleSearch] = useState('');
-    const [expandedModuleIds, setExpandedModuleIds] = useState(new Set());
-    const [enabledProjects, setEnabledProjects] = useState([]);
-    const [uploadProjectId, setUploadProjectId] = useState('');
     const [showExportDropdown, setShowExportDropdown] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [exportFields, setExportFields] = useState({
@@ -113,7 +64,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
     // Column widths — drag-to-resize + localStorage persistence
     const { columnWidths, startResize, resetWidths, resetColumnWidth, isResizing } = useColumnWidths('test-cases', COLUMN_DEFS);
 
-    const featureColumnDefs = activeColumns(COLUMN_DEFS, { qtest: qtestEnabled });
+    const featureColumnDefs = activeColumns(COLUMN_DEFS, {});
     const isVisible = (key) => visibleKeys.has(key) && featureColumnDefs.some(c => c.key === key);
 
     // T007: Wrapper that clears the column's filter when toggling it off
@@ -142,78 +93,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
     // Dedup refs to prevent StrictMode double-fire
     const categoriesLoadedRef = useRef(false);
     const testsLoadingRef = useRef('');
-    // Track which test IDs we've already loaded qtest mappings for
-    const qtestLoadedRef = useRef({ idsKey: '', loading: false });
-
-    useEffect(() => {
-        let cancelled = false;
-
-        qtestApi.getConfig()
-            .then(cfg => {
-                if (!cancelled) {
-                    setQtestEnabled(!!cfg?.enabled);
-                }
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    setQtestEnabled(false);
-                }
-            });
-
-        return () => { cancelled = true; };
-    }, []);
-
-    // Load qtest mappings for the current test set when integration is enabled.
-    useEffect(() => {
-        let cancelled = false;
-        if (!qtestEnabled) {
-            setQtestMappings({});
-            qtestLoadedRef.current = { idsKey: '', loading: false };
-            return;
-        }
-        if (tests.length === 0) {
-            setQtestMappings({});
-            qtestLoadedRef.current = { idsKey: '', loading: false };
-            return;
-        }
-
-        const idsKey = tests.map(t => t.id).sort().join(',');
-        // Skip if we already loaded (or are loading) for this exact set of tests
-        if (idsKey === qtestLoadedRef.current.idsKey) return;
-
-        if (!visibleKeys.has('qtest_status')) {
-            toggleColumn('qtest_status');
-        }
-        if (qtestLoadedRef.current.idsKey === idsKey) return;
-        qtestLoadedRef.current = { idsKey, loading: true };
-
-        qtestApi.batchGetMappings(tests.map(t => t.id))
-            .then(data => {
-                if (cancelled) return;
-                setQtestMappings(data.mappings || {});
-                qtestLoadedRef.current = { idsKey, loading: false };
-            })
-            .catch(() => {
-                if (!cancelled) {
-                    qtestLoadedRef.current = { idsKey: '', loading: false };
-                }
-            });
-
-        return () => { cancelled = true; };
-    }, [qtestEnabled, tests, toggleColumn, visibleKeys]);
-
-    // Force-refresh qtest mappings (after upload/sync)
-    const reloadQtestMappings = useCallback(() => {
-        qtestLoadedRef.current = { idsKey: '', loading: false };
-        if (tests.length === 0) return;
-        qtestApi.batchGetMappings(tests.map(t => t.id))
-            .then(data => {
-                setQtestMappings(data.mappings || {});
-                const idsKey = tests.map(t => t.id).sort().join(',');
-                qtestLoadedRef.current = { idsKey, loading: false };
-            });
-    }, [tests]);
-
     const handleExport = useCallback(() => {
         const fields = ['name', ...Object.entries(exportFields).filter(([, v]) => v).map(([k]) => k)];
         setExporting(true);
@@ -254,7 +133,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         setPrevFolderIdsKey(folderIdsKey);
         setSelectedTestIds([]);
         setFilterText("");
-        setColumnFilters({ id: "", name: "", description: "", categories: [], steps_count: "", reverification_flagged: "", open_defects: "", linked_requirements: "", qtest_status: "", created_at: { from: null, to: null }, updated_at: { from: null, to: null } });
+        setColumnFilters({ id: "", name: "", description: "", categories: [], steps_count: "", reverification_flagged: "", open_defects: "", linked_requirements: "", created_at: { from: null, to: null }, updated_at: { from: null, to: null } });
         if (!folderIdsKey) {
             setTests([]);
         }
@@ -332,84 +211,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                 });
             }
         });
-    };
-
-    const loadModulesForProject = (projectId) => {
-        setQtestModules([]);
-        setUploadModuleId('');
-        setExpandedModuleIds(new Set());
-        if (!projectId) { setLoadingModules(false); return; }
-        setLoadingModules(true);
-        qtestApi.listModules(parseInt(projectId))
-            .then(mods => setQtestModules(mods || []))
-            .catch(() => toast.error('Failed to load QTest modules'))
-            .finally(() => setLoadingModules(false));
-    };
-
-    const handleUploadProjectChange = (projectId) => {
-        setUploadProjectId(projectId);
-        setUploadModuleSearch('');
-        loadModulesForProject(projectId);
-    };
-
-    const handleQtestUpload = () => {
-        if (selectedTestIds.length === 0) { toast.error('Select test cases to upload'); return; }
-        setShowUploadDialog(true);
-        setUploadResult(null);
-        setUploadModuleSearch('');
-        setUploadModuleId('');
-        setExpandedModuleIds(new Set());
-        setLoadingModules(true);
-        qtestApi.listEnabledProjects()
-            .then(projects => {
-                setEnabledProjects(projects || []);
-                const def = (projects || []).find(p => p.is_default);
-                const selected = def || (projects && projects[0]);
-                if (selected) {
-                    setUploadProjectId(String(selected.project_id));
-                    qtestApi.listModules(selected.project_id)
-                        .then(mods => setQtestModules(mods || []))
-                        .catch(() => toast.error('Failed to load QTest modules'))
-                        .finally(() => setLoadingModules(false));
-                } else {
-                    setUploadProjectId('');
-                    setLoadingModules(false);
-                }
-            })
-            .catch(() => { toast.error('Failed to load QTest projects'); setLoadingModules(false); });
-    };
-
-    const doUpload = () => {
-        if (!uploadModuleId) { toast.error('Select a QTest module'); return; }
-        if (!uploadProjectId) { toast.error('Select a QTest project'); return; }
-        setUploading(true);
-        qtestApi.upload(selectedTestIds, parseInt(uploadModuleId), uploadConflict, parseInt(uploadProjectId))
-            .then(result => {
-                setUploadResult(result);
-                if (result.succeeded > 0) toast.success(`Uploaded ${result.succeeded} test case(s) to QTest`);
-                if (result.rate_limited) toast.error('QTest rate limit reached — some items were not uploaded');
-                reloadQtestMappings();
-            })
-            .catch(err => toast.error(err.response?.data?.error || 'Upload failed'))
-            .finally(() => setUploading(false));
-    };
-
-    const handleQtestSync = () => {
-        if (selectedTestIds.length === 0) { toast.error('Select test cases to sync'); return; }
-        qtestApi.sync(selectedTestIds)
-            .then(result => {
-                if (result.succeeded > 0) toast.success(`Synced ${result.succeeded} test case(s) to QTest`);
-                if (result.failed > 0) toast.error(`${result.failed} test case(s) failed to sync`);
-                if (result.rate_limited) toast.error('QTest rate limit reached');
-                reloadQtestMappings();
-            })
-            .catch(err => toast.error(err.response?.data?.error || 'Sync failed'));
-    };
-
-    const handleQtestImportComplete = () => {
-        loadTests();
-        reloadQtestMappings();
-        window.dispatchEvent(new CustomEvent('folder-tree-changed'));
     };
 
     const toggleSelectAll = () => {
@@ -552,15 +353,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         const createdMatch = inDateRange(t.created_at, columnFilters.created_at);
         const updatedMatch = inDateRange(t.updated_at, columnFilters.updated_at);
 
-        // QTest status filter (enum), only meaningful when integration is on.
-        let qtestMatch = true;
-        if (columnFilters.qtest_status) {
-            const mapping = qtestMappings[t.id];
-            const qstatus = mapping ? mapping.sync_status : 'not_linked';
-            qtestMatch = qstatus === columnFilters.qtest_status;
-        }
-
-        return idMatch && nameMatch && descMatch && categoryMatch && stepsMatch && reverifMatch && defectsMatch && reqsMatch && createdMatch && updatedMatch && qtestMatch;
+        return idMatch && nameMatch && descMatch && categoryMatch && stepsMatch && reverifMatch && defectsMatch && reqsMatch && createdMatch && updatedMatch;
     });
 
     const sortedTests = [...filteredTests].sort((a, b) => {
@@ -721,17 +514,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                             </div>
                         )}
                     </div>
-                    {qtestEnabled && (
-                        <button
-                            className="action-btn"
-                            onClick={() => setShowImportDialog(true)}
-                            disabled={isMultiRoot}
-                            style={{ opacity: isMultiRoot ? 0.5 : 1, cursor: isMultiRoot ? 'not-allowed' : 'pointer' }}
-                            title={isMultiRoot ? 'Import is available for a single folder selection' : 'Import test cases from QTest'}
-                        >
-                            Import from QTest
-                        </button>
-                    )}
                     <button
                         className="primary-btn"
                         onClick={handleCreate}
@@ -755,16 +537,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                     <div style={{ height: 20, width: 1, background: 'var(--border-color)' }}></div>
                     <div style={{ display: 'flex', gap: 8 }}>
                         <button className="action-btn" onClick={handleBulkDelete} style={{ color: 'var(--accent-red)' }} data-testid="bulk-delete-tests-button">🗑️ Delete</button>
-                        {qtestEnabled && (
-                            <button className="action-btn" onClick={handleQtestUpload} disabled={selectedTestIds.length === 0} style={{ fontSize: '0.8rem' }}>
-                                Upload to QTest
-                            </button>
-                        )}
-                        {qtestEnabled && (
-                            <button className="action-btn" onClick={handleQtestSync} disabled={selectedTestIds.length === 0} style={{ fontSize: '0.8rem' }}>
-                                Sync to QTest
-                            </button>
-                        )}
                     </div>
                     <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
                         <select
@@ -839,12 +611,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                                 <th className="col-resize-th" style={{ width: columnWidths['linked_requirements'], cursor: 'pointer', userSelect: 'none' }} onClick={() => requestSort('linked_requirements')}>
                                     Requirements {getSortIndicator('linked_requirements')}
                                     <div className={`col-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={(e) => startResize('linked_requirements', e)} onDoubleClick={(e) => { e.stopPropagation(); resetColumnWidth('linked_requirements'); }} />
-                                </th>
-                            )}
-                            {isVisible('qtest_status') && (
-                                <th className="col-resize-th" style={{ width: columnWidths['qtest_status'], cursor: 'pointer', userSelect: 'none' }} onClick={() => requestSort('qtest_status')}>
-                                    QTest Status {getSortIndicator('qtest_status')}
-                                    <div className={`col-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={(e) => startResize('qtest_status', e)} onDoubleClick={(e) => { e.stopPropagation(); resetColumnWidth('qtest_status'); }} />
                                 </th>
                             )}
                             {isVisible('created_at') && (
@@ -953,22 +719,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                                         />
                                     </th>
                                 )}
-                                {isVisible('qtest_status') && (
-                                    <th>
-                                        <select
-                                            className="col-filter-select"
-                                            data-testid="filter-qtest_status"
-                                            value={columnFilters.qtest_status}
-                                            onChange={(e) => handleColumnFilterChange('qtest_status', e.target.value)}
-                                        >
-                                            <option value="">All</option>
-                                            <option value="not_linked">Not Linked</option>
-                                            <option value="synced">Synced</option>
-                                            <option value="changes_pending">Changes Pending</option>
-                                            <option value="broken">Broken</option>
-                                        </select>
-                                    </th>
-                                )}
                                 {isVisible('created_at') && (
                                     <th>
                                         <DateRangeFilter
@@ -1071,20 +821,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                                         }
                                     </td>
                                 )}
-                                {isVisible('qtest_status') && (() => {
-                                    const mapping = qtestMappings[t.id];
-                                    const qstatus = mapping ? mapping.sync_status : 'not_linked';
-                                    const statusLabels = { synced: 'Synced', changes_pending: 'Pending', broken: 'Broken', not_linked: '—' };
-                                    const statusBg = { synced: 'rgba(52,211,153,0.15)', changes_pending: 'rgba(251,191,36,0.15)', broken: 'rgba(248,113,113,0.15)', not_linked: 'transparent' };
-                                    const statusColor = { synced: '#34d399', changes_pending: '#fbbf24', broken: '#f87171', not_linked: 'var(--text-secondary)' };
-                                    return (
-                                        <td style={{ textAlign: 'center' }}>
-                                            <span style={{ fontSize: '0.75rem', padding: '2px 6px', borderRadius: 4, background: statusBg[qstatus], color: statusColor[qstatus] }}>
-                                                {statusLabels[qstatus]}
-                                            </span>
-                                        </td>
-                                    );
-                                })()}
                                 {isVisible('created_at') && (
                                     <td style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                                         {formatDate(t.created_at)}
@@ -1172,397 +908,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                     </div>
                 </div>
             )}
-
-            {showImportDialog && !isMultiRoot && (
-                <QTestImportModal
-                    initialFolderId={selectedFolders[0].id}
-                    onClose={() => setShowImportDialog(false)}
-                    onImported={handleQtestImportComplete}
-                />
-            )}
-
-            {showUploadDialog && (() => {
-                const flatModules = flattenModules(qtestModules);
-                const moduleSearch = (uploadModuleSearch || '').toLowerCase();
-                const isSearching = moduleSearch.length > 0;
-                const displayModules = isSearching
-                    ? flatModules.filter(m => m.name.toLowerCase().includes(moduleSearch))
-                    : getVisibleModules(flatModules, expandedModuleIds);
-                const selectedModule = flatModules.find(m => String(m.id) === String(uploadModuleId));
-                const total = selectedTestIds.length;
-                const hasResult = !!uploadResult;
-                const allSucceeded = hasResult && uploadResult.succeeded === total && uploadResult.failed === 0;
-                const hasFailed = hasResult && uploadResult.failed > 0;
-
-                const toggleExpand = (id) => {
-                    setExpandedModuleIds(prev => {
-                        const next = new Set(prev);
-                        if (next.has(id)) next.delete(id);
-                        else next.add(id);
-                        return next;
-                    });
-                };
-
-                return (
-                    <div className="modal-overlay" onClick={() => !uploading && setShowUploadDialog(false)}>
-                        <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, width: '90vw', padding: 0, overflow: 'hidden' }}>
-                            {/* Header */}
-                            <div style={{
-                                padding: '24px 28px 20px',
-                                borderBottom: '1px solid var(--border-color)',
-                                display: 'flex', alignItems: 'center', gap: 14,
-                            }}>
-                                <div style={{
-                                    width: 40, height: 40, borderRadius: 10,
-                                    background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: '1.2rem', flexShrink: 0,
-                                }}>⬆</div>
-                                <div style={{ flex: 1 }}>
-                                    <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                        Upload to QTest
-                                    </h3>
-                                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                                        {total} test case{total !== 1 ? 's' : ''} selected
-                                        {uploadProjectId && enabledProjects.length > 0 && (() => {
-                                            const proj = enabledProjects.find(p => String(p.project_id) === uploadProjectId);
-                                            return proj ? (
-                                                <span style={{ marginLeft: 6 }}>
-                                                    · Project: <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{proj.project_name}</span>
-                                                </span>
-                                            ) : null;
-                                        })()}
-                                    </p>
-                                </div>
-                            </div>
-
-                            {/* Body */}
-                            <div style={{ padding: '24px 28px' }}>
-                                {!hasResult ? (
-                                    <>
-                                        {/* Project picker */}
-                                        {enabledProjects.length > 1 && (
-                                            <div style={{ marginBottom: 20 }}>
-                                                <label style={{
-                                                    display: 'block', marginBottom: 8,
-                                                    fontSize: '0.8rem', fontWeight: 600,
-                                                    color: 'var(--text-secondary)',
-                                                    textTransform: 'uppercase', letterSpacing: '0.05em',
-                                                }}>Target Project</label>
-                                                <select
-                                                    className="modern-select"
-                                                    value={uploadProjectId}
-                                                    onChange={e => handleUploadProjectChange(e.target.value)}
-                                                    style={{ width: '100%' }}
-                                                >
-                                                    {enabledProjects.map(p => (
-                                                        <option key={p.project_id} value={String(p.project_id)}>
-                                                            {p.project_name}{p.is_default ? ' (Default)' : ''}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            </div>
-                                        )}
-                                        {enabledProjects.length === 0 && !loadingModules && (
-                                            <div style={{
-                                                padding: '16px', borderRadius: 10,
-                                                background: 'rgba(251,191,36,0.08)',
-                                                border: '1px solid rgba(251,191,36,0.3)',
-                                                fontSize: '0.85rem', color: 'var(--text-secondary)',
-                                                marginBottom: 20,
-                                            }}>
-                                                No projects enabled — configure projects in QTest Settings first
-                                            </div>
-                                        )}
-                                        {/* Module picker */}
-                                        <div style={{ marginBottom: 24 }}>
-                                            <label style={{
-                                                display: 'block', marginBottom: 8,
-                                                fontSize: '0.8rem', fontWeight: 600,
-                                                color: 'var(--text-secondary)',
-                                                textTransform: 'uppercase', letterSpacing: '0.05em',
-                                            }}>Target Module</label>
-                                            {loadingModules ? (
-                                                <div style={{
-                                                    padding: '40px 0', textAlign: 'center',
-                                                    color: 'var(--text-secondary)', fontSize: '0.9rem',
-                                                }}>
-                                                    <div style={{
-                                                        width: 28, height: 28, margin: '0 auto 10px',
-                                                        border: '2px solid var(--border-color)',
-                                                        borderTopColor: 'var(--accent-indigo)',
-                                                        borderRadius: '50%',
-                                                        animation: 'spin 0.6s linear infinite',
-                                                    }} />
-                                                    Loading modules from QTest...
-                                                </div>
-                                            ) : (
-                                                <div style={{
-                                                    border: '1px solid var(--border-color)',
-                                                    borderRadius: 10, overflow: 'hidden',
-                                                    background: 'var(--bg-primary)',
-                                                }}>
-                                                    {/* Search input */}
-                                                    <div style={{
-                                                        padding: '10px 14px',
-                                                        borderBottom: '1px solid var(--border-color)',
-                                                        display: 'flex', alignItems: 'center', gap: 8,
-                                                    }}>
-                                                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>🔍</span>
-                                                        <input
-                                                            type="text"
-                                                            placeholder="Search modules..."
-                                                            value={uploadModuleSearch || ''}
-                                                            onChange={e => setUploadModuleSearch(e.target.value)}
-                                                            style={{
-                                                                flex: 1, border: 'none', outline: 'none',
-                                                                background: 'transparent', fontSize: '0.9rem',
-                                                                color: 'var(--text-primary)',
-                                                            }}
-                                                        />
-                                                        {uploadModuleSearch && (
-                                                            <button
-                                                                onClick={() => setUploadModuleSearch('')}
-                                                                style={{
-                                                                    background: 'none', border: 'none',
-                                                                    cursor: 'pointer', color: 'var(--text-secondary)',
-                                                                    fontSize: '0.85rem', padding: '2px 4px',
-                                                                }}
-                                                            >✕</button>
-                                                        )}
-                                                    </div>
-                                                    {/* Module tree */}
-                                                    <div style={{
-                                                        maxHeight: 300, overflowY: 'auto',
-                                                        padding: '4px 0',
-                                                    }}>
-                                                        {displayModules.length === 0 ? (
-                                                            <div style={{
-                                                                padding: '20px 14px', textAlign: 'center',
-                                                                color: 'var(--text-secondary)', fontSize: '0.9rem',
-                                                            }}>
-                                                                {isSearching ? 'No modules match your search' : 'No modules found'}
-                                                            </div>
-                                                        ) : displayModules.map(m => {
-                                                            const isSelected = String(m.id) === String(uploadModuleId);
-                                                            const isExpanded = expandedModuleIds.has(m.id);
-                                                            return (
-                                                                <div
-                                                                    key={m.id}
-                                                                    style={{
-                                                                        padding: '8px 14px',
-                                                                        paddingLeft: isSearching ? 14 : 14 + m.depth * 20,
-                                                                        cursor: 'pointer',
-                                                                        fontSize: '0.9rem',
-                                                                        display: 'flex', alignItems: 'center', gap: 6,
-                                                                        background: isSelected
-                                                                            ? 'var(--accent-indigo-subtle, rgba(99,102,241,0.1))'
-                                                                            : 'transparent',
-                                                                        color: isSelected
-                                                                            ? 'var(--accent-indigo)'
-                                                                            : 'var(--text-primary)',
-                                                                        fontWeight: isSelected ? 600 : 400,
-                                                                        transition: 'background 0.1s',
-                                                                    }}
-                                                                    onMouseEnter={e => {
-                                                                        if (!isSelected)
-                                                                            e.currentTarget.style.background = 'var(--bg-hover, rgba(255,255,255,0.05))';
-                                                                    }}
-                                                                    onMouseLeave={e => {
-                                                                        if (!isSelected)
-                                                                            e.currentTarget.style.background = 'transparent';
-                                                                    }}
-                                                                    onClick={() => setUploadModuleId(String(m.id))}
-                                                                >
-                                                                    {/* Expand/collapse toggle */}
-                                                                    {m.hasChildren && !isSearching ? (
-                                                                        <span
-                                                                            onClick={e => { e.stopPropagation(); toggleExpand(m.id); }}
-                                                                            style={{
-                                                                                width: 20, height: 20,
-                                                                                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                                                                                borderRadius: 4, flexShrink: 0,
-                                                                                fontSize: '0.7rem', color: 'var(--text-secondary)',
-                                                                                transition: 'transform 0.15s',
-                                                                                transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
-                                                                            }}
-                                                                        >▶</span>
-                                                                    ) : (
-                                                                        <span style={{ width: 20, flexShrink: 0 }} />
-                                                                    )}
-                                                                    <span style={{ fontSize: '0.85rem', opacity: 0.5 }}>📁</span>
-                                                                    <span style={{ flex: 1 }}>{m.name}</span>
-                                                                    {isSelected && <span style={{ fontSize: '0.8rem' }}>✓</span>}
-                                                                </div>
-                                                            );
-                                                        })}
-                                                    </div>
-                                                    {/* Selected indicator */}
-                                                    {selectedModule && (
-                                                        <div style={{
-                                                            padding: '10px 14px',
-                                                            borderTop: '1px solid var(--border-color)',
-                                                            fontSize: '0.85rem',
-                                                            color: 'var(--accent-indigo)',
-                                                            display: 'flex', alignItems: 'center', gap: 6,
-                                                        }}>
-                                                            <span>✓</span>
-                                                            <span style={{ fontWeight: 600 }}>{selectedModule.name}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            )}
-                                        </div>
-
-                                        {/* Conflict resolution */}
-                                        <div style={{ marginBottom: 4 }}>
-                                            <label style={{
-                                                display: 'block', marginBottom: 10,
-                                                fontSize: '0.8rem', fontWeight: 600,
-                                                color: 'var(--text-secondary)',
-                                                textTransform: 'uppercase', letterSpacing: '0.05em',
-                                            }}>If Already Linked</label>
-                                            <div style={{ display: 'flex', gap: 10 }}>
-                                                {[
-                                                    { value: 'skip', label: 'Skip', desc: 'Keep existing' },
-                                                    { value: 'update', label: 'Update', desc: 'Overwrite in QTest' },
-                                                ].map(opt => (
-                                                    <div
-                                                        key={opt.value}
-                                                        onClick={() => setUploadConflict(opt.value)}
-                                                        style={{
-                                                            flex: 1, padding: '12px 16px',
-                                                            borderRadius: 10, cursor: 'pointer',
-                                                            border: `2px solid ${uploadConflict === opt.value ? 'var(--accent-indigo)' : 'var(--border-color)'}`,
-                                                            background: uploadConflict === opt.value
-                                                                ? 'var(--accent-indigo-subtle, rgba(99,102,241,0.08))'
-                                                                : 'transparent',
-                                                            transition: 'all 0.15s',
-                                                        }}
-                                                    >
-                                                        <div style={{
-                                                            fontSize: '0.9rem', fontWeight: 600,
-                                                            color: uploadConflict === opt.value ? 'var(--accent-indigo)' : 'var(--text-primary)',
-                                                        }}>{opt.label}</div>
-                                                        <div style={{
-                                                            fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 2,
-                                                        }}>{opt.desc}</div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </>
-                                ) : (
-                                    /* Upload results */
-                                    <div style={{ textAlign: 'center', padding: '12px 0' }}>
-                                        <div style={{
-                                            width: 56, height: 56, borderRadius: '50%',
-                                            margin: '0 auto 20px',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            fontSize: '1.8rem',
-                                            background: allSucceeded
-                                                ? 'rgba(34,197,94,0.12)'
-                                                : hasFailed
-                                                    ? 'rgba(239,68,68,0.12)'
-                                                    : 'rgba(251,191,36,0.12)',
-                                        }}>
-                                            {allSucceeded ? '✅' : hasFailed ? '⚠️' : 'ℹ️'}
-                                        </div>
-                                        <h4 style={{
-                                            margin: '0 0 8px', fontSize: '1.15rem', fontWeight: 700,
-                                            color: 'var(--text-primary)',
-                                        }}>
-                                            {allSucceeded ? 'Upload Complete' : hasFailed ? 'Partial Upload' : 'Upload Finished'}
-                                        </h4>
-
-                                        <div style={{
-                                            display: 'flex', gap: 16, justifyContent: 'center',
-                                            margin: '20px 0',
-                                        }}>
-                                            {[
-                                                { label: 'Succeeded', value: uploadResult.succeeded, color: '#22c55e' },
-                                                { label: 'Skipped', value: uploadResult.skipped, color: '#a3a3a3' },
-                                                { label: 'Failed', value: uploadResult.failed, color: '#ef4444' },
-                                            ].filter(s => s.value > 0).map(s => (
-                                                <div key={s.label} style={{
-                                                    padding: '14px 28px', borderRadius: 10,
-                                                    background: 'var(--bg-primary)',
-                                                    border: '1px solid var(--border-color)',
-                                                    minWidth: 100,
-                                                }}>
-                                                    <div style={{
-                                                        fontSize: '1.5rem', fontWeight: 700,
-                                                        color: s.color,
-                                                    }}>{s.value}</div>
-                                                    <div style={{
-                                                        fontSize: '0.8rem', color: 'var(--text-secondary)',
-                                                        marginTop: 4,
-                                                    }}>{s.label}</div>
-                                                </div>
-                                            ))}
-                                        </div>
-
-                                        {uploadResult.rate_limited && (
-                                            <div style={{
-                                                padding: '10px 14px', borderRadius: 8,
-                                                background: 'rgba(251,191,36,0.1)',
-                                                border: '1px solid rgba(251,191,36,0.3)',
-                                                fontSize: '0.85rem', color: '#fbbf24',
-                                                marginTop: 8,
-                                            }}>
-                                                ⚡ Rate limit reached — some items were not processed
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {/* Footer */}
-                            <div style={{
-                                padding: '16px 28px',
-                                borderTop: '1px solid var(--border-color)',
-                                display: 'flex', justifyContent: 'flex-end', gap: 12,
-                            }}>
-                                <button
-                                    className="action-btn"
-                                    onClick={() => { setShowUploadDialog(false); setUploadModuleSearch(''); }}
-                                    disabled={uploading}
-                                    style={{ fontSize: '0.85rem' }}
-                                >
-                                    {hasResult ? 'Close' : 'Cancel'}
-                                </button>
-                                {!hasResult && (
-                                    <button
-                                        className="primary-btn"
-                                        onClick={doUpload}
-                                        disabled={uploading || !uploadModuleId}
-                                        style={{
-                                            fontSize: '0.85rem',
-                                            display: 'flex', alignItems: 'center', gap: 6,
-                                            opacity: (!uploadModuleId && !uploading) ? 0.5 : 1,
-                                        }}
-                                    >
-                                        {uploading ? (
-                                            <>
-                                                <span style={{
-                                                    width: 14, height: 14, display: 'inline-block',
-                                                    border: '2px solid rgba(255,255,255,0.3)',
-                                                    borderTopColor: '#fff',
-                                                    borderRadius: '50%',
-                                                    animation: 'spin 0.6s linear infinite',
-                                                }} />
-                                                Uploading...
-                                            </>
-                                        ) : (
-                                            <>⬆ Upload {total} test case{total !== 1 ? 's' : ''}</>
-                                        )}
-                                    </button>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                );
-            })()}
 
             {modal && (
                 <Modal

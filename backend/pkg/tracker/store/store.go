@@ -19,12 +19,11 @@ import (
 )
 
 type Store struct {
-	db            *gorm.DB
-	mu            sync.RWMutex // protects db during ReopenDB
-	qtestImportMu sync.Mutex
-	analysisMu    sync.Mutex     // serializes version-bumps in CreateAnalysis (ai-failure-analysis)
-	httpClient    *http.Client   // shared HTTP client for external API calls (Jira, QTest, etc.)
-	box           *secretbox.Box // at-rest encryption for integration/LLM secrets (F-016)
+	db         *gorm.DB
+	mu         sync.RWMutex   // protects db during ReopenDB
+	analysisMu sync.Mutex     // serializes version-bumps in CreateAnalysis (ai-failure-analysis)
+	httpClient *http.Client   // shared HTTP client for external API calls (Jira, Confluence, etc.)
+	box        *secretbox.Box // at-rest encryption for integration/LLM secrets (F-016)
 }
 
 // encryptSecret returns the value encrypted for storage. Idempotent and
@@ -72,7 +71,7 @@ func New(dsn string) (*Store, error) {
 
 	s := &Store{
 		db: db,
-		// SSRF-guarded client for outbound integration calls (Jira/Confluence/QTest).
+		// SSRF-guarded client for outbound integration calls (Jira/Confluence).
 		// Blocks cloud-metadata/link-local but allows self-hosted private hosts (F-003).
 		httpClient: safehttp.IntegrationClient(15 * time.Second),
 		box:        box,
@@ -122,9 +121,6 @@ func (s *Store) bootstrapDB() error {
 		&models.AIGenTemplate{},             // 010-ai-test-generation
 		&models.AIGenCoverageConfig{},       // 010-ai-test-generation: coverage levels
 		&models.ConfluenceConfig{},          // 011-jira-confluence-import
-		&models.QTestConfig{},               // 013-qtest-sync
-		&models.QTestMapping{},              // 013-qtest-sync
-		&models.QTestEnabledProject{},       // 013-qtest-sync: multi-project
 		&models.Backup{},                    // 015-database-backups
 		&models.BackupSchedule{},            // 015-database-backups
 		&models.Comment{},                   // comments on runs and results
@@ -139,6 +135,11 @@ func (s *Store) bootstrapDB() error {
 	// Dead-code cleanup: drop orphaned executions table (replaced by run_results).
 	db.Exec(`DROP TABLE IF EXISTS executions`)
 
+	// 013-qtest-sync removed: drop the QTest integration tables (config, mappings, projects).
+	db.Exec(`DROP TABLE IF EXISTS qtest_mappings`)
+	db.Exec(`DROP TABLE IF EXISTS qtest_configs`)
+	db.Exec(`DROP TABLE IF EXISTS qtest_projects`)
+
 	// 016-retries: partial unique index for attempt_number (GORM can't do partial indexes via tags)
 	db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_run_results_attempt ON run_results(test_run_id, test_case_id, attempt_number) WHERE test_case_id IS NOT NULL`)
 
@@ -151,14 +152,6 @@ func (s *Store) bootstrapDB() error {
 	// 008-jira-integration: unique constraint on (test_case_id, jira_issue_key) — FR-013.
 	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_defect_link ON defect_links (test_case_id, jira_issue_key)`).Error; err != nil {
 		return fmt.Errorf("failed to create defect_links unique index: %w", err)
-	}
-
-	// 013-qtest-sync: unique constraint on test_case_id and status filtering index.
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_qtest_mapping_test_case ON qtest_mappings (test_case_id)`).Error; err != nil {
-		return fmt.Errorf("failed to create qtest_mappings unique index: %w", err)
-	}
-	if err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_qtest_mapping_status ON qtest_mappings (sync_status)`).Error; err != nil {
-		return fmt.Errorf("failed to create qtest_mappings status index: %w", err)
 	}
 
 	// ai-failure-analysis: at most one active (queued/running) analysis job per run,
@@ -285,12 +278,6 @@ func (s *Store) backfillEncryptSecrets() error {
 	var conf models.ConfluenceConfig
 	if err := s.db.First(&conf, "id = ?", confluenceConfigSingletonID).Error; err == nil {
 		if err := encryptColumn(&models.ConfluenceConfig{}, conf.ID, "api_token", conf.APIToken); err != nil {
-			return err
-		}
-	}
-	var qt models.QTestConfig
-	if err := s.db.First(&qt, "id = ?", qtestConfigSingletonID).Error; err == nil {
-		if err := encryptColumn(&models.QTestConfig{}, qt.ID, "api_token", qt.APIToken); err != nil {
 			return err
 		}
 	}

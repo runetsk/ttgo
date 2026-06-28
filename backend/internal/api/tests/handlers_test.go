@@ -114,7 +114,7 @@ func TestGetTestByCustomField_MissingParams(t *testing.T) {
 
 func TestGetTestByCustomField_NotFound(t *testing.T) {
 	st := newStore(t)
-	w := do(t, st, "GET", "/api/tests/by-custom-field?field=QTestId&value=x", nil)
+	w := do(t, st, "GET", "/api/tests/by-custom-field?field=ExternalId&value=x", nil)
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
@@ -343,22 +343,4 @@ func TestDismissReverification(t *testing.T) {
 	_, tc := seedFolderAndTest(t, st)
 	w := do(t, st, "DELETE", "/api/tests/"+tc.ID+"/reverification-flag", nil)
 	assert.Equal(t, http.StatusNoContent, w.Code)
-}
-
-func TestGetQTestMapping_NotLinked(t *testing.T) {
-	st := newStore(t)
-	_, tc := seedFolderAndTest(t, st)
-	w := do(t, st, "GET", "/api/tests/"+tc.ID+"/qtest-mapping", nil)
-	require.Equal(t, http.StatusOK, w.Code)
-	var resp map[string]interface{}
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
-	assert.Equal(t, false, resp["linked"])
-}
-
-func TestUnlinkQTestMapping_NoMapping(t *testing.T) {
-	st := newStore(t)
-	_, tc := seedFolderAndTest(t, st)
-	// Store returns an error when no mapping exists -> 500.
-	w := do(t, st, "DELETE", "/api/tests/"+tc.ID+"/qtest-mapping", nil)
-	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

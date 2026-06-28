@@ -1926,56 +1926,6 @@
     letter-spacing: 0.02em;
 }
 
-.detail-pane-qtest-badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 2px 7px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    white-space: nowrap;
-}
-
-.detail-pane-qtest-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    display: inline-block;
-}
-
-.detail-pane-qtest-badge.qtest-synced {
-    background: rgba(34, 197, 94, 0.12);
-    color: #86efac;
-    border: 1px solid rgba(34, 197, 94, 0.25);
-}
-.detail-pane-qtest-badge.qtest-synced .detail-pane-qtest-dot { background: #22c55e; }
-
-.detail-pane-qtest-badge.qtest-conflict {
-    background: rgba(239, 68, 68, 0.12);
-    color: #fca5a5;
-    border: 1px solid rgba(239, 68, 68, 0.25);
-}
-.detail-pane-qtest-badge.qtest-conflict .detail-pane-qtest-dot { background: #ef4444; }
-
-.detail-pane-qtest-badge.qtest-modified,
-.detail-pane-qtest-badge.qtest-pending {
-    background: rgba(245, 158, 11, 0.14);
-    color: #fcd34d;
-    border: 1px solid rgba(245, 158, 11, 0.28);
-}
-.detail-pane-qtest-badge.qtest-modified .detail-pane-qtest-dot,
-.detail-pane-qtest-badge.qtest-pending .detail-pane-qtest-dot { background: #f59e0b; }
-
-.detail-pane-qtest-badge.qtest-none {
-    background: rgba(255, 255, 255, 0.04);
-    color: var(--text-secondary);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-}
-.detail-pane-qtest-badge.qtest-none .detail-pane-qtest-dot { background: #555; }
-
 .detail-pane-icon-btn {
     background: transparent;
     border: 1px solid transparent;

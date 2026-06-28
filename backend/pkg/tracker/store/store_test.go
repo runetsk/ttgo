@@ -174,14 +174,14 @@ func TestGetTestCaseByCustomField_FindsJSONStoredTextValue(t *testing.T) {
 	s := newTestStore(t)
 
 	def := &models.CustomFieldDefinition{
-		Name: "QTestId",
+		Name: "ExternalId",
 		Type: models.FieldTypeText,
 	}
 	require.NoError(t, s.CreateCustomFieldDefinition(def))
 
 	root, _ := s.CreateFolder("Root", nil)
 	test := &models.TestCase{
-		Name:     "QTest lookup",
+		Name:     "external id lookup",
 		FolderID: root.ID,
 		CustomValues: []*models.CustomFieldValue{
 			{
@@ -192,7 +192,7 @@ func TestGetTestCaseByCustomField_FindsJSONStoredTextValue(t *testing.T) {
 	}
 	require.NoError(t, s.CreateTestCase(test))
 
-	found, err := s.GetTestCaseByCustomField("QTestId", "46260677")
+	found, err := s.GetTestCaseByCustomField("ExternalId", "46260677")
 	require.NoError(t, err)
 	require.NotNil(t, found)
 	assert.Equal(t, test.ID, found.ID)

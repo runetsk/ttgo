@@ -4,8 +4,7 @@ import StepsEditor from './StepsEditor';
 import RichTextField from './RichTextField';
 import HistorySidebar from './HistorySidebar';
 import RequirementLinkPanel from './RequirementLinkPanel';
-import QTestSyncPanel from './QTestSyncPanel';
-import { updateTest, getCustomFields, getTest, getCategories, getFolderTree, listTestExecutions, qtest, versions as versionsApi, requirements as requirementsApi } from '../api';
+import { updateTest, getCustomFields, getTest, getCategories, getFolderTree, listTestExecutions, versions as versionsApi, requirements as requirementsApi } from '../api';
 import { useAbortController } from '../hooks/useAbortController';
 
 function formatRelative(iso) {
@@ -68,7 +67,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     const [showHistory, setShowHistory] = useState(false);
     const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState('steps');
-    const [qtestMapping, setQtestMapping] = useState(null);
     const [versionHistory, setVersionHistory] = useState([]);
     const [linkedReqs, setLinkedReqs] = useState([]);
 
@@ -92,16 +90,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
             .catch(() => setExecutions([]))
             .finally(() => setExecLoading(false));
     }, [test?.id, testId]);
-
-    // Load QTest mapping so the header badge can show sync status
-    useEffect(() => {
-        const id = test?.id || testId;
-        if (!id || !inlinePane) return;
-        setQtestMapping(null);
-        qtest.getMapping(id)
-            .then(data => setQtestMapping(data?.linked === false ? null : data))
-            .catch(() => setQtestMapping(null));
-    }, [test?.id, testId, inlinePane]);
 
     // Load version history (for Activity timeline + footer author) and linked requirements (count)
     useEffect(() => {
@@ -453,9 +441,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                         </div>
                     )}
                 </div>
-
-                {/* ── QTest Sync panel (013-qtest-sync) ── */}
-                {test?.id && <QTestSyncPanel testCaseId={test.id} />}
             </div>
 
             <footer className="modal-footer">
@@ -496,19 +481,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
         const passRate = totalRuns > 0 ? passCount / totalRuns : 0;
         const passColor = passRate > 0.85 ? 'var(--accent-green)' : passRate > 0.7 ? 'var(--warning-color)' : 'var(--accent-red)';
         const last10 = executions.slice(0, 10);
-        const rawStatus = qtestMapping?.sync_status || test?.qtest_status || null;
-        const statusMap = {
-            synced: { label: 'Synced', cls: 'qtest-synced' },
-            changes_pending: { label: 'Changes pending', cls: 'qtest-modified' },
-            broken: { label: 'Broken', cls: 'qtest-conflict' },
-            Synced: { label: 'Synced', cls: 'qtest-synced' },
-            Pending: { label: 'Pending', cls: 'qtest-pending' },
-            Modified: { label: 'Modified', cls: 'qtest-modified' },
-            Conflict: { label: 'Conflict', cls: 'qtest-conflict' },
-        };
-        const qtestDescriptor = rawStatus ? statusMap[rawStatus] : null;
-        const qtestStatus = qtestDescriptor?.label || null;
-        const qtestClass = qtestDescriptor?.cls || 'qtest-none';
         const updatedLabel = formatRelative(test?.updated_at);
 
         const defects = executions.filter(e => e.defect_type && e.defect_type !== '');
@@ -559,11 +531,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                 <div className="detail-pane-header">
                     <div className="detail-pane-header-top">
                         {shortId && <span className="detail-pane-id-pill">{shortId}</span>}
-                        {qtestStatus && (
-                            <span className={`detail-pane-qtest-badge ${qtestClass}`}>
-                                <span className="detail-pane-qtest-dot" /> {qtestStatus}
-                            </span>
-                        )}
                         {test?.reverification_flagged && (
                             <span className="detail-pane-reverify-badge" data-testid="reverify-badge" title="This test needs reverification">
                                 <span aria-hidden>⚑</span> Needs reverify
@@ -726,8 +693,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                                     </div>
                                 </div>
                             )}
-
-                            {test?.id && <div style={{ marginTop: 16 }}><QTestSyncPanel testCaseId={test.id} /></div>}
                         </>
                     )}
 

@@ -7,7 +7,7 @@ import (
 )
 
 // Mount registers Confluence routes. Writing the integration config (org-wide
-// base URL + credentials) is admin-only, matching Jira/qTest; reads stay at read
+// base URL + credentials) is admin-only, matching Jira; reads stay at read
 // scope (F-005).
 func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddleware, requireAdmin routing.AdminMiddleware) {
 	api.HandleFunc("GET /settings/confluence", requireAuth("read", h.GetConfig))

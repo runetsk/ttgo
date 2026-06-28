@@ -22,6 +22,4 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("GET /tests/{id}/executions", requireAuth("read", h.ListTestExecutions))
 	api.HandleFunc("POST /tests/{id}/defect-links/create-issue", requireAuth("write", h.CreateJiraIssue))
 	api.HandleFunc("DELETE /tests/{id}/reverification-flag", requireAuth("write", h.DismissReverification))
-	api.HandleFunc("GET /tests/{id}/qtest-mapping", requireAuth("read", h.GetQTestMapping))
-	api.HandleFunc("DELETE /tests/{id}/qtest-mapping", requireAuth("write", h.UnlinkQTestMapping))
 }

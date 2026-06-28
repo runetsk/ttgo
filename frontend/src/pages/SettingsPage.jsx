@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getCustomFields, createCustomField, deleteCustomField, users as usersApi, seed as seedApi, jira as jiraApi, confluence as confApi, qtest as qtestApi } from '../api';
+import { getCustomFields, createCustomField, deleteCustomField, users as usersApi, seed as seedApi, jira as jiraApi, confluence as confApi } from '../api';
 import { toast } from '../toast';
 import Modal from '../components/Modal';
 import TokenSettings from '../components/TokenSettings';
@@ -94,7 +94,6 @@ export default function SettingsPage() {
             tabs: [
                 { id: 'jira', label: 'Jira', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg> },
                 { id: 'confluence', label: 'Confluence', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
-                { id: 'qtest', label: 'QTest', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> },
                 { id: 'ai-test-generation', label: 'AI Generation', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> },
             ],
         },
@@ -265,24 +264,6 @@ export default function SettingsPage() {
                     renderTestConnection={(cfg, enabled) => <ConfluenceTestConnection />}
                 />
             )}
-            {activeTab === 'qtest' && (
-                <>
-                    <IntegrationSettings
-                        provider="qtest"
-                        providerLabel="QTest"
-                        description="Connect to QTest Manager to upload and sync test cases. API tokens are stored server-side and masked in responses."
-                        apiGetConfig={qtestApi.getConfig}
-                        apiUpsertConfig={qtestApi.upsertConfig}
-                        extraFields={[
-                            { key: 'project_id', label: 'Project ID (legacy)', placeholder: 'Use project manager below', defaultValue: '' },
-                            { key: 'project_name', label: 'Project Name (legacy)', placeholder: 'Use project manager below', defaultValue: '' },
-                        ]}
-                        tokenHintField="api_token_masked"
-                        renderTestConnection={(cfg, enabled) => <QTestTestConnection />}
-                    />
-                    <QTestProjectManager />
-                </>
-            )}
             {activeTab === 'ai-test-generation' && (
                 <>
                     <AIFeaturesToggle isAdmin={isAdmin} />
@@ -405,192 +386,6 @@ function ConfluenceTestConnection() {
                     ) : (
                         <div style={{ color: 'var(--accent-red, #f87171)' }}>{'✗'} {testResult.message}</div>
                     )}
-                </div>
-            )}
-        </div>
-    );
-}
-
-// ─────────────────────────────────────────────
-// QTestTestConnection — test connection panel for QTest
-// ─────────────────────────────────────────────
-function QTestTestConnection() {
-    const [testResult, setTestResult] = useState(null);
-    const [testing, setTesting] = useState(false);
-
-    const handleTest = () => {
-        setTesting(true);
-        setTestResult(null);
-        qtestApi.testConnection()
-            .then(result => {
-                setTestResult({ success: result.connected, message: result.message });
-            })
-            .catch(err => {
-                setTestResult({ success: false, message: err.response?.data?.error || err.message || 'Connection failed.' });
-            })
-            .finally(() => setTesting(false));
-    };
-
-    return (
-        <div className="glass-panel" style={{ padding: 20 }}>
-            <h4 style={{ marginTop: 0, marginBottom: 10 }}>Test Connection</h4>
-            <div style={{ marginBottom: 12 }}>
-                <button className="action-btn" onClick={handleTest} disabled={testing}>
-                    {testing ? 'Testing...' : 'Test Connection'}
-                </button>
-            </div>
-            {testResult && (
-                <div style={{
-                    padding: '10px 14px',
-                    borderRadius: 6,
-                    border: `1px solid ${testResult.success ? 'rgba(52,211,153,0.4)' : 'rgba(248,113,113,0.4)'}`,
-                    background: testResult.success ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
-                    fontSize: '0.875rem',
-                }}>
-                    {testResult.success ? (
-                        <div style={{ fontWeight: 600, color: 'var(--accent-green, #34d399)' }}>{'✓'} {testResult.message}</div>
-                    ) : (
-                        <div style={{ color: 'var(--accent-red, #f87171)' }}>{'✗'} {testResult.message}</div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-}
-
-// ─────────────────────────────────────────────
-// QTestProjectManager — manage enabled QTest projects
-// ─────────────────────────────────────────────
-function QTestProjectManager() {
-    const [enabledProjects, setEnabledProjects] = useState([]);
-    const [availableProjects, setAvailableProjects] = useState([]);
-    const [fetching, setFetching] = useState(false);
-    const [loading, setLoading] = useState(true);
-
-    const loadEnabled = useCallback(() => {
-        qtestApi.listEnabledProjects()
-            .then(p => setEnabledProjects(p || []))
-            .catch(() => {})
-            .finally(() => setLoading(false));
-    }, []);
-
-    useEffect(() => { loadEnabled(); }, [loadEnabled]);
-
-    const fetchFromQTest = () => {
-        setFetching(true);
-        qtestApi.listProjects()
-            .then(p => setAvailableProjects(p || []))
-            .catch(err => toast.error(err.response?.data?.error || 'Failed to fetch projects'))
-            .finally(() => setFetching(false));
-    };
-
-    const enabledIds = new Set(enabledProjects.map(p => p.project_id));
-
-    const handleAdd = (project) => {
-        qtestApi.addEnabledProject(project.id, project.name)
-            .then(() => { toast.success(`Added "${project.name}"`); loadEnabled(); })
-            .catch(err => toast.error(err.response?.data?.error || 'Failed to add project'));
-    };
-
-    const handleRemove = (projectId) => {
-        qtestApi.removeEnabledProject(projectId)
-            .then(() => { toast.success('Project removed'); loadEnabled(); })
-            .catch(err => toast.error(err.response?.data?.error || 'Failed to remove project'));
-    };
-
-    const handleSetDefault = (projectId) => {
-        qtestApi.setDefaultProject(projectId)
-            .then(() => { toast.success('Default project updated'); loadEnabled(); })
-            .catch(err => toast.error(err.response?.data?.error || 'Failed to set default'));
-    };
-
-    return (
-        <div className="glass-panel" style={{ padding: 20, marginTop: 16 }}>
-            <h4 style={{ marginTop: 0, marginBottom: 6 }}>Enabled Projects</h4>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 16 }}>
-                Select which QTest projects are available for uploading and syncing test cases.
-            </p>
-
-            {/* Enabled list */}
-            {loading ? (
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 16 }}>Loading...</div>
-            ) : enabledProjects.length === 0 ? (
-                <div style={{
-                    padding: '14px', borderRadius: 8, marginBottom: 16,
-                    background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
-                    fontSize: '0.85rem', color: 'var(--text-secondary)',
-                }}>
-                    No projects enabled yet. Fetch projects from QTest to get started.
-                </div>
-            ) : (
-                <div style={{ marginBottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {enabledProjects.map(p => (
-                        <div key={p.project_id} style={{
-                            padding: '10px 14px', borderRadius: 8,
-                            background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
-                            display: 'flex', alignItems: 'center', gap: 12,
-                        }}>
-                            <div style={{ flex: 1 }}>
-                                <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{p.project_name}</div>
-                                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                    ID: {p.project_id}
-                                    {p.is_default && <span style={{ marginLeft: 8, color: 'var(--accent-indigo)', fontWeight: 600 }}>★ Default</span>}
-                                </div>
-                            </div>
-                            {!p.is_default && (
-                                <button
-                                    className="action-btn"
-                                    onClick={() => handleSetDefault(p.project_id)}
-                                    style={{ fontSize: '0.75rem', padding: '4px 10px' }}
-                                    title="Set as default project"
-                                >Set Default</button>
-                            )}
-                            <button
-                                className="action-btn"
-                                onClick={() => handleRemove(p.project_id)}
-                                style={{ fontSize: '0.75rem', padding: '4px 10px', color: 'var(--accent-red)' }}
-                            >Remove</button>
-                        </div>
-                    ))}
-                </div>
-            )}
-
-            {/* Fetch & add from QTest */}
-            <button className="action-btn" onClick={fetchFromQTest} disabled={fetching} style={{ marginBottom: 12 }}>
-                {fetching ? 'Fetching...' : 'Fetch Projects from QTest'}
-            </button>
-
-            {availableProjects.length > 0 && (
-                <div style={{
-                    maxHeight: 250, overflowY: 'auto',
-                    border: '1px solid var(--border-color)', borderRadius: 8,
-                    background: 'var(--bg-primary)',
-                }}>
-                    {availableProjects.map(p => {
-                        const isEnabled = enabledIds.has(p.id);
-                        return (
-                            <div key={p.id} style={{
-                                padding: '8px 14px',
-                                display: 'flex', alignItems: 'center', gap: 12,
-                                borderBottom: '1px solid var(--border-color)',
-                                opacity: isEnabled ? 0.5 : 1,
-                            }}>
-                                <div style={{ flex: 1 }}>
-                                    <div style={{ fontSize: '0.85rem', fontWeight: 500 }}>{p.name}</div>
-                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>ID: {p.id}</div>
-                                </div>
-                                {isEnabled ? (
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--accent-green)' }}>✓ Enabled</span>
-                                ) : (
-                                    <button
-                                        className="primary-btn"
-                                        onClick={() => handleAdd(p)}
-                                        style={{ fontSize: '0.75rem', padding: '4px 12px' }}
-                                    >Add</button>
-                                )}
-                            </div>
-                        );
-                    })}
                 </div>
             )}
         </div>
