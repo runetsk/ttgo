@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getTestRun, deleteTestRun, updateTestRun, deleteRunResult, addRunResult, updateRunResult, retryRunResult, bulkUpdateRunResults, getTests, listRunComments, listRunDefectLinks, analyzeRunFailures, getCategories } from '../api';
 import DateRangeFilter from '../components/filters/DateRangeFilter';
 import CategoryFilter from '../components/filters/CategoryFilter';
@@ -19,6 +19,8 @@ import { useColumnWidths } from '../hooks/useColumnWidths';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
 import RunResultsToolbar from '../components/RunResultsToolbar';
+import RunCompareTab from '../components/runCompare/RunCompareTab';
+import { latestAttempts } from '../utils/runResults';
 import { useRunViewPreference } from '../hooks/useRunViewPreference';
 import { groupResults, GROUP_DIMENSIONS } from '../utils/runResultsGrouping';
 
@@ -67,7 +69,8 @@ export default function TestRunDetail() {
     const [selectedResults, setSelectedResults] = useState(new Set());
     const lastClickedRef = React.useRef(null);
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
-    const [activeTab, setActiveTab] = useState('results');
+    const [searchParams] = useSearchParams();
+    const [activeTab, setActiveTab] = useState(searchParams.get('compareWith') ? 'compare' : 'results');
     const [showRunComments, setShowRunComments] = useState(false);
     const [runCommentCount, setRunCommentCount] = useState(0);
     const [latestCommentTime, setLatestCommentTime] = useState(null);
@@ -206,18 +209,11 @@ export default function TestRunDetail() {
     const { latestResults, attemptsByTestCase } = React.useMemo(() => {
         if (!run?.run_results) return { latestResults: [], attemptsByTestCase: {} };
         const byTestCase = {};
-        const orphans = [];
         for (const rr of run.run_results) {
-            if (!rr.test_case_id) { orphans.push(rr); continue; }
-            if (!byTestCase[rr.test_case_id]) byTestCase[rr.test_case_id] = [];
-            byTestCase[rr.test_case_id].push(rr);
+            if (!rr.test_case_id) continue;
+            (byTestCase[rr.test_case_id] = byTestCase[rr.test_case_id] || []).push(rr);
         }
-        const latest = [...orphans];
-        for (const tcId in byTestCase) {
-            byTestCase[tcId].sort((a, b) => b.attempt_number - a.attempt_number);
-            latest.push(byTestCase[tcId][0]);
-        }
-        return { latestResults: latest, attemptsByTestCase: byTestCase };
+        return { latestResults: latestAttempts(run.run_results), attemptsByTestCase: byTestCase };
     }, [run?.run_results]);
 
 
@@ -576,9 +572,10 @@ export default function TestRunDetail() {
 
             {/* Tab bar */}
             <div style={{ display: 'flex', gap: 0, marginBottom: 12, borderBottom: '1px solid var(--border-color)' }}>
-                {['results', 'defects', 'timeline'].map(tab => (
+                {['results', 'defects', 'timeline', 'compare'].map(tab => (
                     <button
                         key={tab}
+                        data-testid={`run-tab-${tab}`}
                         onClick={() => setActiveTab(tab)}
                         style={{
                             padding: '8px 20px', fontSize: '0.82rem', fontWeight: 600,
@@ -588,7 +585,7 @@ export default function TestRunDetail() {
                             marginBottom: -1, textTransform: 'capitalize',
                         }}
                     >
-                        {tab === 'defects' ? `Defects${runDefectLinks.length > 0 ? ` (${new Set(runDefectLinks.map(l => l.jira_issue_key)).size})` : ''}` : tab === 'timeline' ? 'Timeline' : 'Results'}
+                        {tab === 'defects' ? `Defects${runDefectLinks.length > 0 ? ` (${new Set(runDefectLinks.map(l => l.jira_issue_key)).size})` : ''}` : tab === 'timeline' ? 'Timeline' : tab === 'compare' ? 'Compare' : 'Results'}
                     </button>
                 ))}
             </div>
@@ -1464,6 +1461,9 @@ export default function TestRunDetail() {
                         }, 100);
                     }}
                 />
+            )}
+            {activeTab === 'compare' && (
+                <RunCompareTab run={run} />
             )}
         </div>
     );
