@@ -8,6 +8,10 @@ import QTestImportModal from './QTestImportModal';
 import { useColumnPreference } from '../hooks/useColumnPreference';
 import { useColumnWidths } from '../hooks/useColumnWidths';
 import { stripHtml } from '../utils/htmlUtils';
+import DateRangeFilter from './filters/DateRangeFilter';
+import CategoryFilter from './filters/CategoryFilter';
+import { inDateRange } from '../utils/dateFilter';
+import { activeColumns } from '../utils/columnFeatures';
 
 // T003: Column definitions for the Test Cases grid
 const COLUMN_DEFS = [
@@ -19,7 +23,7 @@ const COLUMN_DEFS = [
     { key: 'reverification_flagged',label: 'Reverification', mandatory: false, defaultVisible: false, defaultWidth: 130 },
     { key: 'open_defects',          label: 'Open Defects',   mandatory: false, defaultVisible: false, defaultWidth: 110 },
     { key: 'linked_requirements',   label: 'Requirements',   mandatory: false, defaultVisible: false, defaultWidth: 150 },
-    { key: 'qtest_status',          label: 'QTest Status',   mandatory: false, defaultVisible: false, defaultWidth: 130 },
+    { key: 'qtest_status',          label: 'QTest Status',   mandatory: false, defaultVisible: false, defaultWidth: 130, feature: 'qtest' },
     { key: 'created_at',            label: 'Created',        mandatory: false, defaultVisible: true,  defaultWidth: 120 },
     { key: 'updated_at',            label: 'Updated',        mandatory: false, defaultVisible: true,  defaultWidth: 120 },
 ];
@@ -66,17 +70,12 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
     const [modal, setModal] = useState(null);
     const [filterText, setFilterText] = useState("");
     const [columnFilters, setColumnFilters] = useState({
-        id: "",
-        name: "",
-        description: "",
-        categories: "",
-        steps_count: "",
-        reverification_flagged: "",
-        open_defects: "",
-        linked_requirements: "",
-        qtest_status: "",
-        created_at: "",
-        updated_at: ""
+        id: "", name: "", description: "",
+        categories: [],                 // selected category IDs (match ANY)
+        steps_count: "", reverification_flagged: "", open_defects: "",
+        linked_requirements: "", qtest_status: "",
+        created_at: { from: null, to: null },
+        updated_at: { from: null, to: null },
     });
     const [showColumnFilters, setShowColumnFilters] = useState(false);
     const [selectedTestIds, setSelectedTestIds] = useState([]);
@@ -95,7 +94,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
     const [expandedModuleIds, setExpandedModuleIds] = useState(new Set());
     const [enabledProjects, setEnabledProjects] = useState([]);
     const [uploadProjectId, setUploadProjectId] = useState('');
-    const [qtestStatusFilter, setQtestStatusFilter] = useState('');
     const [showExportDropdown, setShowExportDropdown] = useState(false);
     const [showExportModal, setShowExportModal] = useState(false);
     const [exportFields, setExportFields] = useState({
@@ -111,15 +109,18 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
 
     // T004: Column visibility — hook + helper
     const [visibleKeys, toggleColumn, resetColumns] = useColumnPreference('test-cases', COLUMN_DEFS);
-    const isVisible = (key) => visibleKeys.has(key);
 
     // Column widths — drag-to-resize + localStorage persistence
     const { columnWidths, startResize, resetWidths, resetColumnWidth, isResizing } = useColumnWidths('test-cases', COLUMN_DEFS);
 
+    const featureColumnDefs = activeColumns(COLUMN_DEFS, { qtest: qtestEnabled });
+    const isVisible = (key) => visibleKeys.has(key) && featureColumnDefs.some(c => c.key === key);
+
     // T007: Wrapper that clears the column's filter when toggling it off
     const handleToggleColumn = useCallback((key) => {
         toggleColumn(key);
-        setColumnFilters(prev => ({ ...prev, [key]: '' }));
+        const emptyVal = key === 'categories' ? [] : (key === 'created_at' || key === 'updated_at') ? { from: null, to: null } : '';
+        setColumnFilters(prev => ({ ...prev, [key]: emptyVal }));
     }, [toggleColumn]);
 
     // Combined reset: visibility + widths
@@ -253,7 +254,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         setPrevFolderIdsKey(folderIdsKey);
         setSelectedTestIds([]);
         setFilterText("");
-        setColumnFilters({ id: "", name: "", description: "", categories: "", steps_count: "", reverification_flagged: "", open_defects: "", linked_requirements: "", qtest_status: "", created_at: "", updated_at: "" });
+        setColumnFilters({ id: "", name: "", description: "", categories: [], steps_count: "", reverification_flagged: "", open_defects: "", linked_requirements: "", qtest_status: "", created_at: { from: null, to: null }, updated_at: { from: null, to: null } });
         if (!folderIdsKey) {
             setTests([]);
         }
@@ -536,33 +537,30 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         const idFilter = columnFilters.id.toLowerCase();
         const nameFilter = columnFilters.name.toLowerCase();
         const descFilter = columnFilters.description.toLowerCase();
-        const categoriesFilter = columnFilters.categories.toLowerCase();
         const stepsFilter = columnFilters.steps_count.toLowerCase();
-        const reverifFilter = columnFilters.reverification_flagged.toLowerCase();
         const defectsFilter = columnFilters.open_defects.toLowerCase();
         const reqsFilter = columnFilters.linked_requirements.toLowerCase();
-        const createdFilter = columnFilters.created_at.toLowerCase();
-        const updatedFilter = columnFilters.updated_at.toLowerCase();
 
         const idMatch = idFilter === "" || t.id.toLowerCase().includes(idFilter);
         const nameMatch = nameFilter === "" || t.name.toLowerCase().includes(nameFilter);
         const descMatch = descFilter === "" || stripHtml(t.description).toLowerCase().includes(descFilter);
-        const categoryMatch = categoriesFilter === "" || t.categories?.some(s => s.name.toLowerCase().includes(categoriesFilter));
+        const categoryMatch = columnFilters.categories.length === 0 || t.categories?.some(s => columnFilters.categories.includes(s.id));
         const stepsMatch = stepsFilter === "" || String(t.steps_count ?? t.steps?.length ?? 0).includes(stepsFilter);
-        const reverifMatch = reverifFilter === "" || (t.reverification_flagged ? 'yes' : 'no').includes(reverifFilter);
+        const reverifMatch = columnFilters.reverification_flagged === "" || (t.reverification_flagged ? 'yes' : 'no') === columnFilters.reverification_flagged;
         const defectsMatch = defectsFilter === "" || String(t.open_defect_count || 0).includes(defectsFilter);
         const reqsMatch = reqsFilter === "" || t.linked_requirements?.some(r => r.identifier.toLowerCase().includes(reqsFilter));
-        const createdMatch = createdFilter === "" || formatDate(t.created_at).toLowerCase().includes(createdFilter);
-        const updatedMatch = updatedFilter === "" || formatDate(t.updated_at).toLowerCase().includes(updatedFilter);
+        const createdMatch = inDateRange(t.created_at, columnFilters.created_at);
+        const updatedMatch = inDateRange(t.updated_at, columnFilters.updated_at);
 
-        // QTest status filter
-        if (qtestStatusFilter) {
+        // QTest status filter (enum), only meaningful when integration is on.
+        let qtestMatch = true;
+        if (columnFilters.qtest_status) {
             const mapping = qtestMappings[t.id];
-            const status = mapping ? mapping.sync_status : 'not_linked';
-            if (status !== qtestStatusFilter) return false;
+            const qstatus = mapping ? mapping.sync_status : 'not_linked';
+            qtestMatch = qstatus === columnFilters.qtest_status;
         }
 
-        return idMatch && nameMatch && descMatch && categoryMatch && stepsMatch && reverifMatch && defectsMatch && reqsMatch && createdMatch && updatedMatch;
+        return idMatch && nameMatch && descMatch && categoryMatch && stepsMatch && reverifMatch && defectsMatch && reqsMatch && createdMatch && updatedMatch && qtestMatch;
     });
 
     const sortedTests = [...filteredTests].sort((a, b) => {
@@ -673,20 +671,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                         />
                         <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }}>🔍</span>
                     </div>
-                    {qtestEnabled && (
-                        <select
-                            className="modern-select"
-                            value={qtestStatusFilter}
-                            onChange={e => setQtestStatusFilter(e.target.value)}
-                            style={{ fontSize: '0.8rem', padding: '4px 8px' }}
-                        >
-                            <option value="">All QTest Status</option>
-                            <option value="not_linked">Not Linked</option>
-                            <option value="synced">Synced</option>
-                            <option value="changes_pending">Changes Pending</option>
-                            <option value="broken">Broken</option>
-                        </select>
-                    )}
                     <button
                         className={`action-btn ${showColumnFilters ? 'active' : ''}`}
                         onClick={() => setShowColumnFilters(!showColumnFilters)}
@@ -697,7 +681,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                     </button>
                     {/* T005: Column visibility picker */}
                     <ColumnPicker
-                        columnDefs={COLUMN_DEFS}
+                        columnDefs={featureColumnDefs}
                         visibleKeys={visibleKeys}
                         onToggle={handleToggleColumn}
                         onReset={handleResetAll}
@@ -914,12 +898,11 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                                 )}
                                 {isVisible('categories') && (
                                     <th>
-                                        <input
-                                            className="modern-input"
-                                            placeholder="Categories..."
-                                            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px' }}
+                                        <CategoryFilter
+                                            categories={categories}
                                             value={columnFilters.categories}
-                                            onChange={(e) => handleColumnFilterChange('categories', e.target.value)}
+                                            onChange={(ids) => handleColumnFilterChange('categories', ids)}
+                                            testId="filter-categories"
                                         />
                                     </th>
                                 )}
@@ -936,13 +919,16 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                                 )}
                                 {isVisible('reverification_flagged') && (
                                     <th>
-                                        <input
-                                            className="modern-input"
-                                            placeholder="Yes/No..."
-                                            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px' }}
+                                        <select
+                                            className="col-filter-select"
+                                            data-testid="filter-reverification"
                                             value={columnFilters.reverification_flagged}
                                             onChange={(e) => handleColumnFilterChange('reverification_flagged', e.target.value)}
-                                        />
+                                        >
+                                            <option value="">All</option>
+                                            <option value="yes">Yes</option>
+                                            <option value="no">No</option>
+                                        </select>
                                     </th>
                                 )}
                                 {isVisible('open_defects') && (
@@ -969,34 +955,35 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                                 )}
                                 {isVisible('qtest_status') && (
                                     <th>
-                                        <input
-                                            className="modern-input"
-                                            placeholder="QTest..."
-                                            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px' }}
+                                        <select
+                                            className="col-filter-select"
+                                            data-testid="filter-qtest_status"
                                             value={columnFilters.qtest_status}
                                             onChange={(e) => handleColumnFilterChange('qtest_status', e.target.value)}
-                                        />
+                                        >
+                                            <option value="">All</option>
+                                            <option value="not_linked">Not Linked</option>
+                                            <option value="synced">Synced</option>
+                                            <option value="changes_pending">Changes Pending</option>
+                                            <option value="broken">Broken</option>
+                                        </select>
                                     </th>
                                 )}
                                 {isVisible('created_at') && (
                                     <th>
-                                        <input
-                                            className="modern-input"
-                                            placeholder="Date..."
-                                            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px' }}
+                                        <DateRangeFilter
                                             value={columnFilters.created_at}
-                                            onChange={(e) => handleColumnFilterChange('created_at', e.target.value)}
+                                            onChange={(v) => handleColumnFilterChange('created_at', v)}
+                                            testId="filter-created_at"
                                         />
                                     </th>
                                 )}
                                 {isVisible('updated_at') && (
                                     <th>
-                                        <input
-                                            className="modern-input"
-                                            placeholder="Date..."
-                                            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 8px' }}
+                                        <DateRangeFilter
                                             value={columnFilters.updated_at}
-                                            onChange={(e) => handleColumnFilterChange('updated_at', e.target.value)}
+                                            onChange={(v) => handleColumnFilterChange('updated_at', v)}
+                                            testId="filter-updated_at"
                                         />
                                     </th>
                                 )}
