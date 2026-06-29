@@ -1,6 +1,6 @@
 # TTGO Development Guidelines
 
-Last updated: 2026-04-08
+Last updated: 2026-06-29
 
 ## Project Structure
 
@@ -72,3 +72,10 @@ npm run lint   # ESLint
 - Go: standard conventions (`gofmt`, idiomatic error handling)
 - JavaScript/JSX: ESLint enforced; functional React components only
 - No new Go modules or npm packages without a clear need
+
+## Versioning
+
+- Semantic Versioning (`MAJOR.MINOR.PATCH`); the canonical version is the git tag `vX.Y.Z` (it also serves the Go module).
+- Record notable changes in `CHANGELOG.md` ([Keep a Changelog](https://keepachangelog.com) format) under `## [Unreleased]` as work lands.
+- On release: move the `Unreleased` items under a new `## [X.Y.Z] - YYYY-MM-DD` heading, bump `frontend/package.json` `version`, commit, then tag `vX.Y.Z` on `main`.
+- Commit messages follow Conventional Commits (`feat:`, `fix:`, `docs:`, `test:`, `chore:`).
