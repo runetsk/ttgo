@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Unified the test-runs sidebar with the library sidebar: shared SVG folder/chevron
+  icons (replacing the emoji `📁/📂` and text `▾/›`), the same `--sidebar-*` color
+  tokens, and matching row styling (left accent border on the selected folder, hover,
+  spacing, and indentation). The three inline folder action buttons (`+ ✎ 🗑`) collapse
+  to the library's `+` / `⋮` pattern, where `⋮` opens the existing context menu.
+
 ### Fixed
 - Run comparison: cancel in-flight fetches when switching the compared run, so rapidly
   changing the selection can no longer briefly render a stale comparison.

@@ -14,6 +14,7 @@ import {
     updateTestRun,
 } from '../api';
 import Modal from './Modal';
+import { ChevronSvg, FolderSvg, AllRunsSvg } from './FolderIcons';
 import { toast } from '../toast';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -71,6 +72,7 @@ function ContextMenu({ x, y, items, onClose }) {
                 ) : (
                     <button
                         key={i}
+                        data-testid={item.testId}
                         onClick={() => { onClose(); item.onClick(); }}
                         style={{
                             display: 'block',
@@ -128,7 +130,7 @@ function RunItem({ run, onRunClick, onRunContextMenu, isSelected }) {
 // ── Recursive folder tree node ────────────────────────────────────────────────
 function RunFolderNode({
     folder, depth, selectedFolderId, selectedRunId, expandedFolderIds, onToggleExpand,
-    onSelectFolder, onRename, onDelete, onCreateSubfolder, onRunClick,
+    onSelectFolder, onCreateSubfolder, onRunClick,
     onContextMenu, onRunContextMenu, onRunDrop, onFolderDrop,
 }) {
     const [isDragOver, setIsDragOver] = useState(false);
@@ -178,7 +180,7 @@ function RunFolderNode({
         <div className="run-folder-tree-node">
             <div
                 className={`run-folder-item ${isSelected ? 'selected' : ''} ${isDragOver ? 'drag-over' : ''}`}
-                style={{ paddingLeft: 8 + depth * 16 }}
+                style={{ paddingLeft: 8 + depth * 14 }}
                 onClick={() => onSelectFolder(folder.id)}
                 onContextMenu={(e) => onContextMenu(e, folder)}
                 draggable
@@ -189,40 +191,30 @@ function RunFolderNode({
                 data-testid={`run-folder-item-${folder.id}`}
                 title={folder.name}
             >
-                <button
+                <span
+                    className={`expand-toggle ${hasChildren ? 'visible' : ''} ${isExpanded && hasChildren ? 'expanded' : ''}`}
                     onClick={(e) => { e.stopPropagation(); onToggleExpand(folder.id); }}
-                    style={{
-                        background: 'none', border: 'none', cursor: 'pointer',
-                        padding: '0 2px', color: 'var(--text-secondary)',
-                        fontSize: '0.65rem', lineHeight: 1, flexShrink: 0, width: 12,
-                    }}
                     title={isExpanded ? 'Collapse' : 'Expand'}
                 >
-                    {isExpanded ? '▾' : '›'}
-                </button>
-                <span style={{ fontSize: '0.85em', opacity: 0.6, flexShrink: 0 }}>
-                    {isExpanded && hasChildren ? '📂' : '📁'}
+                    <ChevronSvg />
+                </span>
+                <span className="folder-icon">
+                    <FolderSvg open={isExpanded && hasChildren} />
                 </span>
                 <span className="run-folder-name">{folder.name}</span>
-                <div className="run-folder-actions" onClick={e => e.stopPropagation()}>
+                <div className="folder-actions" onClick={e => e.stopPropagation()}>
                     <button
-                        className="run-folder-action-btn"
+                        className="folder-actions-btn"
                         title="New subfolder"
                         onClick={() => onCreateSubfolder(folder)}
                         data-testid={`add-subfolder-${folder.id}`}
                     >+</button>
                     <button
-                        className="run-folder-action-btn"
-                        title="Rename"
-                        onClick={() => onRename(folder)}
-                        data-testid={`rename-folder-${folder.id}`}
-                    >&#9998;</button>
-                    <button
-                        className="run-folder-action-btn danger"
-                        title="Delete"
-                        onClick={() => onDelete(folder)}
-                        data-testid={`delete-folder-${folder.id}`}
-                    >&#128465;</button>
+                        className="folder-actions-btn"
+                        title="More actions"
+                        onClick={(e) => onContextMenu(e, folder)}
+                        data-testid={`folder-menu-${folder.id}`}
+                    >⋮</button>
                 </div>
             </div>
 
@@ -239,8 +231,6 @@ function RunFolderNode({
                             expandedFolderIds={expandedFolderIds}
                             onToggleExpand={onToggleExpand}
                             onSelectFolder={onSelectFolder}
-                            onRename={onRename}
-                            onDelete={onDelete}
                             onCreateSubfolder={onCreateSubfolder}
                             onRunClick={onRunClick}
                             onContextMenu={onContextMenu}
@@ -251,12 +241,12 @@ function RunFolderNode({
                     ))}
                     {/* Direct test runs */}
                     {(folder.test_runs || []).map(run => (
-                        <div key={run.id} style={{ paddingLeft: (depth + 1) * 16 + 8 }}>
+                        <div key={run.id} style={{ paddingLeft: (depth + 1) * 14 + 8 }}>
                             <RunItem run={run} onRunClick={onRunClick} onRunContextMenu={onRunContextMenu} isSelected={selectedRunId === run.id} />
                         </div>
                     ))}
                     {!hasChildren && (
-                        <div className="run-sidebar-message" style={{ paddingLeft: (depth + 1) * 16 + 8 }}>
+                        <div className="run-sidebar-message" style={{ paddingLeft: (depth + 1) * 14 + 8 }}>
                             Empty
                         </div>
                     )}
@@ -278,7 +268,6 @@ export default function RunFolderSidebar({
     selectedFolderId,
     selectedRunId,
     onSelectFolder,
-    runs = [],
     onRunDropped,
 }) {
     const navigate = useNavigate();
@@ -618,6 +607,7 @@ export default function RunFolderSidebar({
             },
             {
                 label: 'Rename',
+                testId: `rename-folder-${contextMenu.folder.id}`,
                 onClick: () => { setRenameError(''); setModal({ type: 'rename', folder: contextMenu.folder }); },
             },
             'separator',
@@ -637,6 +627,7 @@ export default function RunFolderSidebar({
             {
                 label: 'Delete',
                 danger: true,
+                testId: `delete-folder-${contextMenu.folder.id}`,
                 onClick: () => setModal({ type: 'delete', folder: contextMenu.folder }),
             },
         ]
@@ -690,7 +681,8 @@ export default function RunFolderSidebar({
                 data-testid="all-runs-entry"
                 {...allRunsDropHandlers}
             >
-                <span style={{ fontSize: '0.9em' }}>&#128203;</span>
+                <span className="expand-toggle" />
+                <span className="folder-icon"><AllRunsSvg /></span>
                 <span className="run-folder-name">All Runs</span>
             </div>
 
@@ -703,13 +695,13 @@ export default function RunFolderSidebar({
                         data-testid="uncategorised-entry"
                         {...uncatDropHandlers}
                     >
-                        <button
+                        <span
+                            className={`expand-toggle visible ${uncatExpanded ? 'expanded' : ''}`}
                             onClick={(e) => { e.stopPropagation(); handleToggleUncat(); }}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0 2px', color: 'var(--text-secondary)', fontSize: '0.65rem', lineHeight: 1, flexShrink: 0, width: 12 }}
                         >
-                            {uncatExpanded ? '▾' : '›'}
-                        </button>
-                        <span style={{ fontSize: '0.9em' }}>&#128194;</span>
+                            <ChevronSvg />
+                        </span>
+                        <span className="folder-icon"><FolderSvg open={uncatExpanded} /></span>
                         <span className="run-folder-name">Uncategorised</span>
                     </div>
                     {uncatExpanded && (
@@ -739,8 +731,6 @@ export default function RunFolderSidebar({
                     expandedFolderIds={expandedFolderIds}
                     onToggleExpand={handleToggleExpand}
                     onSelectFolder={(id) => onSelectFolder(id)}
-                    onRename={(f) => { setRenameError(''); setModal({ type: 'rename', folder: f }); }}
-                    onDelete={(f) => setModal({ type: 'delete', folder: f })}
                     onCreateSubfolder={(f) => { setCreateError(''); setModal({ type: 'create', parentId: f.id }); }}
                     onRunClick={handleRunClick}
                     onContextMenu={handleContextMenu}

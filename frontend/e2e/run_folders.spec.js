@@ -104,8 +104,9 @@ test.describe('US1 — Create and Manage Run Folders', () => {
         const item = page.getByTestId(`run-folder-item-${folder.id}`);
         await expect(item).toBeVisible();
 
-        // Hover to reveal rename button then click it
+        // Hover to reveal the actions, open the "⋮" menu, then click Rename
         await item.hover();
+        await page.getByTestId(`folder-menu-${folder.id}`).click();
         await page.getByTestId(`rename-folder-${folder.id}`).click();
 
         await expect(page.getByTestId('modal-input')).toBeVisible();
@@ -141,6 +142,7 @@ test.describe('US1 — Create and Manage Run Folders', () => {
         await expect(item).toBeVisible();
 
         await item.hover();
+        await page.getByTestId(`folder-menu-${folder.id}`).click();
         await page.getByTestId(`delete-folder-${folder.id}`).click();
 
         // Confirm delete modal

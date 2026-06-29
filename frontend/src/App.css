@@ -1017,8 +1017,8 @@
 /* ── Run Folder Sidebar ──────────────────────────────────────────────────── */
 .run-folder-sidebar {
     /* width set via inline style for resizing */
-    background-color: var(--bg-secondary);
-    border-right: 1px solid var(--border-color);
+    background-color: var(--sidebar-bg);
+    border-right: 1px solid var(--sidebar-border);
     display: flex;
     flex-direction: column;
     padding: 16px 8px;
@@ -1046,7 +1046,7 @@
     font-size: 0.72em;
     text-transform: uppercase;
     letter-spacing: 0.1em;
-    color: var(--text-secondary);
+    color: var(--sidebar-muted);
     font-weight: 700;
 }
 
@@ -1054,24 +1054,32 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 8px 8px;
-    border-radius: var(--radius-md);
+    padding: 5px 10px 5px 8px;
+    margin: 1px 0;
+    border-radius: 6px;
+    border-left: 2px solid transparent;
     cursor: pointer;
     color: var(--text-primary);
-    font-size: 0.875em;
-    transition: all 0.15s ease;
+    font-size: 13px;
+    transition: background 0.12s ease, color 0.12s ease;
     user-select: none;
 }
 
 .run-folder-item:hover {
-    background-color: var(--bg-tertiary);
+    background-color: var(--sidebar-row-hover);
     color: var(--text-primary);
 }
 
 .run-folder-item.selected {
-    background-color: rgba(99, 102, 241, 0.12);
-    color: var(--accent-indigo);
-    font-weight: 500;
+    background-color: var(--sidebar-selected-bg);
+    color: var(--sidebar-selected-fg);
+    font-weight: 600;
+    border-left: 2px solid var(--accent-indigo);
+}
+
+.run-folder-item.selected .folder-icon,
+.run-folder-item.selected .expand-toggle {
+    color: var(--sidebar-selected-icon);
 }
 
 .run-folder-item.multi-selected {
@@ -1081,8 +1089,9 @@
 }
 
 .run-folder-item.drag-over {
-    background-color: rgba(99, 102, 241, 0.2);
-    border: 1px dashed var(--accent-indigo);
+    background-color: rgba(99, 102, 241, 0.1);
+    border: 2px dashed var(--accent-indigo);
+    margin: 0; /* offset the added border width */
 }
 
 .run-folder-name {
@@ -1090,6 +1099,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
 }
 
 .run-folder-drag-handle {
@@ -1103,16 +1113,12 @@
     cursor: grabbing;
 }
 
-.run-folder-actions {
-    display: none;
-    gap: 2px;
-    flex-shrink: 0;
+/* Hover action buttons (+ / ⋮) reuse the library .folder-actions look */
+.run-folder-item:hover .folder-actions {
+    opacity: 1;
 }
 
-.run-folder-item:hover .run-folder-actions {
-    display: flex;
-}
-
+/* Header "+ Folder" button keeps its own affordance */
 .run-folder-action-btn {
     background: transparent;
     border: none;
@@ -1153,7 +1159,7 @@
 
 .run-folder-empty {
     font-size: 0.8em;
-    color: var(--text-secondary);
+    color: var(--sidebar-muted);
     padding: 8px 8px;
     font-style: italic;
 }
@@ -1166,7 +1172,7 @@
 
 .run-sidebar-children {
     padding-left: 20px;
-    border-left: 2px solid var(--border-color);
+    border-left: 1px solid var(--sidebar-border);
     margin-left: 14px;
     margin-bottom: 4px;
 }
@@ -1176,26 +1182,26 @@
     align-items: center;
     gap: 6px;
     padding: 5px 8px;
-    border-radius: var(--radius-sm, 4px);
+    border-radius: 6px;
     cursor: pointer;
     color: var(--text-primary);
     transition: background 0.12s ease, color 0.12s ease;
 }
 
 .run-sidebar-run-item:hover {
-    background: var(--bg-tertiary);
+    background: var(--sidebar-row-hover);
     color: var(--text-primary);
 }
 
 .run-sidebar-run-item.selected {
-    background: rgba(99, 102, 241, 0.12);
-    color: var(--accent-indigo);
-    font-weight: 500;
+    background: var(--sidebar-selected-bg);
+    color: var(--sidebar-selected-fg);
+    font-weight: 600;
 }
 
 .run-sidebar-message {
     font-size: 0.75rem;
-    color: var(--text-secondary);
+    color: var(--sidebar-muted);
     padding: 5px 8px;
     font-style: italic;
 }

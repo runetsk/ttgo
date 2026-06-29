@@ -4,6 +4,7 @@ import { createFolder, updateFolder, deleteFolder, deleteFolders, moveFolder, bu
 import Modal from './Modal';
 import ContextMenu from './ContextMenu';
 import TestCaseNode from './TestCaseNode';
+import { ChevronSvg, FolderSvg } from './FolderIcons';
 import { toast } from '../toast';
 
 // Recursively count all test cases under a folder
@@ -12,25 +13,6 @@ const countTests = (folder) => {
     const nested = folder.sub_folders?.reduce((sum, sub) => sum + countTests(sub), 0) || 0;
     return direct + nested;
 };
-
-const ChevronSvg = () => (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="9 18 15 12 9 6" />
-    </svg>
-);
-
-const FolderSvg = ({ open }) => (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        {open ? (
-            <>
-                <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2H3z" />
-                <path d="M3 9h18l-2 9a2 2 0 0 1-2 1.5H5a2 2 0 0 1-2-1.5z" />
-            </>
-        ) : (
-            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-        )}
-    </svg>
-);
 
 const FolderNode = ({ folder, depth = 0, onSelect, selectedIds, onRefresh, expandedIds, onToggle, activeTestId, selectedTestIds = [], onSelectTest, onDeleteTests, showTests = false }) => {
     const isSelected = selectedIds.includes(folder.id);
