@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **E2E result reporting (dogfooding).** An opt-in Playwright reporter pushes the
+  e2e suite's own results into a running TTGO instance as a test run — auto-provisioning
+  a `Playwright E2E` folder, category, and a test case per Playwright test, then recording
+  per-test pass/fail, duration, and failure details. Enabled by setting a write-scoped
+  `TTGO_REPORT_TOKEN`; a no-op otherwise, so normal runs are unaffected.
+
 ### Changed
 - Unified the test-runs sidebar with the library sidebar: shared SVG folder/chevron
   icons (replacing the emoji `📁/📂` and text `▾/›`), the same `--sidebar-*` color

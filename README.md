@@ -165,6 +165,31 @@ The project includes a Claude Code skill (`.claude/skills/ttgo.md`) that lets yo
 
 Claude Code will translate your request into the appropriate `ttgo` CLI commands, parse the output, and chain multi-step workflows automatically. The skill is loaded automatically when working in this repo.
 
+**E2E result reporting (dogfooding)**
+
+The Playwright e2e suite can push its own results into a running TTGO instance as
+a test run. It is opt-in: set `TTGO_REPORT_TOKEN` (a **write**-scoped API token from
+**Settings → API Tokens**) and the reporter auto-provisions a `Playwright E2E` folder,
+category, and one test case per Playwright test, then records each run with per-test
+pass/fail, duration, and failure details. With the token unset, the suite behaves exactly
+as before.
+
+```bash
+cd frontend
+TTGO_REPORT_TOKEN=<write-token> npx playwright test
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `TTGO_REPORT_TOKEN` | — | Write-scoped API token. **Unset = reporter disabled.** |
+| `TTGO_REPORT_URL` | `http://localhost:8080` | TTGO API base URL to push results to |
+| `TTGO_REPORT_FOLDER` | `Playwright E2E` | Folder that holds the auto-provisioned test cases |
+| `TTGO_REPORT_CATEGORY` | `Playwright E2E` | Category attached to each run |
+| `TTGO_REPORT_RUN_NAME` | `Playwright E2E` | Run-name prefix (a timestamp is appended) |
+| `TTGO_REPORT_ENV` | `e2e` | `environment` label stored on each result |
+
+Reporting failures are logged and never fail the test run.
+
 ## Configuration
 
 The backend is configured via environment variables (or a `.env` file in the `backend/` directory):
