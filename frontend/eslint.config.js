@@ -27,9 +27,10 @@ export default defineConfig([
     },
   },
   {
-    // e2e/ files (Playwright specs, global setup, the TTGO reporter) run in Node,
-    // not the browser. Give them Node globals and turn off the React-only rule.
-    files: ['e2e/**/*.js'],
+    // e2e/ files (Playwright specs, global setup, the TTGO reporter) and the Node
+    // config files (playwright/vite/eslint) run in Node, not the browser. Give them
+    // Node globals and turn off the React-only rule.
+    files: ['e2e/**/*.js', '*.config.js'],
     languageOptions: {
       globals: { ...globals.node },
     },

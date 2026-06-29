@@ -1,10 +1,10 @@
 import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import { chromium, request as playwrightRequest } from '@playwright/test';
+import { request as playwrightRequest } from '@playwright/test';
+import { API_URL } from './config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const API_URL = 'http://localhost:8080/api';
 
 export default async function globalSetup() {
     // ── 1. Start mock external API server if not running ──
@@ -44,7 +44,7 @@ export default async function globalSetup() {
     const loginRes = await apiContext.post(`${API_URL}/auth/login`, {
         data: {
             email: process.env.TEST_ADMIN_EMAIL || 'admin@example.com',
-            password: process.env.TEST_ADMIN_PASSWORD || 'admin123',
+            password: process.env.TEST_ADMIN_PASSWORD || 'changeme123',
         },
     });
 

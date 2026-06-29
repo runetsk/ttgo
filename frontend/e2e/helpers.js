@@ -1,4 +1,5 @@
-const API_URL = 'http://localhost:8080/api';
+import { API_URL } from './config.js';
+
 const MOCK_URL = 'http://localhost:9999';
 
 async function createRequirementAPI(request, identifier, title, description = '') {
