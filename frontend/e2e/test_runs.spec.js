@@ -5,8 +5,8 @@ test.describe('Test Runs Management', () => {
     const API_URL = 'http://localhost:8080/api';
 
     // API Helpers
-    const createSuiteAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/suites`, {
+    const createCategoryAPI = async (request, name) => {
+        const res = await request.post(`${API_URL}/categories`, {
             data: { name: name, description: 'Created via API' }
         });
         expect(res.ok()).toBeTruthy();
@@ -29,16 +29,16 @@ test.describe('Test Runs Management', () => {
         return await res.json();
     }
 
-    const linkTestToSuiteAPI = async (request, testId, suiteId) => {
-        const res = await request.post(`${API_URL}/tests/${testId}/suites`, {
-            data: { suite_id: suiteId }
+    const linkTestToCategoryAPI = async (request, testId, categoryId) => {
+        const res = await request.post(`${API_URL}/tests/${testId}/categories`, {
+            data: { category_id: categoryId }
         });
         expect(res.ok()).toBeTruthy();
     }
 
-    const createRunAPI = async (request, suiteId, name) => {
+    const createRunAPI = async (request, categoryId, name) => {
         const res = await request.post(`${API_URL}/runs`, {
-            data: { suite_id: suiteId, name: name }
+            data: { category_id: categoryId, name: name }
         });
         expect(res.ok()).toBeTruthy();
         return await res.json();
@@ -51,12 +51,12 @@ test.describe('Test Runs Management', () => {
         return run.run_results.find(r => r.test_case_id === testCaseId)?.id;
     };
 
-    // UI Helper (Legacy for Creation Test)
-    const createSuiteUI = async (page, name) => {
-        await page.goto('/suites');
-        await page.getByTestId('open-create-suite-modal').click();
-        await page.getByTestId('suite-name-input').fill(name);
-        await page.getByTestId('create-suite-button').click();
+    // UI Helper for Category Creation
+    const createCategoryUI = async (page, name) => {
+        await page.goto('/categories');
+        await page.getByTestId('open-create-category-modal').click();
+        await page.getByTestId('category-name-input').fill(name);
+        await page.getByTestId('create-category-button').click();
         await expect(page.locator(`text=${name}`)).toBeVisible();
     };
 
@@ -65,10 +65,10 @@ test.describe('Test Runs Management', () => {
         page.on('pageerror', err => console.log(`[Browser Error]: ${err.message}`));
     });
 
-    test('should allow creating a test run from a suite', async ({ page }) => {
+    test('should allow creating a test run from a category', async ({ page }) => {
         // This test exercises the UI flow entirely
-        const suiteName = 'UI Suite ' + Date.now();
-        await createSuiteUI(page, suiteName);
+        const categoryName = 'UI Category ' + Date.now();
+        await createCategoryUI(page, categoryName);
 
         // 1. Navigate to runs page
         await page.goto('/runs');
@@ -77,13 +77,13 @@ test.describe('Test Runs Management', () => {
 
         // 2. Create a new run
         await page.getByRole('button', { name: 'New Test Run' }).click({ force: true });
-        await expect(page.locator('.modal')).toBeVisible();
+        await expect(page.locator('.modal-content')).toBeVisible();
 
         const runName = 'UI Run ' + Date.now();
-        // Select the suite
-        await page.selectOption('select[name="suite_id"]', { label: suiteName });
-        await page.fill('input[name="name"]', runName);
-        await page.click('button:text("Start Run")');
+        // Select the category
+        await page.getByTestId('create-run-category-select').selectOption({ label: categoryName });
+        await page.getByTestId('create-run-name-input').fill(runName);
+        await page.getByTestId('create-run-submit').click();
 
         // 3. Verify run appears in list
         const row = page.getByRole('row', { name: runName });
@@ -93,23 +93,23 @@ test.describe('Test Runs Management', () => {
         // 4. Click run to see details (Implicit check of navigation)
         await row.getByText('PENDING').click();
 
-        await expect(page).toHaveURL(/\/runs\/[a-f0-9-]+$/);
+        await expect(page).toHaveURL(/\/runs\/run\/[a-f0-9-]+$/);
         await expect(page.locator('.grid-title')).toContainText(runName); // Renamed header uses grid-title
     });
 
     test('should filter and sort test runs', async ({ page, request }) => {
-        const suiteNameA = 'Filter Suite A ' + Date.now();
-        const suiteNameB = 'Filter Suite B ' + Date.now();
-        const suiteA = await createSuiteAPI(request, suiteNameA);
-        const suiteB = await createSuiteAPI(request, suiteNameB);
+        const catNameA = 'Filter Cat A ' + Date.now();
+        const catNameB = 'Filter Cat B ' + Date.now();
+        const catA = await createCategoryAPI(request, catNameA);
+        const catB = await createCategoryAPI(request, catNameB);
 
         const run1Name = 'Run 1 A ' + Date.now();
         const run2Name = 'Run 2 B ' + Date.now();
         const run3Name = 'Run 3 A ' + Date.now();
 
-        await createRunAPI(request, suiteA.id, run1Name);
-        await createRunAPI(request, suiteB.id, run2Name);
-        await createRunAPI(request, suiteA.id, run3Name);
+        await createRunAPI(request, catA.id, run1Name);
+        await createRunAPI(request, catB.id, run2Name);
+        await createRunAPI(request, catA.id, run3Name);
 
         await page.goto('/runs');
         await page.waitForLoadState('domcontentloaded');
@@ -117,15 +117,19 @@ test.describe('Test Runs Management', () => {
         // Show filter row
         await page.getByRole('button', { name: 'Column Filters' }).click();
 
-        // 1. Filter by Suite A
-        await page.getByTestId('filter-suite-select').selectOption({ label: suiteNameA });
+        // 1. Filter by Category A — open popover and select it
+        await page.getByTestId('filter-run-category').click();
+        await page.getByTestId(`filter-run-category-option-${catA.id}`).click();
+        await page.keyboard.press('Escape');
 
         await expect(page.getByText(run1Name)).toBeVisible();
         await expect(page.getByText(run3Name)).toBeVisible();
         await expect(page.getByText(run2Name)).not.toBeVisible();
 
-        // Reset
-        await page.getByTestId('filter-suite-select').selectOption({ value: '' });
+        // Reset — clear the category filter
+        await page.getByTestId('filter-run-category').click();
+        await page.getByTestId('filter-run-category-clear').click();
+        await page.keyboard.press('Escape');
         await expect(page.getByText(run2Name)).toBeVisible();
 
         // 2. Filter by Status (Pending)
@@ -138,7 +142,7 @@ test.describe('Test Runs Management', () => {
     });
 
     test('should delete a test run', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'Delete Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'Delete Suite ' + Date.now());
         const runName = 'Run to Delete ' + Date.now();
         await createRunAPI(request, suite.id, runName);
 
@@ -162,14 +166,14 @@ test.describe('Test Runs Management', () => {
     });
 
     test('should rename run, add test, and remove test', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'CRUD Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'CRUD Suite ' + Date.now());
 
         // Add minimal tests to suite
         const folder = await createFolderAPI(request, 'CRUD Folder ' + Date.now());
         const test1 = await createTestAPI(request, 'Test 1', folder.id);
         const test2 = await createTestAPI(request, 'Test 2', folder.id);
-        await linkTestToSuiteAPI(request, test1.id, suite.id);
-        await linkTestToSuiteAPI(request, test2.id, suite.id);
+        await linkTestToCategoryAPI(request, test1.id, suite.id);
+        await linkTestToCategoryAPI(request, test2.id, suite.id);
 
         const runName = 'Original Name ' + Date.now();
         const renamedRunName = 'Renamed Run ' + Date.now();
@@ -215,7 +219,7 @@ test.describe('Test Runs Management', () => {
     });
 
     test('should navigate to details on row click', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'Nav API Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'Nav API Suite ' + Date.now());
         const runName = 'Nav API Run ' + Date.now();
         await createRunAPI(request, suite.id, runName);
 
@@ -228,14 +232,14 @@ test.describe('Test Runs Management', () => {
         await row.getByText('PENDING').click();
 
         await expect(page.locator('.grid-title')).toContainText(runName);
-        await expect(page.url()).toMatch(/\/runs\/[a-f0-9-]+$/);
+        await expect(page.url()).toMatch(/\/runs\/run\/[a-f0-9-]+$/);
     });
 
     test('should update test result status in a run', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'Status Update Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'Status Update Suite ' + Date.now());
         const folder = await createFolderAPI(request, 'Status Folder ' + Date.now());
         const test1 = await createTestAPI(request, 'Status Test 1', folder.id);
-        await linkTestToSuiteAPI(request, test1.id, suite.id);
+        await linkTestToCategoryAPI(request, test1.id, suite.id);
 
         const runName = 'Status Run ' + Date.now();
         const run = await createRunAPI(request, suite.id, runName);
@@ -267,10 +271,10 @@ test.describe('Test Runs Management', () => {
     });
 
     test('should display rich failure details', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'Failure Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'Failure Suite ' + Date.now());
         const folder = await createFolderAPI(request, 'Failure Folder ' + Date.now());
         const testCase = await createTestAPI(request, 'Failure Test', folder.id);
-        await linkTestToSuiteAPI(request, testCase.id, suite.id);
+        await linkTestToCategoryAPI(request, testCase.id, suite.id);
         const run = await createRunAPI(request, suite.id, 'Failure Run ' + Date.now());
 
         // Update result with failure data
@@ -317,15 +321,15 @@ test.describe('Test Runs Management', () => {
     });
 
     test('should sort run results by duration', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'Perf Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'Perf Suite ' + Date.now());
         const folder = await createFolderAPI(request, 'Perf Folder ' + Date.now());
         const t1 = await createTestAPI(request, 'Test Short', folder.id);
         const t2 = await createTestAPI(request, 'Test Long', folder.id);
         const t3 = await createTestAPI(request, 'Test Medium', folder.id);
 
-        await linkTestToSuiteAPI(request, t1.id, suite.id);
-        await linkTestToSuiteAPI(request, t2.id, suite.id);
-        await linkTestToSuiteAPI(request, t3.id, suite.id);
+        await linkTestToCategoryAPI(request, t1.id, suite.id);
+        await linkTestToCategoryAPI(request, t2.id, suite.id);
+        await linkTestToCategoryAPI(request, t3.id, suite.id);
 
         const run = await createRunAPI(request, suite.id, 'Perf Run ' + Date.now());
 
@@ -367,10 +371,10 @@ test.describe('Test Runs Management', () => {
     });
 
     test('should display environment context in run result details', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'Env Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'Env Suite ' + Date.now());
         const folder = await createFolderAPI(request, 'Env Folder ' + Date.now());
         const testCase = await createTestAPI(request, 'Context Test', folder.id);
-        await linkTestToSuiteAPI(request, testCase.id, suite.id);
+        await linkTestToCategoryAPI(request, testCase.id, suite.id);
         const run = await createRunAPI(request, suite.id, 'Env Run ' + Date.now());
 
         // Update with Context Fields
@@ -398,10 +402,10 @@ test.describe('Test Runs Management', () => {
     });
 
     test('should navigate from run result to test case', async ({ page, request }) => {
-        const suite = await createSuiteAPI(request, 'Nav Test Suite ' + Date.now());
+        const suite = await createCategoryAPI(request, 'Nav Test Suite ' + Date.now());
         const folder = await createFolderAPI(request, 'Nav Test Folder ' + Date.now());
         const testCase = await createTestAPI(request, 'Navigable Test', folder.id);
-        await linkTestToSuiteAPI(request, testCase.id, suite.id);
+        await linkTestToCategoryAPI(request, testCase.id, suite.id);
         const run = await createRunAPI(request, suite.id, 'Nav Run ' + Date.now());
 
         await page.goto(`/runs/run/${run.id}`);
@@ -417,24 +421,24 @@ test.describe('Test Runs Management', () => {
         await expect(page.getByTestId('test-case-name-input')).toHaveValue('Navigable Test');
     });
 
-    test('should display suites in run result rows and stats bar', async ({ page, request }) => {
-        const suiteName = 'Result Suite ' + Date.now();
-        const suite = await createSuiteAPI(request, suiteName);
+    test('should display categories in run result rows and stats bar', async ({ page, request }) => {
+        const categoryName = 'Result Category ' + Date.now();
+        const category = await createCategoryAPI(request, categoryName);
         const folder = await createFolderAPI(request, 'Result Folder ' + Date.now());
-        const testCase = await createTestAPI(request, 'Suite-Tagged Test', folder.id);
-        await linkTestToSuiteAPI(request, testCase.id, suite.id);
-        const run = await createRunAPI(request, suite.id, 'Suite Display Run ' + Date.now());
+        const testCase = await createTestAPI(request, 'Category-Tagged Test', folder.id);
+        await linkTestToCategoryAPI(request, testCase.id, category.id);
+        const run = await createRunAPI(request, category.id, 'Category Display Run ' + Date.now());
 
         await page.goto(`/runs/run/${run.id}`);
         await page.waitForLoadState('domcontentloaded');
 
-        // Suites column in the result row should show the suite tag
-        const row = page.getByRole('row', { name: 'Suite-Tagged Test' });
+        // Categories column in the result row should show the category tag
+        const row = page.getByRole('row', { name: 'Category-Tagged Test' });
         await expect(row).toBeVisible();
-        await expect(row.locator('.suite-tag')).toContainText(suiteName);
+        await expect(row.locator('.category-tag')).toContainText(categoryName);
 
-        // Stats bar should also derive and show the suite from the result's test case
-        await expect(page.getByTestId('run-suites')).toContainText(suiteName);
+        // Stats bar should also derive and show the category from the result's test case
+        await expect(page.getByTestId('run-categories')).toContainText(categoryName);
     });
 
     test('should bulk delete test runs', async ({ page, request }) => {
@@ -445,7 +449,7 @@ test.describe('Test Runs Management', () => {
         const run3 = `Run 3 ${timestamp}`;
 
         // 1. Create Suite
-        const suite = await createSuiteAPI(request, suiteName);
+        const suite = await createCategoryAPI(request, suiteName);
 
         // 2. Create 3 Test Runs via API
         await createRunAPI(request, suite.id, run1);
