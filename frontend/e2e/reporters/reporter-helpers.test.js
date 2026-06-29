@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { testCaseName, buildResultBody } from './reporter-helpers.js';
+import { testCaseName, buildResultBody, extractSteps } from './reporter-helpers.js';
 
 // Minimal Playwright TestCase stub: only titlePath() is used by the helpers.
 const fakeTest = (titlePath) => ({ titlePath: () => titlePath });
@@ -67,4 +67,25 @@ test('buildResultBody truncates very long error text', () => {
     });
     assert.ok(body.error_message.length < long.length);
     assert.ok(body.error_message.endsWith('…[truncated]'));
+});
+
+test('extractSteps keeps only test.step entries, ordered', () => {
+    const result = {
+        steps: [
+            { category: 'hook', title: 'Before Hooks' },
+            { category: 'test.step', title: 'Seed data' },
+            { category: 'pw:api', title: "page.goto('/runs')" },
+            { category: 'test.step', title: 'Filter by category' },
+            { category: 'expect', title: 'expect toBeVisible' },
+        ],
+    };
+    assert.deepEqual(extractSteps(result), [
+        { action: 'Seed data', expected_result: '', order_index: 0 },
+        { action: 'Filter by category', expected_result: '', order_index: 1 },
+    ]);
+});
+
+test('extractSteps returns [] when there are no test.step entries', () => {
+    assert.deepEqual(extractSteps({ steps: [{ category: 'pw:api', title: 'x' }] }), []);
+    assert.deepEqual(extractSteps({}), []);
 });

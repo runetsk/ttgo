@@ -52,3 +52,16 @@ export function buildResultBody({ result, testCaseId, name, environment = 'e2e',
 
     return body;
 }
+
+// Extracts a TTGO step list from a Playwright result. Only the explicit steps the
+// test author wrote with test.step('…') are used (category 'test.step'); hooks,
+// fixtures, and raw pw:api/expect calls are ignored so the steps stay readable.
+export function extractSteps(result) {
+    const steps = [];
+    for (const s of result.steps || []) {
+        if (s.category === 'test.step') {
+            steps.push({ action: s.title, expected_result: '', order_index: steps.length });
+        }
+    }
+    return steps;
+}

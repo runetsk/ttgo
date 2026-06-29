@@ -53,22 +53,32 @@ export function createTtgoClient({ baseUrl, token, fetch = globalThis.fetch }) {
         return created.id;
     }
 
-    // Ensures a test case exists for every name in `names` within `folderId`.
-    // Returns a Map(name -> test_case_id). Existing cases are reused by name.
-    async function ensureTestCases(folderId, names) {
+    // Ensures a test case exists for every item within `folderId`. Each item is a
+    // name string, or { name, steps } where steps is a TTGO step array. Returns a
+    // Map(name -> test_case_id). Existing cases are reused by name; a step-less
+    // existing case is backfilled with steps (never clobbering steps already there).
+    async function ensureTestCases(folderId, items) {
+        const norm = (items || []).map((it) =>
+            typeof it === 'string' ? { name: it, steps: [] } : { name: it.name, steps: it.steps || [] }
+        );
         const existing = await request(
             'GET',
             `/tests?folder_ids=${encodeURIComponent(folderId)}`
-        ); // array
+        ); // array of full test cases (includes their steps)
+        const byName = new Map();
+        for (const t of existing || []) byName.set(t.name, t);
         const map = new Map();
-        for (const t of existing || []) map.set(t.name, t.id);
-        for (const name of names) {
-            if (!map.has(name)) {
-                const created = await request('POST', '/tests', {
-                    name,
-                    folder_id: folderId,
-                    description: '',
-                });
+        for (const { name, steps } of norm) {
+            const found = byName.get(name);
+            if (found) {
+                if (steps.length && (found.steps || []).length === 0) {
+                    await request('PUT', `/tests/${found.id}`, { name, folder_id: folderId, steps });
+                }
+                map.set(name, found.id);
+            } else {
+                const body = { name, folder_id: folderId, description: '' };
+                if (steps.length) body.steps = steps;
+                const created = await request('POST', '/tests', body);
                 map.set(name, created.id);
             }
         }
@@ -99,6 +109,31 @@ export function createTtgoClient({ baseUrl, token, fetch = globalThis.fetch }) {
         return request('POST', `/runs/${runId}/complete`);
     }
 
+    // Uploads image files to a result's screenshot gallery (multipart). `files` is
+    // [{ name, contentType, buffer }]. Lets fetch set the multipart boundary — do NOT
+    // send a JSON Content-Type header here.
+    async function uploadScreenshots(runId, resultId, files) {
+        const form = new FormData();
+        for (const f of files) {
+            form.append('screenshots', new Blob([f.buffer], { type: f.contentType }), f.name);
+        }
+        const res = await fetch(`${root}/api/runs/${runId}/results/${resultId}/screenshots`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}` },
+            body: form,
+        });
+        if (!res.ok) {
+            let detail = '';
+            try {
+                detail = await res.text();
+            } catch {
+                // status code is enough to act on
+            }
+            throw new Error(`TTGO POST /runs/${runId}/results/${resultId}/screenshots -> ${res.status} ${detail}`);
+        }
+        return res.status === 204 ? null : res.json();
+    }
+
     return {
         request,
         findOrCreateFolder,
@@ -108,5 +143,6 @@ export function createTtgoClient({ baseUrl, token, fetch = globalThis.fetch }) {
         updateRun,
         addResult,
         completeRun,
+        uploadScreenshots,
     };
 }

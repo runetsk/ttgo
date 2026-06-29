@@ -109,3 +109,59 @@ test('updateRun PUTs run fields (e.g. category_id) without a name or snapshot', 
     assert.equal(calls[0].url, 'http://x:8080/api/runs/run9');
     assert.deepEqual(calls[0].body, { category_id: 'c1' });
 });
+
+test('ensureTestCases creates new cases with steps and backfills step-less existing ones', async () => {
+    const { fetch, calls } = makeFetch((call) => {
+        if (call.method === 'GET') return { json: [{ id: 'tA', name: 'A' }] }; // A exists, no steps
+        if (call.method === 'POST') return { json: { id: 'tB', name: call.body.name } };
+        return {}; // PUT (backfill)
+    });
+    const c = createTtgoClient({ baseUrl: 'http://x:8080', token: 't', fetch });
+    const steps = [{ action: 'do a thing', expected_result: '', order_index: 0 }];
+    const map = await c.ensureTestCases('f1', [
+        { name: 'A', steps }, // exists but step-less -> PUT backfill
+        { name: 'B', steps }, // new -> POST with steps
+    ]);
+    assert.equal(map.get('A'), 'tA');
+    assert.equal(map.get('B'), 'tB');
+
+    const put = calls.find((x) => x.method === 'PUT');
+    assert.equal(put.url, 'http://x:8080/api/tests/tA');
+    assert.deepEqual(put.body, { name: 'A', folder_id: 'f1', steps });
+
+    const post = calls.find((x) => x.method === 'POST');
+    assert.deepEqual(post.body, { name: 'B', folder_id: 'f1', description: '', steps });
+});
+
+test('ensureTestCases does not backfill a case that already has steps', async () => {
+    const { fetch, calls } = makeFetch((call) => {
+        if (call.method === 'GET') return { json: [{ id: 'tA', name: 'A', steps: [{ action: 'existing' }] }] };
+        return {};
+    });
+    const c = createTtgoClient({ baseUrl: 'http://x:8080', token: 't', fetch });
+    await c.ensureTestCases('f1', [{ name: 'A', steps: [{ action: 'new', expected_result: '', order_index: 0 }] }]);
+    assert.equal(calls.filter((x) => x.method === 'PUT').length, 0);
+});
+
+test('uploadScreenshots POSTs multipart (FormData) with Bearer auth and no JSON content-type', async () => {
+    let captured;
+    const fetch = async (url, opts) => {
+        captured = {
+            url,
+            method: opts.method,
+            headers: opts.headers,
+            isFormData: opts.body instanceof FormData,
+        };
+        return { ok: true, status: 201, json: async () => ({ screenshots: ['/api/uploads/screenshots/res1/step_001.png'] }) };
+    };
+    const c = createTtgoClient({ baseUrl: 'http://x:8080', token: 'tok', fetch });
+    const out = await c.uploadScreenshots('run1', 'res1', [
+        { name: 'shot.png', contentType: 'image/png', buffer: Buffer.from('fake-png') },
+    ]);
+    assert.deepEqual(out.screenshots, ['/api/uploads/screenshots/res1/step_001.png']);
+    assert.equal(captured.method, 'POST');
+    assert.equal(captured.url, 'http://x:8080/api/runs/run1/results/res1/screenshots');
+    assert.equal(captured.headers.Authorization, 'Bearer tok');
+    assert.equal(captured.headers['Content-Type'], undefined);
+    assert.ok(captured.isFormData);
+});

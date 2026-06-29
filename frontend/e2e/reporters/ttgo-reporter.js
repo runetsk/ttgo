@@ -1,5 +1,7 @@
+import { readFile } from 'node:fs/promises';
 import { createTtgoClient } from './ttgo-client.js';
-import { testCaseName, buildResultBody } from './reporter-helpers.js';
+import { testCaseName, buildResultBody, extractSteps } from './reporter-helpers.js';
+import { BASE_URL } from '../config.js';
 
 // Opt-in Playwright reporter that mirrors each `playwright test` invocation as a
 // TTGO test run. Activates only when TTGO_REPORT_TOKEN is set; otherwise it is a
@@ -9,7 +11,9 @@ export default class TtgoReporter {
     constructor() {
         this.token = process.env.TTGO_REPORT_TOKEN || '';
         this.enabled = Boolean(this.token);
-        this.baseUrl = process.env.TTGO_REPORT_URL || 'http://localhost:8080';
+        // Default to the same instance the suite targets (TTGO_E2E_BASE_URL / :80),
+        // so results land in the running app without needing a separate env var.
+        this.baseUrl = process.env.TTGO_REPORT_URL || BASE_URL;
         this.folderName = process.env.TTGO_REPORT_FOLDER || 'Playwright E2E';
         this.categoryName = process.env.TTGO_REPORT_CATEGORY || 'Playwright E2E';
         this.runPrefix = process.env.TTGO_REPORT_RUN_NAME || 'Playwright E2E';
@@ -44,8 +48,12 @@ export default class TtgoReporter {
                 test,
                 result,
                 name: testCaseName(test),
+                steps: extractSteps(result),
             }));
-            const caseMap = await client.ensureTestCases(folderId, named.map((e) => e.name));
+            const caseMap = await client.ensureTestCases(
+                folderId,
+                named.map((e) => ({ name: e.name, steps: e.steps }))
+            );
 
             // Create the run WITHOUT a category, then attach the category as a label.
             // Creating with category_id would make the backend snapshot the category's
@@ -72,8 +80,20 @@ export default class TtgoReporter {
                     environment: this.environment,
                     browser: project,
                 });
-                await client.addResult(run.id, body);
+                const created = await client.addResult(run.id, body);
                 pushed += 1;
+
+                // On failure, upload Playwright's screenshot attachment(s) to the result.
+                if ((body.status === 'FAIL' || body.status === 'ERROR') && created?.id) {
+                    try {
+                        const shots = await collectScreenshots(result);
+                        if (shots.length) {
+                            await client.uploadScreenshots(run.id, created.id, shots);
+                        }
+                    } catch (e) {
+                        console.warn(`[ttgo] screenshot upload failed (result still recorded): ${e.message}`);
+                    }
+                }
             }
 
             await client.completeRun(run.id);
@@ -82,4 +102,20 @@ export default class TtgoReporter {
             console.warn(`[ttgo] result reporting failed (run not affected): ${err.message}`);
         }
     }
+}
+
+// Reads Playwright image attachments (e.g. the screenshot:'only-on-failure' capture)
+// into buffers for upload. Best-effort: a missing/unreadable file is skipped, not thrown.
+async function collectScreenshots(result) {
+    const shots = [];
+    for (const a of result.attachments || []) {
+        if (!a.path || !(a.contentType || '').startsWith('image/')) continue;
+        try {
+            const buffer = await readFile(a.path);
+            shots.push({ name: a.name || 'screenshot.png', contentType: a.contentType, buffer });
+        } catch {
+            // attachment file already cleaned up — skip
+        }
+    }
+    return shots;
 }
