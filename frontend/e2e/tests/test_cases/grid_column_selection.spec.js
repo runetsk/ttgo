@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createRequirementAPI } from '../../helpers/api.js';
 
 const LS_KEY_TESTS = 'ttgo_columns_test-cases';
 const LS_KEY_REQS  = 'ttgo_columns_requirements';
@@ -72,7 +73,7 @@ test.describe('Grid Column Selection — TestGrid (US1 + US2)', () => {
             // All five columns listed
             await expect(popover.getByText('ID')).toBeVisible();
             await expect(popover.getByText('Test Name')).toBeVisible();
-            await expect(popover.getByText('Suites')).toBeVisible();
+            await expect(popover.getByText('Categories')).toBeVisible();
             await expect(popover.getByText('Created')).toBeVisible();
             await expect(popover.getByText('Updated')).toBeVisible();
         });
@@ -136,16 +137,16 @@ test.describe('Grid Column Selection — TestGrid (US1 + US2)', () => {
             await expect(page.getByTestId('test-table')).toBeVisible();
             await expect(page.locator('thead th').filter({ hasText: 'Updated' })).not.toBeVisible();
 
-            // "Test Name" and "Suites" columns should still be visible
+            // "Test Name" and "Categories" columns should still be visible
             await expect(page.locator('thead th').filter({ hasText: 'Test Name' })).toBeVisible();
-            await expect(page.locator('thead th').filter({ hasText: 'Suites' })).toBeVisible();
+            await expect(page.locator('thead th').filter({ hasText: 'Categories' })).toBeVisible();
         });
     });
 
     // ── FR-004 / SC-003 ──────────────────────────────────────────────────────
 
     test('Test Name column cannot be hidden — always visible', async ({ page }) => {
-        const optionalCols = ['ID', 'Suites', 'Created', 'Updated'];
+        const optionalCols = ['ID', 'Categories', 'Created', 'Updated'];
 
         await test.step('Set up a folder with one test', async () => {
             await setupFolderAndTest(page);
@@ -270,7 +271,12 @@ test.describe('Grid Column Selection — RequirementsPage (US3)', () => {
         });
     });
 
-    test('hiding Coverage column removes it from Requirements table', async ({ page }) => {
+    test('hiding Coverage column removes it from Requirements table', async ({ page, request }) => {
+        await test.step('Seed a requirement so the table (with headers) renders', async () => {
+            await createRequirementAPI(request, 'REQ-COV-' + Date.now(), 'Coverage column requirement');
+            await page.reload();
+        });
+
         await test.step('Verify the Coverage header is visible by default', async () => {
             await expect(page.locator('thead th').filter({ hasText: 'Coverage' })).toBeVisible();
         });

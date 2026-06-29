@@ -49,7 +49,9 @@ test.describe('Test Case Navigation & Sidebar Sync', () => {
         });
 
         await test.step('Verify the URL and sidebar visibility', async () => {
-            await expect(page).toHaveURL(new RegExp(`/library/tests/${testCase.id}`));
+            // Selecting a folder first scopes the route to /library/folders/<id>/tests/<id>,
+            // so match the /tests/<id> tail (present whether or not a folder is in context).
+            await expect(page).toHaveURL(new RegExp(`/tests/${testCase.id}`));
             await expect(page.getByTestId('sidebar')).toBeVisible();
         });
 

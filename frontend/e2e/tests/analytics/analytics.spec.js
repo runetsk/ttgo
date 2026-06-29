@@ -12,8 +12,8 @@ test.describe('Analytics Dashboard (US2)', () => {
   test('analytics dashboard shows summary cards', async ({ page }) => {
     await test.step('Open the analytics page and verify the summary cards are visible', async () => {
       await page.goto('/analytics');
-      await expect(page.getByText('Total Runs')).toBeVisible();
-      await expect(page.getByText('Pass Rate')).toBeVisible();
+      await expect(page.getByText('Total Runs', { exact: true })).toBeVisible();
+      await expect(page.getByText('Pass Rate', { exact: true })).toBeVisible();
     });
   });
 
