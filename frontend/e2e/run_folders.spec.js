@@ -4,9 +4,9 @@ const API_URL = 'http://localhost:8080/api';
 
 // ── API helpers ──────────────────────────────────────────────────────────────
 
-const createSuiteAPI = async (request, name) => {
-    const res = await request.post(`${API_URL}/suites`, {
-        data: { name, description: 'Run folder E2E suite' }
+const createCategoryAPI = async (request, name) => {
+    const res = await request.post(`${API_URL}/categories`, {
+        data: { name, description: 'Run folder E2E category' }
     });
     expect(res.ok()).toBeTruthy();
     return res.json();
@@ -28,16 +28,16 @@ const createTestCaseAPI = async (request, name, folderId) => {
     return res.json();
 };
 
-const linkTestToSuiteAPI = async (request, testId, suiteId) => {
-    const res = await request.post(`${API_URL}/tests/${testId}/suites`, {
-        data: { suite_id: suiteId }
+const linkTestToCategoryAPI = async (request, testId, categoryId) => {
+    const res = await request.post(`${API_URL}/tests/${testId}/categories`, {
+        data: { category_id: categoryId }
     });
     expect(res.ok()).toBeTruthy();
 };
 
-const createRunAPI = async (request, suiteId, name, runFolderId = null) => {
+const createRunAPI = async (request, categoryId, name, runFolderId = null) => {
     const res = await request.post(`${API_URL}/runs`, {
-        data: { suite_id: suiteId, name, run_folder_id: runFolderId }
+        data: { category_id: categoryId, name, run_folder_id: runFolderId }
     });
     expect(res.ok()).toBeTruthy();
     return res.json();
@@ -55,13 +55,13 @@ const deleteRunFolderAPI = async (request, id) => {
     await request.delete(`${API_URL}/run-folders/${id}`);
 };
 
-// ── Set up: create a suite with one test case (reusable fixture) ─────────────
-const setupSuite = async (request, tag) => {
+// ── Set up: create a category with one test case (reusable fixture) ──────────
+const setupCategory = async (request, tag) => {
     const folder = await createFolderAPI(request, `RF-Folder-${tag}`);
     const tc = await createTestCaseAPI(request, `RF-TC-${tag}`, folder.id);
-    const suite = await createSuiteAPI(request, `RF-Suite-${tag}`);
-    await linkTestToSuiteAPI(request, tc.id, suite.id);
-    return suite;
+    const category = await createCategoryAPI(request, `RF-Category-${tag}`);
+    await linkTestToCategoryAPI(request, tc.id, category.id);
+    return category;
 };
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -132,7 +132,7 @@ test.describe('US1 — Create and Manage Run Folders', () => {
     });
 
     test('delete folder removes it from sidebar and does not delete runs', async ({ page, request }) => {
-        const suite = await setupSuite(request, `DelTest-${Date.now()}`);
+        const suite = await setupCategory(request, `DelTest-${Date.now()}`);
         const folder = await createRunFolderAPI(request, `ToDelete-${Date.now()}`);
         const run = await createRunAPI(request, suite.id, `Run-InFolder-${Date.now()}`, folder.id);
 
@@ -178,14 +178,14 @@ test.describe('US2 — Assign Runs to Folders', () => {
     });
 
     test('run created with folder appears under that folder in the API', async ({ page, request }) => {
-        const suite = await setupSuite(request, `US2Create-${Date.now()}`);
+        const suite = await setupCategory(request, `US2Create-${Date.now()}`);
         const folder = await createRunFolderAPI(request, `AssignFolder-${Date.now()}`);
         const runName = `US2-Run-${Date.now()}`;
 
         await page.goto('/runs');
         await page.getByTestId('create-test-run-button').click();
 
-        await page.getByTestId('create-run-suite-select').selectOption(suite.id);
+        await page.getByTestId('create-run-category-select').selectOption(suite.id);
         await page.getByTestId('create-run-name-input').fill(runName);
         await page.getByTestId('create-run-folder-select').selectOption(folder.id);
         await page.getByTestId('create-run-submit').click();
@@ -205,7 +205,7 @@ test.describe('US2 — Assign Runs to Folders', () => {
 
     test('run created pre-selects active folder from sidebar', async ({ page, request }) => {
         const folder = await createRunFolderAPI(request, `PreSelect-${Date.now()}`);
-        const suite = await setupSuite(request, `PreSelect-${Date.now()}`);
+        const suite = await setupCategory(request, `PreSelect-${Date.now()}`);
 
         await page.goto('/runs');
 
@@ -232,7 +232,7 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
     test.setTimeout(60000);
 
     test('clicking folder filters run list to only its runs', async ({ page, request }) => {
-        const suite = await setupSuite(request, `US3Filter-${Date.now()}`);
+        const suite = await setupCategory(request, `US3Filter-${Date.now()}`);
         const folder = await createRunFolderAPI(request, `FilterFolder-${Date.now()}`);
         const runInFolder = await createRunAPI(request, suite.id, `InFolder-${Date.now()}`, folder.id);
         const runOutside = await createRunAPI(request, suite.id, `Outside-${Date.now()}`, null);
@@ -254,7 +254,7 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
     });
 
     test('clicking "All Runs" shows all runs', async ({ page, request }) => {
-        const suite = await setupSuite(request, `US3All-${Date.now()}`);
+        const suite = await setupCategory(request, `US3All-${Date.now()}`);
         const folder = await createRunFolderAPI(request, `AllFolder-${Date.now()}`);
         const runInFolder = await createRunAPI(request, suite.id, `InF-${Date.now()}`, folder.id);
         const runOutside = await createRunAPI(request, suite.id, `Out-${Date.now()}`, null);
@@ -292,7 +292,7 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
     });
 
     test('new run defaults into selected folder when created without modal folder choice', async ({ page, request }) => {
-        const suite = await setupSuite(request, `US3Default-${Date.now()}`);
+        const suite = await setupCategory(request, `US3Default-${Date.now()}`);
         const folder = await createRunFolderAPI(request, `DefaultFolder-${Date.now()}`);
         const runName = `DefaultRun-${Date.now()}`;
 
@@ -303,7 +303,7 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
 
         // Open create modal — folder should be pre-selected
         await page.getByTestId('create-test-run-button').click();
-        await page.getByTestId('create-run-suite-select').selectOption(suite.id);
+        await page.getByTestId('create-run-category-select').selectOption(suite.id);
         await page.getByTestId('create-run-name-input').fill(runName);
         // Do NOT change the folder dropdown — it should already have folder.id selected
         await page.getByTestId('create-run-submit').click();
