@@ -7,7 +7,10 @@ export default defineConfig({
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
     workers: 1,
-    reporter: 'html',
+    reporter: [
+        ['html'],
+        ['./e2e/reporters/ttgo-reporter.js'],
+    ],
     timeout: 30000,
     expect: {
         timeout: 15000,
