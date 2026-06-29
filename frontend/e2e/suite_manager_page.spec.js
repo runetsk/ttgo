@@ -1,31 +1,30 @@
 import { test, expect } from '@playwright/test';
 
-test.describe('Suite Manager Page', () => {
+// Migrated from the removed `suites` concept to `categories`. The Suite Manager
+// page is now the Category Manager page at /categories.
+test.describe('Category Manager Page', () => {
     test.setTimeout(30000);
 
-    test('should navigate to suites page and manage suites', async ({ page }) => {
-        const suiteName = `Suite Page Test ${Date.now()}`;
+    test('should navigate to categories page and manage categories', async ({ page }) => {
+        const catName = `Category Page Test ${Date.now()}`;
 
         await page.goto('/');
 
-        // 1. Verify Suite Manager is NOT on Dashboard
-        await expect(page.getByText('Available Suites')).not.toBeVisible();
+        // 1. Navigate to Categories Page via the top nav
+        await page.getByRole('button', { name: 'Categories' }).click();
+        await expect(page.url()).toContain('/categories');
+        await expect(page.getByTestId('category-manager')).toBeVisible();
 
-        // 2. Navigate to Suites Page
-        await page.getByRole('button', { name: 'Suites' }).click();
-        await expect(page.url()).toContain('/suites');
-        await expect(page.getByRole('heading', { name: 'Suite Management' }).first()).toBeVisible();
+        // 2. Create a Category via modal
+        await page.getByTestId('open-create-category-modal').click();
+        await page.getByTestId('category-name-input').fill(catName);
+        await page.getByTestId('create-category-button').click();
 
-        // 3. Create a Suite via modal
-        await page.getByTestId('open-create-suite-modal').click();
-        await page.getByTestId('suite-name-input').fill(suiteName);
-        await page.getByTestId('create-suite-button').click();
+        // 3. Verify category creation
+        await expect(page.getByText(catName)).toBeVisible();
 
-        // 4. Verify Suite Creation
-        await expect(page.getByText(suiteName)).toBeVisible();
-
-        // 5. Navigate back to Home
+        // 4. Navigate back to Tests
         await page.getByRole('button', { name: 'Tests' }).click();
-        await expect(page.url()).not.toContain('/suites');
+        await expect(page.url()).not.toContain('/categories');
     });
 });

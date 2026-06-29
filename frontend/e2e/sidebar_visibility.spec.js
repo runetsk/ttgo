@@ -9,9 +9,9 @@ test.describe('Sidebar Visibility', () => {
         // 1. Home (Tests) should have sidebar
         await expect(page.locator('.sidebar')).toBeVisible();
 
-        // 2. Suites should NOT have sidebar
-        await page.getByRole('button', { name: 'Suites' }).click();
-        await expect(page.url()).toContain('/suites');
+        // 2. Categories should NOT have sidebar
+        await page.getByRole('button', { name: 'Categories' }).click();
+        await expect(page.url()).toContain('/categories');
         await expect(page.locator('.sidebar')).not.toBeVisible();
 
         // 3. Settings should NOT have sidebar
