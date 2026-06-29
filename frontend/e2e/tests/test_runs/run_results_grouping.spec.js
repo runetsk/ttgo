@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from './config.js';
+import { API_URL } from '../../config.js';
 
 // Verifies the run-results List/Grouped view ported from the legacy tree:
 // toggle, group-by selector, group headers, collapse/expand, and that the

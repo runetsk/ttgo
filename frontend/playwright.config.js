@@ -2,8 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 import { BASE_URL } from './e2e/config.js';
 
 export default defineConfig({
-    testDir: './e2e',
-    testIgnore: '**/reporters/**',
+    testDir: './e2e/tests',
     fullyParallel: false,
     forbidOnly: !!process.env.CI,
     retries: process.env.CI ? 2 : 0,
@@ -40,6 +39,6 @@ export default defineConfig({
         reuseExistingServer: !process.env.CI,
         cwd: './',
     } : undefined,
-    globalSetup: './e2e/global-setup.js',
-    globalTeardown: './e2e/global-teardown.js',
+    globalSetup: './e2e/hooks/global-setup.js',
+    globalTeardown: './e2e/hooks/global-teardown.js',
 });

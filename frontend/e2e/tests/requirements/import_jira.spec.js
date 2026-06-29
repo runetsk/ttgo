@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_URL, MOCK_URL, configureJiraAPI, deleteAllRequirements } from './helpers.js';
+import { API_URL, MOCK_URL, configureJiraAPI, deleteAllRequirements } from '../../helpers/api.js';
 
 test.describe("Jira Import", () => {
   test.beforeEach(async ({ page, request }) => {

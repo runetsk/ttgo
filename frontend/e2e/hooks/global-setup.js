@@ -2,7 +2,7 @@ import { spawn } from 'child_process';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { request as playwrightRequest } from '@playwright/test';
-import { API_URL } from './config.js';
+import { API_URL } from '../config.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -14,7 +14,7 @@ export default async function globalSetup() {
             console.log('Mock server already running on :9999');
         }
     } catch {
-        const child = spawn('node', [join(__dirname, 'mock-external-server.cjs')], {
+        const child = spawn('node', [join(__dirname, '..', 'mocks', 'mock-external-server.cjs')], {
             stdio: 'pipe',
             detached: true,
         });
@@ -83,7 +83,7 @@ export default async function globalSetup() {
     };
 
     const fs = await import('fs');
-    fs.writeFileSync(join(__dirname, '.auth-state.json'), JSON.stringify(storageState, null, 2));
+    fs.writeFileSync(join(__dirname, '..', '.auth-state.json'), JSON.stringify(storageState, null, 2));
 
     await apiContext.dispose();
 }

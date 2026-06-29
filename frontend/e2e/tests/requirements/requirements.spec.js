@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { deleteAllRequirements, createRequirementAPI } from './helpers.js';
+import { deleteAllRequirements, createRequirementAPI } from '../../helpers/api.js';
 
 test.describe('Requirements CRUD', () => {
 

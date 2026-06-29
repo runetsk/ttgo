@@ -1,4 +1,4 @@
-import { API_URL } from './config.js';
+import { API_URL } from '../config.js';
 
 const MOCK_URL = 'http://localhost:9999';
 

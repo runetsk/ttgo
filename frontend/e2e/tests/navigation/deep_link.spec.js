@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from './config.js';
+import { API_URL } from '../../config.js';
 
 test.describe('Deep Linking', () => {
     test.setTimeout(60000);

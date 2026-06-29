@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_URL, configureJiraAPI, deleteAllRequirements } from './helpers.js';
+import { API_URL, configureJiraAPI, deleteAllRequirements } from '../../helpers/api.js';
 
 /**
  * Helper: import a single Jira ticket via the UI import flow.

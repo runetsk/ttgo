@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from './config.js';
+import { API_URL } from '../../config.js';
 
 test.describe('Run Comparison (Compare tab)', () => {
     const post = async (request, path, data) => {

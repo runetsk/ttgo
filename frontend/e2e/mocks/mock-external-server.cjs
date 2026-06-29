@@ -2,8 +2,8 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const jiraFixtures = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/jira-tickets.json'), 'utf8'));
-const confFixtures = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/confluence-pages.json'), 'utf8'));
+const jiraFixtures = JSON.parse(fs.readFileSync(path.join(__dirname, '../fixtures/jira-tickets.json'), 'utf8'));
+const confFixtures = JSON.parse(fs.readFileSync(path.join(__dirname, '../fixtures/confluence-pages.json'), 'utf8'));
 
 const PORT = 9999;
 
