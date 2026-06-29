@@ -12,7 +12,7 @@ test.describe('Deep Linking', () => {
         await test.step('Create a folder and a test case via the UI', async () => {
             // 1. Create Data
             await page.goto('/');
-            await page.getByText('+ Root').click();
+            await page.getByTestId('create-root-folder-button').click();
             await page.getByPlaceholder('Folder name').fill(folderName);
             await page.getByRole('button', { name: 'Confirm' }).click();
 
@@ -25,32 +25,38 @@ test.describe('Deep Linking', () => {
         });
 
         await test.step('Click the test to navigate and verify the detail page URL', async () => {
-            // 2. Click to Navigate
+            // 2. Click to Navigate. Clicking a test from a selected folder opens the
+            // three-pane route /library/folders/<folderId>/tests/<testId>.
             await page.getByText(testName).click();
 
-            // Verify URL
-            expect(page.url()).toContain('/library/tests/');
-            testId = page.url().split('/library/tests/')[1];
+            // Verify URL — match the stable /tests/<id> tail (not /library/tests/).
+            await expect(page).toHaveURL(/\/tests\/[^/]+$/);
+            testId = page.url().split('/tests/')[1];
 
-            // Verify Detail Page
-            await expect(page.locator(`input[value="${testName}"]`)).toBeVisible();
+            // Verify Detail Page — the inline detail pane shows the name as a
+            // controlled input, so assert its value via testid (an
+            // input[value="…"] attribute selector won't match a React value prop).
+            await expect(page.getByTestId('test-case-name-input')).toHaveValue(testName);
         });
 
         await test.step('Reload the page and verify the test detail persists', async () => {
             // 3. Reload Page
             await page.reload();
-            await expect(page.locator(`input[value="${testName}"]`)).toBeVisible();
+            await expect(page.getByTestId('test-case-name-input')).toHaveValue(testName);
             expect(page.url()).toContain(testId);
         });
 
         await test.step('Close the detail and verify navigation away from the test URL', async () => {
-            // 4. Navigate Back (Close) — folder exists so navigates to /library/folders/:id
-            await page.getByRole('button', { name: '×' }).click();
-            await expect(page.url()).not.toContain('/library/tests/');
+            // 4. Close the detail pane — folder exists so navigates to /library/folders/:id
+            await page.getByTestId('close-modal-button').click();
+            await expect(page.url()).not.toContain('/tests/');
         });
     });
 
-    test('should show warning banner and folder picker when test folder has been deleted', async ({ page, request }) => {
+    // FIXME: folder deletion now cascade-deletes its test cases (backend F-015), so a test
+    // can no longer be "orphaned" (folder gone, test surviving). This asserts a removed feature
+    // (the folder-missing warning banner). Restore an orphaned-test path or delete this test.
+    test.fixme('should show warning banner and folder picker when test folder has been deleted', async ({ page, request }) => {
         const folderName = 'Deleted Folder ' + Date.now();
         const testName = 'Orphaned Test ' + Date.now();
         let folder;
@@ -105,7 +111,9 @@ test.describe('Deep Linking', () => {
         });
     });
 
-    test('should move orphaned test to a new folder via the warning banner picker', async ({ page, request }) => {
+    // FIXME: same removed feature as above — folder deletion cascades to its tests (F-015),
+    // so an orphaned test (and its warning-banner folder picker) can't be set up anymore.
+    test.fixme('should move orphaned test to a new folder via the warning banner picker', async ({ page, request }) => {
         const folderName = 'ToDelete Folder ' + Date.now();
         const targetFolderName = 'Target Folder ' + Date.now();
         const testName = 'Move-Me Test ' + Date.now();

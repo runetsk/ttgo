@@ -16,9 +16,9 @@ test.describe('Sidebar Resize and Zoom', () => {
             await expect(sidebar).toBeVisible({ timeout: 10000 });
             handle = page.locator('.resize-handle');
 
-            // Initial width check (default 280)
+            // Initial width check (default 240 — see Sidebar.jsx sidebarWidth fallback)
             box = await sidebar.boundingBox();
-            expect(box.width).toBeCloseTo(280, 0);
+            expect(box.width).toBeCloseTo(240, 0);
         });
 
         await test.step('Drag the resize handle and verify the new width', async () => {
@@ -42,14 +42,18 @@ test.describe('Sidebar Resize and Zoom', () => {
     });
 
     test('should zoom sidebar', async ({ page }) => {
+        // The zoom control lives in the run-folder sidebar on /runs. Its zoomable
+        // wrapper is the div that directly contains the "All Runs" entry and carries
+        // the inline `font-size: <zoom>rem` style.
+        const zoomWrapper = page.getByTestId('all-runs-entry').locator('..');
+
         await test.step('Verify the folder tree starts at the default font size', async () => {
-            const sidebar = page.getByTestId('sidebar');
+            await page.goto('/runs');
+            const sidebar = page.getByTestId('run-folder-sidebar');
             await expect(sidebar).toBeVisible({ timeout: 10000 });
 
-            // Initial check (default 1rem = 16px usually, but checking style)
-            // We set fontSize inline, so we can check that.
-            // Initially it might be 1rem (from state default)
-            await expect(page.locator('.folder-tree')).toHaveCSS('font-size', '16px');
+            // Default zoom is 1 → inline font-size: 1rem (16px computed).
+            await expect(zoomWrapper).toHaveCSS('font-size', '16px');
         });
 
         await test.step('Zoom in and verify the font size increases', async () => {
@@ -57,18 +61,15 @@ test.describe('Sidebar Resize and Zoom', () => {
             await page.getByTitle('Zoom In').click();
 
             // Check new size (1.1rem -> ~17.6px)
-            // Check new size (1.1rem -> ~17.6px)
-            // Check style attribute because computed CSS might vary across browsers/systems
-            const folderTree = page.locator('.folder-tree');
-            await expect(folderTree).toHaveAttribute('style', /font-size: 1.1rem/);
+            // Check the style attribute because computed CSS might vary across browsers/systems
+            await expect(zoomWrapper).toHaveAttribute('style', /font-size: 1.1rem/);
         });
 
         await test.step('Reload and verify the zoom level persists', async () => {
             await page.reload();
-            const sidebarReloaded = page.getByTestId('sidebar');
+            const sidebarReloaded = page.getByTestId('run-folder-sidebar');
             await expect(sidebarReloaded).toBeVisible();
-            const folderTreeReloaded = page.locator('.folder-tree');
-            await expect(folderTreeReloaded).toHaveAttribute('style', /font-size: 1.1rem/);
+            await expect(zoomWrapper).toHaveAttribute('style', /font-size: 1.1rem/);
         });
     });
 });

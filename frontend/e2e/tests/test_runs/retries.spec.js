@@ -183,20 +183,23 @@ test.describe('Test Run Retries', () => {
             // Before retry — no retried indicator
             await page.goto(`/runs/run/${run.id}`);
             await page.waitForLoadState('domcontentloaded');
-            await expect(page.getByText(/retried/)).not.toBeVisible();
+            await expect(page.getByTestId('stats-retried')).not.toBeVisible();
         });
 
-        await test.step('Retry the result via API', async () => {
-            // Retry via API
-            await retryResultAPI(request, run.id, r1.id);
+        await test.step('Retry the result via API and pass the new attempt', async () => {
+            // Retry via API → attempt 2, then mark it PASS so it counts as
+            // "passed after retry" (the summary indicator only shows for passed retries).
+            const r2 = await retryResultAPI(request, run.id, r1.id);
+            await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
         });
 
         await test.step('Reload and verify the summary bar shows the retried count', async () => {
             await page.reload();
             await page.waitForLoadState('domcontentloaded');
 
-            // Summary bar should now show "↻ 1 retried"
-            await expect(page.getByText(/1 retried/)).toBeVisible();
+            // Summary bar should now show "↻ 1 passed after retry"
+            await expect(page.getByTestId('stats-retried')).toBeVisible();
+            await expect(page.getByTestId('stats-retried')).toContainText('1 passed after retry');
         });
     });
 
@@ -221,9 +224,11 @@ test.describe('Test Run Retries', () => {
             await page.goto(`/runs/run/${run.id}`);
             await page.waitForLoadState('domcontentloaded');
 
-            // Expand the result row to show RunResultDetail
+            // Expand the result row to show RunResultDetail. Click the attempt badge
+            // (which toggles the detail panel) rather than the row center, since the
+            // status/defect cells stop click propagation and would not expand the row.
             const row = page.getByRole('row', { name: `Detail Test ${ts}` });
-            await row.click();
+            await row.getByTitle(/Attempt 2/).click();
 
             // RunResultDetail should show "Attempt 2" header
             await expect(page.getByTestId('run-result-detail').getByText(/Attempt 2/)).toBeVisible();

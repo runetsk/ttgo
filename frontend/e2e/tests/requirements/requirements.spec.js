@@ -52,9 +52,11 @@ test.describe('Requirements CRUD', () => {
         });
 
         await test.step('Open the edit form and update the title', async () => {
-            // Click the edit button on the row
+            // Open the row's kebab actions menu, then click Edit.
+            // The menu is portaled to document.body, so the item is page-scoped (not inside the row).
             const row = page.locator('tr').filter({ hasText: `EDIT-${ts}` });
-            await row.getByRole('button', { name: 'Edit' }).click();
+            await row.getByRole('button', { name: 'Actions' }).click();
+            await page.locator('.context-menu-item').filter({ hasText: 'Edit' }).click();
 
             // Update the title
             const titleInput = page.getByPlaceholder('Short description of the requirement');
@@ -85,8 +87,11 @@ test.describe('Requirements CRUD', () => {
             // Accept the confirmation dialog
             page.on('dialog', dialog => dialog.accept());
 
+            // Open the row's kebab actions menu, then click Delete.
+            // The menu is portaled to document.body, so the item is page-scoped (not inside the row).
             const row = page.locator('tr').filter({ hasText: `DEL-${ts}` });
-            await row.getByRole('button', { name: 'Delete' }).click();
+            await row.getByRole('button', { name: 'Actions' }).click();
+            await page.locator('.context-menu-item').filter({ hasText: 'Delete' }).click();
 
             // Requirement should disappear
             await expect(page.getByText(`DEL-${ts}`)).not.toBeVisible();
@@ -135,13 +140,14 @@ test.describe('Requirements CRUD', () => {
             await page.reload();
         });
 
-        await test.step('Verify the coverage summary cards show the expected counts', async () => {
-            // Summary cards: glass-panel divs with value + label
-            const cards = page.locator('.glass-panel');
-            await expect(cards.filter({ hasText: /^2Total$/ })).toBeVisible();
-            await expect(cards.filter({ hasText: /^0Covered$/ })).toBeVisible();
-            await expect(cards.filter({ hasText: /^2Gaps$/ })).toBeVisible();
-            await expect(cards.filter({ hasText: /^0%Coverage$/ })).toBeVisible();
+        await test.step('Verify the coverage summary strip shows the expected counts', async () => {
+            // Summary is a single glass-panel strip of stat pills (value span + label span)
+            // plus a percentage span. Each pill div's text content is `${value}${label}`.
+            const summary = page.locator('.glass-panel').first();
+            await expect(summary.locator('div').filter({ hasText: /^2Total$/ })).toBeVisible();
+            await expect(summary.locator('div').filter({ hasText: /^0Covered$/ })).toBeVisible();
+            await expect(summary.locator('div').filter({ hasText: /^2Gaps$/ })).toBeVisible();
+            await expect(summary.getByText('0%', { exact: true })).toBeVisible();
         });
     });
 });

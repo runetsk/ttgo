@@ -53,6 +53,12 @@ test.describe('Sidebar Test Cases', () => {
             // Wait for the sidebar title so we know the component is mounting
             await expect(page.getByTestId('sidebar-title')).toBeVisible({ timeout: 15000 });
 
+            // Test cases only render in the tree when "Show tests in tree" is on.
+            const showTestsToggle = page.getByTestId('sidebar-show-tests-toggle');
+            if ((await showTestsToggle.getAttribute('class') || '').indexOf('active') === -1) {
+                await showTestsToggle.click();
+            }
+
             // IMPORTANT: The sidebar tree is fetched asynchronously.
             // We must wait for the folder to appear in the DOM.
             folderContainer = page.getByTestId('folder-container').filter({ hasText: folderName }).first();
@@ -69,16 +75,16 @@ test.describe('Sidebar Test Cases', () => {
 
         await test.step('Expand the folder in the sidebar', async () => {
             await folderContainer.hover();
-            expandToggle = folderContainer.locator('.expand-toggle');
+            expandToggle = folderContainer.locator('.expand-toggle').first();
 
-            // If it's visible (meaning it has children), check if expanded
+            // The toggle only carries the 'visible' class when the folder has children.
             await expect(expandToggle).toBeVisible({ timeout: 10000 });
 
-            // '▾' means expanded, '›' means collapsed
-            const toggleText = await expandToggle.textContent() || '';
-            if (!toggleText.includes('▾')) {
+            // Expanded state is reflected by the 'expanded' class (SVG chevron, no text).
+            const toggleClass = await expandToggle.getAttribute('class') || '';
+            if (!toggleClass.includes('expanded')) {
                 await expandToggle.click();
-                await expect(expandToggle).toHaveText('▾', { timeout: 10000 });
+                await expect(expandToggle).toHaveClass(/expanded/, { timeout: 10000 });
             }
         });
 
@@ -135,9 +141,15 @@ test.describe('Sidebar Test Case Drag and Drop', () => {
             const folder1Node = page.getByTestId('folder-name').filter({ hasText: folder1Name });
             await expect(folder1Node).toBeVisible();
 
+            // Test cases only render in the tree when "Show tests in tree" is on.
+            const showTestsToggle = page.getByTestId('sidebar-show-tests-toggle');
+            if ((await showTestsToggle.getAttribute('class') || '').indexOf('active') === -1) {
+                await showTestsToggle.click();
+            }
+
             // Expand folder1 to see test cases
             const folder1Container = page.getByTestId('folder-container').filter({ hasText: folder1Name }).first();
-            const expandToggle1 = folder1Container.locator('.expand-toggle');
+            const expandToggle1 = folder1Container.locator('.expand-toggle').first();
             await expect(expandToggle1).toBeVisible({ timeout: 10000 });
             await expandToggle1.click();
 
@@ -161,11 +173,18 @@ test.describe('Sidebar Test Case Drag and Drop', () => {
         await test.step('Reload and verify the test is now under folder2', async () => {
             await page.reload();
 
+            // Re-ensure "Show tests in tree" is on after the reload.
+            const showTestsToggle = page.getByTestId('sidebar-show-tests-toggle');
+            await expect(showTestsToggle).toBeVisible({ timeout: 15000 });
+            if ((await showTestsToggle.getAttribute('class') || '').indexOf('active') === -1) {
+                await showTestsToggle.click();
+            }
+
             const folder2Node = page.getByTestId('folder-name').filter({ hasText: folder2Name });
             await expect(folder2Node).toBeVisible();
 
             const folder2Container = page.getByTestId('folder-container').filter({ hasText: folder2Name }).first();
-            const expandToggle2 = folder2Container.locator('.expand-toggle');
+            const expandToggle2 = folder2Container.locator('.expand-toggle').first();
             await expect(expandToggle2).toBeVisible({ timeout: 10000 });
             await expandToggle2.click();
 
@@ -174,7 +193,7 @@ test.describe('Sidebar Test Case Drag and Drop', () => {
 
         await test.step('Verify the test is no longer under folder1', async () => {
             const folder1ContainerReloaded = page.getByTestId('folder-container').filter({ hasText: folder1Name }).first();
-            const expandToggle1Reloaded = folder1ContainerReloaded.locator('.expand-toggle');
+            const expandToggle1Reloaded = folder1ContainerReloaded.locator('.expand-toggle').first();
             if (await expandToggle1Reloaded.isVisible()) {
                 await expandToggle1Reloaded.click();
                 await expect(folder1ContainerReloaded.locator('.test-case-node').filter({ hasText: testName })).not.toBeVisible({ timeout: 5000 });

@@ -43,8 +43,10 @@ test.describe('Performance & Regression', () => {
             console.log('Reloading page to trigger deep link logic...');
             await page.reload();
 
-            // Wait for the grid title (fetch complete)
-            await expect(page.locator('h2.grid-title')).toHaveText(folderName);
+            // Wait for the grid title (fetch complete). The <h2.grid-title> also
+            // contains a child rename (✏️) button, so its full text is
+            // "<folderName>✏️" — assert containment rather than exact text.
+            await expect(page.locator('h2.grid-title')).toContainText(folderName);
 
             // Wait a bit to ensure no subsequent loop happens (loops usually fire rapidly)
             await page.waitForTimeout(2000);

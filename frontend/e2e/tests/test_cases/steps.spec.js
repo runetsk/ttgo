@@ -32,18 +32,18 @@ test.describe('Test Steps Management', () => {
 
         await test.step('Create a folder and a test case', async () => {
             await page.goto('/');
-            await page.getByText('+ Root').click();
-            await page.getByPlaceholder('Folder name').fill(folderName);
-            await page.getByRole('button', { name: 'Confirm' }).click();
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(folderName);
+            await page.getByTestId('modal-confirm-button').click();
             await expect(page.getByText('New Root Folder')).not.toBeVisible();
 
             // Wait for folder and click
             await expect(page.getByTestId('folder-name').filter({ hasText: folderName })).toBeVisible();
             await page.getByTestId('folder-name').filter({ hasText: folderName }).click();
 
-            await page.getByText('+ New Test').click();
-            await page.getByPlaceholder('Test case name...').fill(testName);
-            await page.getByRole('button', { name: 'Confirm' }).click();
+            await page.getByTestId('create-test-button').click();
+            await page.getByTestId('modal-input').fill(testName);
+            await page.getByTestId('modal-confirm-button').click();
         });
 
         await test.step('Open the test detail view', async () => {

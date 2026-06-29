@@ -1,4 +1,20 @@
 import { test, expect } from '@playwright/test';
+import { API_URL } from '../../config.js';
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+const createFolderAPI = async (request, name) => {
+    const res = await request.post(`${API_URL}/folders`, { data: { name, parent_id: null } });
+    expect(res.ok()).toBeTruthy();
+    return res.json();
+};
+
+const createTestAPI = async (request, name, folderId) => {
+    const res = await request.post(`${API_URL}/tests`, {
+        data: { name, folder_id: folderId, description: '' }
+    });
+    expect(res.ok()).toBeTruthy();
+    return res.json();
+};
 
 test.describe('Test Grid Filtering & Selection', () => {
     test.beforeEach(async ({ page }) => {
@@ -80,17 +96,32 @@ test.describe('Test Grid Filtering & Selection', () => {
         });
     });
 
-    test('should clear selection after bulk action', async ({ page }) => {
-        const rows = page.getByTestId('test-row');
-        if (await rows.count() === 0) return;
+    test('should clear selection after bulk action', async ({ page, request }) => {
+        const ts = Date.now();
+
+        await test.step('Seed an isolated folder with two test cases via API', async () => {
+            const folder = await createFolderAPI(request, `Bulk Clear Folder ${ts}`);
+            await createTestAPI(request, `Bulk Clear A ${ts}`, folder.id);
+            await createTestAPI(request, `Bulk Clear B ${ts}`, folder.id);
+        });
+
+        await test.step('Open the seeded folder and wait for its rows', async () => {
+            await page.goto('/');
+            await page.getByTestId('folder-name').filter({ hasText: `Bulk Clear Folder ${ts}` }).first().click();
+            await expect(page.getByTestId('test-table')).toBeVisible();
+            await expect(page.getByTestId('test-row')).toHaveCount(2);
+        });
 
         await test.step('Select all rows and verify the bulk bar shows', async () => {
             await page.locator('thead input[type="checkbox"]').click();
             await expect(page.locator('.bulk-action-bar')).toBeVisible();
         });
 
-        await test.step('Run Bulk Pass and verify the selection clears', async () => {
-            await page.getByRole('button', { name: 'Bulk Pass' }).click();
+        await test.step('Run a bulk delete and verify the selection clears', async () => {
+            // The test-cases grid bulk bar exposes Delete (with a confirm modal);
+            // confirming it clears the selection and hides the bar.
+            await page.getByTestId('bulk-delete-tests-button').click();
+            await page.getByTestId('modal-confirm-button').click();
 
             // Bar should disappear and selection should be empty
             await expect(page.locator('.bulk-action-bar')).not.toBeVisible();

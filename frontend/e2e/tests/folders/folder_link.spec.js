@@ -9,7 +9,7 @@ test.describe('Folder Deep Linking', () => {
 
         await test.step('Create a root folder', async () => {
             await page.goto('/');
-            await page.getByText('+ Root').click();
+            await page.getByTestId('create-root-folder-button').click();
             await page.getByPlaceholder('Folder name').fill(folderName);
             await page.getByRole('button', { name: 'Confirm' }).click();
 
@@ -23,19 +23,20 @@ test.describe('Folder Deep Linking', () => {
             expect(page.url()).toContain('/library/folders/');
             folderId = page.url().split('/library/folders/')[1];
 
-            // Verify Test Grid Header matches folder name
-            await expect(page.locator('h2.grid-title')).toHaveText(folderName);
+            // Verify Test Grid Header matches folder name. The <h2.grid-title>
+            // also holds a child rename (✏️) button, so assert containment.
+            await expect(page.locator('h2.grid-title')).toContainText(folderName);
         });
 
         await test.step('Reload the page and verify the folder selection persists', async () => {
             await page.reload();
-            await expect(page.locator('h2.grid-title')).toHaveText(folderName);
+            await expect(page.locator('h2.grid-title')).toContainText(folderName);
             expect(page.url()).toContain(folderId);
         });
 
-        await test.step('Deselect via the logo and verify the grid empty state', async () => {
-            // Clicking "Library" or logo should go to /
-            await page.getByText('TestTracker').click();
+        await test.step('Deselect via the Tests nav and verify the grid empty state', async () => {
+            // The top-nav "Tests" button navigates to /library (clears selection).
+            await page.getByRole('button', { name: 'Tests', exact: true }).click();
             await expect(page.url()).not.toContain('/library/folders/');
             await expect(page.url()).not.toContain('/library/tests/');
 
