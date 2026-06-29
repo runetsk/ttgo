@@ -3,17 +3,17 @@ import { test, expect } from '@playwright/test';
 test.describe('Test Runs Pagination', () => {
     const API_URL = 'http://localhost:8080/api';
 
-    const createSuiteAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/suites`, {
-            data: { name: name, description: 'Pagination Test Suite' }
+    const createCategoryAPI = async (request, name) => {
+        const res = await request.post(`${API_URL}/categories`, {
+            data: { name: name, description: 'Pagination Test Category' }
         });
         expect(res.ok()).toBeTruthy();
         return await res.json();
     };
 
-    const createRunAPI = async (request, suiteId, name) => {
+    const createRunAPI = async (request, categoryId, name) => {
         const res = await request.post(`${API_URL}/runs`, {
-            data: { suite_id: suiteId, name: name }
+            data: { category_id: categoryId, name: name }
         });
         expect(res.ok()).toBeTruthy();
         return await res.json();
@@ -21,18 +21,24 @@ test.describe('Test Runs Pagination', () => {
 
     test('should paginate test runs correctly', async ({ page, request }) => {
         const timestamp = Date.now();
-        const suiteName = `Pagination Suite ${timestamp}`;
-        const suite = await createSuiteAPI(request, suiteName);
+        const categoryName = `Pagination Category ${timestamp}`;
+        const category = await createCategoryAPI(request, categoryName);
 
         // Create 25 runs to test pagination (default limit is 20)
         console.log('Creating 25 test runs sequentially...');
         for (let i = 1; i <= 25; i++) {
-            await createRunAPI(request, suite.id, `Paginated Run ${i} ${timestamp}`);
+            await createRunAPI(request, category.id, `Paginated Run ${i} ${timestamp}`);
         }
 
         await page.goto('/runs');
         await page.getByRole('button', { name: 'Column Filters' }).click();
-        await page.getByTestId('filter-suite-select').selectOption({ label: suiteName });
+
+        // Open the CategoryFilter popover and select our category
+        await page.getByTestId('filter-run-category').click();
+        await page.getByTestId(`filter-run-category-option-${category.id}`).click();
+        // Close the popover by pressing Escape
+        await page.keyboard.press('Escape');
+
         await page.waitForSelector('text=Showing');
 
         // 1. Verify default state (20 per page)
