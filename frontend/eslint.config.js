@@ -26,4 +26,15 @@ export default defineConfig([
       'no-unused-vars': ['error', { varsIgnorePattern: '^[A-Z_]' }],
     },
   },
+  {
+    // e2e/ files (Playwright specs, global setup, the TTGO reporter) run in Node,
+    // not the browser. Give them Node globals and turn off the React-only rule.
+    files: ['e2e/**/*.js'],
+    languageOptions: {
+      globals: { ...globals.node },
+    },
+    rules: {
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])
