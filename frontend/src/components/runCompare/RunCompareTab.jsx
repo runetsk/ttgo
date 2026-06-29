@@ -40,7 +40,7 @@ export default function RunCompareTab({ run }) {
 
     // Fetch the compared run.
     useEffect(() => {
-        if (!compareWith || compareWith === run.id) { setComparedRun(null); return; } // eslint-disable-line react-hooks/set-state-in-effect
+        if (!compareWith || compareWith === run.id) { setComparedRun(null); setLoading(false); setError(null); return; } // eslint-disable-line react-hooks/set-state-in-effect
         let cancelled = false;
         setLoading(true); setError(null);
         getTestRun(compareWith)
