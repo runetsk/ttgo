@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const API_URL = 'http://localhost:8080/api';
+import { API_URL } from './config.js';
 
 test.describe('Test Run Stats Verification', () => {
     let runId;
@@ -64,31 +63,39 @@ test.describe('Test Run Stats Verification', () => {
     });
 
     test('should display correct stats in TestRunList columns', async ({ page }) => {
-        await page.goto('/runs');
+        await test.step('Open the runs page and filter by the seeded category', async () => {
+            await page.goto('/runs');
 
-        // Show filter row and filter by our specific category
-        await page.getByRole('button', { name: 'Column Filters' }).click();
-        await page.getByTestId('filter-run-category').click();
-        await page.getByTestId(`filter-run-category-option-${categoryId}`).click();
-        await page.keyboard.press('Escape');
+            // Show filter row and filter by our specific category
+            await page.getByRole('button', { name: 'Column Filters' }).click();
+            await page.getByTestId('filter-run-category').click();
+            await page.getByTestId(`filter-run-category-option-${categoryId}`).click();
+            await page.keyboard.press('Escape');
+        });
 
-        const checkbox = page.locator(`[data-testid="select-run-checkbox-${runId}"]`);
-        await expect(checkbox).toBeVisible();
+        await test.step('Verify the run row is visible and the stats columns are correct', async () => {
+            const checkbox = page.locator(`[data-testid="select-run-checkbox-${runId}"]`);
+            await expect(checkbox).toBeVisible();
 
-        // Check columns
-        // Passed/Failed are default-visible columns; Pending/Total are optional
-        // columns hidden by default, so assert the visible stats here.
-        await expect(page.getByTestId(`run-passed-${runId}`)).toHaveText('1');
-        await expect(page.getByTestId(`run-failed-${runId}`)).toHaveText('1');
+            // Check columns
+            // Passed/Failed are default-visible columns; Pending/Total are optional
+            // columns hidden by default, so assert the visible stats here.
+            await expect(page.getByTestId(`run-passed-${runId}`)).toHaveText('1');
+            await expect(page.getByTestId(`run-failed-${runId}`)).toHaveText('1');
+        });
     });
 
     test('should display correct stats in TestRunDetail header', async ({ page }) => {
-        await page.goto(`/runs/run/${runId}`);
+        await test.step('Open the run detail page', async () => {
+            await page.goto(`/runs/run/${runId}`);
+        });
 
-        // Redesigned stats bar shows passed as "{passed} / {total}" — no separate total testid.
-        await expect(page.getByTestId('stats-passed')).toContainText('1');
-        await expect(page.getByTestId('stats-passed')).toContainText('3');
-        await expect(page.getByTestId('stats-failed')).toContainText('1');
-        await expect(page.getByTestId('stats-pending')).toContainText('1');
+        await test.step('Verify the stats bar shows correct passed, failed, and pending counts', async () => {
+            // Redesigned stats bar shows passed as "{passed} / {total}" — no separate total testid.
+            await expect(page.getByTestId('stats-passed')).toContainText('1');
+            await expect(page.getByTestId('stats-passed')).toContainText('3');
+            await expect(page.getByTestId('stats-failed')).toContainText('1');
+            await expect(page.getByTestId('stats-pending')).toContainText('1');
+        });
     });
 });

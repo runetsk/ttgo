@@ -23,20 +23,27 @@ async function setupFolderAndTest(page) {
 
 test.describe('TestGrid typed column filters', () => {
     test('date range filter narrows the grid', async ({ page }) => {
-        const { testName } = await setupFolderAndTest(page);
-        await page.getByRole('button', { name: 'Column Filters' }).click();
+        let testName;
 
-        // Row visible before filtering.
-        await expect(page.getByTestId('test-row').filter({ hasText: testName })).toBeVisible();
+        await test.step('Set up a folder with one test and open Column Filters', async () => {
+            ({ testName } = await setupFolderAndTest(page));
+            await page.getByRole('button', { name: 'Column Filters' }).click();
+        });
 
-        // A past range excludes the just-created test.
-        await page.getByTestId('filter-created_at').click();
-        await page.getByTestId('filter-created_at-from').fill('2000-01-01');
-        await page.getByTestId('filter-created_at-to').fill('2000-01-02');
-        await expect(page.getByTestId('test-row').filter({ hasText: testName })).toHaveCount(0);
+        await test.step('Verify the row is visible before filtering', async () => {
+            await expect(page.getByTestId('test-row').filter({ hasText: testName })).toBeVisible();
+        });
 
-        // "Today" preset brings it back.
-        await page.getByTestId('filter-created_at-preset-today').click();
-        await expect(page.getByTestId('test-row').filter({ hasText: testName })).toBeVisible();
+        await test.step('Apply a past date range and verify the test is excluded', async () => {
+            await page.getByTestId('filter-created_at').click();
+            await page.getByTestId('filter-created_at-from').fill('2000-01-01');
+            await page.getByTestId('filter-created_at-to').fill('2000-01-02');
+            await expect(page.getByTestId('test-row').filter({ hasText: testName })).toHaveCount(0);
+        });
+
+        await test.step('Apply the Today preset and verify the test reappears', async () => {
+            await page.getByTestId('filter-created_at-preset-today').click();
+            await expect(page.getByTestId('test-row').filter({ hasText: testName })).toBeVisible();
+        });
     });
 });

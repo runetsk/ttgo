@@ -12,22 +12,26 @@ test.describe('Test Tracking System E2E', () => {
         const rootFolderName = `Root Folder ${timestamp}`;
         const subFolderName = `Sub Folder ${timestamp}`;
 
-        // 1. Create a Root Folder
-        await page.getByTestId('create-root-folder-button').click();
-        await page.getByTestId('modal-input').fill(rootFolderName);
-        await page.getByTestId('modal-confirm-button').click();
+        let rootFolder;
 
-        const rootFolder = page.getByTestId('folder-name').filter({ hasText: rootFolderName });
-        await expect(rootFolder).toBeVisible();
+        await test.step('Create a root folder', async () => {
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(rootFolderName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        // 2. Create a Subfolder via Context Menu
-        await rootFolder.click({ button: 'right' });
-        await page.getByTestId('context-menu-create-subfolder').click();
-        await page.getByTestId('modal-input').fill(subFolderName);
-        await page.getByTestId('modal-confirm-button').click();
+            rootFolder = page.getByTestId('folder-name').filter({ hasText: rootFolderName });
+            await expect(rootFolder).toBeVisible();
+        });
 
-        const subFolder = page.getByTestId('folder-name').filter({ hasText: subFolderName });
-        await expect(subFolder).toBeVisible();
+        await test.step('Create a subfolder via the context menu', async () => {
+            await rootFolder.click({ button: 'right' });
+            await page.getByTestId('context-menu-create-subfolder').click();
+            await page.getByTestId('modal-input').fill(subFolderName);
+            await page.getByTestId('modal-confirm-button').click();
+
+            const subFolder = page.getByTestId('folder-name').filter({ hasText: subFolderName });
+            await expect(subFolder).toBeVisible();
+        });
     });
 
     test('should create a test case in a folder', async ({ page }) => {
@@ -35,20 +39,26 @@ test.describe('Test Tracking System E2E', () => {
         const rootFolderName = `Root Folder ${timestamp}`;
         const testName = `User Login Test ${timestamp}`;
 
-        // Pre-requisite: Create a folder to put the test in
-        await page.getByTestId('create-root-folder-button').click();
-        await page.getByTestId('modal-input').fill(rootFolderName);
-        await page.getByTestId('modal-confirm-button').click();
+        await test.step('Create a folder and select it', async () => {
+            // Pre-requisite: Create a folder to put the test in
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(rootFolderName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        const folder = page.getByTestId('folder-name').filter({ hasText: rootFolderName });
-        await folder.click();
+            const folder = page.getByTestId('folder-name').filter({ hasText: rootFolderName });
+            await folder.click();
+        });
 
-        await page.getByTestId('create-test-button').click();
-        await page.getByTestId('modal-input').fill(testName);
-        await page.getByTestId('modal-confirm-button').click();
+        await test.step('Create a test case in the folder', async () => {
+            await page.getByTestId('create-test-button').click();
+            await page.getByTestId('modal-input').fill(testName);
+            await page.getByTestId('modal-confirm-button').click();
+        });
 
-        const testRow = page.getByTestId('test-row').filter({ hasText: testName });
-        await expect(testRow).toBeVisible();
+        await test.step('Verify the test case appears in the grid', async () => {
+            const testRow = page.getByTestId('test-row').filter({ hasText: testName });
+            await expect(testRow).toBeVisible();
+        });
     });
 
     test('should manage suites and assign to test', async ({ page }) => {
@@ -57,54 +67,60 @@ test.describe('Test Tracking System E2E', () => {
         const testName = `User Login Test ${timestamp}`;
         const suiteName = `Regression ${timestamp}`;
 
-        // Setup: Create folder and test
-        await page.getByTestId('create-root-folder-button').click();
-        await page.getByTestId('modal-input').fill(rootFolderName);
-        await page.getByTestId('modal-confirm-button').click();
+        await test.step('Set up a folder and a test case', async () => {
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(rootFolderName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        const folder = page.getByTestId('folder-name').filter({ hasText: rootFolderName }).first();
-        await folder.click();
+            const folder = page.getByTestId('folder-name').filter({ hasText: rootFolderName }).first();
+            await folder.click();
 
-        await page.getByTestId('create-test-button').click();
-        await page.getByTestId('modal-input').fill(testName);
-        await page.getByTestId('modal-confirm-button').click();
+            await page.getByTestId('create-test-button').click();
+            await page.getByTestId('modal-input').fill(testName);
+            await page.getByTestId('modal-confirm-button').click();
+        });
 
-        // 4. Create a Suite
-        // Navigate to Suite Manager
-        await page.getByRole('button', { name: 'Suites' }).click();
-        await page.waitForURL(/\/suites/);
+        await test.step('Create a suite in the Suite Manager', async () => {
+            // Navigate to Suite Manager
+            await page.getByRole('button', { name: 'Suites' }).click();
+            await page.waitForURL(/\/suites/);
 
-        await page.getByTestId('open-create-suite-modal').click();
-        await page.getByTestId('suite-name-input').fill(suiteName);
-        await page.getByTestId('create-suite-button').click();
-        await expect(page.getByText(suiteName)).toBeVisible();
+            await page.getByTestId('open-create-suite-modal').click();
+            await page.getByTestId('suite-name-input').fill(suiteName);
+            await page.getByTestId('create-suite-button').click();
+            await expect(page.getByText(suiteName)).toBeVisible();
+        });
 
-        // Go back to Library
-        await page.getByRole('button', { name: 'Tests' }).click();
+        await test.step('Return to the library and re-select the folder', async () => {
+            await page.getByRole('button', { name: 'Tests' }).click();
 
-        // Re-select folder to see tests
-        const refolder = page.getByTestId('folder-name').filter({ hasText: rootFolderName }).first();
-        await refolder.click();
+            // Re-select folder to see tests
+            const refolder = page.getByTestId('folder-name').filter({ hasText: rootFolderName }).first();
+            await refolder.click();
+        });
 
-        // 5. Assign Suite to Test (via Detail View)
-        // Click test name to navigate (avoid checkbox in first column)
-        await page.getByTestId('test-row').filter({ hasText: testName }).getByText(testName).click();
+        await test.step('Assign the suite to the test via the detail view', async () => {
+            // Click test name to navigate (avoid checkbox in first column)
+            await page.getByTestId('test-row').filter({ hasText: testName }).getByText(testName).click();
 
-        // In Details View — verify test name input is focused
-        await expect(page.getByTestId('test-case-name-input')).toHaveValue(testName);
+            // In Details View — verify test name input is focused
+            await expect(page.getByTestId('test-case-name-input')).toHaveValue(testName);
 
-        // Select suite from the "+ Suite" dropdown, then click Add
-        await page.getByTestId('suite-select').selectOption({ label: suiteName });
-        await page.getByTestId('add-suite-button').click();
+            // Select suite from the "+ Suite" dropdown, then click Add
+            await page.getByTestId('suite-select').selectOption({ label: suiteName });
+            await page.getByTestId('add-suite-button').click();
 
-        // Verify suite chip appears in the meta bar before saving
-        await expect(page.locator('.meta-chip').filter({ hasText: suiteName })).toBeVisible();
+            // Verify suite chip appears in the meta bar before saving
+            await expect(page.locator('.meta-chip').filter({ hasText: suiteName })).toBeVisible();
+        });
 
-        // Save — navigates back to folder view
-        await page.getByRole('button', { name: 'Save Changes' }).click();
+        await test.step('Save and verify the suite tag appears in the grid row', async () => {
+            // Save — navigates back to folder view
+            await page.getByRole('button', { name: 'Save Changes' }).click();
 
-        // Verify suite tag appears in the grid row
-        await expect(page.getByTestId('test-row').filter({ hasText: testName }).locator('.suite-tag')).toContainText(suiteName);
+            // Verify suite tag appears in the grid row
+            await expect(page.getByTestId('test-row').filter({ hasText: testName }).locator('.suite-tag')).toContainText(suiteName);
+        });
     });
 
     test('should record execution results', async ({ page }) => {
@@ -112,66 +128,79 @@ test.describe('Test Tracking System E2E', () => {
         const rootFolderName = `Root Folder ${timestamp}`;
         const testName = `User Login Test ${timestamp}`;
 
-        // Setup: Create folder and test
-        await page.getByTestId('create-root-folder-button').click();
-        await page.getByTestId('modal-input').fill(rootFolderName);
-        await page.getByTestId('modal-confirm-button').click();
+        let testRow;
 
-        const folder = page.getByTestId('folder-name').filter({ hasText: rootFolderName }).first();
-        await folder.click();
+        await test.step('Set up a folder and a test case', async () => {
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(rootFolderName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        await page.getByTestId('create-test-button').click();
-        await page.getByTestId('modal-input').fill(testName);
-        await page.getByTestId('modal-confirm-button').click();
+            const folder = page.getByTestId('folder-name').filter({ hasText: rootFolderName }).first();
+            await folder.click();
 
-        const testRow = page.getByTestId('test-row').filter({ hasText: testName });
+            await page.getByTestId('create-test-button').click();
+            await page.getByTestId('modal-input').fill(testName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        // 6. Record Execution Results
-        // Select row and use bulk actions
-        await testRow.locator('input[type="checkbox"]').check();
-        await page.getByTestId('bulk-pass-button').click();
+            testRow = page.getByTestId('test-row').filter({ hasText: testName });
+        });
 
-        // Wait for selection to clear (action bar goes away)
-        await expect(page.getByTestId('bulk-pass-button')).not.toBeVisible();
+        await test.step('Record a passing result via the bulk action', async () => {
+            // Select row and use bulk actions
+            await testRow.locator('input[type="checkbox"]').check();
+            await page.getByTestId('bulk-pass-button').click();
 
-        // Re-select for next action (bulk action clears selection)
-        await testRow.locator('input[type="checkbox"]').check();
+            // Wait for selection to clear (action bar goes away)
+            await expect(page.getByTestId('bulk-pass-button')).not.toBeVisible();
+        });
 
-        // Wait for action bar to reappear
-        await expect(page.getByTestId('bulk-fail-button')).toBeVisible({ timeout: 10000 });
-        await page.getByTestId('bulk-fail-button').click();
-        await expect(page.getByTestId('bulk-fail-button')).not.toBeVisible();
+        await test.step('Record a failing result via the bulk action', async () => {
+            // Re-select for next action (bulk action clears selection)
+            await testRow.locator('input[type="checkbox"]').check();
+
+            // Wait for action bar to reappear
+            await expect(page.getByTestId('bulk-fail-button')).toBeVisible({ timeout: 10000 });
+            await page.getByTestId('bulk-fail-button').click();
+            await expect(page.getByTestId('bulk-fail-button')).not.toBeVisible();
+        });
     });
 
     test('should support multiple folder selection', async ({ page }) => {
         test.setTimeout(90000);
         const timestamp = Date.now();
-        // Setup: Create 2 folders
         const f1 = `F1 ${timestamp}`;
         const f2 = `F2 ${timestamp}`;
 
-        await page.getByTestId('create-root-folder-button').click();
-        await page.getByTestId('modal-input').fill(f1);
-        await page.getByTestId('modal-confirm-button').click();
+        let node1;
+        let node2;
 
-        await page.getByTestId('create-root-folder-button').click();
-        await page.getByTestId('modal-input').fill(f2);
-        await page.getByTestId('modal-confirm-button').click();
+        await test.step('Create two root folders', async () => {
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(f1);
+            await page.getByTestId('modal-confirm-button').click();
 
-        // Select first
-        const node1 = page.getByTestId('folder-name').filter({ hasText: f1 }).first();
-        await node1.click();
-        await expect(node1).toHaveClass(/selected/); // Link itself has class
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(f2);
+            await page.getByTestId('modal-confirm-button').click();
+        });
 
-        // Cmd/Ctrl-Select second
-        const node2 = page.getByTestId('folder-name').filter({ hasText: f2 }).first();
-        await node2.click({ modifiers: ['ControlOrMeta'] });
+        await test.step('Select the first folder', async () => {
+            node1 = page.getByTestId('folder-name').filter({ hasText: f1 }).first();
+            await node1.click();
+            await expect(node1).toHaveClass(/selected/); // Link itself has class
+        });
 
-        // Verify both selected
-        await expect(node1).toHaveClass(/selected/);
-        await expect(node2).toHaveClass(/selected/);
+        await test.step('Ctrl-select the second folder and verify both are selected', async () => {
+            node2 = page.getByTestId('folder-name').filter({ hasText: f2 }).first();
+            await node2.click({ modifiers: ['ControlOrMeta'] });
 
-        // Verify Bulk Action UI
-        await expect(page.getByText('Delete (2)')).toBeVisible();
+            // Verify both selected
+            await expect(node1).toHaveClass(/selected/);
+            await expect(node2).toHaveClass(/selected/);
+        });
+
+        await test.step('Verify the bulk action UI appears', async () => {
+            await expect(page.getByText('Delete (2)')).toBeVisible();
+        });
     });
 });

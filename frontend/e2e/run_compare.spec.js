@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { API_URL } from './config.js';
 
 test.describe('Run Comparison (Compare tab)', () => {
-    const API_URL = 'http://localhost:8080/api';
-
     const post = async (request, path, data) => {
         const res = await request.post(`${API_URL}${path}`, { data });
         expect(res.ok(), `POST ${path} -> ${res.status()}`).toBeTruthy();
@@ -59,41 +58,64 @@ test.describe('Run Comparison (Compare tab)', () => {
     };
 
     test('groups tests by outcome, shows summary, and expands a regression', async ({ page, request }) => {
-        const { runA, runB, shared } = await seed(request);
+        let runA;
+        let runB;
+        let shared;
 
-        await page.goto(`/runs/run/${runA.id}?compareWith=${runB.id}`);
-        await page.waitForLoadState('domcontentloaded');
+        await test.step('Seed two runs covering every comparison bucket', async () => {
+            ({ runA, runB, shared } = await seed(request));
+        });
 
-        await expect(page.getByTestId('run-compare-tab')).toBeVisible({ timeout: 30000 });
+        await test.step('Open the compare view for run A against run B', async () => {
+            await page.goto(`/runs/run/${runA.id}?compareWith=${runB.id}`);
+            await page.waitForLoadState('domcontentloaded');
 
-        // Every bucket has exactly one test.
-        for (const key of ['regressions', 'fixed', 'stillFailing', 'otherChanges', 'unchanged', 'onlyThis', 'onlyCompared']) {
-            await expect(page.getByTestId(`compare-group-${key}-count`)).toHaveText('1', { timeout: 15000 });
-        }
+            await expect(page.getByTestId('run-compare-tab')).toBeVisible({ timeout: 30000 });
+        });
 
-        // Summary chips.
-        await expect(page.getByTestId('compare-count-regressions')).toHaveText(/1/, { timeout: 15000 });
-        await expect(page.getByTestId('compare-count-shared')).toHaveText(/5/, { timeout: 15000 });
+        await test.step('Verify every bucket has exactly one test', async () => {
+            // Every bucket has exactly one test.
+            for (const key of ['regressions', 'fixed', 'stillFailing', 'otherChanges', 'unchanged', 'onlyThis', 'onlyCompared']) {
+                await expect(page.getByTestId(`compare-group-${key}-count`)).toHaveText('1', { timeout: 15000 });
+            }
+        });
 
-        // The regression row is s1; expanding it shows both runs' statuses.
-        const regRow = page.getByTestId(`compare-row-${shared[0].id}`);
-        await expect(regRow).toBeVisible();
-        await regRow.click();
-        const detail = page.getByTestId(`compare-detail-${shared[0].id}`);
-        await expect(detail).toBeVisible();
-        await expect(detail.getByText('Fail', { exact: true })).toBeVisible();
-        await expect(detail.getByText('Pass', { exact: true })).toBeVisible();
+        await test.step('Verify the summary chips', async () => {
+            // Summary chips.
+            await expect(page.getByTestId('compare-count-regressions')).toHaveText(/1/, { timeout: 15000 });
+            await expect(page.getByTestId('compare-count-shared')).toHaveText(/5/, { timeout: 15000 });
+        });
 
-        // Deep-link round-trips across reload.
-        await page.reload();
-        await page.waitForLoadState('domcontentloaded');
-        await expect(page.getByTestId('compare-group-regressions-count')).toHaveText('1', { timeout: 30000 });
+        await test.step('Expand the regression row and verify both runs\' statuses', async () => {
+            // The regression row is s1; expanding it shows both runs' statuses.
+            const regRow = page.getByTestId(`compare-row-${shared[0].id}`);
+            await expect(regRow).toBeVisible();
+            await regRow.click();
+            const detail = page.getByTestId(`compare-detail-${shared[0].id}`);
+            await expect(detail).toBeVisible();
+            await expect(detail.getByText('Fail', { exact: true })).toBeVisible();
+            await expect(detail.getByText('Pass', { exact: true })).toBeVisible();
+        });
+
+        await test.step('Verify the deep-link round-trips across reload', async () => {
+            // Deep-link round-trips across reload.
+            await page.reload();
+            await page.waitForLoadState('domcontentloaded');
+            await expect(page.getByTestId('compare-group-regressions-count')).toHaveText('1', { timeout: 30000 });
+        });
     });
 
     test('guards against comparing a run with itself', async ({ page, request }) => {
-        const { runA } = await seed(request);
-        await page.goto(`/runs/run/${runA.id}?compareWith=${runA.id}`);
-        await page.waitForLoadState('domcontentloaded');
-        await expect(page.getByTestId('compare-same-run')).toBeVisible({ timeout: 30000 });
+        let runA;
+
+        await test.step('Seed two runs covering every comparison bucket', async () => {
+            ({ runA } = await seed(request));
+        });
+
+        await test.step('Open the compare view for run A against itself and verify the guard', async () => {
+            await page.goto(`/runs/run/${runA.id}?compareWith=${runA.id}`);
+            await page.waitForLoadState('domcontentloaded');
+            await expect(page.getByTestId('compare-same-run')).toBeVisible({ timeout: 30000 });
+        });
     });
 });

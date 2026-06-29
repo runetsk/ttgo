@@ -12,43 +12,51 @@ test.describe('Recursive Folder Display', () => {
     });
 
     test('should show tests from subfolders when parent folder is selected', async ({ page }) => {
-        // 1. Create Parent Folder
-        await page.getByTestId('create-root-folder-button').click();
-        await page.getByTestId('modal-input').fill(parentFolderName);
-        await page.getByTestId('modal-confirm-button').click();
+        let parentFolder;
+        let childFolder;
 
-        const parentFolder = page.getByTestId('folder-name').filter({ hasText: parentFolderName });
-        await expect(parentFolder).toBeVisible();
+        await test.step('Create the parent folder', async () => {
+            await page.getByTestId('create-root-folder-button').click();
+            await page.getByTestId('modal-input').fill(parentFolderName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        // 2. Select Parent and Add Parent Test
-        await parentFolder.click();
-        await page.getByTestId('create-test-button').click();
-        await page.getByTestId('modal-input').fill(parentTestName);
-        await page.getByTestId('modal-confirm-button').click();
-        await expect(page.getByTestId('test-row').filter({ hasText: parentTestName })).toBeVisible();
+            parentFolder = page.getByTestId('folder-name').filter({ hasText: parentFolderName });
+            await expect(parentFolder).toBeVisible();
+        });
 
-        // 3. Create Child Folder under Parent
-        await parentFolder.click({ button: 'right' });
-        await page.getByTestId('context-menu-create-subfolder').click();
-        await page.getByTestId('modal-input').fill(childFolderName);
-        await page.getByTestId('modal-confirm-button').click();
+        await test.step('Select the parent folder and add a parent test', async () => {
+            await parentFolder.click();
+            await page.getByTestId('create-test-button').click();
+            await page.getByTestId('modal-input').fill(parentTestName);
+            await page.getByTestId('modal-confirm-button').click();
+            await expect(page.getByTestId('test-row').filter({ hasText: parentTestName })).toBeVisible();
+        });
 
-        const childFolder = page.getByTestId('folder-name').filter({ hasText: childFolderName });
-        await expect(childFolder).toBeVisible();
+        await test.step('Create a child folder under the parent', async () => {
+            await parentFolder.click({ button: 'right' });
+            await page.getByTestId('context-menu-create-subfolder').click();
+            await page.getByTestId('modal-input').fill(childFolderName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        // 4. Select Child and Add Child Test
-        await childFolder.click();
-        await page.getByTestId('create-test-button').click();
-        await page.getByTestId('modal-input').fill(childTestName);
-        await page.getByTestId('modal-confirm-button').click();
+            childFolder = page.getByTestId('folder-name').filter({ hasText: childFolderName });
+            await expect(childFolder).toBeVisible();
+        });
 
-        // In Child folder: Child Test should be visible, Parent Test should NOT
-        await expect(page.getByTestId('test-row').filter({ hasText: childTestName })).toBeVisible();
-        await expect(page.getByTestId('test-row').filter({ hasText: parentTestName })).not.toBeVisible();
+        await test.step('Select the child folder and add a child test', async () => {
+            await childFolder.click();
+            await page.getByTestId('create-test-button').click();
+            await page.getByTestId('modal-input').fill(childTestName);
+            await page.getByTestId('modal-confirm-button').click();
 
-        // 5. Select Parent again and verify both are visible
-        await parentFolder.click();
-        await expect(page.getByTestId('test-row').filter({ hasText: parentTestName })).toBeVisible();
-        await expect(page.getByTestId('test-row').filter({ hasText: childTestName })).toBeVisible();
+            // In Child folder: Child Test should be visible, Parent Test should NOT
+            await expect(page.getByTestId('test-row').filter({ hasText: childTestName })).toBeVisible();
+            await expect(page.getByTestId('test-row').filter({ hasText: parentTestName })).not.toBeVisible();
+        });
+
+        await test.step('Reselect the parent folder and verify both tests are visible', async () => {
+            await parentFolder.click();
+            await expect(page.getByTestId('test-row').filter({ hasText: parentTestName })).toBeVisible();
+            await expect(page.getByTestId('test-row').filter({ hasText: childTestName })).toBeVisible();
+        });
     });
 });

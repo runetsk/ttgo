@@ -1,6 +1,5 @@
 import { test, expect } from '@playwright/test';
-
-const API_URL = 'http://localhost:8080/api';
+import { API_URL } from './config.js';
 
 test.describe('Test Run Retries', () => {
 
@@ -56,156 +55,210 @@ test.describe('Test Run Retries', () => {
 
     test('retry button creates a new PENDING attempt and shows badge', async ({ page, request }) => {
         const ts = Date.now();
-        const folder = await createFolderAPI(request, `Retry Folder ${ts}`);
-        const tc = await createTestAPI(request, `Retry Test ${ts}`, folder.id);
-        const run = await createRunAPI(request, `Retry Run ${ts}`);
-        const r1 = await addResultAPI(request, run.id, tc.id);
+        let run;
+        let r1;
+        let row;
 
-        // Mark first attempt as FAIL
-        await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
+        await test.step('Seed a run with a failed first attempt via API', async () => {
+            const folder = await createFolderAPI(request, `Retry Folder ${ts}`);
+            const tc = await createTestAPI(request, `Retry Test ${ts}`, folder.id);
+            run = await createRunAPI(request, `Retry Run ${ts}`);
+            r1 = await addResultAPI(request, run.id, tc.id);
 
-        await page.goto(`/runs/run/${run.id}`);
-        await page.waitForLoadState('domcontentloaded');
+            // Mark first attempt as FAIL
+            await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
+        });
 
-        const row = page.getByRole('row', { name: `Retry Test ${ts}` });
-        await expect(row).toBeVisible();
+        await test.step('Open the run detail and confirm the row shows FAIL', async () => {
+            await page.goto(`/runs/run/${run.id}`);
+            await page.waitForLoadState('domcontentloaded');
 
-        // Status shows FAIL
-        await expect(row.locator('select').first()).toHaveValue('FAIL');
+            row = page.getByRole('row', { name: `Retry Test ${ts}` });
+            await expect(row).toBeVisible();
 
-        // Click the retry (↻) button
-        page.on('dialog', d => d.dismiss()); // guard against accidental confirms
-        await row.getByTitle('Retry this test').click();
+            // Status shows FAIL
+            await expect(row.locator('select').first()).toHaveValue('FAIL');
+        });
 
-        // After retry, the row should now show PENDING (new attempt)
-        await expect(row.locator('select').first()).toHaveValue('PENDING');
+        await test.step('Click retry and verify a new PENDING attempt 2 badge appears', async () => {
+            // Click the retry (↻) button
+            page.on('dialog', d => d.dismiss()); // guard against accidental confirms
+            await row.getByTitle('Retry this test').click();
 
-        // Attempt 2 badge should appear
-        await expect(row.getByTitle(/Attempt 2/)).toBeVisible();
+            // After retry, the row should now show PENDING (new attempt)
+            await expect(row.locator('select').first()).toHaveValue('PENDING');
+
+            // Attempt 2 badge should appear
+            await expect(row.getByTitle(/Attempt 2/)).toBeVisible();
+        });
     });
 
     test('retry creates new attempt and aggregation shows only latest', async ({ page, request }) => {
         const ts = Date.now();
-        const folder = await createFolderAPI(request, `Agg Folder ${ts}`);
-        const tc = await createTestAPI(request, `Agg Test ${ts}`, folder.id);
-        const run = await createRunAPI(request, `Agg Run ${ts}`);
-        const r1 = await addResultAPI(request, run.id, tc.id);
+        let run;
 
-        // Attempt 1: FAIL
-        await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
+        await test.step('Seed a run, fail attempt 1, then retry to a passing attempt 2', async () => {
+            const folder = await createFolderAPI(request, `Agg Folder ${ts}`);
+            const tc = await createTestAPI(request, `Agg Test ${ts}`, folder.id);
+            run = await createRunAPI(request, `Agg Run ${ts}`);
+            const r1 = await addResultAPI(request, run.id, tc.id);
 
-        // Retry via API → attempt 2 PASS
-        const r2 = await retryResultAPI(request, run.id, r1.id);
-        await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
+            // Attempt 1: FAIL
+            await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
 
-        await page.goto(`/runs/run/${run.id}`);
-        await page.waitForLoadState('domcontentloaded');
+            // Retry via API → attempt 2 PASS
+            const r2 = await retryResultAPI(request, run.id, r1.id);
+            await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
+        });
 
-        // Stats bar should reflect latest attempt only: 1 passed, 0 failed
-        await expect(page.getByTestId('stats-passed')).toContainText('1');
-        await expect(page.getByTestId('stats-failed')).toContainText('0');
+        await test.step('Verify the stats bar reflects only the latest attempt', async () => {
+            await page.goto(`/runs/run/${run.id}`);
+            await page.waitForLoadState('domcontentloaded');
+
+            // Stats bar should reflect latest attempt only: 1 passed, 0 failed
+            await expect(page.getByTestId('stats-passed')).toContainText('1');
+            await expect(page.getByTestId('stats-failed')).toContainText('0');
+        });
     });
 
     test('attempt badge click opens detail with timeline', async ({ page, request }) => {
         const ts = Date.now();
-        const folder = await createFolderAPI(request, `Expand Folder ${ts}`);
-        const tc = await createTestAPI(request, `Expand Test ${ts}`, folder.id);
-        const run = await createRunAPI(request, `Expand Run ${ts}`);
-        const r1 = await addResultAPI(request, run.id, tc.id);
+        let run;
+        let badge;
 
-        await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
-        const r2 = await retryResultAPI(request, run.id, r1.id);
-        await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
+        await test.step('Seed a run with a failed attempt 1 and a passing attempt 2', async () => {
+            const folder = await createFolderAPI(request, `Expand Folder ${ts}`);
+            const tc = await createTestAPI(request, `Expand Test ${ts}`, folder.id);
+            run = await createRunAPI(request, `Expand Run ${ts}`);
+            const r1 = await addResultAPI(request, run.id, tc.id);
 
-        await page.goto(`/runs/run/${run.id}`);
-        await page.waitForLoadState('domcontentloaded');
+            await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
+            const r2 = await retryResultAPI(request, run.id, r1.id);
+            await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
+        });
 
-        const row = page.getByRole('row', { name: `Expand Test ${ts}` });
-        const badge = row.getByTitle(/Attempt 2/);
-        await expect(badge).toBeVisible();
+        await test.step('Open the run detail and confirm the detail panel is hidden initially', async () => {
+            await page.goto(`/runs/run/${run.id}`);
+            await page.waitForLoadState('domcontentloaded');
 
-        // Detail panel not visible before clicking badge
-        await expect(page.getByTestId('run-result-detail')).not.toBeVisible();
+            const row = page.getByRole('row', { name: `Expand Test ${ts}` });
+            badge = row.getByTitle(/Attempt 2/);
+            await expect(badge).toBeVisible();
 
-        // Click badge to expand detail panel with timeline
-        await badge.click();
+            // Detail panel not visible before clicking badge
+            await expect(page.getByTestId('run-result-detail')).not.toBeVisible();
+        });
 
-        // Detail panel should appear with timeline dots for both attempts
-        const detail = page.getByTestId('run-result-detail');
-        await expect(detail).toBeVisible();
-        await expect(detail.getByTitle(/Attempt 1/)).toBeVisible();
-        await expect(detail.getByTitle(/Attempt 2/)).toBeVisible();
+        await test.step('Click the badge to expand the detail panel and verify both attempts on the timeline', async () => {
+            // Click badge to expand detail panel with timeline
+            await badge.click();
 
-        // Click badge again to collapse
-        await badge.click();
-        await expect(page.getByTestId('run-result-detail')).not.toBeVisible();
+            // Detail panel should appear with timeline dots for both attempts
+            const detail = page.getByTestId('run-result-detail');
+            await expect(detail).toBeVisible();
+            await expect(detail.getByTitle(/Attempt 1/)).toBeVisible();
+            await expect(detail.getByTitle(/Attempt 2/)).toBeVisible();
+        });
+
+        await test.step('Click the badge again to collapse the detail panel', async () => {
+            // Click badge again to collapse
+            await badge.click();
+            await expect(page.getByTestId('run-result-detail')).not.toBeVisible();
+        });
     });
 
     test('retried_count indicator appears in summary bar', async ({ page, request }) => {
         const ts = Date.now();
-        const folder = await createFolderAPI(request, `Summary Folder ${ts}`);
-        const tc = await createTestAPI(request, `Summary Test ${ts}`, folder.id);
-        const run = await createRunAPI(request, `Summary Run ${ts}`);
-        const r1 = await addResultAPI(request, run.id, tc.id);
+        let run;
+        let r1;
 
-        // Before retry — no retried indicator
-        await page.goto(`/runs/run/${run.id}`);
-        await page.waitForLoadState('domcontentloaded');
-        await expect(page.getByText(/retried/)).not.toBeVisible();
+        await test.step('Seed a run with a single result via API', async () => {
+            const folder = await createFolderAPI(request, `Summary Folder ${ts}`);
+            const tc = await createTestAPI(request, `Summary Test ${ts}`, folder.id);
+            run = await createRunAPI(request, `Summary Run ${ts}`);
+            r1 = await addResultAPI(request, run.id, tc.id);
+        });
 
-        // Retry via API
-        await retryResultAPI(request, run.id, r1.id);
+        await test.step('Open the run detail and confirm no retried indicator yet', async () => {
+            // Before retry — no retried indicator
+            await page.goto(`/runs/run/${run.id}`);
+            await page.waitForLoadState('domcontentloaded');
+            await expect(page.getByText(/retried/)).not.toBeVisible();
+        });
 
-        await page.reload();
-        await page.waitForLoadState('domcontentloaded');
+        await test.step('Retry the result via API', async () => {
+            // Retry via API
+            await retryResultAPI(request, run.id, r1.id);
+        });
 
-        // Summary bar should now show "↻ 1 retried"
-        await expect(page.getByText(/1 retried/)).toBeVisible();
+        await test.step('Reload and verify the summary bar shows the retried count', async () => {
+            await page.reload();
+            await page.waitForLoadState('domcontentloaded');
+
+            // Summary bar should now show "↻ 1 retried"
+            await expect(page.getByText(/1 retried/)).toBeVisible();
+        });
     });
 
     test('run detail shows attempt number in expanded RunResultDetail', async ({ page, request }) => {
         const ts = Date.now();
-        const folder = await createFolderAPI(request, `Detail Folder ${ts}`);
-        const tc = await createTestAPI(request, `Detail Test ${ts}`, folder.id);
-        const run = await createRunAPI(request, `Detail Run ${ts}`);
-        const r1 = await addResultAPI(request, run.id, tc.id);
+        let run;
 
-        const r2 = await retryResultAPI(request, run.id, r1.id);
-        await updateResultAPI(request, run.id, r2.id, {
-            status: 'FAIL',
-            error_message: 'Still failing on attempt 2'
+        await test.step('Seed a run and retry to a failing attempt 2 with an error message', async () => {
+            const folder = await createFolderAPI(request, `Detail Folder ${ts}`);
+            const tc = await createTestAPI(request, `Detail Test ${ts}`, folder.id);
+            run = await createRunAPI(request, `Detail Run ${ts}`);
+            const r1 = await addResultAPI(request, run.id, tc.id);
+
+            const r2 = await retryResultAPI(request, run.id, r1.id);
+            await updateResultAPI(request, run.id, r2.id, {
+                status: 'FAIL',
+                error_message: 'Still failing on attempt 2'
+            });
         });
 
-        await page.goto(`/runs/run/${run.id}`);
-        await page.waitForLoadState('domcontentloaded');
+        await test.step('Open the run, expand the row, and verify the attempt 2 detail', async () => {
+            await page.goto(`/runs/run/${run.id}`);
+            await page.waitForLoadState('domcontentloaded');
 
-        // Expand the result row to show RunResultDetail
-        const row = page.getByRole('row', { name: `Detail Test ${ts}` });
-        await row.click();
+            // Expand the result row to show RunResultDetail
+            const row = page.getByRole('row', { name: `Detail Test ${ts}` });
+            await row.click();
 
-        // RunResultDetail should show "Attempt 2" header
-        await expect(page.getByTestId('run-result-detail').getByText(/Attempt 2/)).toBeVisible();
-        await expect(page.getByText('Still failing on attempt 2')).toBeVisible();
+            // RunResultDetail should show "Attempt 2" header
+            await expect(page.getByTestId('run-result-detail').getByText(/Attempt 2/)).toBeVisible();
+            await expect(page.getByText('Still failing on attempt 2')).toBeVisible();
+        });
     });
 
     test('retry API returns 404 for non-existent result', async ({ request }) => {
-        const run = await createRunAPI(request, `404 Retry Run ${Date.now()}`);
-        const res = await request.post(`${API_URL}/runs/${run.id}/results/non-existent-id/retry`);
-        expect(res.status()).toBe(404);
+        await test.step('Retry a non-existent result and expect a 404', async () => {
+            const run = await createRunAPI(request, `404 Retry Run ${Date.now()}`);
+            const res = await request.post(`${API_URL}/runs/${run.id}/results/non-existent-id/retry`);
+            expect(res.status()).toBe(404);
+        });
     });
 
     test('retry API returns 400 for orphaned result', async ({ request }) => {
-        const run = await createRunAPI(request, `Orphan Retry Run ${Date.now()}`);
+        let run;
+        let orphanRes;
 
-        // Add a result without a test_case_id (orphaned)
-        const orphanRes = await request.post(`${API_URL}/runs/${run.id}/results`, {
-            data: { test_case_id: null, test_name_snapshot: 'Orphan Test' }
+        await test.step('Create a run and add an orphaned result (no test_case_id)', async () => {
+            run = await createRunAPI(request, `Orphan Retry Run ${Date.now()}`);
+
+            // Add a result without a test_case_id (orphaned)
+            orphanRes = await request.post(`${API_URL}/runs/${run.id}/results`, {
+                data: { test_case_id: null, test_name_snapshot: 'Orphan Test' }
+            });
         });
-        // Orphaned results may be rejected at add time; if created, retry should 400
-        if (orphanRes.ok()) {
-            const orphan = await orphanRes.json();
-            const retryRes = await request.post(`${API_URL}/runs/${run.id}/results/${orphan.id}/retry`);
-            expect(retryRes.status()).toBe(400);
-        }
+
+        await test.step('Retry the orphaned result and expect a 400 if it was created', async () => {
+            // Orphaned results may be rejected at add time; if created, retry should 400
+            if (orphanRes.ok()) {
+                const orphan = await orphanRes.json();
+                const retryRes = await request.post(`${API_URL}/runs/${run.id}/results/${orphan.id}/retry`);
+                expect(retryRes.status()).toBe(400);
+            }
+        });
     });
 });

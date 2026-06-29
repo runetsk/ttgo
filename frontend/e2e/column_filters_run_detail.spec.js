@@ -1,8 +1,7 @@
 import { test, expect } from '@playwright/test';
+import { API_URL } from './config.js';
 
 test.describe('Run detail results filters', () => {
-    const API_URL = 'http://localhost:8080/api';
-
     const createFolderAPI = async (request, name) => {
         const res = await request.post(`${API_URL}/folders`, { data: { name, parent_id: null } });
         expect(res.ok()).toBeTruthy();
@@ -27,60 +26,84 @@ test.describe('Run detail results filters', () => {
     };
 
     test('filter row toggles and status filter narrows results', async ({ page, request }) => {
-        // Seed: folder + 2 tests + a run + 2 PENDING run results
-        const stamp = Date.now();
-        const folder = await createFolderAPI(request, `CF Folder ${stamp}`);
-        const t1 = await createTestAPI(request, `CF Test A ${stamp}`, folder.id);
-        const t2 = await createTestAPI(request, `CF Test B ${stamp}`, folder.id);
-        const run = await createRunAPI(request, `CF Run ${stamp}`);
-        await addRunResultAPI(request, run.id, t1.id, 'PENDING');
-        await addRunResultAPI(request, run.id, t2.id, 'PENDING');
+        let run;
 
-        await page.goto(`/runs/run/${run.id}`);
-        await page.waitForLoadState('domcontentloaded');
+        await test.step('Seed a folder, two tests, a run, and two PENDING results via API', async () => {
+            // Seed: folder + 2 tests + a run + 2 PENDING run results
+            const stamp = Date.now();
+            const folder = await createFolderAPI(request, `CF Folder ${stamp}`);
+            const t1 = await createTestAPI(request, `CF Test A ${stamp}`, folder.id);
+            const t2 = await createTestAPI(request, `CF Test B ${stamp}`, folder.id);
+            run = await createRunAPI(request, `CF Run ${stamp}`);
+            await addRunResultAPI(request, run.id, t1.id, 'PENDING');
+            await addRunResultAPI(request, run.id, t2.id, 'PENDING');
+        });
 
-        // Toolbar must be visible
-        const toolbar = page.getByTestId('run-results-toolbar');
-        await expect(toolbar).toBeVisible({ timeout: 30000 });
+        await test.step('Open the run detail page and verify the toolbar is visible', async () => {
+            await page.goto(`/runs/run/${run.id}`);
+            await page.waitForLoadState('domcontentloaded');
 
-        // Initially, status filter should not be visible
-        await expect(page.getByTestId('filter-result-status')).not.toBeVisible();
+            // Toolbar must be visible
+            const toolbar = page.getByTestId('run-results-toolbar');
+            await expect(toolbar).toBeVisible({ timeout: 30000 });
+        });
 
-        // Click the Column Filters toggle button
-        await page.getByRole('button', { name: 'Column Filters' }).click();
+        await test.step('Toggle Column Filters on and verify the status filter appears', async () => {
+            // Initially, status filter should not be visible
+            await expect(page.getByTestId('filter-result-status')).not.toBeVisible();
 
-        // Status filter control is now visible
-        await expect(page.getByTestId('filter-result-status')).toBeVisible();
+            // Click the Column Filters toggle button
+            await page.getByRole('button', { name: 'Column Filters' }).click();
 
-        // 2 rows visible before filtering
-        await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(2);
+            // Status filter control is now visible
+            await expect(page.getByTestId('filter-result-status')).toBeVisible();
+        });
 
-        // Filter to PASS → 0 result rows (all are PENDING)
-        await page.getByTestId('filter-result-status').selectOption('PASS');
-        await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(0);
+        await test.step('Verify two rows are visible before filtering', async () => {
+            // 2 rows visible before filtering
+            await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(2);
+        });
 
-        // Filter back to PENDING → 2 result rows
-        await page.getByTestId('filter-result-status').selectOption('PENDING');
-        await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(2);
+        await test.step('Filter to PASS and verify no rows remain', async () => {
+            // Filter to PASS → 0 result rows (all are PENDING)
+            await page.getByTestId('filter-result-status').selectOption('PASS');
+            await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(0);
+        });
+
+        await test.step('Filter back to PENDING and verify two rows return', async () => {
+            // Filter back to PENDING → 2 result rows
+            await page.getByTestId('filter-result-status').selectOption('PENDING');
+            await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(2);
+        });
     });
 
     test('filter row toggle shows and hides', async ({ page, request }) => {
-        const stamp = Date.now();
-        const folder = await createFolderAPI(request, `CF2 Folder ${stamp}`);
-        const t1 = await createTestAPI(request, `CF2 Test A ${stamp}`, folder.id);
-        const run = await createRunAPI(request, `CF2 Run ${stamp}`);
-        await addRunResultAPI(request, run.id, t1.id, 'PENDING');
+        let run;
 
-        await page.goto(`/runs/run/${run.id}`);
-        await page.waitForLoadState('domcontentloaded');
-        await expect(page.getByTestId('run-results-toolbar')).toBeVisible({ timeout: 30000 });
+        await test.step('Seed a folder, a test, a run, and a PENDING result via API', async () => {
+            const stamp = Date.now();
+            const folder = await createFolderAPI(request, `CF2 Folder ${stamp}`);
+            const t1 = await createTestAPI(request, `CF2 Test A ${stamp}`, folder.id);
+            run = await createRunAPI(request, `CF2 Run ${stamp}`);
+            await addRunResultAPI(request, run.id, t1.id, 'PENDING');
+        });
 
-        // Show filters
-        await page.getByRole('button', { name: 'Column Filters' }).click();
-        await expect(page.getByTestId('filter-result-status')).toBeVisible();
+        await test.step('Open the run detail page and verify the toolbar is visible', async () => {
+            await page.goto(`/runs/run/${run.id}`);
+            await page.waitForLoadState('domcontentloaded');
+            await expect(page.getByTestId('run-results-toolbar')).toBeVisible({ timeout: 30000 });
+        });
 
-        // Hide filters
-        await page.getByRole('button', { name: 'Hide Filters' }).click();
-        await expect(page.getByTestId('filter-result-status')).not.toBeVisible();
+        await test.step('Show the filters and verify the status filter appears', async () => {
+            // Show filters
+            await page.getByRole('button', { name: 'Column Filters' }).click();
+            await expect(page.getByTestId('filter-result-status')).toBeVisible();
+        });
+
+        await test.step('Hide the filters and verify the status filter disappears', async () => {
+            // Hide filters
+            await page.getByRole('button', { name: 'Hide Filters' }).click();
+            await expect(page.getByTestId('filter-result-status')).not.toBeVisible();
+        });
     });
 });
