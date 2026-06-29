@@ -41,20 +41,26 @@ export default function RunCompareTab({ run }) {
     // Fetch the compared run.
     useEffect(() => {
         if (!compareWith || compareWith === run.id) { setComparedRun(null); return; } // eslint-disable-line react-hooks/set-state-in-effect
+        let cancelled = false;
         setLoading(true); setError(null);
         getTestRun(compareWith)
-            .then((d) => { setComparedRun(d && d.id ? d : null); setLoading(false); })
-            .catch((e) => { setError((e && e.message) || 'Failed to load run'); setLoading(false); });
+            .then((d) => { if (!cancelled) { setComparedRun(d && d.id ? d : null); setLoading(false); } })
+            .catch((e) => { if (!cancelled) { setError((e && e.message) || 'Failed to load run'); setLoading(false); } });
+        return () => { cancelled = true; };
     }, [compareWith, run.id]);
 
     // AI verdicts for both runs (only when enabled).
     useEffect(() => {
         if (!aiFeaturesEnabled) { setAnalysesThis({}); return; } // eslint-disable-line react-hooks/set-state-in-effect
-        getCurrentRunAnalyses(run.id).then(setAnalysesThis).catch(() => setAnalysesThis({}));
+        let cancelled = false;
+        getCurrentRunAnalyses(run.id).then((d) => { if (!cancelled) setAnalysesThis(d); }).catch(() => { if (!cancelled) setAnalysesThis({}); });
+        return () => { cancelled = true; };
     }, [aiFeaturesEnabled, run.id]);
     useEffect(() => {
         if (!aiFeaturesEnabled || !comparedRun) { setAnalysesCompared({}); return; } // eslint-disable-line react-hooks/set-state-in-effect
-        getCurrentRunAnalyses(comparedRun.id).then(setAnalysesCompared).catch(() => setAnalysesCompared({}));
+        let cancelled = false;
+        getCurrentRunAnalyses(comparedRun.id).then((d) => { if (!cancelled) setAnalysesCompared(d); }).catch(() => { if (!cancelled) setAnalysesCompared({}); });
+        return () => { cancelled = true; };
     }, [aiFeaturesEnabled, comparedRun]);
 
     // Recomputes when the opened run updates live (WebSocket) or the selection changes.
