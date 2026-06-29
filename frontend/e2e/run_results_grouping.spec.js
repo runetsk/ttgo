@@ -16,17 +16,17 @@ test.describe('Run Results Grouping', () => {
         expect(res.ok()).toBeTruthy();
         return await res.json();
     };
-    const createSuiteAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/suites`, { data: { name, description: 'grouping e2e' } });
+    const createCategoryAPI = async (request, name) => {
+        const res = await request.post(`${API_URL}/categories`, { data: { name, description: 'grouping e2e' } });
         expect(res.ok()).toBeTruthy();
         return await res.json();
     };
-    const linkTestToSuiteAPI = async (request, testId, suiteId) => {
-        const res = await request.post(`${API_URL}/tests/${testId}/suites`, { data: { suite_id: suiteId } });
+    const linkTestToCategoryAPI = async (request, testId, categoryId) => {
+        const res = await request.post(`${API_URL}/tests/${testId}/categories`, { data: { category_id: categoryId } });
         expect(res.ok()).toBeTruthy();
     };
-    const createRunAPI = async (request, suiteId, name) => {
-        const res = await request.post(`${API_URL}/runs`, { data: { suite_id: suiteId, name } });
+    const createRunAPI = async (request, categoryId, name) => {
+        const res = await request.post(`${API_URL}/runs`, { data: { category_id: categoryId, name } });
         expect(res.ok()).toBeTruthy();
         return await res.json();
     };
@@ -36,10 +36,10 @@ test.describe('Run Results Grouping', () => {
         const folder = await createFolderAPI(request, `Grp Folder ${stamp}`);
         const t1 = await createTestAPI(request, `Grp Test A ${stamp}`, folder.id);
         const t2 = await createTestAPI(request, `Grp Test B ${stamp}`, folder.id);
-        const suite = await createSuiteAPI(request, `Grp Suite ${stamp}`);
-        await linkTestToSuiteAPI(request, t1.id, suite.id);
-        await linkTestToSuiteAPI(request, t2.id, suite.id);
-        const run = await createRunAPI(request, suite.id, `Grp Run ${stamp}`);
+        const category = await createCategoryAPI(request, `Grp Category ${stamp}`);
+        await linkTestToCategoryAPI(request, t1.id, category.id);
+        await linkTestToCategoryAPI(request, t2.id, category.id);
+        const run = await createRunAPI(request, category.id, `Grp Run ${stamp}`);
 
         await page.goto(`/runs/run/${run.id}`);
         await page.waitForLoadState('domcontentloaded');
