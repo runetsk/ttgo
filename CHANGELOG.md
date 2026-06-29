@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Run comparison: cancel in-flight fetches when switching the compared run, so rapidly
+  changing the selection can no longer briefly render a stale comparison.
+
 ## [0.1.0] - 2026-06-29
 
 ### Added
