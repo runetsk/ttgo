@@ -31,6 +31,7 @@
         <a href="#features">Features</a>
         <a href="#compare">Compare</a>
         <a href="#tech">Tech</a>
+        <a href="#license">License</a>
         <a class="btn btn--ghost btn--sm" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">
           <span aria-hidden="true">★</span> GitHub
         </a>
@@ -55,7 +56,7 @@
         </p>
         <div class="hero__cta reveal">
           <a class="btn btn--primary" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">View on GitHub →</a>
-          <a class="btn btn--ghost" href="https://github.com/runetsk/ttgo/issues/new?title=TTGO%20commercial%20license" target="_blank" rel="noopener">Commercial license</a>
+          <a class="btn btn--ghost" href="#quickstart">Quick start ↓</a>
         </div>
         <div class="hero__shot reveal">
           <div class="browser">
@@ -197,8 +198,37 @@
       </div>
     </section>
 
+    <!-- ───────────────────────── License / free to use ───────────────────────── -->
+    <section class="section section--alt" id="license">
+      <div class="container">
+        <header class="section__head reveal">
+          <h2>Free to use</h2>
+          <p>TTGO is source-available under PolyForm Shield. For almost everyone, that means one thing — it's free: no per-seat bills, no time limits, no catch.</p>
+        </header>
+        <div class="license reveal">
+          <div class="license__col license__col--free">
+            <h3><span class="license__ic" aria-hidden="true">✓</span> Free for</h3>
+            <ul>
+              <li>Running it internally — your team, your company, your infrastructure</li>
+              <li>Personal projects, side projects, and evaluation</li>
+              <li>Embedding it inside your own product, as long as that product doesn't compete with TTGO</li>
+            </ul>
+          </div>
+          <div class="license__col license__col--limit">
+            <h3><span class="license__ic" aria-hidden="true">✕</span> The only catch</h3>
+            <ul>
+              <li>Re-offering TTGO itself as a hosted service (SaaS)</li>
+              <li>White-labeling or reselling it as a standalone product</li>
+              <li>Using it to build a competing test-management tool</li>
+            </ul>
+          </div>
+        </div>
+        <p class="license__note">In plain terms: build on it, run it, ship your product on it — just don't repackage TTGO into a competitor. Full terms are in the <a href="https://github.com/runetsk/ttgo/blob/main/LICENSE" target="_blank" rel="noopener">LICENSE</a> (<a href="https://polyformproject.org/licenses/shield/1.0.0" target="_blank" rel="noopener">PolyForm Shield 1.0.0</a>).</p>
+      </div>
+    </section>
+
     <!-- ───────────────────────── CTA ───────────────────────── -->
-    <section class="section cta">
+    <section class="section cta" id="quickstart">
       <div class="container cta__inner reveal">
         <h2>Run it yourself in minutes</h2>
         <p>Clone the repo, drop in your admin credentials, and bring it up with Docker.</p>
@@ -210,7 +240,6 @@ cp .env.example .env   <span class="tok-c"># set ADMIN_EMAIL and ADMIN_PASSWORD<
 docker compose up -d --build</code></pre>
         <div class="cta__btns">
           <a class="btn btn--primary" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">View on GitHub →</a>
-          <a class="btn btn--ghost" href="https://github.com/runetsk/ttgo/issues/new?title=TTGO%20commercial%20license" target="_blank" rel="noopener">Get a commercial license</a>
         </div>
       </div>
     </section>
