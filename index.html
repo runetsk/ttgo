@@ -13,7 +13,7 @@
   <meta property="og:description" content="Own your data, automate everything. A modern self-hosted alternative to TestRail, Xray and qTest." />
   <meta property="og:image" content="images/01-test-library.png" />
 
-  <link rel="icon" href="data:image/svg+xml,&lt;svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22&gt;&lt;text y=%22.9em%22 font-size=%2290%22&gt;🧪&lt;/text&gt;&lt;/svg&gt;" />
+  <link rel="icon" type="image/svg+xml" href="ttgo-icon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
@@ -24,11 +24,12 @@
   <header class="nav" id="nav">
     <div class="container nav__inner">
       <a href="#top" class="brand" aria-label="TTGO home">
-        <span class="brand__mark" aria-hidden="true">🧪</span>
+        <img class="brand__mark" src="ttgo-icon.svg" alt="" width="24" height="24" />
         <span class="brand__name">TTGO</span>
       </a>
       <nav class="nav__links" id="navLinks" aria-label="Primary">
         <a href="#features">Features</a>
+        <a href="#automation">Automation</a>
         <a href="#compare">Compare</a>
         <a href="#tech">Tech</a>
         <a href="#license">License</a>
@@ -145,6 +146,33 @@
       </div>
     </section>
 
+    <!-- ───────────────────────── Automation & AI agents ───────────────────────── -->
+    <section class="section" id="automation">
+      <div class="container">
+        <header class="section__head reveal">
+          <h2>Built for automation &amp; AI agents</h2>
+          <p>TTGO is API-first: a documented REST API, a first-class CLI, and a bundled agent skill let you wire it into CI pipelines, scripts, or an autonomous AI-agent workflow.</p>
+        </header>
+        <div class="pillars reveal">
+          <article class="card">
+            <div class="card__icon">🔌</div>
+            <h3>Rich REST API</h3>
+            <p>Every test case, run, result and requirement is scriptable over a documented REST API (Swagger) with bearer-token auth — automate anything the UI can do.</p>
+          </article>
+          <article class="card">
+            <div class="card__icon">⌨️</div>
+            <h3>First-class CLI</h3>
+            <p>The <code>ttgo</code> CLI drives tests, runs and analytics straight from your terminal or CI pipeline — no browser required.</p>
+          </article>
+          <article class="card">
+            <div class="card__icon">🤖</div>
+            <h3>Skill for AI agents</h3>
+            <p>Ships with a Claude Code skill so an AI agent can operate TTGO in plain English — drop it straight into your agent workflow.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
     <!-- ───────────────────────── Comparison ───────────────────────── -->
     <section class="section section--alt" id="compare">
       <div class="container">
@@ -249,7 +277,7 @@ docker compose up -d --build</code></pre>
   <footer class="footer">
     <div class="container footer__inner">
       <div class="footer__brand">
-        <span class="brand__mark" aria-hidden="true">🧪</span>
+        <img class="brand__mark" src="ttgo-icon.svg" alt="" width="24" height="24" />
         <strong>TTGO</strong>
         <span class="footer__tag">Self-hosted, source-available test management.</span>
       </div>

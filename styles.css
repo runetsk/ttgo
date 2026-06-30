@@ -78,7 +78,7 @@ code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo
 }
 .nav__inner { display: flex; align-items: center; justify-content: space-between; height: 64px; }
 .brand { display: inline-flex; align-items: center; gap: 9px; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.02em; }
-.brand__mark { font-size: 1.25rem; filter: drop-shadow(0 2px 8px rgba(99, 102, 241, 0.5)); }
+.brand__mark { width: 24px; height: 24px; display: block; filter: drop-shadow(0 2px 8px rgba(99, 102, 241, 0.45)); }
 .nav__links { display: flex; align-items: center; gap: 26px; }
 .nav__links a { color: var(--text-dim); font-weight: 500; font-size: 0.95rem; transition: color .2s ease; }
 .nav__links a:hover { color: var(--text); }
@@ -147,6 +147,9 @@ code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo
 .card h3 { font-size: 1.08rem; font-weight: 700; letter-spacing: -0.01em; }
 .card p { color: var(--text-dim); font-size: 0.93rem; margin-top: 8px; }
 .card code, .feature__text code { background: var(--surface-2); border: 1px solid var(--border-s); padding: 1px 6px; border-radius: 6px; font-size: 0.85em; color: var(--accent-h); }
+
+/* ───────────── Automation pillars ───────────── */
+.pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 920px; margin: 0 auto; }
 
 /* ───────────── Feature rows ───────────── */
 .feature { display: grid; grid-template-columns: 1fr 1.25fr; gap: 56px; align-items: center; margin-bottom: 72px; }
@@ -226,6 +229,7 @@ code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo
 /* ───────────── Responsive ───────────── */
 @media (max-width: 860px) {
   .cards { grid-template-columns: repeat(2, 1fr); }
+  .pillars { grid-template-columns: 1fr; }
   .license { grid-template-columns: 1fr; }
   .feature { grid-template-columns: 1fr; gap: 28px; }
   .feature--rev .feature__text { order: 0; }
