@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getTestRun, deleteTestRun, updateTestRun, deleteRunResult, addRunResult, updateRunResult, retryRunResult, bulkUpdateRunResults, getTests, listRunComments, listRunDefectLinks, analyzeRunFailures, getCategories } from '../api';
+import { getTestRun, deleteTestRun, updateTestRun, deleteRunResult, addRunResult, updateRunResult, retryRunResult, bulkUpdateRunResults, getTests, listRunComments, listRunDefects, analyzeRunFailures, getCategories } from '../api';
 import DateRangeFilter from '../components/filters/DateRangeFilter';
 import CategoryFilter from '../components/filters/CategoryFilter';
 import { inDateRange } from '../utils/dateFilter';
@@ -143,7 +143,7 @@ export default function TestRunDetail() {
 
     const loadRunDefectLinks = useCallback(() => {
         setDefectsLoading(true);
-        listRunDefectLinks(runId)
+        listRunDefects(runId)
             .then(data => setRunDefectLinks(Array.isArray(data) ? data : []))
             .catch(() => setRunDefectLinks([]))
             .finally(() => setDefectsLoading(false));
@@ -590,7 +590,7 @@ export default function TestRunDetail() {
                             marginBottom: -1, textTransform: 'capitalize',
                         }}
                     >
-                        {tab === 'defects' ? `Defects${runDefectLinks.length > 0 ? ` (${new Set(runDefectLinks.map(l => l.jira_issue_key)).size})` : ''}` : tab === 'timeline' ? 'Timeline' : tab === 'compare' ? 'Compare' : 'Results'}
+                        {tab === 'defects' ? `Defects${runDefectLinks.length > 0 ? ` (${new Set(runDefectLinks.map(l => l.id)).size})` : ''}` : tab === 'timeline' ? 'Timeline' : tab === 'compare' ? 'Compare' : 'Results'}
                     </button>
                 ))}
             </div>
@@ -1334,38 +1334,36 @@ export default function TestRunDetail() {
                         </p>
                     )}
                     {!defectsLoading && runDefectLinks.length > 0 && (() => {
-                        // Group links by jira_issue_key
+                        // Group rows by defect id (RunDefectRow embeds native Defect)
                         const grouped = new Map();
-                        runDefectLinks.forEach(link => {
-                            const key = link.jira_issue_key;
-                            if (!grouped.has(key)) {
-                                grouped.set(key, {
-                                    jira_issue_key: key,
-                                    last_known_url: link.last_known_url,
-                                    last_known_summary: link.last_known_summary,
-                                    last_known_status: link.last_known_status,
-                                    last_known_priority: link.last_known_priority,
-                                    status_category: link.status_category,
+                        runDefectLinks.forEach(row => {
+                            if (!grouped.has(row.id)) {
+                                grouped.set(row.id, {
+                                    id: row.id,
+                                    title: row.title,
+                                    status: row.status,
+                                    severity: row.severity,
+                                    external_key: row.external_key,
+                                    external_url: row.external_url,
                                     results: [],
                                 });
                             }
-                            grouped.get(key).results.push({
-                                id: link.id,
-                                test_case_id: link.test_case_id,
-                                test_name_snapshot: link.test_name_snapshot,
-                                result_status: link.result_status,
+                            grouped.get(row.id).results.push({
+                                id: row.id,
+                                test_case_id: row.test_case_id,
+                                test_name_snapshot: row.test_name_snapshot,
+                                result_status: row.result_status,
                             });
                         });
+                        const severityColor = { critical: '#ef4444', major: '#f97316', minor: '#eab308', trivial: '#6b7280' };
                         return (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                                 {Array.from(grouped.values()).map(defect => {
-                                    const statusStyle = defect.status_category === 'done'
+                                    const badgeStyle = defect.status === 'closed'
                                         ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }
-                                        : defect.status_category === 'indeterminate'
-                                        ? { background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)' }
-                                        : { background: 'rgba(148,163,184,0.15)', color: '#94a3b8', border: '1px solid rgba(148,163,184,0.35)' };
+                                        : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)' };
                                     return (
-                                        <div key={defect.jira_issue_key} style={{
+                                        <div key={defect.id} style={{
                                             border: '1px solid var(--border-color)', borderRadius: 8,
                                             overflow: 'hidden', background: 'var(--bg-primary)',
                                         }}>
@@ -1373,37 +1371,32 @@ export default function TestRunDetail() {
                                             <div
                                                 onClick={() => setExpandedDefects(prev => {
                                                     const next = new Set(prev);
-                                                    next.has(defect.jira_issue_key) ? next.delete(defect.jira_issue_key) : next.add(defect.jira_issue_key);
+                                                    next.has(defect.id) ? next.delete(defect.id) : next.add(defect.id);
                                                     return next;
                                                 })}
                                                 style={{
                                                     display: 'flex', alignItems: 'center', gap: 12,
                                                     padding: '10px 16px', background: 'var(--bg-secondary)',
-                                                    borderBottom: expandedDefects.has(defect.jira_issue_key) ? '1px solid var(--border-color)' : 'none',
+                                                    borderBottom: expandedDefects.has(defect.id) ? '1px solid var(--border-color)' : 'none',
                                                     cursor: 'pointer', userSelect: 'none',
                                                 }}>
                                                 <span style={{ fontSize: '0.68rem', color: 'var(--text-secondary)', flexShrink: 0, width: 12, textAlign: 'center' }}>
-                                                    {expandedDefects.has(defect.jira_issue_key) ? '▼' : '▶'}
+                                                    {expandedDefects.has(defect.id) ? '▼' : '▶'}
                                                 </span>
-                                                <a
-                                                    href={defect.last_known_url || '#'}
-                                                    target="_blank"
-                                                    rel="noopener noreferrer"
-                                                    onClick={e => e.stopPropagation()}
-                                                    style={{ fontWeight: 700, color: 'var(--accent-purple, #a78bfa)', fontSize: '0.88rem', textDecoration: 'none', flexShrink: 0 }}
-                                                >
-                                                    {defect.jira_issue_key}
-                                                </a>
-                                                <span style={{ fontSize: '0.82rem', color: 'var(--text-primary)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                    {defect.last_known_summary || '—'}
+                                                <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: '0.88rem', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {defect.title}
                                                 </span>
-                                                <span style={{ ...statusStyle, padding: '2px 10px', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
-                                                    {defect.last_known_status || '—'}
+                                                <span style={{ ...badgeStyle, padding: '2px 10px', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                                    {defect.status}
                                                 </span>
-                                                {defect.last_known_priority && (
-                                                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', flexShrink: 0 }}>
-                                                        {defect.last_known_priority}
-                                                    </span>
+                                                <span style={{ fontSize: '0.72rem', color: severityColor[defect.severity] || 'var(--text-secondary)', fontWeight: 600, flexShrink: 0 }}>
+                                                    {defect.severity}
+                                                </span>
+                                                {defect.external_url && (
+                                                    <a href={defect.external_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                                                        style={{ fontSize: '0.75rem', color: 'var(--accent-purple, #a78bfa)', flexShrink: 0 }}>
+                                                        {defect.external_key || 'external'} ↗
+                                                    </a>
                                                 )}
                                                 <span style={{
                                                     background: 'rgba(239,68,68,0.15)', color: 'var(--accent-red)',
@@ -1412,10 +1405,10 @@ export default function TestRunDetail() {
                                                     {defect.results.length} test{defect.results.length !== 1 ? 's' : ''}
                                                 </span>
                                             </div>
-                                            {/* Affected test cases — collapsed by default */}
-                                            {expandedDefects.has(defect.jira_issue_key) && <div style={{ padding: '6px 16px' }}>
+                                            {/* Affected test results — collapsed by default */}
+                                            {expandedDefects.has(defect.id) && <div style={{ padding: '6px 16px' }}>
                                                 {defect.results.map((res, idx) => (
-                                                    <div key={res.id} style={{
+                                                    <div key={`${res.id}-${idx}`} style={{
                                                         display: 'flex', alignItems: 'center', gap: 10,
                                                         padding: '6px 0',
                                                         borderBottom: idx < defect.results.length - 1 ? '1px solid var(--border-color)' : 'none',

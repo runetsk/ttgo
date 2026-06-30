@@ -1,6 +1,7 @@
 package runs_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -98,4 +99,33 @@ func TestRetryRunResultEndpointNotFound(t *testing.T) {
 	srv.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+func TestLinkExistingDefectToResult(t *testing.T) {
+	s, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := api.NewServer(s)
+
+	// Seed: test case, run, run result, defect
+	require.NoError(t, s.DB().Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','x',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+	require.NoError(t, s.DB().Exec(`INSERT INTO test_runs (id,name) VALUES ('run1','R1')`).Error)
+	require.NoError(t, s.DB().Exec(`INSERT INTO run_results (id,test_run_id,test_case_id,status) VALUES ('rr1','run1','tc1','FAIL')`).Error)
+	d := &models.Defect{Title: "bug"}
+	require.NoError(t, s.CreateDefect(d))
+
+	// POST link to correct run/result — should return 201
+	body, _ := json.Marshal(map[string]string{"defect_id": d.ID})
+	req := httptest.NewRequest(http.MethodPost, "/api/runs/run1/results/rr1/defect-links", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	addTestAuth(t, s, req)
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+	assert.Equal(t, http.StatusCreated, rec.Code, rec.Body.String())
+
+	// GET with wrong run ID — result does not belong to "NOPE" run → 404
+	req2 := httptest.NewRequest(http.MethodGet, "/api/runs/NOPE/results/rr1/defect-links", nil)
+	addTestAuth(t, s, req2)
+	rec2 := httptest.NewRecorder()
+	srv.ServeHTTP(rec2, req2)
+	assert.Equal(t, http.StatusNotFound, rec2.Code)
 }

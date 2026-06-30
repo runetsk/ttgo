@@ -19,21 +19,21 @@ func demoID(name string) string {
 
 // seedDataset is the full in-memory representation of the demo dataset.
 type seedDataset struct {
-	Folders                    []models.Folder
-	Categories                 []models.Category
-	TestCases                  []models.TestCase
-	Steps                      []models.TestStep
-	CategoryAssignments        []models.CategoryTestCase
-	RunFolders                 []models.RunFolder
-	TestRuns                   []models.TestRun
-	RunResults                 []models.RunResult
-	Requirements               []models.Requirement
-	RequirementLinks           []models.RequirementTestCaseLink
-	DefectLinks                []models.DefectLink
-	LLMProviders               []models.LLMProviderConfig
-	RunResultAnalyses          []models.RunResultAnalysis
-	RunAnalysisJobs            []models.RunAnalysisJob
-	ReverificationFlaggedTCIDs []string
+	Folders             []models.Folder
+	Categories          []models.Category
+	TestCases           []models.TestCase
+	Steps               []models.TestStep
+	CategoryAssignments []models.CategoryTestCase
+	RunFolders          []models.RunFolder
+	TestRuns            []models.TestRun
+	RunResults          []models.RunResult
+	Requirements        []models.Requirement
+	RequirementLinks    []models.RequirementTestCaseLink
+	Defects             []models.Defect     // native demo: Task 9
+	DefectLinks         []models.DefectLink // native demo: Task 9
+	LLMProviders        []models.LLMProviderConfig
+	RunResultAnalyses   []models.RunResultAnalysis
+	RunAnalysisJobs     []models.RunAnalysisJob
 }
 
 // ptr is a tiny helper that returns a pointer to the given string value.
@@ -47,24 +47,24 @@ func demoDataset() seedDataset {
 	catalog := buildDemoCatalog(now)
 	runs := buildDemoRuns(now, catalog)
 	requirements := buildDemoRequirements(now, catalog)
-	defects := buildDemoDefectLinks(now)
 	ai := buildDemoAIData(now)
+	defects, defectLinks := buildDemoDefects(now)
 
 	return seedDataset{
-		Folders:                    catalog.Folders,
-		Categories:                 catalog.Categories,
-		TestCases:                  catalog.TestCases,
-		Steps:                      catalog.Steps,
-		CategoryAssignments:        catalog.CategoryAssignments,
-		RunFolders:                 runs.RunFolders,
-		TestRuns:                   runs.TestRuns,
-		RunResults:                 runs.RunResults,
-		Requirements:               requirements.Requirements,
-		RequirementLinks:           requirements.RequirementLinks,
-		DefectLinks:                defects,
-		LLMProviders:               ai.Providers,
-		RunResultAnalyses:          ai.Analyses,
-		RunAnalysisJobs:            ai.Jobs,
-		ReverificationFlaggedTCIDs: demoReverificationFlaggedTestCaseIDs(),
+		Folders:             catalog.Folders,
+		Categories:          catalog.Categories,
+		TestCases:           catalog.TestCases,
+		Steps:               catalog.Steps,
+		CategoryAssignments: catalog.CategoryAssignments,
+		RunFolders:          runs.RunFolders,
+		TestRuns:            runs.TestRuns,
+		RunResults:          runs.RunResults,
+		Requirements:        requirements.Requirements,
+		RequirementLinks:    requirements.RequirementLinks,
+		Defects:             defects,
+		DefectLinks:         defectLinks,
+		LLMProviders:        ai.Providers,
+		RunResultAnalyses:   ai.Analyses,
+		RunAnalysisJobs:     ai.Jobs,
 	}
 }

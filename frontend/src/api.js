@@ -351,24 +351,27 @@ export const confluence = {
 export const listTestExecutions = (testCaseId) =>
     api.get(`/tests/${testCaseId}/executions`).then(res => res.data);
 
-// ── Defect links (008-jira-integration) — test-case-level helpers kept for create-issue ──
-export const defectLinks = {
-    createIssue: (testCaseId, data) =>
-        api.post(`/tests/${testCaseId}/defect-links/create-issue`, data).then(res => res.data),
+// ── Native defects ──
+export const defects = {
+    list: (params = {}) => api.get('/defects', { params }).then(res => res.data),
+    create: (data) => api.post('/defects', data).then(res => res.data),
+    update: (id, data) => api.patch(`/defects/${id}`, data).then(res => res.data),
+    remove: (id) => api.delete(`/defects/${id}`),
 };
 
-// All defect links in a run (summary view)
-export const listRunDefectLinks = (runId) =>
-    api.get(`/runs/${runId}/defect-links`).then(res => res.data);
+export const resultDefects = {
+    list: (runId, resultId) => api.get(`/runs/${runId}/results/${resultId}/defect-links`).then(res => res.data),
+    link: (runId, resultId, defectId) => api.post(`/runs/${runId}/results/${resultId}/defect-links`, { defect_id: defectId }).then(res => res.data),
+    create: (runId, resultId, data) => api.post(`/runs/${runId}/results/${resultId}/defects`, data).then(res => res.data),
+    unlink: (runId, resultId, defectId) => api.delete(`/runs/${runId}/results/${resultId}/defect-links/${encodeURIComponent(defectId)}`),
+};
 
-// Run-result-scoped defect links
-export const resultDefectLinks = {
-    list: (runId, resultId) =>
-        api.get(`/runs/${runId}/results/${resultId}/defect-links`).then(res => res.data),
-    link: (runId, resultId, jiraKey) =>
-        api.post(`/runs/${runId}/results/${resultId}/defect-links`, { jira_issue_key: jiraKey }).then(res => res.data),
-    unlink: (runId, resultId, jiraKey) =>
-        api.delete(`/runs/${runId}/results/${resultId}/defect-links/${encodeURIComponent(jiraKey)}`),
+export const listRunDefects = (runId) => api.get(`/runs/${runId}/defect-links`).then(res => res.data);
+
+export const testCaseDefects = {
+    list: (testId) => api.get(`/tests/${testId}/defect-links`).then(res => res.data),
+    link: (testId, defectId) => api.post(`/tests/${testId}/defect-links`, { defect_id: defectId }).then(res => res.data),
+    unlink: (testId, defectId) => api.delete(`/tests/${testId}/defect-links/${encodeURIComponent(defectId)}`),
 };
 
 // ── AI Test Case Generation (010-ai-test-generation) ──

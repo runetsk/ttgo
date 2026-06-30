@@ -89,6 +89,10 @@ func New(dsn string) (*Store, error) {
 func (s *Store) bootstrapDB() error {
 	db := s.db
 
+	if err := migrateDefects(db); err != nil {
+		return fmt.Errorf("failed to migrate defects: %w", err)
+	}
+
 	// T006: removed duplicate &models.CustomFieldValue{}
 	// T008: added new models for API tokens, webhooks, analytics
 	// 004-user-auth: added User and UserSession models
@@ -116,7 +120,8 @@ func (s *Store) bootstrapDB() error {
 		&models.Requirement{},               // 007-req-traceability
 		&models.RequirementTestCaseLink{},   // 007-req-traceability
 		&models.JiraConfig{},                // 007-req-traceability / 008-jira-integration
-		&models.DefectLink{},                // 008-jira-integration
+		&models.Defect{},                    // native-defects
+		&models.DefectLink{},                // native-defects
 		&models.LLMProviderConfig{},         // 010-ai-test-generation
 		&models.AIGenTemplate{},             // 010-ai-test-generation
 		&models.AIGenCoverageConfig{},       // 010-ai-test-generation: coverage levels
@@ -144,9 +149,14 @@ func (s *Store) bootstrapDB() error {
 		return fmt.Errorf("failed to create run_result_analyses index: %w", err)
 	}
 
-	// 008-jira-integration: unique constraint on (test_case_id, jira_issue_key) — FR-013.
-	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_defect_link ON defect_links (test_case_id, jira_issue_key)`).Error; err != nil {
-		return fmt.Errorf("failed to create defect_links unique index: %w", err)
+	db.Exec(`DROP INDEX IF EXISTS uq_defect_link`)
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_defect_link_result
+		ON defect_links (defect_id, run_result_id) WHERE run_result_id IS NOT NULL`).Error; err != nil {
+		return fmt.Errorf("failed to create defect_links result index: %w", err)
+	}
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_defect_link_testcase
+		ON defect_links (defect_id, test_case_id) WHERE run_result_id IS NULL`).Error; err != nil {
+		return fmt.Errorf("failed to create defect_links testcase index: %w", err)
 	}
 
 	// ai-failure-analysis: at most one active (queued/running) analysis job per run,

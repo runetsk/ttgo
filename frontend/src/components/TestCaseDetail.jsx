@@ -4,7 +4,7 @@ import StepsEditor from './StepsEditor';
 import RichTextField from './RichTextField';
 import HistorySidebar from './HistorySidebar';
 import RequirementLinkPanel from './RequirementLinkPanel';
-import { updateTest, getCustomFields, getTest, getCategories, getFolderTree, listTestExecutions, versions as versionsApi, requirements as requirementsApi } from '../api';
+import { updateTest, getCustomFields, getTest, getCategories, getFolderTree, listTestExecutions, versions as versionsApi, requirements as requirementsApi, testCaseDefects } from '../api';
 import { useAbortController } from '../hooks/useAbortController';
 
 function formatRelative(iso) {
@@ -69,6 +69,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     const [activeTab, setActiveTab] = useState('steps');
     const [versionHistory, setVersionHistory] = useState([]);
     const [linkedReqs, setLinkedReqs] = useState([]);
+    const [linkedDefects, setLinkedDefects] = useState([]);
 
     // Execution history
     const [executions, setExecutions] = useState([]);
@@ -97,12 +98,16 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
         if (!id || !inlinePane) return;
         setVersionHistory([]);
         setLinkedReqs([]);
+        setLinkedDefects([]);
         versionsApi.list(id)
             .then(data => setVersionHistory(Array.isArray(data) ? data : []))
             .catch(() => setVersionHistory([]));
         requirementsApi.listByTestCase(id)
             .then(data => setLinkedReqs(Array.isArray(data) ? data : (data?.requirements || [])))
             .catch(() => setLinkedReqs([]));
+        testCaseDefects.list(id)
+            .then(data => setLinkedDefects(Array.isArray(data) ? data : []))
+            .catch(() => setLinkedDefects([]));
     }, [test?.id, testId, inlinePane]);
 
     // Initial Load
@@ -485,11 +490,12 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
 
         const defects = executions.filter(e => e.defect_type && e.defect_type !== '');
         const tabs = [
-            { k: 'steps',    l: 'Steps',    n: steps.length },
-            { k: 'runs',     l: 'Runs',     n: totalRuns },
-            { k: 'defects',  l: 'Defects',  n: defects.length },
-            { k: 'reqs',     l: 'Reqs',     n: linkedReqs.length },
-            { k: 'activity', l: 'Activity', n: null },
+            { k: 'steps',          l: 'Steps',          n: steps.length },
+            { k: 'runs',           l: 'Runs',           n: totalRuns },
+            { k: 'defects',        l: 'Defects',        n: defects.length },
+            { k: 'linked-defects', l: 'Linked Defects', n: linkedDefects.length },
+            { k: 'reqs',           l: 'Reqs',           n: linkedReqs.length },
+            { k: 'activity',       l: 'Activity',       n: null },
         ];
 
         const latestVersionWithAuthor = versionHistory.find(v => v.user_name);
@@ -778,6 +784,21 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                                     </div>
                                 );
                             })}
+                        </div>
+                    )}
+
+                    {activeTab === 'linked-defects' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            {linkedDefects.length === 0 ? (
+                                <p style={{ fontSize: 12, color: 'var(--text-secondary)', fontStyle: 'italic', margin: 0 }}>No linked defects.</p>
+                            ) : linkedDefects.map(d => (
+                                <div key={d.id} className="detail-pane-defect-row">
+                                    <span className="detail-pane-defect-severity">{d.severity}</span>
+                                    <span>{d.title}</span>
+                                    <span className="detail-pane-exec-meta">{d.status}</span>
+                                    {d.external_url && <a href={d.external_url} target="_blank" rel="noopener noreferrer">↗</a>}
+                                </div>
+                            ))}
                         </div>
                     )}
 

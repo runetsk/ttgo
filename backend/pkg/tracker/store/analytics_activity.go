@@ -61,61 +61,41 @@ func (s *Store) GetRecentActivity(startDate, endDate time.Time, limit int) ([]ma
 	return results, nil
 }
 
-// GetUniqueBugs returns unique Jira defect links with linked test case count.
+// GetUniqueBugs returns unique defects with linked test case count.
 func (s *Store) GetUniqueBugs(startDate, endDate time.Time, limit int) ([]map[string]interface{}, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 50
 	}
-
 	q := newAnalyticsQuery(`
-		SELECT
-			dl.jira_issue_key,
-			dl.last_known_summary,
-			dl.last_known_status,
-			dl.last_known_priority,
-			dl.last_known_assignee,
-			dl.last_known_url,
-			dl.status_category,
+		SELECT d.id, d.title, d.status, d.severity, d.external_provider, d.external_key, d.external_url,
 			COUNT(DISTINCT dl.test_case_id) as linked_test_count,
-			MIN(dl.created_at) as first_linked_at,
-			MAX(dl.updated_at) as last_updated_at
-		FROM defect_links dl`)
-
+			MIN(dl.created_at) as first_linked_at, d.updated_at as last_updated_at
+		FROM defects d LEFT JOIN defect_links dl ON dl.defect_id = d.id`)
 	if !startDate.IsZero() {
-		q.Where("dl.created_at >= ?", startDate)
+		q.Where("d.created_at >= ?", startDate)
 	}
 	if !endDate.IsZero() {
-		q.Where("dl.created_at < ?", endDate)
+		q.Where("d.created_at < ?", endDate)
 	}
-	q.GroupBy("dl.jira_issue_key").OrderBy("linked_test_count DESC, dl.jira_issue_key ASC").Limit(limit)
-
+	q.GroupBy("d.id").OrderBy("linked_test_count DESC, d.created_at DESC").Limit(limit)
 	query, args := q.Build()
-
-	var results []map[string]interface{}
 	rows, err := s.db.Raw(query, args...).Rows()
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-
+	var results []map[string]interface{}
 	for rows.Next() {
-		var jiraKey, summary, status, priority, assignee, url, statusCat string
+		var id, title, status, severity, provider, key, url string
 		var linkedCount int
 		var firstLinked, lastUpdated string
-		if err := rows.Scan(&jiraKey, &summary, &status, &priority, &assignee, &url, &statusCat, &linkedCount, &firstLinked, &lastUpdated); err != nil {
+		if err := rows.Scan(&id, &title, &status, &severity, &provider, &key, &url, &linkedCount, &firstLinked, &lastUpdated); err != nil {
 			return nil, err
 		}
 		results = append(results, map[string]interface{}{
-			"jira_issue_key":    jiraKey,
-			"summary":           summary,
-			"status":            status,
-			"priority":          priority,
-			"assignee":          assignee,
-			"url":               url,
-			"status_category":   statusCat,
-			"linked_test_count": linkedCount,
-			"first_linked_at":   firstLinked,
-			"last_updated_at":   lastUpdated,
+			"id": id, "title": title, "status": status, "severity": severity,
+			"external_provider": provider, "external_key": key, "external_url": url,
+			"linked_test_count": linkedCount, "first_linked_at": firstLinked, "last_updated_at": lastUpdated,
 		})
 	}
 	if results == nil {

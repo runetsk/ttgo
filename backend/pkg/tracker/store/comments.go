@@ -85,33 +85,25 @@ func (s *Store) CountCommentsByTargets(targetType string, targetIDs []string) (m
 	return m, nil
 }
 
-// CountDefectLinksByRuns returns open/closed defect link counts per run ID
-// by counting run-result-scoped defect links.
+// CountDefectLinksByRuns returns open/closed defect counts per test-run ID.
 func (s *Store) CountDefectLinksByRuns(runIDs []string) (open map[string]int, closed map[string]int, err error) {
-	type result struct {
-		TestRunID      string
-		StatusCategory string
-		Count          int
+	type row struct {
+		TestRunID string
+		Status    string
+		N         int
 	}
-	var results []result
+	var rows []row
 	err = s.db.Raw(`
-		SELECT rr.test_run_id, dl.status_category, COUNT(*) as count
-		FROM defect_links dl
-		JOIN run_results rr ON rr.id = dl.run_result_id
-		WHERE rr.test_run_id IN ?
-		GROUP BY rr.test_run_id, dl.status_category
-	`, runIDs).Scan(&results).Error
-	if err != nil {
-		return nil, nil, err
-	}
-	open = make(map[string]int, len(runIDs))
-	closed = make(map[string]int, len(runIDs))
-	for _, r := range results {
-		if r.StatusCategory == "done" {
-			closed[r.TestRunID] = r.Count
+		SELECT rr.test_run_id, d.status, COUNT(DISTINCT d.id) as n
+		FROM defect_links dl JOIN run_results rr ON rr.id = dl.run_result_id JOIN defects d ON d.id = dl.defect_id
+		WHERE rr.test_run_id IN ? GROUP BY rr.test_run_id, d.status`, runIDs).Scan(&rows).Error
+	open, closed = map[string]int{}, map[string]int{}
+	for _, r := range rows {
+		if r.Status == "closed" {
+			closed[r.TestRunID] += r.N
 		} else {
-			open[r.TestRunID] += r.Count
+			open[r.TestRunID] += r.N
 		}
 	}
-	return open, closed, nil
+	return open, closed, err
 }

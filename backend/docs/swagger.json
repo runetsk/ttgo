@@ -1480,6 +1480,220 @@
                 }
             }
         },
+        "/defects": {
+            "get": {
+                "description": "Returns native defects with optional filtering by status, severity, or search query.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "defects"
+                ],
+                "summary": "List defects",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Filter by status: open | closed",
+                        "name": "status",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Filter by severity: critical | major | minor | trivial",
+                        "name": "severity",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Full-text search query",
+                        "name": "q",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Creates a new native defect.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "defects"
+                ],
+                "summary": "Create a defect",
+                "parameters": [
+                    {
+                        "description": "Defect to create",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.CreateDefectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/defects/{id}": {
+            "delete": {
+                "description": "Permanently deletes a defect and all its links.",
+                "tags": [
+                    "defects"
+                ],
+                "summary": "Delete a defect",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Defect ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "patch": {
+                "description": "Partially updates a defect (nil fields are left unchanged).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "defects"
+                ],
+                "summary": "Update a defect",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Defect ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Fields to update",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.UpdateDefectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/folders": {
             "post": {
                 "description": "Creates a new folder, optionally nested under a parent folder.",
@@ -3353,6 +3567,348 @@
                 }
             }
         },
+        "/runs/{id}/defect-links": {
+            "get": {
+                "description": "Returns all defects linked to any result within the given test run.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "runs"
+                ],
+                "summary": "List defects for a run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ttgo_pkg_tracker_models.RunDefectRow"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/runs/{id}/results/{result_id}/defect-links": {
+            "get": {
+                "description": "Returns all defects linked to the specified run result.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "runs"
+                ],
+                "summary": "List defects for a run result",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run result ID",
+                        "name": "result_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Links an existing defect to the specified run result (and its test case).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "runs"
+                ],
+                "summary": "Link an existing defect to a run result",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run result ID",
+                        "name": "result_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Defect to link",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.LinkDefectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.DefectLink"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/runs/{id}/results/{result_id}/defect-links/{defect_id}": {
+            "delete": {
+                "description": "Removes the defect link from the specified run result.",
+                "tags": [
+                    "runs"
+                ],
+                "summary": "Unlink a defect from a run result",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run result ID",
+                        "name": "result_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Defect ID",
+                        "name": "defect_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/runs/{id}/results/{result_id}/defects": {
+            "post": {
+                "description": "Creates a new defect and immediately links it to the specified run result.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "runs"
+                ],
+                "summary": "Create and link a defect to a run result",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Run result ID",
+                        "name": "result_id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Defect to create",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.CreateDefectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "defect": {
+                                    "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                                },
+                                "link": {
+                                    "$ref": "#/definitions/ttgo_pkg_tracker_models.DefectLink"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/runs/{id}/results/{result_id}/screenshots": {
             "post": {
                 "security": [
@@ -4328,6 +4884,184 @@
                 }
             }
         },
+        "/tests/{id}/defect-links": {
+            "get": {
+                "description": "Returns all defects linked to the specified test case.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tests"
+                ],
+                "summary": "List defects for a test case",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test case ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            "post": {
+                "description": "Links an existing defect to the specified test case (case-scoped link).",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tests"
+                ],
+                "summary": "Link a defect to a test case",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test case ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "Defect to link",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.LinkDefectRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.DefectLink"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tests/{id}/defect-links/{defect_id}": {
+            "delete": {
+                "description": "Removes the case-scoped defect link from the specified test case.",
+                "tags": [
+                    "tests"
+                ],
+                "summary": "Unlink a defect from a test case",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test case ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Defect ID",
+                        "name": "defect_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/tests/{id}/requirements": {
             "get": {
                 "description": "Returns all requirements linked to the given test case, ordered by identifier.",
@@ -4363,6 +5097,40 @@
                             "type": "object",
                             "additionalProperties": {
                                 "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/tests/{id}/reverification-flag": {
+            "delete": {
+                "description": "Clears the reverification_flagged state for the given test case.",
+                "tags": [
+                    "tests"
+                ],
+                "summary": "Dismiss the reverification flag",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Test case ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "204": {
+                        "description": "No Content"
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
                             }
                         }
                     }
@@ -5279,6 +6047,32 @@
                 }
             }
         },
+        "ttgo_pkg_tracker_models.CreateDefectRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "external_key": {
+                    "type": "string"
+                },
+                "external_provider": {
+                    "type": "string"
+                },
+                "external_url": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
         "ttgo_pkg_tracker_models.CustomFieldDefinition": {
             "type": "object",
             "properties": {
@@ -5344,6 +6138,67 @@
                     "items": {
                         "type": "integer"
                     }
+                }
+            }
+        },
+        "ttgo_pkg_tracker_models.Defect": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "external_key": {
+                    "type": "string"
+                },
+                "external_provider": {
+                    "type": "string"
+                },
+                "external_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "linked_test_count": {
+                    "description": "computed: distinct test cases",
+                    "type": "integer"
+                },
+                "severity": {
+                    "description": "critical|major|minor|trivial",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"open\" | \"closed\"",
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_models.DefectLink": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "defect_id": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "run_result_id": {
+                    "type": "string"
+                },
+                "test_case_id": {
+                    "type": "string"
                 }
             }
         },
@@ -5501,6 +6356,14 @@
                 }
             }
         },
+        "ttgo_pkg_tracker_models.LinkDefectRequest": {
+            "type": "object",
+            "properties": {
+                "defect_id": {
+                    "type": "string"
+                }
+            }
+        },
         "ttgo_pkg_tracker_models.ParseImportRequest": {
             "type": "object",
             "properties": {
@@ -5617,6 +6480,56 @@
                     "type": "string"
                 },
                 "test_case_id": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_models.RunDefectRow": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "description": {
+                    "type": "string"
+                },
+                "external_key": {
+                    "type": "string"
+                },
+                "external_provider": {
+                    "type": "string"
+                },
+                "external_url": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "linked_test_count": {
+                    "description": "computed: distinct test cases",
+                    "type": "integer"
+                },
+                "result_status": {
+                    "type": "string"
+                },
+                "severity": {
+                    "description": "critical|major|minor|trivial",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "\"open\" | \"closed\"",
+                    "type": "string"
+                },
+                "test_case_id": {
+                    "type": "string"
+                },
+                "test_name_snapshot": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                },
+                "updated_at": {
                     "type": "string"
                 }
             }
@@ -5952,6 +6865,32 @@
                 },
                 "reason": {
                     "description": "Why parsing failed",
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_models.UpdateDefectRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "external_key": {
+                    "type": "string"
+                },
+                "external_provider": {
+                    "type": "string"
+                },
+                "external_url": {
+                    "type": "string"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
                     "type": "string"
                 }
             }

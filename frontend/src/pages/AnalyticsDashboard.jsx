@@ -354,7 +354,7 @@ export default function AnalyticsDashboard() {
             {/* P3: Unique Bugs (collapsed, lazy) */}
             <CollapsibleSection
                 title="Unique Bugs"
-                description="Jira defects linked to test cases, grouped by issue key. Shows issue status, priority, assignee, and how many test cases reference each bug."
+                description="Defects linked to test cases. Shows status, severity, and how many test cases reference each bug."
                 defaultExpanded={false}
                 onFirstExpand={() => handleFirstExpand('uniqueBugs')}
             >

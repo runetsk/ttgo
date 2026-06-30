@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TTGO_REPORT_TOKEN`; a no-op otherwise, so normal runs are unaffected.
 
 ### Changed
+- Replaced the Jira-centric defect system with native, tracker-owned defects (title/description/status/severity) that work with no external configuration. Defects are global and link to many results/test cases; an optional reference-only external link (Jira/GitHub/any URL) can be attached. Added a Defects triage page. Existing Jira defect links are migrated to native defects on first startup.
+- **Audit-log action string change:** the test-case reverification audit-log action changed from `defect_link:reverification_dismissed:<id>` to `defect:reverification_dismissed:<id>`. Any audit-log consumer keyed on the old prefix should update.
 - Unified the test-runs sidebar with the library sidebar: shared SVG folder/chevron
   icons (replacing the emoji `📁/📂` and text `▾/›`), the same `--sidebar-*` color
   tokens, and matching row styling (left accent border on the selected folder, hover,

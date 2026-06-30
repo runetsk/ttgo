@@ -50,6 +50,10 @@ func purgeKnownDemoEntities(tx *gorm.DB) error {
 	for _, d := range ds.DefectLinks {
 		defectIDs = append(defectIDs, d.ID)
 	}
+	defectEntityIDs := make([]string, 0, len(ds.Defects))
+	for _, d := range ds.Defects {
+		defectEntityIDs = append(defectEntityIDs, d.ID)
+	}
 	providerIDs := make([]string, 0, len(ds.LLMProviders))
 	for _, p := range ds.LLMProviders {
 		providerIDs = append(providerIDs, p.ID)
@@ -124,6 +128,11 @@ func purgeKnownDemoEntities(tx *gorm.DB) error {
 	}
 	if len(rrIDs) > 0 {
 		if err := tx.Where("run_result_id IN ?", rrIDs).Delete(&models.DefectLink{}).Error; err != nil {
+			return err
+		}
+	}
+	if len(defectEntityIDs) > 0 {
+		if err := tx.Where("id IN ?", defectEntityIDs).Delete(&models.Defect{}).Error; err != nil {
 			return err
 		}
 	}
@@ -266,6 +275,8 @@ func (s *Store) seedCountsByType() (SeedCounts, error) {
 			counts.RunResults = r.Cnt
 		case "requirement":
 			counts.Requirements = r.Cnt
+		case "defect":
+			counts.Defects = r.Cnt
 		case "defect_link":
 			counts.DefectLinks = r.Cnt
 		case "llm_provider":

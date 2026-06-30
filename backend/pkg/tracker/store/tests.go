@@ -192,30 +192,6 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 			tcMap[tc.ID] = tc
 		}
 
-		// Populate defect counts (same logic as GetFolderTree).
-		type defectCount struct {
-			TestCaseID     string
-			StatusCategory string
-			Count          int
-		}
-		var counts []defectCount
-		_ = s.db.Model(&models.DefectLink{}).
-			Where("test_case_id IN ? AND run_result_id IS NULL", tcIDs).
-			Select("test_case_id, status_category, count(*) as count").
-			Group("test_case_id, status_category").
-			Scan(&counts).Error
-		for _, c := range counts {
-			tc := tcMap[c.TestCaseID]
-			if tc == nil {
-				continue
-			}
-			if c.StatusCategory == "done" {
-				tc.ClosedDefectCount += c.Count
-			} else {
-				tc.OpenDefectCount += c.Count
-			}
-		}
-
 		// Populate linked requirements in bulk.
 		type reqLink struct {
 			TestCaseID string
@@ -254,6 +230,30 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 					tc.StepsCount = sc.Count
 				}
 			}
+		}
+
+		// Populate open/closed defect counts per test case.
+		type cnt struct {
+			TestCaseID string
+			Status     string
+			N          int
+		}
+		var counts []cnt
+		_ = s.db.Raw(`
+			SELECT dl.test_case_id, d.status, COUNT(DISTINCT d.id) as n
+			FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
+			WHERE dl.test_case_id IN ? GROUP BY dl.test_case_id, d.status`, tcIDs).Scan(&counts).Error
+		openByTC, closedByTC := map[string]int{}, map[string]int{}
+		for _, c := range counts {
+			if c.Status == "closed" {
+				closedByTC[c.TestCaseID] += c.N
+			} else {
+				openByTC[c.TestCaseID] += c.N
+			}
+		}
+		for i := range tests {
+			tests[i].OpenDefectCount = openByTC[tests[i].ID]
+			tests[i].ClosedDefectCount = closedByTC[tests[i].ID]
 		}
 	}
 
@@ -363,7 +363,12 @@ func deleteTestCasesTx(tx *gorm.DB, ids []string) error {
 		return err
 	}
 	// Remove defect links (008-jira-integration, FR-014 cascade delete).
-	if err := tx.Delete(&models.DefectLink{}, "test_case_id IN ?", ids).Error; err != nil {
+	// Test-case-scoped links are deleted; result-scoped links have test_case_id nulled to preserve run history.
+	if err := tx.Where("test_case_id IN ? AND run_result_id IS NULL", ids).Delete(&models.DefectLink{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Model(&models.DefectLink{}).Where("test_case_id IN ? AND run_result_id IS NOT NULL", ids).
+		Update("test_case_id", nil).Error; err != nil {
 		return err
 	}
 	// Delete test cases — steps and custom_values cascade via GORM constraints.

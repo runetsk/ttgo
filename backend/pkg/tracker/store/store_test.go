@@ -9,6 +9,8 @@ import (
 )
 
 func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	t.Chdir(t.TempDir()) // bootstrap creates backups/ in cwd
 	s, err := New(":memory:")
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = s.Close() })

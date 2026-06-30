@@ -2,100 +2,53 @@ package store
 
 import (
 	"time"
+
 	"ttgo/pkg/tracker/models"
 )
 
-// buildDemoDefectLinks returns a small set of DefectLink rows attached to
-// failing RunResults so the demo exercises the Jira-integration surface
-// (link listing, status categories, reverification flag, write-back queue).
-func buildDemoDefectLinks(now time.Time) []models.DefectLink {
-	synced := now.Add(-15 * time.Minute)
-
-	links := []models.DefectLink{
+// buildDemoDefects returns native demo defects + links.
+//
+// Link targets are verified against the demo dataset:
+//   - tc1 = demoID("tc:session-expires")   → run2 member at i=2 (i%3==2 → FAIL)
+//   - tc2 = demoID("tc:checkout-valid-payment") → run2 member at i=5 (i%3==2 → FAIL)
+//   - rr1 = demoID("rr:run2-"+tc1)         → enriched failure in assertionStory
+//   - rr2 = demoID("rr:run2-"+tc2)         → enriched failure in timeoutStory
+//   - tc3 = demoID("tc:category-filter")   → test case; link is case-scoped (closed defect)
+func buildDemoDefects(now time.Time) ([]models.Defect, []models.DefectLink) {
+	defects := []models.Defect{
 		{
-			ID:                demoID("defect:ECOM-701"),
-			TestCaseID:        demoID("tc:session-expires"),
-			RunResultID:       ptr(demoID("rr:run2-" + demoID("tc:session-expires"))),
-			JiraIssueKey:      "ECOM-701",
-			LastKnownSummary:  "Dashboard header missing after login on staging",
-			LastKnownStatus:   "In Progress",
-			LastKnownPriority: "High",
-			LastKnownAssignee: "Priya Patel",
-			LastKnownURL:      "https://demo.atlassian.net/browse/ECOM-701",
-			StatusCategory:    "indeterminate",
-			LastSyncedAt:      &synced,
-			CreatedAt:         now,
-			UpdatedAt:         now,
+			ID: demoID("defect:1"), Title: "Dashboard header missing after login",
+			Status: "open", Severity: "major",
+			ExternalProvider: "Jira", ExternalKey: "ECOM-701",
+			ExternalURL: "https://demo.atlassian.net/browse/ECOM-701",
+			CreatedAt:   now, UpdatedAt: now,
 		},
 		{
-			ID:                demoID("defect:ECOM-702"),
-			TestCaseID:        demoID("tc:checkout-valid-payment"),
-			RunResultID:       ptr(demoID("rr:run2-" + demoID("tc:checkout-valid-payment"))),
-			JiraIssueKey:      "ECOM-702",
-			LastKnownSummary:  "Payment iframe times out on Firefox",
-			LastKnownStatus:   "To Do",
-			LastKnownPriority: "Medium",
-			LastKnownAssignee: "Alex Kim",
-			LastKnownURL:      "https://demo.atlassian.net/browse/ECOM-702",
-			StatusCategory:    "todo",
-			LastSyncedAt:      &synced,
-			CreatedAt:         now,
-			UpdatedAt:         now,
+			ID: demoID("defect:2"), Title: "Payment iframe times out on Firefox",
+			Status: "open", Severity: "minor",
+			CreatedAt: now, UpdatedAt: now,
 		},
 		{
-			ID:                 demoID("defect:ECOM-703"),
-			TestCaseID:         demoID("tc:account-lockout"),
-			RunResultID:        ptr(demoID("rr:run3-" + demoID("tc:account-lockout"))),
-			JiraIssueKey:       "ECOM-703",
-			LastKnownSummary:   "Account-lockout banner fails to render under load",
-			LastKnownStatus:    "In Progress",
-			LastKnownPriority:  "High",
-			LastKnownAssignee:  "Marcus Lee",
-			LastKnownURL:       "https://demo.atlassian.net/browse/ECOM-703",
-			StatusCategory:     "indeterminate",
-			CommentPending:     true,
-			PendingCommentText: "TTGO run failed: staging · 2026-04-22 · https://demo.ttgo.test/runs/sprint1-edge",
-			LastSyncedAt:       &synced,
-			CreatedAt:          now,
-			UpdatedAt:          now,
-		},
-		{
-			ID:                demoID("defect:ECOM-650"),
-			TestCaseID:        demoID("tc:category-filter"),
-			RunResultID:       ptr(demoID("rr:run6-" + demoID("tc:category-filter"))),
-			JiraIssueKey:      "ECOM-650",
-			LastKnownSummary:  "Search service returns 504 under high concurrency",
-			LastKnownStatus:   "Done",
-			LastKnownPriority: "Medium",
-			LastKnownAssignee: "Priya Patel",
-			LastKnownURL:      "https://demo.atlassian.net/browse/ECOM-650",
-			StatusCategory:    "done",
-			LastSyncedAt:      &synced,
-			CreatedAt:         now,
-			UpdatedAt:         now,
-		},
-		{
-			ID:                demoID("defect:ECOM-712"),
-			TestCaseID:        demoID("tc:category-filter"),
-			JiraIssueKey:      "ECOM-712",
-			LastKnownSummary:  "Category-filter SQL regression in v2026.04.5",
-			LastKnownStatus:   "Done",
-			LastKnownPriority: "High",
-			LastKnownAssignee: "Alex Kim",
-			LastKnownURL:      "https://demo.atlassian.net/browse/ECOM-712",
-			StatusCategory:    "done",
-			LastSyncedAt:      &synced,
-			CreatedAt:         now,
-			UpdatedAt:         now,
+			ID: demoID("defect:3"), Title: "Category-filter SQL regression",
+			Status: "closed", Severity: "major",
+			CreatedAt: now, UpdatedAt: now,
 		},
 	}
 
-	return links
-}
+	tc1 := demoID("tc:session-expires")
+	tc2 := demoID("tc:checkout-valid-payment")
+	tc3 := demoID("tc:category-filter")
+	rr1 := demoID("rr:run2-" + tc1)
+	rr2 := demoID("rr:run2-" + tc2)
 
-// demoReverificationFlaggedTestCaseIDs lists test cases whose defects are all
-// resolved ("done") so the demo can surface the reverification-needed flag.
-func demoReverificationFlaggedTestCaseIDs() []string {
-	// tc:category-filter has two linked defects and both are in StatusCategory=done.
-	return []string{demoID("tc:category-filter")}
+	links := []models.DefectLink{
+		// result-scoped: open defect linked to tc:session-expires failure in run2
+		{ID: demoID("dl:1"), DefectID: defects[0].ID, TestCaseID: &tc1, RunResultID: &rr1, CreatedAt: now},
+		// result-scoped: open defect linked to tc:checkout-valid-payment failure in run2
+		{ID: demoID("dl:2"), DefectID: defects[1].ID, TestCaseID: &tc2, RunResultID: &rr2, CreatedAt: now},
+		// case-scoped: closed defect linked to tc:category-filter (triggers reverification flag)
+		{ID: demoID("dl:3"), DefectID: defects[2].ID, TestCaseID: &tc3, CreatedAt: now},
+	}
+
+	return defects, links
 }

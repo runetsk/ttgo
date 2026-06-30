@@ -1,131 +1,94 @@
 package cmd
 
 import (
-	"ttgo/internal/cli/output"
+	"fmt"
 
 	"github.com/spf13/cobra"
 )
 
 func newDefectsCmd() *cobra.Command {
-	defectsCmd := &cobra.Command{
-		Use:   "defects",
-		Short: "Manage Jira defect links",
-	}
-
-	defectsCmd.AddCommand(
-		newDefectsListCmd(),
-		newDefectsLinkCmd(),
-		newDefectsUnlinkCmd(),
-		newDefectsCreateIssueCmd(),
-	)
-
-	return defectsCmd
+	cmd := &cobra.Command{Use: "defects", Short: "Manage native defects"}
+	cmd.AddCommand(newDefectsListCmd(), newDefectsCreateCmd(), newDefectsLinkCmd(), newDefectsUnlinkCmd())
+	return cmd
 }
 
 func newDefectsListCmd() *cobra.Command {
-	var testID, runID, resultID string
+	var status, severity, q string
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List defect links",
+		Use: "list", Short: "List defects",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := newClient()
 			if err != nil {
 				return err
 			}
-			var raw []byte
-			var fetchErr error
-			switch {
-			case testID != "":
-				raw, fetchErr = c.ListTestDefects(testID)
-			case resultID != "" && runID != "":
-				raw, fetchErr = c.ListResultDefects(runID, resultID)
-			case runID != "":
-				raw, fetchErr = c.ListRunDefects(runID)
-			default:
-				return cmd.Help()
+			params := map[string]string{}
+			for k, v := range map[string]string{"status": status, "severity": severity, "q": q} {
+				if v != "" {
+					params[k] = v
+				}
 			}
-			if fetchErr != nil {
-				return fetchErr
+			raw, err := c.ListDefects(params)
+			if err != nil {
+				return err
 			}
-			return output.PrintRaw(cmd.OutOrStdout(), outputMode(), raw)
+			fmt.Println(string(raw))
+			return nil
 		},
 	}
-	cmd.Flags().StringVar(&testID, "test", "", "Test case ID")
-	cmd.Flags().StringVar(&runID, "run", "", "Run ID")
-	cmd.Flags().StringVar(&resultID, "result", "", "Result ID (requires --run)")
+	cmd.Flags().StringVar(&status, "status", "", "filter by status (open|closed)")
+	cmd.Flags().StringVar(&severity, "severity", "", "filter by severity")
+	cmd.Flags().StringVar(&q, "q", "", "search title/external key")
+	return cmd
+}
+
+func newDefectsCreateCmd() *cobra.Command {
+	var title, desc, severity string
+	cmd := &cobra.Command{
+		Use: "create", Short: "Create a defect",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := newClient()
+			if err != nil {
+				return err
+			}
+			raw, err := c.CreateDefect(map[string]interface{}{"title": title, "description": desc, "severity": severity})
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(raw))
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&title, "title", "", "defect title (required)")
+	cmd.Flags().StringVar(&desc, "description", "", "defect description")
+	cmd.Flags().StringVar(&severity, "severity", "minor", "severity")
+	_ = cmd.MarkFlagRequired("title")
 	return cmd
 }
 
 func newDefectsLinkCmd() *cobra.Command {
-	var runID, resultID, jiraKey string
-	cmd := &cobra.Command{
-		Use:   "link",
-		Short: "Link a Jira issue to a run result",
+	return &cobra.Command{
+		Use: "link <run-id> <result-id> <defect-id>", Short: "Link an existing defect to a run result",
+		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := newClient()
 			if err != nil {
 				return err
 			}
-			if err := c.LinkDefect(runID, resultID, jiraKey); err != nil {
-				return err
-			}
-			output.PrintMessage(cmd.OutOrStdout(), outputMode(), "Defect linked.")
-			return nil
+			return c.LinkDefect(args[0], args[1], args[2])
 		},
 	}
-	cmd.Flags().StringVar(&runID, "run", "", "Run ID (required)")
-	cmd.Flags().StringVar(&resultID, "result", "", "Result ID (required)")
-	cmd.Flags().StringVar(&jiraKey, "jira-key", "", "Jira issue key (required)")
-	cmd.MarkFlagRequired("run")
-	cmd.MarkFlagRequired("result")
-	cmd.MarkFlagRequired("jira-key")
-	return cmd
 }
 
 func newDefectsUnlinkCmd() *cobra.Command {
-	var runID, resultID, jiraKey string
-	cmd := &cobra.Command{
-		Use:   "unlink",
-		Short: "Unlink a Jira issue from a run result",
+	return &cobra.Command{
+		Use: "unlink <run-id> <result-id> <defect-id>", Short: "Unlink a defect from a run result",
+		Args: cobra.ExactArgs(3),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			c, err := newClient()
 			if err != nil {
 				return err
 			}
-			if err := c.UnlinkDefect(runID, resultID, jiraKey); err != nil {
-				return err
-			}
-			output.PrintMessage(cmd.OutOrStdout(), outputMode(), "Defect unlinked.")
-			return nil
+			return c.UnlinkDefect(args[0], args[1], args[2])
 		},
 	}
-	cmd.Flags().StringVar(&runID, "run", "", "Run ID (required)")
-	cmd.Flags().StringVar(&resultID, "result", "", "Result ID (required)")
-	cmd.Flags().StringVar(&jiraKey, "jira-key", "", "Jira issue key (required)")
-	cmd.MarkFlagRequired("run")
-	cmd.MarkFlagRequired("result")
-	cmd.MarkFlagRequired("jira-key")
-	return cmd
-}
-
-func newDefectsCreateIssueCmd() *cobra.Command {
-	var testID string
-	cmd := &cobra.Command{
-		Use:   "create-issue",
-		Short: "Create a new Jira issue from a test case",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			c, err := newClient()
-			if err != nil {
-				return err
-			}
-			raw, err := c.CreateDefectIssue(testID)
-			if err != nil {
-				return err
-			}
-			return output.PrintRaw(cmd.OutOrStdout(), outputMode(), raw)
-		},
-	}
-	cmd.Flags().StringVar(&testID, "test", "", "Test case ID (required)")
-	cmd.MarkFlagRequired("test")
-	return cmd
 }

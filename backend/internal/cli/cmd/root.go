@@ -36,11 +36,11 @@ func NewRootCmd() *cobra.Command {
 	root.AddCommand(newCategoriesCmd())
 	root.AddCommand(newRequirementsCmd())
 	root.AddCommand(newAnalyticsCmd())
-	root.AddCommand(newDefectsCmd())
 	root.AddCommand(newBackupsCmd())
 	root.AddCommand(newWebhooksCmd())
 	root.AddCommand(newAICmd())
 	root.AddCommand(newUsersCmd())
+	root.AddCommand(newDefectsCmd())
 
 	return root
 }

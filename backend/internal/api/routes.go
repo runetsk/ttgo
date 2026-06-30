@@ -9,6 +9,7 @@ import (
 	apibackups "ttgo/internal/api/backups"
 	apicategories "ttgo/internal/api/categories"
 	apicustomfields "ttgo/internal/api/customfields"
+	apidefects "ttgo/internal/api/defects"
 	apifolders "ttgo/internal/api/folders"
 	apiconfluence "ttgo/internal/api/integrations/confluence"
 	apijira "ttgo/internal/api/integrations/jira"
@@ -68,6 +69,7 @@ func mountAPIRoutes(s *Server, api *routegroup.Bundle) {
 	apibackups.Mount(api, s.backups, s.requireAdmin)
 	apiusers.Mount(api, apiusers.NewHandler(s.store, s.Hub, userFromContext, authHandler.LogAuthEvent), s.requireAdmin)
 	apianalytics.Mount(api, apianalytics.NewHandler(s.store), s.requireAuth)
+	apidefects.Mount(api, apidefects.NewHandler(s.store), s.requireAuth)
 
 	// Seed / demo data
 	api.HandleFunc("GET /seed", s.requireAdmin(s.handleGetSeedStatus))

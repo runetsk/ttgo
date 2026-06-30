@@ -28,6 +28,7 @@ const RequirementsPage = lazy(() => import('./pages/RequirementsPage'))
 const RequirementDetailPage = lazy(() => import('./pages/RequirementDetailPage'))
 const AIGeneratePage = lazy(() => import('./pages/AIGeneratePage'))
 const HelpPage = lazy(() => import('./pages/HelpPage'))
+const DefectsPage = lazy(() => import('./pages/DefectsPage'))
 
 function PageLoader() {
     return (
@@ -96,6 +97,7 @@ function App() {
     if (location.pathname.startsWith('/requirements/')) return;
     if (location.pathname === '/ai-generate') return;
     if (location.pathname === '/help') return;
+    if (location.pathname === '/defects') return;
 
     if (selectedFolders.length === 1) {
       const id = selectedFolders[0].id;
@@ -203,6 +205,7 @@ function App() {
               <Route path="/requirements/:reqId" element={<RequirementDetailPage />} />
               <Route path="/ai-generate" element={<AIGenerateRoute />} />
               <Route path="/help" element={<HelpPage />} />
+              <Route path="/defects" element={<DefectsPage />} />
             </Routes>
             </Suspense>
           </div>

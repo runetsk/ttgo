@@ -148,6 +148,47 @@ async function deleteRunFolderAPI(request, id) {
     await ensureOk(res);
 }
 
+// ── Defects ──────────────────────────────────────────────────────────────────
+
+// Creates a global (standalone) defect. Returns the Defect object.
+async function createDefectAPI(request, fields = {}) {
+    const res = await request.post(`${API_URL}/defects`, { data: fields });
+    await ensureOk(res);
+    return res.json();
+}
+
+// Creates a defect and immediately links it to a run result in one call.
+// Returns { defect, link }.
+async function createAndLinkResultDefectAPI(request, runId, resultId, fields = {}) {
+    const res = await request.post(`${API_URL}/runs/${runId}/results/${resultId}/defects`, { data: fields });
+    await ensureOk(res);
+    return res.json();
+}
+
+// Links an existing defect (by defect_id) to a run result. Returns the DefectLink.
+async function linkResultDefectAPI(request, runId, resultId, defectId) {
+    const res = await request.post(`${API_URL}/runs/${runId}/results/${resultId}/defect-links`, {
+        data: { defect_id: defectId },
+    });
+    await ensureOk(res);
+    return res.json();
+}
+
+// Unlinks a defect from a run result. Returns nothing (204).
+async function unlinkResultDefectAPI(request, runId, resultId, defectId) {
+    const res = await request.delete(
+        `${API_URL}/runs/${runId}/results/${resultId}/defect-links/${defectId}`
+    );
+    await ensureOk(res);
+}
+
+// Lists defects linked to a specific run result. Returns Defect[].
+async function listResultDefectsAPI(request, runId, resultId) {
+    const res = await request.get(`${API_URL}/runs/${runId}/results/${resultId}/defect-links`);
+    await ensureOk(res);
+    return res.json();
+}
+
 export {
     API_URL,
     MOCK_URL,
@@ -168,4 +209,9 @@ export {
     getResultId,
     createRunFolderAPI,
     deleteRunFolderAPI,
+    createDefectAPI,
+    createAndLinkResultDefectAPI,
+    linkResultDefectAPI,
+    unlinkResultDefectAPI,
+    listResultDefectsAPI,
 };

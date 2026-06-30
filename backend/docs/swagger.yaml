@@ -108,6 +108,23 @@ definitions:
       type:
         $ref: '#/definitions/ttgo_pkg_tracker_models.CustomFieldType'
     type: object
+  ttgo_pkg_tracker_models.CreateDefectRequest:
+    properties:
+      description:
+        type: string
+      external_key:
+        type: string
+      external_provider:
+        type: string
+      external_url:
+        type: string
+      severity:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+    type: object
   ttgo_pkg_tracker_models.CustomFieldDefinition:
     properties:
       created_at:
@@ -155,6 +172,47 @@ definitions:
         items:
           type: integer
         type: array
+    type: object
+  ttgo_pkg_tracker_models.Defect:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      external_key:
+        type: string
+      external_provider:
+        type: string
+      external_url:
+        type: string
+      id:
+        type: string
+      linked_test_count:
+        description: 'computed: distinct test cases'
+        type: integer
+      severity:
+        description: critical|major|minor|trivial
+        type: string
+      status:
+        description: '"open" | "closed"'
+        type: string
+      title:
+        type: string
+      updated_at:
+        type: string
+    type: object
+  ttgo_pkg_tracker_models.DefectLink:
+    properties:
+      created_at:
+        type: string
+      defect_id:
+        type: string
+      id:
+        type: string
+      run_result_id:
+        type: string
+      test_case_id:
+        type: string
     type: object
   ttgo_pkg_tracker_models.ExecutionStatus:
     enum:
@@ -261,6 +319,11 @@ definitions:
       url:
         type: string
     type: object
+  ttgo_pkg_tracker_models.LinkDefectRequest:
+    properties:
+      defect_id:
+        type: string
+    type: object
   ttgo_pkg_tracker_models.ParseImportRequest:
     properties:
       content:
@@ -344,6 +407,40 @@ definitions:
       requirement_id:
         type: string
       test_case_id:
+        type: string
+    type: object
+  ttgo_pkg_tracker_models.RunDefectRow:
+    properties:
+      created_at:
+        type: string
+      description:
+        type: string
+      external_key:
+        type: string
+      external_provider:
+        type: string
+      external_url:
+        type: string
+      id:
+        type: string
+      linked_test_count:
+        description: 'computed: distinct test cases'
+        type: integer
+      result_status:
+        type: string
+      severity:
+        description: critical|major|minor|trivial
+        type: string
+      status:
+        description: '"open" | "closed"'
+        type: string
+      test_case_id:
+        type: string
+      test_name_snapshot:
+        type: string
+      title:
+        type: string
+      updated_at:
         type: string
     type: object
   ttgo_pkg_tracker_models.RunFolder:
@@ -582,6 +679,23 @@ definitions:
         type: string
       reason:
         description: Why parsing failed
+        type: string
+    type: object
+  ttgo_pkg_tracker_models.UpdateDefectRequest:
+    properties:
+      description:
+        type: string
+      external_key:
+        type: string
+      external_provider:
+        type: string
+      external_url:
+        type: string
+      severity:
+        type: string
+      status:
+        type: string
+      title:
         type: string
     type: object
 host: localhost:8080
@@ -1552,6 +1666,146 @@ paths:
       summary: Delete a custom field definition
       tags:
       - custom-fields
+  /defects:
+    get:
+      description: Returns native defects with optional filtering by status, severity,
+        or search query.
+      parameters:
+      - description: 'Filter by status: open | closed'
+        in: query
+        name: status
+        type: string
+      - description: 'Filter by severity: critical | major | minor | trivial'
+        in: query
+        name: severity
+        type: string
+      - description: Full-text search query
+        in: query
+        name: q
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/ttgo_pkg_tracker_models.Defect'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: List defects
+      tags:
+      - defects
+    post:
+      consumes:
+      - application/json
+      description: Creates a new native defect.
+      parameters:
+      - description: Defect to create
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.CreateDefectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.Defect'
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Create a defect
+      tags:
+      - defects
+  /defects/{id}:
+    delete:
+      description: Permanently deletes a defect and all its links.
+      parameters:
+      - description: Defect ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Delete a defect
+      tags:
+      - defects
+    patch:
+      consumes:
+      - application/json
+      description: Partially updates a defect (nil fields are left unchanged).
+      parameters:
+      - description: Defect ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.UpdateDefectRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.Defect'
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Update a defect
+      tags:
+      - defects
   /folders:
     post:
       consumes:
@@ -2797,6 +3051,233 @@ paths:
       summary: List test runs
       tags:
       - runs
+  /runs/{id}/defect-links:
+    get:
+      description: Returns all defects linked to any result within the given test
+        run.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/ttgo_pkg_tracker_models.RunDefectRow'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: List defects for a run
+      tags:
+      - runs
+  /runs/{id}/results/{result_id}/defect-links:
+    get:
+      description: Returns all defects linked to the specified run result.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/ttgo_pkg_tracker_models.Defect'
+            type: array
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: List defects for a run result
+      tags:
+      - runs
+    post:
+      consumes:
+      - application/json
+      description: Links an existing defect to the specified run result (and its test
+        case).
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      - description: Defect to link
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.LinkDefectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.DefectLink'
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Link an existing defect to a run result
+      tags:
+      - runs
+  /runs/{id}/results/{result_id}/defect-links/{defect_id}:
+    delete:
+      description: Removes the defect link from the specified run result.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      - description: Defect ID
+        in: path
+        name: defect_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Unlink a defect from a run result
+      tags:
+      - runs
+  /runs/{id}/results/{result_id}/defects:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new defect and immediately links it to the specified
+        run result.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      - description: Defect to create
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.CreateDefectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            properties:
+              defect:
+                $ref: '#/definitions/ttgo_pkg_tracker_models.Defect'
+              link:
+                $ref: '#/definitions/ttgo_pkg_tracker_models.DefectLink'
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Create and link a defect to a run result
+      tags:
+      - runs
   /runs/{id}/results/{result_id}/screenshots:
     post:
       consumes:
@@ -3326,6 +3807,123 @@ paths:
       summary: Assign a category to a test case
       tags:
       - tests
+  /tests/{id}/defect-links:
+    get:
+      description: Returns all defects linked to the specified test case.
+      parameters:
+      - description: Test case ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/ttgo_pkg_tracker_models.Defect'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: List defects for a test case
+      tags:
+      - tests
+    post:
+      consumes:
+      - application/json
+      description: Links an existing defect to the specified test case (case-scoped
+        link).
+      parameters:
+      - description: Test case ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Defect to link
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.LinkDefectRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.DefectLink'
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Link a defect to a test case
+      tags:
+      - tests
+  /tests/{id}/defect-links/{defect_id}:
+    delete:
+      description: Removes the case-scoped defect link from the specified test case.
+      parameters:
+      - description: Test case ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Defect ID
+        in: path
+        name: defect_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Unlink a defect from a test case
+      tags:
+      - tests
   /tests/{id}/requirements:
     get:
       description: Returns all requirements linked to the given test case, ordered
@@ -3354,6 +3952,28 @@ paths:
       summary: List requirements linked to a test case
       tags:
       - requirements
+  /tests/{id}/reverification-flag:
+    delete:
+      description: Clears the reverification_flagged state for the given test case.
+      parameters:
+      - description: Test case ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: Dismiss the reverification flag
+      tags:
+      - tests
   /tests/bulk-delete:
     post:
       consumes:

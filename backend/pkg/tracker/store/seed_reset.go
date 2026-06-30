@@ -13,6 +13,7 @@ type ResetCounts struct {
 	FlakyStats        int64 `json:"flaky_stats"`
 	TestRuns          int64 `json:"test_runs"`
 	RunFolders        int64 `json:"run_folders"`
+	Defects           int64 `json:"defects"`
 	DefectLinks       int64 `json:"defect_links"`
 	CategoryTestCases int64 `json:"category_test_cases"`
 	ReqLinks          int64 `json:"requirement_links"`
@@ -54,6 +55,9 @@ func (s *Store) ResetAllDataTx() (ResetCounts, error) {
 		}
 		tx.Model(&models.RunFolder{}).Where("1 = 1").Update("parent_id", nil)
 		if c.RunFolders, err = del(&models.RunFolder{}); err != nil {
+			return err
+		}
+		if c.Defects, err = del(&models.Defect{}); err != nil {
 			return err
 		}
 		if c.DefectLinks, err = del(&models.DefectLink{}); err != nil {

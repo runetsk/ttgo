@@ -66,30 +66,34 @@ func (s *Store) GetFolderTree() ([]*models.Folder, error) {
 		return nil, err
 	}
 
-	// Populate defect counts per test case (008-jira-integration, FR-015).
-	type defectCount struct {
-		TestCaseID     string
-		StatusCategory string
-		Count          int
-	}
-	var counts []defectCount
-	_ = s.db.Model(&models.DefectLink{}).
-		Where("run_result_id IS NULL").
-		Select("test_case_id, status_category, count(*) as count").
-		Group("test_case_id, status_category").
-		Scan(&counts).Error
-	openMap := make(map[string]int)
-	closedMap := make(map[string]int)
-	for _, c := range counts {
-		if c.StatusCategory == "done" {
-			closedMap[c.TestCaseID] += c.Count
-		} else {
-			openMap[c.TestCaseID] += c.Count
+	// Populate open/closed defect counts per test case.
+	if len(allTestCases) > 0 {
+		tcIDs := make([]string, len(allTestCases))
+		for i, tc := range allTestCases {
+			tcIDs[i] = tc.ID
 		}
-	}
-	for _, tc := range allTestCases {
-		tc.OpenDefectCount = openMap[tc.ID]
-		tc.ClosedDefectCount = closedMap[tc.ID]
+		type cnt struct {
+			TestCaseID string
+			Status     string
+			N          int
+		}
+		var counts []cnt
+		_ = s.db.Raw(`
+			SELECT dl.test_case_id, d.status, COUNT(DISTINCT d.id) as n
+			FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
+			WHERE dl.test_case_id IN ? GROUP BY dl.test_case_id, d.status`, tcIDs).Scan(&counts).Error
+		openByTC, closedByTC := map[string]int{}, map[string]int{}
+		for _, c := range counts {
+			if c.Status == "closed" {
+				closedByTC[c.TestCaseID] += c.N
+			} else {
+				openByTC[c.TestCaseID] += c.N
+			}
+		}
+		for i := range allTestCases {
+			allTestCases[i].OpenDefectCount = openByTC[allTestCases[i].ID]
+			allTestCases[i].ClosedDefectCount = closedByTC[allTestCases[i].ID]
+		}
 	}
 
 	// Build tree

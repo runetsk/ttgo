@@ -3,7 +3,6 @@ package runs
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -254,58 +253,12 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 
 	h.store.TouchTestRun(runID)
 
-	var warnings []models.RunResultUpdateWarning
-	if req.Status != nil && models.ExecutionStatus(*req.Status) == models.StatusPass {
-		var rr models.RunResult
-		if err := h.store.DB().Select("test_case_id").Where("id = ?", resultID).First(&rr).Error; err == nil && rr.TestCaseID != nil {
-			warnings = h.triggerJiraWriteBack(r, runID, *rr.TestCaseID)
-		}
-	}
-
+	// native: Task 6 — Jira write-back removed; native defect status update restored here.
 	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
 		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultUpdated, "run:"+runID, fullRun))
 	}
 
-	if len(warnings) > 0 {
-		httpx.JSON(w, http.StatusOK, map[string]interface{}{"status": "updated", "warnings": warnings})
-		return
-	}
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
-}
-
-func (h *Handler) triggerJiraWriteBack(r *http.Request, runID, testCaseID string) []models.RunResultUpdateWarning {
-	cfg, err := h.store.GetJiraConfig()
-	if err != nil || cfg == nil || !cfg.Enabled {
-		return nil
-	}
-
-	links, err := h.store.ListDefectLinksByTestCase(testCaseID)
-	if err != nil || len(links) == 0 {
-		return nil
-	}
-
-	scheme := "http"
-	if r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
-	}
-	runURL := fmt.Sprintf("%s://%s/runs/%s", scheme, r.Host, runID)
-
-	tc, _ := h.store.GetTestCase(testCaseID)
-	testName := testCaseID
-	if tc != nil {
-		testName = tc.Name
-	}
-
-	var warnings []models.RunResultUpdateWarning
-	for _, link := range links {
-		if warn := h.store.WriteBackComment(cfg, testCaseID, link.JiraIssueKey, testName, runURL); warn != "" {
-			warnings = append(warnings, models.RunResultUpdateWarning{
-				JiraIssueKey: link.JiraIssueKey,
-				Message:      warn,
-			})
-		}
-	}
-	return warnings
 }
 
 func (h *Handler) DeleteTestRun(w http.ResponseWriter, r *http.Request) {
@@ -659,16 +612,7 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 
 	h.store.TouchTestRun(runID)
 
-	var allWarnings []models.RunResultUpdateWarning
-	if models.ExecutionStatus(req.Status) == models.StatusPass {
-		for _, resultID := range req.ResultIDs {
-			var rr models.RunResult
-			if err := h.store.DB().Select("test_case_id").Where("id = ?", resultID).First(&rr).Error; err == nil && rr.TestCaseID != nil {
-				allWarnings = append(allWarnings, h.triggerJiraWriteBack(r, runID, *rr.TestCaseID)...)
-			}
-		}
-	}
-
+	// native: Task 6 — Jira write-back removed; native defect status update restored here.
 	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
 		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultBulkUpdated, "run:"+runID, fullRun))
 	}
@@ -676,9 +620,6 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]interface{}{
 		"status":  "updated",
 		"updated": len(req.ResultIDs),
-	}
-	if len(allWarnings) > 0 {
-		resp["warnings"] = allWarnings
 	}
 	httpx.JSON(w, http.StatusOK, resp)
 }

@@ -419,8 +419,17 @@ func (s *Store) DeleteTestRun(id string) error {
 				Delete(&models.Comment{}).Error; err != nil {
 				return err
 			}
+			// Collect affected test cases before deleting links, for reverification.
+			var affectedTCs []string
+			if err := tx.Model(&models.DefectLink{}).Where("run_result_id IN ? AND test_case_id IS NOT NULL", resultIDs).
+				Distinct().Pluck("test_case_id", &affectedTCs).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("run_result_id IN ?", resultIDs).
 				Delete(&models.DefectLink{}).Error; err != nil {
+				return err
+			}
+			if err := recomputeReverification(tx, affectedTCs); err != nil {
 				return err
 			}
 			// AI failure-analysis rows have no DB FK to results; delete them here
@@ -461,8 +470,17 @@ func (s *Store) DeleteTestRuns(ids []string) error {
 				Delete(&models.Comment{}).Error; err != nil {
 				return err
 			}
+			// Collect affected test cases before deleting links, for reverification.
+			var affectedTCs []string
+			if err := tx.Model(&models.DefectLink{}).Where("run_result_id IN ? AND test_case_id IS NOT NULL", resultIDs).
+				Distinct().Pluck("test_case_id", &affectedTCs).Error; err != nil {
+				return err
+			}
 			if err := tx.Where("run_result_id IN ?", resultIDs).
 				Delete(&models.DefectLink{}).Error; err != nil {
+				return err
+			}
+			if err := recomputeReverification(tx, affectedTCs); err != nil {
 				return err
 			}
 			// AI failure-analysis rows have no DB FK to results (F-047).
@@ -571,9 +589,17 @@ func (s *Store) DeleteRunResult(runID string, resultID string) error {
 			Delete(&models.Comment{}).Error; err != nil {
 			return err
 		}
-		// Delete result-level defect links
+		// Delete result-level defect links (collect affected test cases first for reverification)
+		var affectedTCs []string
+		if err := tx.Model(&models.DefectLink{}).Where("run_result_id = ? AND test_case_id IS NOT NULL", resultID).
+			Distinct().Pluck("test_case_id", &affectedTCs).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("run_result_id = ?", resultID).
 			Delete(&models.DefectLink{}).Error; err != nil {
+			return err
+		}
+		if err := recomputeReverification(tx, affectedTCs); err != nil {
 			return err
 		}
 		// Delete the result

@@ -1,39 +1,37 @@
 import React, { useState } from 'react';
 import { relativeTime } from './utils';
 
-const PRIORITY_CONFIG = {
-    'Highest': { color: '#ef4444', icon: '⬆⬆', bg: 'rgba(239,68,68,0.08)' },
-    'High': { color: '#f97316', icon: '⬆', bg: 'rgba(249,115,22,0.08)' },
-    'Medium': { color: '#eab308', icon: '—', bg: 'rgba(234,179,8,0.08)' },
-    'Low': { color: '#22c55e', icon: '⬇', bg: 'rgba(34,197,94,0.08)' },
-    'Lowest': { color: '#6b7280', icon: '⬇⬇', bg: 'rgba(107,114,128,0.08)' },
+const SEVERITY_CONFIG = {
+    critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.08)' },
+    major:    { color: '#f97316', bg: 'rgba(249,115,22,0.08)' },
+    minor:    { color: '#eab308', bg: 'rgba(234,179,8,0.08)' },
+    trivial:  { color: '#6b7280', bg: 'rgba(107,114,128,0.08)' },
 };
 
-const STATUS_CAT_CONFIG = {
-    'todo': { label: 'To Do', color: '#9ca3af', icon: '○' },
-    'indeterminate': { label: 'In Progress', color: '#3b82f6', icon: '◐' },
-    'done': { label: 'Done', color: '#22c55e', icon: '●' },
+const STATUS_CONFIG = {
+    closed: { label: 'Closed', color: '#22c55e', icon: '●' },
+    open:   { label: 'Open',   color: '#f97316', icon: '○' },
 };
 
-function StatusBadge({ status, statusCategory }) {
-    const cat = STATUS_CAT_CONFIG[statusCategory] || { label: status || 'Unknown', color: '#9ca3af', icon: '○' };
+function StatusBadge({ status }) {
+    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.open;
     return (
         <span className="analytics-rate-badge" style={{
-            backgroundColor: cat.color + '18',
-            color: cat.color,
-            border: `1px solid ${cat.color}33`,
+            backgroundColor: cfg.color + '18',
+            color: cfg.color,
+            border: `1px solid ${cfg.color}33`,
             gap: 4,
             display: 'inline-flex',
             alignItems: 'center',
         }}>
-            <span style={{ fontSize: '0.7em' }}>{cat.icon}</span>
-            {status || cat.label}
+            <span style={{ fontSize: '0.7em' }}>{cfg.icon}</span>
+            {cfg.label}
         </span>
     );
 }
 
-function PriorityCell({ priority }) {
-    const cfg = PRIORITY_CONFIG[priority];
+function SeverityCell({ severity }) {
+    const cfg = SEVERITY_CONFIG[severity];
     if (!cfg) return <span style={{ color: 'var(--text-secondary)' }}>—</span>;
     return (
         <span style={{
@@ -51,7 +49,7 @@ function PriorityCell({ priority }) {
                 backgroundColor: cfg.color,
                 flexShrink: 0,
             }} />
-            {priority}
+            {severity.charAt(0).toUpperCase() + severity.slice(1)}
         </span>
     );
 }
@@ -65,8 +63,8 @@ export default function UniqueBugsTable({ data }) {
         return (
             <div className="analytics-empty">
                 <div className="analytics-empty-icon">🐛</div>
-                <div className="analytics-empty-text">No defect links found</div>
-                <div className="analytics-empty-hint">Link Jira issues to test cases to see them here</div>
+                <div className="analytics-empty-text">No defects yet</div>
+                <div className="analytics-empty-hint">Create or link defects to see them here</div>
             </div>
         );
     }
@@ -87,14 +85,15 @@ export default function UniqueBugsTable({ data }) {
         return String(av || '').localeCompare(String(bv || '')) * dir;
     });
 
-    const SortHeader = ({ field, children, align }) => (
+    const sortTh = (field, label, align) => (
         <th
+            key={field}
             className="analytics-sortable-th"
             onClick={() => handleSort(field)}
             style={{ textAlign: align || 'left', cursor: 'pointer', userSelect: 'none' }}
         >
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                {children}
+                {label}
                 <span style={{ opacity: sortField === field ? 1 : 0.5, fontSize: '0.65em' }}>
                     {sortField === field ? (sortDir === 'asc' ? '▲' : '▼') : '▲'}
                 </span>
@@ -103,8 +102,8 @@ export default function UniqueBugsTable({ data }) {
     );
 
     // Summary stats
-    const totalOpen = bugs.filter(b => b.status_category !== 'done').length;
-    const totalDone = bugs.filter(b => b.status_category === 'done').length;
+    const totalOpen   = bugs.filter(b => b.status === 'open').length;
+    const totalClosed = bugs.filter(b => b.status === 'closed').length;
 
     return (
         <div>
@@ -129,7 +128,7 @@ export default function UniqueBugsTable({ data }) {
                     <span style={{ color: 'var(--text-secondary)' }}>Open</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.84rem' }}>
-                    <span style={{ fontWeight: 700, color: '#22c55e', fontSize: '1.1rem' }}>{totalDone}</span>
+                    <span style={{ fontWeight: 700, color: '#22c55e', fontSize: '1.1rem' }}>{totalClosed}</span>
                     <span style={{ color: 'var(--text-secondary)' }}>Resolved</span>
                 </div>
             </div>
@@ -138,78 +137,46 @@ export default function UniqueBugsTable({ data }) {
                 <table className="analytics-table">
                     <thead style={{ position: 'sticky', top: 0, background: 'var(--bg-primary)', zIndex: 1 }}>
                         <tr>
-                            <SortHeader field="jira_issue_key">Issue</SortHeader>
-                            <th>Summary</th>
-                            <SortHeader field="status">Status</SortHeader>
-                            <SortHeader field="priority">Priority</SortHeader>
-                            <th>Assignee</th>
-                            <SortHeader field="linked_test_count" align="center">Tests</SortHeader>
-                            <SortHeader field="first_linked_at">Linked</SortHeader>
+                            {sortTh('title', 'Title')}
+                            {sortTh('status', 'Status')}
+                            {sortTh('severity', 'Severity')}
+                            {sortTh('linked_test_count', 'Tests', 'center')}
+                            {sortTh('first_linked_at', 'First Linked')}
                         </tr>
                     </thead>
                     <tbody>
                         {sorted.map((bug, i) => (
-                            <tr key={bug.jira_issue_key || i}>
-                                <td style={{ whiteSpace: 'nowrap' }}>
-                                    {bug.url ? (
-                                        <a href={bug.url} target="_blank" rel="noopener noreferrer"
-                                            style={{
-                                                color: 'var(--accent-blue)',
-                                                textDecoration: 'none',
-                                                fontWeight: 600,
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                gap: 4,
-                                            }}>
-                                            {bug.jira_issue_key}
-                                            <span style={{ fontSize: '0.7em', opacity: 0.6 }}>↗</span>
-                                        </a>
-                                    ) : (
-                                        <span style={{ fontWeight: 600 }}>{bug.jira_issue_key}</span>
-                                    )}
-                                </td>
+                            <tr key={bug.id || i}>
                                 <td style={{
-                                    maxWidth: 280,
+                                    maxWidth: 320,
                                     overflow: 'hidden',
                                     textOverflow: 'ellipsis',
                                     whiteSpace: 'nowrap',
-                                }} title={bug.summary}>
-                                    {bug.summary || '—'}
-                                </td>
-                                <td>
-                                    <StatusBadge status={bug.status} statusCategory={bug.status_category} />
-                                </td>
-                                <td>
-                                    <PriorityCell priority={bug.priority} />
-                                </td>
-                                <td>
-                                    {bug.assignee ? (
-                                        <span style={{
-                                            display: 'inline-flex',
-                                            alignItems: 'center',
-                                            gap: 6,
-                                            fontSize: '0.84rem',
-                                        }}>
-                                            <span style={{
-                                                width: 22,
-                                                height: 22,
-                                                borderRadius: '50%',
-                                                background: 'var(--accent-indigo)',
-                                                color: 'white',
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                justifyContent: 'center',
-                                                fontSize: '0.65rem',
-                                                fontWeight: 700,
-                                                flexShrink: 0,
-                                            }}>
-                                                {bug.assignee.charAt(0).toUpperCase()}
-                                            </span>
-                                            {bug.assignee}
-                                        </span>
-                                    ) : (
-                                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.84rem' }}>Unassigned</span>
+                                }} title={bug.title}>
+                                    <span style={{ fontWeight: 600 }}>{bug.title || '—'}</span>
+                                    {bug.external_url && (
+                                        <a
+                                            href={bug.external_url}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            style={{
+                                                marginLeft: 6,
+                                                color: 'var(--accent-blue)',
+                                                textDecoration: 'none',
+                                                fontSize: '0.8em',
+                                                opacity: 0.8,
+                                            }}
+                                        >
+                                            {bug.external_key || 'link'}
+                                            <span style={{ fontSize: '0.7em', opacity: 0.6 }}> ↗</span>
+                                        </a>
                                     )}
+                                </td>
+                                <td>
+                                    <StatusBadge status={bug.status} />
+                                </td>
+                                <td>
+                                    <SeverityCell severity={bug.severity} />
                                 </td>
                                 <td style={{ textAlign: 'center' }}>
                                     <span style={{

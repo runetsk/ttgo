@@ -20,6 +20,8 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("GET /tests/{id}/versions/{vid}", requireAuth("read", h.GetVersion))
 	api.HandleFunc("POST /tests/{id}/versions/{vid}/restore", requireAuth("write", h.RestoreVersion))
 	api.HandleFunc("GET /tests/{id}/executions", requireAuth("read", h.ListTestExecutions))
-	api.HandleFunc("POST /tests/{id}/defect-links/create-issue", requireAuth("write", h.CreateJiraIssue))
 	api.HandleFunc("DELETE /tests/{id}/reverification-flag", requireAuth("write", h.DismissReverification))
+	api.HandleFunc("GET /tests/{id}/defect-links", requireAuth("read", h.ListTestDefects))
+	api.HandleFunc("POST /tests/{id}/defect-links", requireAuth("write", h.LinkTestDefect))
+	api.HandleFunc("DELETE /tests/{id}/defect-links/{defect_id}", requireAuth("write", h.UnlinkTestDefect))
 }

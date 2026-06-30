@@ -11,6 +11,7 @@ type SeedCounts struct {
 	TestRuns          int `json:"test_runs"`
 	RunResults        int `json:"run_results"`
 	Requirements      int `json:"requirements"`
+	Defects           int `json:"defects"`
 	DefectLinks       int `json:"defect_links"`
 	LLMProviders      int `json:"llm_providers"`
 	RunResultAnalyses int `json:"run_result_analyses"`

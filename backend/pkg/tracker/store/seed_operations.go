@@ -122,6 +122,16 @@ func SeedDemo(tx *gorm.DB) (SeedResult, error) {
 		counts.LLMProviders++
 	}
 
+	for _, d := range ds.Defects {
+		if err := tx.Create(&d).Error; err != nil {
+			return SeedResult{}, err
+		}
+		if err := seedMark(tx, "defect", d.ID); err != nil {
+			return SeedResult{}, err
+		}
+		counts.Defects++
+	}
+
 	for _, d := range ds.DefectLinks {
 		if err := tx.Create(&d).Error; err != nil {
 			return SeedResult{}, err
@@ -132,12 +142,9 @@ func SeedDemo(tx *gorm.DB) (SeedResult, error) {
 		counts.DefectLinks++
 	}
 
-	for _, tcID := range ds.ReverificationFlaggedTCIDs {
-		if err := tx.Model(&models.TestCase{}).
-			Where("id = ?", tcID).
-			Update("reverification_flagged", true).Error; err != nil {
-			return SeedResult{}, err
-		}
+	// Recompute reverification for tc:category-filter whose only defect is closed.
+	if err := recomputeReverification(tx, []string{demoID("tc:category-filter")}); err != nil {
+		return SeedResult{}, err
 	}
 
 	for _, job := range ds.RunAnalysisJobs {
@@ -226,6 +233,13 @@ func RemoveSeed(tx *gorm.DB) (SeedDeleteResult, error) {
 			return SeedDeleteResult{}, err
 		}
 		counts.DefectLinks = len(ids)
+	}
+
+	if ids := byType["defect"]; len(ids) > 0 {
+		if err := tx.Where("id IN ?", ids).Delete(&models.Defect{}).Error; err != nil {
+			return SeedDeleteResult{}, err
+		}
+		counts.Defects = len(ids)
 	}
 
 	if ids := byType["llm_provider"]; len(ids) > 0 {

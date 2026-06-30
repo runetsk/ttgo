@@ -310,34 +310,6 @@ func TestListTestExecutions(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
-func TestCreateJiraIssue_BadJSON(t *testing.T) {
-	st := newStore(t)
-	_, tc := seedFolderAndTest(t, st)
-	r := httptest.NewRequest("POST", "/api/tests/"+tc.ID+"/defect-links/create-issue", strings.NewReader("{bad"))
-	r.Header.Set("Content-Type", "application/json")
-	auth(t, st, r)
-	w := httptest.NewRecorder()
-	api.NewServer(st).ServeHTTP(w, r)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestCreateJiraIssue_MissingSummary(t *testing.T) {
-	st := newStore(t)
-	_, tc := seedFolderAndTest(t, st)
-	w := do(t, st, "POST", "/api/tests/"+tc.ID+"/defect-links/create-issue", map[string]string{})
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
-func TestCreateJiraIssue_StoreError(t *testing.T) {
-	st := newStore(t)
-	_, tc := seedFolderAndTest(t, st)
-	// Jira not configured in store -> store returns error, handler returns 400.
-	w := do(t, st, "POST", "/api/tests/"+tc.ID+"/defect-links/create-issue", map[string]string{
-		"summary": "bug",
-	})
-	assert.Equal(t, http.StatusBadRequest, w.Code)
-}
-
 func TestDismissReverification(t *testing.T) {
 	st := newStore(t)
 	_, tc := seedFolderAndTest(t, st)
