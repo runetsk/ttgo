@@ -54,6 +54,11 @@ frontend/multi_select_verification.png
 .specify/
 .worktrees/
 
+# Claude Code local state & local-only commands (keep launch.json + skills/ tracked)
+.claude/scheduled_tasks.lock
+.claude/settings.local.json
+.claude/commands/speckit.*.md
+
 # Internal docs & specs — kept locally, not shared in the public repo.
 # Exception: docs/images/ holds the screenshots embedded in README.md, so it
 # must stay tracked and public. (Use /docs/* + a negation, not /docs/, because

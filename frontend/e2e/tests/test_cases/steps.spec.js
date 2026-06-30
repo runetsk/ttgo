@@ -26,7 +26,6 @@ async function fillRichField(page, containerSelector, text) {
 
 test.describe('Test Steps Management', () => {
     test('should add and reorder steps', async ({ page }) => {
-        test.setTimeout(60000);
         const folderName = `Steps Demo ${Date.now()}`;
         const testName = `Step Test ${Date.now()}`;
 

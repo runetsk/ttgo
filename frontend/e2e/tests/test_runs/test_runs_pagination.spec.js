@@ -1,23 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from '../../config.js';
+import { createCategoryAPI, createRunAPI } from '../../helpers/api.js';
 
 test.describe('Test Runs Pagination', () => {
-    const createCategoryAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/categories`, {
-            data: { name: name, description: 'Pagination Test Category' }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-
-    const createRunAPI = async (request, categoryId, name) => {
-        const res = await request.post(`${API_URL}/runs`, {
-            data: { category_id: categoryId, name: name }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-
     test('should paginate test runs correctly', async ({ page, request }) => {
         let category;
         let timestamp;
@@ -30,7 +14,7 @@ test.describe('Test Runs Pagination', () => {
             // Create 25 runs to test pagination (default limit is 20)
             console.log('Creating 25 test runs sequentially...');
             for (let i = 1; i <= 25; i++) {
-                await createRunAPI(request, category.id, `Paginated Run ${i} ${timestamp}`);
+                await createRunAPI(request, `Paginated Run ${i} ${timestamp}`, { categoryId: category.id });
             }
         });
 

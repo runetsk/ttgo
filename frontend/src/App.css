@@ -166,6 +166,10 @@
     overflow-y: auto;
     flex: 1;
     padding: 4px 0 12px 0;
+    /* Inset the scroll area by the resize-handle width (6px, absolute at right:0)
+       so the folder-tree scrollbar sits clear of the handle instead of underneath
+       it — otherwise the handle steals pointer events from the scrollbar. */
+    margin-right: 6px;
 }
 
 .folder-header {
@@ -1022,9 +1026,21 @@
     display: flex;
     flex-direction: column;
     padding: 16px 8px;
-    overflow-y: auto;
+    /* The sidebar itself no longer scrolls — .run-folder-sidebar-scroll does, so
+       its scrollbar stays inboard of the resize-handle (absolute at right:0)
+       instead of underneath it. */
+    overflow: hidden;
     flex-shrink: 0;
     position: relative;
+}
+
+/* Inner scroll region: fills the height below the fixed header and scrolls
+   internally. The sidebar's 8px right padding keeps this scrollbar clear of
+   the 6px resize-handle. */
+.run-folder-sidebar-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .run-folder-sidebar.collapsed {

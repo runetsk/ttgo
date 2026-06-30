@@ -2,7 +2,6 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Custom Fields Integration', () => {
-    test.setTimeout(60000);
 
     test('should define field and use it in test case', async ({ page }) => {
         const timestamp = Date.now();
@@ -43,11 +42,11 @@ test.describe('Custom Fields Integration', () => {
             await testGridEntry.click();
             await expect(page.getByTestId('test-case-name-input')).toBeVisible();
 
-            // The field name is truncated to 14 chars in the meta bar label.
-            // Use the .meta-field[title] attribute (which holds the full name) to locate it.
-            const fieldContainer = page.locator(`.meta-field[title="${fieldName}"]`);
-            await expect(fieldContainer).toBeVisible();
-            await fieldContainer.getByRole('combobox').selectOption('High');
+            // In the inline detail pane each custom field renders as a
+            // .detail-pane-custom-key label followed by its <select> sibling.
+            const fieldKey = page.locator('.detail-pane-custom-key').filter({ hasText: fieldName });
+            await expect(fieldKey).toBeVisible();
+            await fieldKey.locator('xpath=following-sibling::select[1]').selectOption('High');
 
             await page.getByRole('button', { name: 'Save Changes' }).click();
             await expect(page.getByTestId('test-case-name-input')).not.toBeVisible({ timeout: 10000 });
@@ -58,9 +57,9 @@ test.describe('Custom Fields Integration', () => {
             await expect(testGridEntry2).toBeVisible({ timeout: 10000 });
             await testGridEntry2.click();
             await expect(page.getByTestId('test-case-name-input')).toBeVisible();
-            const vContainer = page.locator(`.meta-field[title="${fieldName}"]`);
-            await expect(vContainer).toBeVisible();
-            await expect(vContainer.getByRole('combobox')).toHaveValue('High');
+            const vKey = page.locator('.detail-pane-custom-key').filter({ hasText: fieldName });
+            await expect(vKey).toBeVisible();
+            await expect(vKey.locator('xpath=following-sibling::select[1]')).toHaveValue('High');
         });
     });
 });

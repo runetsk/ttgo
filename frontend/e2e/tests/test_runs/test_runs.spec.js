@@ -1,54 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { API_URL } from '../../config.js';
+import {
+    createCategoryAPI,
+    createFolderAPI,
+    createTestAPI,
+    linkTestToCategoryAPI,
+    createRunAPI,
+    getResultId,
+} from '../../helpers/api.js';
 
 test.describe('Test Runs Management', () => {
-
-    // API Helpers
-    const createCategoryAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/categories`, {
-            data: { name: name, description: 'Created via API' }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-
-    const createFolderAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/folders`, {
-            data: { name: name, parent_id: null }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    }
-
-    const createTestAPI = async (request, name, folderId) => {
-        const res = await request.post(`${API_URL}/tests`, {
-            data: { name: name, folder_id: folderId, description: 'API Test' }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    }
-
-    const linkTestToCategoryAPI = async (request, testId, categoryId) => {
-        const res = await request.post(`${API_URL}/tests/${testId}/categories`, {
-            data: { category_id: categoryId }
-        });
-        expect(res.ok()).toBeTruthy();
-    }
-
-    const createRunAPI = async (request, categoryId, name) => {
-        const res = await request.post(`${API_URL}/runs`, {
-            data: { category_id: categoryId, name: name }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-
-    // Returns the RunResult primary key (id) for a given test_case_id within a run.
-    const getResultId = async (request, runId, testCaseId) => {
-        const res = await request.get(`${API_URL}/runs/${runId}`);
-        const run = await res.json();
-        return run.run_results.find(r => r.test_case_id === testCaseId)?.id;
-    };
 
     // UI Helper for Category Creation
     const createCategoryUI = async (page, name) => {
@@ -123,9 +84,9 @@ test.describe('Test Runs Management', () => {
         await test.step('Seed two categories and three runs via API', async () => {
             catA = await createCategoryAPI(request, catNameA);
             const catB = await createCategoryAPI(request, catNameB);
-            await createRunAPI(request, catA.id, run1Name);
-            await createRunAPI(request, catB.id, run2Name);
-            await createRunAPI(request, catA.id, run3Name);
+            await createRunAPI(request, run1Name, { categoryId: catA.id });
+            await createRunAPI(request, run2Name, { categoryId: catB.id });
+            await createRunAPI(request, run3Name, { categoryId: catA.id });
         });
 
         await test.step('Open the test runs page and reveal column filters', async () => {
@@ -167,7 +128,7 @@ test.describe('Test Runs Management', () => {
 
         await test.step('Seed a category and a run via API', async () => {
             const suite = await createCategoryAPI(request, 'Delete Suite ' + Date.now());
-            await createRunAPI(request, suite.id, runName);
+            await createRunAPI(request, runName, { categoryId: suite.id });
         });
 
         await test.step('Open the runs page and verify the run is visible', async () => {
@@ -211,7 +172,7 @@ test.describe('Test Runs Management', () => {
             await linkTestToCategoryAPI(request, test1.id, suite.id);
             await linkTestToCategoryAPI(request, test2.id, suite.id);
 
-            await createRunAPI(request, suite.id, runName);
+            await createRunAPI(request, runName, { categoryId: suite.id });
         });
 
         await test.step('Open the runs page', async () => {
@@ -269,7 +230,7 @@ test.describe('Test Runs Management', () => {
 
         await test.step('Seed a category and a run via API', async () => {
             const suite = await createCategoryAPI(request, 'Nav API Suite ' + Date.now());
-            await createRunAPI(request, suite.id, runName);
+            await createRunAPI(request, runName, { categoryId: suite.id });
         });
 
         await test.step('Open the runs page and verify the run is visible', async () => {
@@ -300,7 +261,7 @@ test.describe('Test Runs Management', () => {
             await linkTestToCategoryAPI(request, test1.id, suite.id);
 
             const runName = 'Status Run ' + Date.now();
-            run = await createRunAPI(request, suite.id, runName);
+            run = await createRunAPI(request, runName, { categoryId: suite.id });
         });
 
         await test.step('Open the run detail and locate the test row', async () => {
@@ -347,7 +308,7 @@ test.describe('Test Runs Management', () => {
             const folder = await createFolderAPI(request, 'Failure Folder ' + Date.now());
             testCase = await createTestAPI(request, 'Failure Test', folder.id);
             await linkTestToCategoryAPI(request, testCase.id, suite.id);
-            run = await createRunAPI(request, suite.id, 'Failure Run ' + Date.now());
+            run = await createRunAPI(request, 'Failure Run ' + Date.now(), { categoryId: suite.id });
 
             // Update result with failure data
             const resultId = await getResultId(request, run.id, testCase.id);
@@ -414,7 +375,7 @@ test.describe('Test Runs Management', () => {
             await linkTestToCategoryAPI(request, t2.id, suite.id);
             await linkTestToCategoryAPI(request, t3.id, suite.id);
 
-            run = await createRunAPI(request, suite.id, 'Perf Run ' + Date.now());
+            run = await createRunAPI(request, 'Perf Run ' + Date.now(), { categoryId: suite.id });
 
             // Update Durations (resolve result PKs first)
             const r1id = await getResultId(request, run.id, t1.id);
@@ -468,7 +429,7 @@ test.describe('Test Runs Management', () => {
             const folder = await createFolderAPI(request, 'Env Folder ' + Date.now());
             const testCase = await createTestAPI(request, 'Context Test', folder.id);
             await linkTestToCategoryAPI(request, testCase.id, suite.id);
-            run = await createRunAPI(request, suite.id, 'Env Run ' + Date.now());
+            run = await createRunAPI(request, 'Env Run ' + Date.now(), { categoryId: suite.id });
 
             // Update with Context Fields
             const envResultId = await getResultId(request, run.id, testCase.id);
@@ -509,7 +470,7 @@ test.describe('Test Runs Management', () => {
             const folder = await createFolderAPI(request, 'Nav Test Folder ' + Date.now());
             testCase = await createTestAPI(request, 'Navigable Test', folder.id);
             await linkTestToCategoryAPI(request, testCase.id, suite.id);
-            run = await createRunAPI(request, suite.id, 'Nav Run ' + Date.now());
+            run = await createRunAPI(request, 'Nav Run ' + Date.now(), { categoryId: suite.id });
         });
 
         await test.step('Open the run detail and verify the test name is a link', async () => {
@@ -538,7 +499,7 @@ test.describe('Test Runs Management', () => {
             const folder = await createFolderAPI(request, 'Result Folder ' + Date.now());
             const testCase = await createTestAPI(request, 'Category-Tagged Test', folder.id);
             await linkTestToCategoryAPI(request, testCase.id, category.id);
-            run = await createRunAPI(request, category.id, 'Category Display Run ' + Date.now());
+            run = await createRunAPI(request, 'Category Display Run ' + Date.now(), { categoryId: category.id });
         });
 
         await test.step('Open the run detail and verify the category tag in the result row', async () => {
@@ -572,9 +533,9 @@ test.describe('Test Runs Management', () => {
             const suite = await createCategoryAPI(request, suiteName);
 
             // 2. Create 3 Test Runs via API
-            await createRunAPI(request, suite.id, run1);
-            await createRunAPI(request, suite.id, run2);
-            await createRunAPI(request, suite.id, run3);
+            await createRunAPI(request, run1, { categoryId: suite.id });
+            await createRunAPI(request, run2, { categoryId: suite.id });
+            await createRunAPI(request, run3, { categoryId: suite.id });
         });
 
         await test.step('Open the runs page and select the first two runs', async () => {

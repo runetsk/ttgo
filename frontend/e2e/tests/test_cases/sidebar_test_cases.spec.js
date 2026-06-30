@@ -5,7 +5,6 @@ import { API_URL } from '../../config.js';
 test.describe('Sidebar Test Cases', () => {
 
     test('should display test cases in the sidebar and allow navigation', async ({ page }) => {
-        test.setTimeout(90000);
 
         // Comprehensive logging for debugging
         page.on('console', msg => {
@@ -111,7 +110,6 @@ test.describe('Sidebar Test Cases', () => {
 test.describe('Sidebar Test Case Drag and Drop', () => {
 
     test('should move test case to a different folder via drag and drop', async ({ page, request }) => {
-        test.setTimeout(60000);
 
         const timestamp = Date.now();
         const folder1Name = `Source Folder ${timestamp}`;

@@ -3,7 +3,6 @@ import { test, expect } from '@playwright/test';
 // Migrated from the removed `suites` concept to `categories`. The Suite Manager
 // page is now the Category Manager page at /categories.
 test.describe('Category Manager Page', () => {
-    test.setTimeout(30000);
 
     test('should navigate to categories page and manage categories', async ({ page }) => {
         const catName = `Category Page Test ${Date.now()}`;

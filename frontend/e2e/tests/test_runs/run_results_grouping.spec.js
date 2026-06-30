@@ -1,35 +1,16 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from '../../config.js';
+import {
+    createFolderAPI,
+    createTestAPI,
+    createCategoryAPI,
+    linkTestToCategoryAPI,
+    createRunAPI,
+} from '../../helpers/api.js';
 
 // Verifies the run-results List/Grouped view ported from the legacy tree:
 // toggle, group-by selector, group headers, collapse/expand, and that the
 // view preference persists across a reload (localStorage).
 test.describe('Run Results Grouping', () => {
-    const createFolderAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/folders`, { data: { name, parent_id: null } });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-    const createTestAPI = async (request, name, folderId) => {
-        const res = await request.post(`${API_URL}/tests`, { data: { name, folder_id: folderId, description: 'grouping e2e' } });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-    const createCategoryAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/categories`, { data: { name, description: 'grouping e2e' } });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-    const linkTestToCategoryAPI = async (request, testId, categoryId) => {
-        const res = await request.post(`${API_URL}/tests/${testId}/categories`, { data: { category_id: categoryId } });
-        expect(res.ok()).toBeTruthy();
-    };
-    const createRunAPI = async (request, categoryId, name) => {
-        const res = await request.post(`${API_URL}/runs`, { data: { category_id: categoryId, name } });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    };
-
     test('toggles list/grouped, shows group headers, collapses, and persists', async ({ page, request }) => {
         let run;
 
@@ -41,7 +22,7 @@ test.describe('Run Results Grouping', () => {
             const category = await createCategoryAPI(request, `Grp Category ${stamp}`);
             await linkTestToCategoryAPI(request, t1.id, category.id);
             await linkTestToCategoryAPI(request, t2.id, category.id);
-            run = await createRunAPI(request, category.id, `Grp Run ${stamp}`);
+            run = await createRunAPI(request, `Grp Run ${stamp}`, { categoryId: category.id });
         });
 
         await test.step('Open the run detail page and verify the toolbar in list view', async () => {

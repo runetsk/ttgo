@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { API_URL, MOCK_URL, configureJiraAPI, configureConfluenceAPI } from '../../helpers/api.js';
 
-test.describe("Settings — Integration Settings", () => {
+test.describe("Settings — Integration Settings", { tag: '@needs-mock' }, () => {
 
   // ── Jira Integration ────────────────────────────────────────────────────────
 

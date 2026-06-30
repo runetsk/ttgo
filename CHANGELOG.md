@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to the library's `+` / `⋮` pattern, where `⋮` opens the existing context menu.
 
 ### Fixed
+- **Custom fields:** creating a `SELECT` custom field failed with HTTP 400 ("options array
+  of strings") because the frontend sent the options JSON-stringified while the API expects
+  a real array. `createCustomField` now sends the array, and the settings list renders the
+  options whether they come back as an array or a legacy string.
 - Run comparison: cancel in-flight fetches when switching the compared run, so rapidly
   changing the selection can no longer briefly render a stale comparison.
 

@@ -1,23 +1,7 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from '../../config.js';
+import { createFolderAPI, createTestAPI } from '../../helpers/api.js';
 
 test.describe('Test Case Navigation & Sidebar Sync', () => {
-    const createFolderAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/folders`, {
-            data: { name: name, parent_id: null }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    }
-
-    const createTestAPI = async (request, name, folderId) => {
-        const res = await request.post(`${API_URL}/tests`, {
-            data: { name: name, folder_id: folderId, description: 'API Test' }
-        });
-        expect(res.ok()).toBeTruthy();
-        return await res.json();
-    }
-
     test('should sync sidebar selection when navigating to a test case', async ({ page, request }) => {
         const folderName = 'Nav Folder ' + Date.now();
         let folder;

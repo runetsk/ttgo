@@ -2,7 +2,6 @@ import { test, expect } from '@playwright/test';
 import { API_URL } from '../../config.js';
 
 test.describe('Deep Linking', () => {
-    test.setTimeout(60000);
 
     test('should navigate to test detail via URL and persist', async ({ page }) => {
         const folderName = `DeepLink Folder ${Date.now()}`;

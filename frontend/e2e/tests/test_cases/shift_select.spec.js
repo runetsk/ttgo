@@ -36,7 +36,6 @@ test.describe('Sidebar Selection', () => {
 
     // Validates Shift-Click range selection with sibling folders
     test('should support shift-click range selection', async ({ page }) => {
-        test.setTimeout(90000);
         const timestamp = Date.now();
         const folders = [`Folder1_${timestamp}`, `Folder2_${timestamp}`, `Folder3_${timestamp}`];
         let nodeA;
@@ -50,7 +49,7 @@ test.describe('Sidebar Selection', () => {
 
         await test.step('Resolve the folder nodes for the range endpoints', async () => {
             nodeA = getFolderNode(page, folders[0]);
-            const nodeB = getFolderNode(page, folders[1]); // Intermediate
+            // folders[1] is the intermediate endpoint of the range (selected implicitly).
             nodeC = getFolderNode(page, folders[2]);
         });
 
@@ -87,7 +86,6 @@ test.describe('Sidebar Selection', () => {
 
     // Validates Shift-Click range selection within nested structures
     test('should handle range selection with nested folders', async ({ page }) => {
-        test.setTimeout(90000);
         const timestamp = Date.now();
         const rootName = `Alpha_${timestamp}`;
         const subName = `Beta_${timestamp}`;

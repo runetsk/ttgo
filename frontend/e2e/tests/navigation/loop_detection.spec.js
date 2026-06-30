@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Performance & Regression', () => {
-    test.setTimeout(30000);
 
     test('should not trigger infinite request loop on folder deep link', async ({ page }) => {
         const folderName = `LoopCheck ${Date.now()}`;

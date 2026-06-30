@@ -11,9 +11,11 @@ export default defineConfig({
         ['html'],
         ['./e2e/reporters/ttgo-reporter.js'],
     ],
-    timeout: 30000,
+    // Per-test timeout for the whole suite (centralized here instead of per-test
+    // test.setTimeout overrides).
+    timeout: 10000,
     expect: {
-        timeout: 15000,
+        timeout: 5000,
     },
     use: {
         baseURL: BASE_URL,

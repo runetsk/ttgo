@@ -249,28 +249,16 @@ curl -X PUT http://localhost:8080/api/runs/{run_id}/results/{test_id} \
 
 ## License & Usage
 
-This project is licensed under the [**PolyForm Shield License 1.0.0**](https://polyformproject.org/licenses/shield/1.0.0) — see [LICENSE](LICENSE).
-
-PolyForm Shield is a standard source-available license. In plain terms:
+TTGO is source-available under the [**PolyForm Shield License 1.0.0**](https://polyformproject.org/licenses/shield/1.0.0) — see [LICENSE](LICENSE). For almost everyone, that means one thing: **it's free** — no per-seat bills, no time limits, no catch.
 
 ✅ **Free to use for:**
-- Internal tools
-- Personal projects
-- Embedding into your own (non-competing) product
+- Running it internally — your team, your company, your infrastructure
+- Personal projects, side projects, and evaluation
+- Embedding it inside your own product, as long as that product doesn't compete with TTGO
 
-❌ **Not allowed without a commercial license:**
-- Offering a product that competes with TTGO (including as a SaaS)
-- Reselling TTGO as a standalone product
-- Building a competing QA / test case management system
+**The only catch** — the few things PolyForm Shield doesn't allow:
+- Re-offering TTGO itself as a hosted service (SaaS)
+- White-labeling or reselling it as a standalone product
+- Using it to build a competing test-management tool
 
-### Commercial Use
-
-If you want to use this project in a way the license doesn't permit (SaaS, white-label, competing product, etc.), you need a commercial license.
-
-### Why this license?
-
-We want this project to be:
-- Open enough for developers to use and build with
-- Protected from being resold or turned into a competing service
-
-The full legal terms are in [LICENSE](LICENSE); the bullets above are a summary for convenience only.
+In plain terms: build on it, run it, ship your product on it — just don't repackage TTGO into a competitor. The full legal terms are in [LICENSE](LICENSE); the bullets above are a summary for convenience only.

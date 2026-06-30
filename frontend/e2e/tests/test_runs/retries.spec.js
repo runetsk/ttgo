@@ -1,55 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { API_URL } from '../../config.js';
+import {
+    createFolderAPI,
+    createTestAPI,
+    createRunAPI,
+    addRunResultAPI,
+    updateRunResultAPI,
+    retryRunResultAPI,
+} from '../../helpers/api.js';
 
 test.describe('Test Run Retries', () => {
-
-    // ── API helpers ───────────────────────────────────────────────────────────
-
-    const createFolderAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/folders`, { data: { name, parent_id: null } });
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
-
-    const createTestAPI = async (request, name, folderId) => {
-        const res = await request.post(`${API_URL}/tests`, {
-            data: { name, folder_id: folderId, description: '' }
-        });
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
-
-    const createRunAPI = async (request, name) => {
-        const res = await request.post(`${API_URL}/runs`, { data: { name } });
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
-
-    const addResultAPI = async (request, runId, testCaseId) => {
-        const res = await request.post(`${API_URL}/runs/${runId}/results`, {
-            data: { test_case_id: testCaseId }
-        });
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
-
-    const updateResultAPI = async (request, runId, resultId, data) => {
-        const res = await request.put(`${API_URL}/runs/${runId}/results/${resultId}`, { data });
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
-
-    const retryResultAPI = async (request, runId, resultId) => {
-        const res = await request.post(`${API_URL}/runs/${runId}/results/${resultId}/retry`);
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
-
-    const getRunAPI = async (request, runId) => {
-        const res = await request.get(`${API_URL}/runs/${runId}`);
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
 
     // ── Tests ─────────────────────────────────────────────────────────────────
 
@@ -63,10 +23,10 @@ test.describe('Test Run Retries', () => {
             const folder = await createFolderAPI(request, `Retry Folder ${ts}`);
             const tc = await createTestAPI(request, `Retry Test ${ts}`, folder.id);
             run = await createRunAPI(request, `Retry Run ${ts}`);
-            r1 = await addResultAPI(request, run.id, tc.id);
+            r1 = await addRunResultAPI(request, run.id, tc.id);
 
             // Mark first attempt as FAIL
-            await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
+            await updateRunResultAPI(request, run.id, r1.id, { status: 'FAIL' });
         });
 
         await test.step('Open the run detail and confirm the row shows FAIL', async () => {
@@ -101,14 +61,14 @@ test.describe('Test Run Retries', () => {
             const folder = await createFolderAPI(request, `Agg Folder ${ts}`);
             const tc = await createTestAPI(request, `Agg Test ${ts}`, folder.id);
             run = await createRunAPI(request, `Agg Run ${ts}`);
-            const r1 = await addResultAPI(request, run.id, tc.id);
+            const r1 = await addRunResultAPI(request, run.id, tc.id);
 
             // Attempt 1: FAIL
-            await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
+            await updateRunResultAPI(request, run.id, r1.id, { status: 'FAIL' });
 
             // Retry via API → attempt 2 PASS
-            const r2 = await retryResultAPI(request, run.id, r1.id);
-            await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
+            const r2 = await retryRunResultAPI(request, run.id, r1.id);
+            await updateRunResultAPI(request, run.id, r2.id, { status: 'PASS' });
         });
 
         await test.step('Verify the stats bar reflects only the latest attempt', async () => {
@@ -130,11 +90,11 @@ test.describe('Test Run Retries', () => {
             const folder = await createFolderAPI(request, `Expand Folder ${ts}`);
             const tc = await createTestAPI(request, `Expand Test ${ts}`, folder.id);
             run = await createRunAPI(request, `Expand Run ${ts}`);
-            const r1 = await addResultAPI(request, run.id, tc.id);
+            const r1 = await addRunResultAPI(request, run.id, tc.id);
 
-            await updateResultAPI(request, run.id, r1.id, { status: 'FAIL' });
-            const r2 = await retryResultAPI(request, run.id, r1.id);
-            await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
+            await updateRunResultAPI(request, run.id, r1.id, { status: 'FAIL' });
+            const r2 = await retryRunResultAPI(request, run.id, r1.id);
+            await updateRunResultAPI(request, run.id, r2.id, { status: 'PASS' });
         });
 
         await test.step('Open the run detail and confirm the detail panel is hidden initially', async () => {
@@ -176,7 +136,7 @@ test.describe('Test Run Retries', () => {
             const folder = await createFolderAPI(request, `Summary Folder ${ts}`);
             const tc = await createTestAPI(request, `Summary Test ${ts}`, folder.id);
             run = await createRunAPI(request, `Summary Run ${ts}`);
-            r1 = await addResultAPI(request, run.id, tc.id);
+            r1 = await addRunResultAPI(request, run.id, tc.id);
         });
 
         await test.step('Open the run detail and confirm no retried indicator yet', async () => {
@@ -189,8 +149,8 @@ test.describe('Test Run Retries', () => {
         await test.step('Retry the result via API and pass the new attempt', async () => {
             // Retry via API → attempt 2, then mark it PASS so it counts as
             // "passed after retry" (the summary indicator only shows for passed retries).
-            const r2 = await retryResultAPI(request, run.id, r1.id);
-            await updateResultAPI(request, run.id, r2.id, { status: 'PASS' });
+            const r2 = await retryRunResultAPI(request, run.id, r1.id);
+            await updateRunResultAPI(request, run.id, r2.id, { status: 'PASS' });
         });
 
         await test.step('Reload and verify the summary bar shows the retried count', async () => {
@@ -211,10 +171,10 @@ test.describe('Test Run Retries', () => {
             const folder = await createFolderAPI(request, `Detail Folder ${ts}`);
             const tc = await createTestAPI(request, `Detail Test ${ts}`, folder.id);
             run = await createRunAPI(request, `Detail Run ${ts}`);
-            const r1 = await addResultAPI(request, run.id, tc.id);
+            const r1 = await addRunResultAPI(request, run.id, tc.id);
 
-            const r2 = await retryResultAPI(request, run.id, r1.id);
-            await updateResultAPI(request, run.id, r2.id, {
+            const r2 = await retryRunResultAPI(request, run.id, r1.id);
+            await updateRunResultAPI(request, run.id, r2.id, {
                 status: 'FAIL',
                 error_message: 'Still failing on attempt 2'
             });

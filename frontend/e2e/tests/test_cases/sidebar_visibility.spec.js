@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Sidebar Visibility', () => {
-    test.setTimeout(30000);
 
     test('should show/hide sidebar based on route', async ({ page }) => {
         await test.step('Open the home page and confirm the sidebar is visible', async () => {

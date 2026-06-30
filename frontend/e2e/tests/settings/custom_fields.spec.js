@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Custom Fields Settings', () => {
-    test.setTimeout(60000);
 
     test('should add and delete custom field definition', async ({ page }) => {
         const fieldName = `Priority ${Date.now()}`;

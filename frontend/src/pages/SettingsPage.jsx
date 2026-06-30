@@ -220,11 +220,11 @@ export default function SettingsPage() {
                                     <div style={{ fontWeight: 600 }}>{f.name}</div>
                                     <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
                                         {f.type} {f.type === 'SELECT' && f.options && (() => {
-                                            try {
-                                                return `(${JSON.parse(f.options).join(', ')})`;
-                                            } catch (e) {
-                                                return `(${f.options})`;
-                                            }
+                                            // Backend returns options as an array; tolerate a legacy JSON string too.
+                                            const opts = Array.isArray(f.options)
+                                                ? f.options
+                                                : (() => { try { return JSON.parse(f.options); } catch { return []; } })();
+                                            return opts.length ? `(${opts.join(', ')})` : '';
                                         })()}
                                     </div>
                                 </div>

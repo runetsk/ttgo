@@ -76,8 +76,8 @@ export default function RunCompareTab({ run }) {
     };
 
     return (
-        <div data-testid="run-compare-tab">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <div data-testid="run-compare-tab" style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 16, flexShrink: 0 }}>
                 <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>Comparing</span>
                 <span style={{ fontSize: '0.88rem', fontWeight: 600 }}>{run.name}</span>
                 <span style={{ color: 'var(--text-secondary)' }}>⇄</span>
@@ -89,25 +89,29 @@ export default function RunCompareTab({ run }) {
                 </select>
             </div>
 
-            {!compareWith && <Empty testid="compare-empty">Pick a run to compare against.</Empty>}
-            {compareWith && compareWith === run.id && <Empty testid="compare-same-run">Select a different run to compare.</Empty>}
-            {loading && <div style={{ padding: 16, color: 'var(--text-secondary)' }}>Loading comparison…</div>}
-            {error && <div data-testid="compare-error" style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--accent-red)', fontSize: '0.85rem' }}>Error: {error}</div>}
+            {/* Scrollable body — the page wrapper (.test-grid-container) is overflow:hidden,
+                so this region must scroll internally or tall diffs get clipped. */}
+            <div data-testid="compare-scroll" style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+                {!compareWith && <Empty testid="compare-empty">Pick a run to compare against.</Empty>}
+                {compareWith && compareWith === run.id && <Empty testid="compare-same-run">Select a different run to compare.</Empty>}
+                {loading && <div style={{ padding: 16, color: 'var(--text-secondary)' }}>Loading comparison…</div>}
+                {error && <div data-testid="compare-error" style={{ padding: '12px 16px', borderRadius: 8, background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.2)', color: 'var(--accent-red)', fontSize: '0.85rem' }}>Error: {error}</div>}
 
-            {diff && !loading && (
-                <>
-                    <RunCompareSummary summary={diff.summary} />
-                    <RunCompareDiffTable
-                        groups={diff.groups}
-                        summary={diff.summary}
-                        thisName={run.name}
-                        comparedName={comparedRun.name}
-                        analysesThis={analysesThis}
-                        analysesCompared={analysesCompared}
-                        aiEnabled={aiFeaturesEnabled}
-                    />
-                </>
-            )}
+                {diff && !loading && (
+                    <>
+                        <RunCompareSummary summary={diff.summary} />
+                        <RunCompareDiffTable
+                            groups={diff.groups}
+                            summary={diff.summary}
+                            thisName={run.name}
+                            comparedName={comparedRun.name}
+                            analysesThis={analysesThis}
+                            analysesCompared={analysesCompared}
+                            aiEnabled={aiFeaturesEnabled}
+                        />
+                    </>
+                )}
+            </div>
         </div>
     );
 }

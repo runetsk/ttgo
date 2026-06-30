@@ -671,8 +671,8 @@ export default function RunFolderSidebar({
                 </div>
             </div>
 
-            {/* Zoomable content */}
-            <div style={{ fontSize: `${zoom}rem` }}>
+            {/* Zoomable content — scrolls internally so its scrollbar clears the resize-handle */}
+            <div className="run-folder-sidebar-scroll" style={{ fontSize: `${zoom}rem` }}>
 
             {/* All Runs */}
             <div

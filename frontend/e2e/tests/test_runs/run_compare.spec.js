@@ -1,23 +1,16 @@
 import { test, expect } from '@playwright/test';
 import { API_URL } from '../../config.js';
+import {
+    createFolderAPI,
+    createTestAPI,
+    createRunAPI,
+    addRunResultAPI,
+    getRunAPI,
+} from '../../helpers/api.js';
 
 test.describe('Run Comparison (Compare tab)', () => {
-    const post = async (request, path, data) => {
-        const res = await request.post(`${API_URL}${path}`, { data });
-        expect(res.ok(), `POST ${path} -> ${res.status()}`).toBeTruthy();
-        return res.json();
-    };
-    const createFolder = (request, name) => post(request, '/folders', { name, parent_id: null });
-    const createTest = (request, name, folderId) => post(request, '/tests', { name, folder_id: folderId, description: 'compare e2e' });
-    const createRun = (request, name) => post(request, '/runs', { name });
-    const addResult = (request, runId, testCaseId) => post(request, `/runs/${runId}/results`, { test_case_id: testCaseId });
-    const getRun = async (request, runId) => {
-        const res = await request.get(`${API_URL}/runs/${runId}`);
-        expect(res.ok()).toBeTruthy();
-        return res.json();
-    };
     const applyStatuses = async (request, runId, statusByTc) => {
-        const run = await getRun(request, runId);
+        const run = await getRunAPI(request, runId);
         for (const rr of run.run_results) {
             const st = statusByTc[rr.test_case_id];
             if (!st) continue;
@@ -29,21 +22,21 @@ test.describe('Run Comparison (Compare tab)', () => {
     // Seeds two runs covering every bucket. Returns ids needed by the tests.
     const seed = async (request) => {
         const stamp = Date.now();
-        const folder = await createFolder(request, `Cmp Folder ${stamp}`);
+        const folder = await createFolderAPI(request, `Cmp Folder ${stamp}`);
         const shared = [];
-        for (const n of ['s1', 's2', 's3', 's4', 's5']) shared.push(await createTest(request, `Cmp ${n} ${stamp}`, folder.id));
-        const onlyA = await createTest(request, `Cmp onlyA ${stamp}`, folder.id);
-        const onlyB = await createTest(request, `Cmp onlyB ${stamp}`, folder.id);
-        const runA = await createRun(request, `Cmp A ${stamp}`);
-        const runB = await createRun(request, `Cmp B ${stamp}`);
+        for (const n of ['s1', 's2', 's3', 's4', 's5']) shared.push(await createTestAPI(request, `Cmp ${n} ${stamp}`, folder.id, 'compare e2e'));
+        const onlyA = await createTestAPI(request, `Cmp onlyA ${stamp}`, folder.id, 'compare e2e');
+        const onlyB = await createTestAPI(request, `Cmp onlyB ${stamp}`, folder.id, 'compare e2e');
+        const runA = await createRunAPI(request, `Cmp A ${stamp}`);
+        const runB = await createRunAPI(request, `Cmp B ${stamp}`);
         // Add shared tests to both runs
         for (const t of shared) {
-            await addResult(request, runA.id, t.id);
-            await addResult(request, runB.id, t.id);
+            await addRunResultAPI(request, runA.id, t.id);
+            await addRunResultAPI(request, runB.id, t.id);
         }
         // Add exclusive tests to their respective runs only
-        await addResult(request, runA.id, onlyA.id);
-        await addResult(request, runB.id, onlyB.id);
+        await addRunResultAPI(request, runA.id, onlyA.id);
+        await addRunResultAPI(request, runB.id, onlyB.id);
         // s1 regression (runA=FAIL, runB=PASS), s2 fixed (runA=PASS, runB=FAIL),
         // s3 still-failing (both FAIL), s4 unchanged (both PASS), s5 other-change (runA=PASS, runB=SKIP)
         await applyStatuses(request, runA.id, {

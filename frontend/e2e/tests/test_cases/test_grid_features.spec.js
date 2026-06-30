@@ -1,20 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from '../../config.js';
-
-// ── API helpers ──────────────────────────────────────────────────────────────
-const createFolderAPI = async (request, name) => {
-    const res = await request.post(`${API_URL}/folders`, { data: { name, parent_id: null } });
-    expect(res.ok()).toBeTruthy();
-    return res.json();
-};
-
-const createTestAPI = async (request, name, folderId) => {
-    const res = await request.post(`${API_URL}/tests`, {
-        data: { name, folder_id: folderId, description: '' }
-    });
-    expect(res.ok()).toBeTruthy();
-    return res.json();
-};
+import { createFolderAPI, createTestAPI } from '../../helpers/api.js';
 
 test.describe('Test Grid Filtering & Selection', () => {
     test.beforeEach(async ({ page }) => {

@@ -37,7 +37,7 @@ async function editRequirementTitle(page, currentTitle, newTitle) {
     await expect(page.getByText(newTitle)).toBeVisible();
 }
 
-test.describe("Resync & Unlink", () => {
+test.describe("Resync & Unlink", { tag: '@needs-mock' }, () => {
     test.beforeEach(async ({ page, request }) => {
         await deleteAllRequirements(request);
         await configureJiraAPI(request);

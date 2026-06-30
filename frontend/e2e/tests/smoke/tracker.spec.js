@@ -173,7 +173,6 @@ test.describe('Test Tracking System E2E', () => {
     });
 
     test('should support multiple folder selection', async ({ page }) => {
-        test.setTimeout(90000);
         const timestamp = Date.now();
         const f1 = `F1 ${timestamp}`;
         const f2 = `F2 ${timestamp}`;

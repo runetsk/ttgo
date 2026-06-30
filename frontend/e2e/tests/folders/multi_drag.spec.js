@@ -1,6 +1,6 @@
 
 import { test, expect } from '@playwright/test';
-import { API_URL } from '../../config.js';
+import { API_URL, getFolderIdByName } from '../../helpers/api.js';
 
 test.describe('Multi-Folder Drag and Drop', () => {
 
@@ -17,29 +17,11 @@ test.describe('Multi-Folder Drag and Drop', () => {
         return page.getByTestId('folder-name').filter({ hasText: name }).first();
     };
 
-    // Helper to get folder ID from the API by name
-    const getFolderIdByName = async (page, name) => {
-        const resp = await page.request.get(`${API_URL}/folders/tree`);
-        const tree = await resp.json();
-        const find = (nodes) => {
-            for (const n of nodes) {
-                if (n.name === name) return n.id;
-                if (n.sub_folders) {
-                    const found = find(n.sub_folders);
-                    if (found) return found;
-                }
-            }
-            return null;
-        };
-        return find(tree);
-    };
-
     test.beforeEach(async ({ page }) => {
         await page.goto('/');
     });
 
     test('should move multiple selected folders', async ({ page }) => {
-        test.setTimeout(90000);
 
         const timestamp = Date.now();
         const folder1Name = `F1_${timestamp}`;

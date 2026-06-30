@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { configureConfluenceAPI, deleteAllRequirements } from '../../helpers/api.js';
 
-test.describe("Confluence Import", () => {
+test.describe("Confluence Import", { tag: '@needs-mock' }, () => {
   test.beforeEach(async ({ page, request }) => {
     await deleteAllRequirements(request);
     await configureConfluenceAPI(request);

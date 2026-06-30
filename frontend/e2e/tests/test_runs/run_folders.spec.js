@@ -1,63 +1,19 @@
 import { test, expect } from '@playwright/test';
 import { API_URL } from '../../config.js';
-
-// ── API helpers ──────────────────────────────────────────────────────────────
-
-const createCategoryAPI = async (request, name) => {
-    const res = await request.post(`${API_URL}/categories`, {
-        data: { name, description: 'Run folder E2E category' }
-    });
-    expect(res.ok()).toBeTruthy();
-    return res.json();
-};
-
-const createFolderAPI = async (request, name) => {
-    const res = await request.post(`${API_URL}/folders`, {
-        data: { name, parent_id: null }
-    });
-    expect(res.ok()).toBeTruthy();
-    return res.json();
-};
-
-const createTestCaseAPI = async (request, name, folderId) => {
-    const res = await request.post(`${API_URL}/tests`, {
-        data: { name, folder_id: folderId, description: '' }
-    });
-    expect(res.ok()).toBeTruthy();
-    return res.json();
-};
-
-const linkTestToCategoryAPI = async (request, testId, categoryId) => {
-    const res = await request.post(`${API_URL}/tests/${testId}/categories`, {
-        data: { category_id: categoryId }
-    });
-    expect(res.ok()).toBeTruthy();
-};
-
-const createRunAPI = async (request, categoryId, name, runFolderId = null) => {
-    const res = await request.post(`${API_URL}/runs`, {
-        data: { category_id: categoryId, name, run_folder_id: runFolderId }
-    });
-    expect(res.ok()).toBeTruthy();
-    return res.json();
-};
-
-const createRunFolderAPI = async (request, name) => {
-    const res = await request.post(`${API_URL}/run-folders`, {
-        data: { name }
-    });
-    expect(res.ok()).toBeTruthy();
-    return res.json();
-};
-
-const deleteRunFolderAPI = async (request, id) => {
-    await request.delete(`${API_URL}/run-folders/${id}`);
-};
+import {
+    createCategoryAPI,
+    createFolderAPI,
+    createTestAPI,
+    linkTestToCategoryAPI,
+    createRunAPI,
+    createRunFolderAPI,
+    deleteRunFolderAPI,
+} from '../../helpers/api.js';
 
 // ── Set up: create a category with one test case (reusable fixture) ──────────
 const setupCategory = async (request, tag) => {
     const folder = await createFolderAPI(request, `RF-Folder-${tag}`);
-    const tc = await createTestCaseAPI(request, `RF-TC-${tag}`, folder.id);
+    const tc = await createTestAPI(request, `RF-TC-${tag}`, folder.id);
     const category = await createCategoryAPI(request, `RF-Category-${tag}`);
     await linkTestToCategoryAPI(request, tc.id, category.id);
     return category;
@@ -68,7 +24,6 @@ const setupCategory = async (request, tag) => {
 // ════════════════════════════════════════════════════════════════════════════
 
 test.describe('US1 — Create and Manage Run Folders', () => {
-    test.setTimeout(60000);
 
     test('sidebar is visible on /runs and shows "All Runs"', async ({ page }) => {
         await test.step('Open the runs page and verify the sidebar shows "All Runs"', async () => {
@@ -167,7 +122,7 @@ test.describe('US1 — Create and Manage Run Folders', () => {
         await test.step('Seed a category, folder, and a run inside the folder via API', async () => {
             const suite = await setupCategory(request, `DelTest-${Date.now()}`);
             folder = await createRunFolderAPI(request, `ToDelete-${Date.now()}`);
-            run = await createRunAPI(request, suite.id, `Run-InFolder-${Date.now()}`, folder.id);
+            run = await createRunAPI(request, `Run-InFolder-${Date.now()}`, { categoryId: suite.id, runFolderId: folder.id });
         });
 
         await test.step('Open the runs page and locate the folder in the sidebar', async () => {
@@ -202,7 +157,6 @@ test.describe('US1 — Create and Manage Run Folders', () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 test.describe('US2 — Assign Runs to Folders', () => {
-    test.setTimeout(60000);
 
     test('folder dropdown appears in Create Run modal', async ({ page, request }) => {
         let folder;
@@ -267,7 +221,7 @@ test.describe('US2 — Assign Runs to Folders', () => {
 
         await test.step('Seed a run folder and a category via API', async () => {
             folder = await createRunFolderAPI(request, `PreSelect-${Date.now()}`);
-            const suite = await setupCategory(request, `PreSelect-${Date.now()}`);
+            await setupCategory(request, `PreSelect-${Date.now()}`);
         });
 
         await test.step('Open the runs page and select the folder in the sidebar', async () => {
@@ -299,7 +253,6 @@ test.describe('US2 — Assign Runs to Folders', () => {
 // ════════════════════════════════════════════════════════════════════════════
 
 test.describe('US3 — Filter and Navigate by Folder', () => {
-    test.setTimeout(60000);
 
     test('clicking folder filters run list to only its runs', async ({ page, request }) => {
         let folder;
@@ -309,8 +262,8 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
         await test.step('Seed a category, a folder, and runs inside and outside it via API', async () => {
             const suite = await setupCategory(request, `US3Filter-${Date.now()}`);
             folder = await createRunFolderAPI(request, `FilterFolder-${Date.now()}`);
-            runInFolder = await createRunAPI(request, suite.id, `InFolder-${Date.now()}`, folder.id);
-            runOutside = await createRunAPI(request, suite.id, `Outside-${Date.now()}`, null);
+            runInFolder = await createRunAPI(request, `InFolder-${Date.now()}`, { categoryId: suite.id, runFolderId: folder.id });
+            runOutside = await createRunAPI(request, `Outside-${Date.now()}`, { categoryId: suite.id });
         });
 
         await test.step('Open the runs page and verify both runs are visible under All Runs', async () => {
@@ -343,8 +296,8 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
         await test.step('Seed a category, a folder, and runs inside and outside it via API', async () => {
             const suite = await setupCategory(request, `US3All-${Date.now()}`);
             folder = await createRunFolderAPI(request, `AllFolder-${Date.now()}`);
-            runInFolder = await createRunAPI(request, suite.id, `InF-${Date.now()}`, folder.id);
-            runOutside = await createRunAPI(request, suite.id, `Out-${Date.now()}`, null);
+            runInFolder = await createRunAPI(request, `InF-${Date.now()}`, { categoryId: suite.id, runFolderId: folder.id });
+            runOutside = await createRunAPI(request, `Out-${Date.now()}`, { categoryId: suite.id });
         });
 
         await test.step('Open the runs page and filter by the folder', async () => {

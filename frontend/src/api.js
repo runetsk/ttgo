@@ -162,7 +162,7 @@ export const deleteComment = (commentId) =>
     api.delete(`/comments/${commentId}`);
 
 export const getCustomFields = () => api.get('/custom-fields').then(res => res.data);
-export const createCustomField = (name, type, options, isMandatory) => api.post('/custom-fields', { name, type, options: options ? JSON.stringify(options) : null, is_mandatory: isMandatory }).then(res => res.data);
+export const createCustomField = (name, type, options, isMandatory) => api.post('/custom-fields', { name, type, options: Array.isArray(options) && options.length ? options : null, is_mandatory: isMandatory }).then(res => res.data);
 export const deleteCustomField = (id) => api.delete(`/custom-fields/${id}`);
 
 

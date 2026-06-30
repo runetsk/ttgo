@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Folder Deep Linking', () => {
-    test.setTimeout(60000);
 
     test('should navigate to folder via URL and persist', async ({ page }) => {
         const folderName = `DeepFolder ${Date.now()}`;
