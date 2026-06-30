@@ -29,6 +29,7 @@ const RequirementDetailPage = lazy(() => import('./pages/RequirementDetailPage')
 const AIGeneratePage = lazy(() => import('./pages/AIGeneratePage'))
 const HelpPage = lazy(() => import('./pages/HelpPage'))
 const DefectsPage = lazy(() => import('./pages/DefectsPage'))
+const QualityLayout = lazy(() => import('./components/QualityLayout'))
 
 function PageLoader() {
     return (
@@ -193,19 +194,21 @@ function App() {
               <Route path="/library" element={<HomeViewWrapper onLoad={handleHomeLoad} selectedFolders={selectedFolders} />} />
               <Route path="/library/folders/:folderId" element={<FolderViewWrapper onFolderLoad={handleFolderLoad} />} />
               <Route path="/library/folders/:folderId/tests/:testId" element={<FolderWithTestPaneWrapper onFolderLoad={handleFolderLoad} />} />
-              <Route path="/categories" element={<CategoryManagerPage />} />
               <Route path="/runs" element={<TestRunListPage selectedFolderId={null} onRunsLoaded={setRunRuns} runListKey={runListKey} />} />
               <Route path="/runs/folders/:runFolderId" element={<RunFolderViewWrapper onRunsLoaded={setRunRuns} runListKey={runListKey} />} />
               <Route path="/runs/run/:runId" element={<TestRunDetailPage />} />
-              <Route path="/analytics" element={<AnalyticsDashboard />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/library/tests/:testId" element={<TestCaseDetailWrapper onFolderLoad={handleFolderLoad} />} />
-              <Route path="/traceability" element={<TraceabilityMatrix />} />
-              <Route path="/requirements" element={<RequirementsPage />} />
-              <Route path="/requirements/:reqId" element={<RequirementDetailPage />} />
+              <Route element={<QualityLayout />}>
+                <Route path="/requirements" element={<RequirementsPage />} />
+                <Route path="/requirements/:reqId" element={<RequirementDetailPage />} />
+                <Route path="/traceability" element={<TraceabilityMatrix />} />
+                <Route path="/defects" element={<DefectsPage />} />
+                <Route path="/categories" element={<CategoryManagerPage />} />
+                <Route path="/analytics" element={<AnalyticsDashboard />} />
+              </Route>
               <Route path="/ai-generate" element={<AIGenerateRoute />} />
               <Route path="/help" element={<HelpPage />} />
-              <Route path="/defects" element={<DefectsPage />} />
             </Routes>
             </Suspense>
           </div>

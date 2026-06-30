@@ -42,35 +42,15 @@ export default function AppNav({ theme, toggleTheme }) {
             icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>,
           },
           {
-            path: '/categories', label: 'Categories',
-            isActive: location.pathname === '/categories',
-            icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="4" rx="1"/><rect x="2" y="10" width="20" height="4" rx="1"/><rect x="2" y="17" width="20" height="4" rx="1"/></svg>,
-          },
-          {
-            path: '/defects', label: 'Defects',
-            isActive: location.pathname === '/defects',
-            icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M12 2v4M5 9H2M5 15H2M22 9h-3M22 15h-3M7 4 5 2M17 4l2-2"/></svg>,
-          },
-          {
-            path: '/analytics', label: 'Analytics',
-            isActive: location.pathname === '/analytics',
-            icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
-          },
-          {
-            path: '/requirements', label: 'Reqs',
-            isActive: location.pathname === '/requirements',
-            icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>,
+            path: '/requirements', label: 'Quality',
+            isActive: location.pathname.startsWith('/requirements') || location.pathname === '/defects' || location.pathname === '/categories' || location.pathname === '/traceability' || location.pathname === '/analytics',
+            icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>,
           },
           {
             path: '/ai-generate', label: 'AI Gen',
             isActive: location.pathname === '/ai-generate',
             icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>,
             badge: aiGen.generating || aiGen.pendingCount > 0,
-          },
-          {
-            path: '/traceability', label: 'Trace',
-            isActive: location.pathname === '/traceability',
-            icon: <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>,
           },
           {
             path: '/settings', label: 'Settings',
