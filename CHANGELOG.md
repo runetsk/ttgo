@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-01
+
 ### Added
 - **E2E result reporting (dogfooding).** An opt-in Playwright reporter pushes the
   e2e suite's own results into a running TTGO instance as a test run — auto-provisioning
@@ -53,5 +55,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with rows that expand to a side-by-side detail of both runs. Shareable via a
   `?compareWith=<runId>` deep link.
 
-[Unreleased]: https://github.com/runetsk/ttgo/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/runetsk/ttgo/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/runetsk/ttgo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/runetsk/ttgo/releases/tag/v0.1.0
