@@ -1,18 +1,27 @@
 # TTGO Development Guidelines
 
-Last updated: 2026-06-29
+Last updated: 2026-07-02
 
 ## Project Structure
 
 ```
 backend/          Go backend (module: ttgo)
-  cmd/server/     Entry point
+  cmd/server/     API server entry point
+  cmd/ttgo/       CLI entry point (Cobra)
   internal/
-    api/          HTTP handlers & routing
+    api/          HTTP handlers & routing (one package per feature)
+    cli/          CLI commands
     config/       Configuration loading
     importparser/ Import utilities
     logging/      Logger setup
-  pkg/tracker/    Core domain models & logic
+    ratelimit/    Per-IP / per-token rate limiting
+    safehttp/     SSRF-guarded outbound HTTP clients
+  pkg/tracker/
+    failureanalysis/  AI failure-analysis grouping + worker
+    llm/              LLM provider clients
+    models/           Domain models
+    secretbox/        At-rest secret encryption (AES-256-GCM)
+    store/            GORM persistence layer
   docs/           Swagger-generated docs
 
 frontend/         React frontend (Vite)
@@ -23,9 +32,10 @@ frontend/         React frontend (Vite)
     hooks/        Custom hooks
     utils/        Utility functions
     api.js        Axios API client
+  e2e/            Playwright suite + TTGO self-reporting reporter
 
-specs/            Feature specification docs
-docs/             Project-level docs
+specs/            Feature specification docs (gitignored, local only)
+docs/             Project-level docs (gitignored except docs/images/)
 ```
 
 ## Stack
@@ -37,6 +47,7 @@ docs/             Project-level docs
 - `gorilla/websocket` for real-time
 - `microcosm-cc/bluemonday` for HTML sanitization
 - `swaggo/swag` + `swaggo/http-swagger` for Swagger docs
+- spf13/cobra for the ttgo CLI
 
 **Frontend** — React 19.2 + Vite
 - React Router v7, Axios
