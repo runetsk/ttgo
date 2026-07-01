@@ -22,6 +22,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tokens, and matching row styling (left accent border on the selected folder, hover,
   spacing, and indentation). The three inline folder action buttons (`+ ✎ 🗑`) collapse
   to the library's `+` / `⋮` pattern, where `⋮` opens the existing context menu.
+- **Quality workspace.** Requirements, Traceability, Defects, Categories, and Analytics are
+  now grouped under a single **Quality** top-nav section with a collapsible left sidebar
+  (icon-only rail when collapsed; the expanded/collapsed state is remembered).
+- **Editable defects.** The Defects page gained full create/edit support — a modal for
+  title, description, severity, and status; an inline status toggle; search by title or
+  external key; status/severity filters; a per-row description preview; and a deep link from
+  a run result's linked-defect title straight to that defect.
+- Native `<select>` menus now theme their option popups to match the app — a dark-mode-friendly
+  background and a brand-indigo selected row instead of the browser's default white list.
 
 ### Fixed
 - **Custom fields:** creating a `SELECT` custom field failed with HTTP 400 ("options array
@@ -30,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   options whether they come back as an array or a legacy string.
 - Run comparison: cancel in-flight fetches when switching the compared run, so rapidly
   changing the selection can no longer briefly render a stale comparison.
+- Defect create/edit modal readability: the dialog used a translucent panel that left its
+  labels and inputs hard to read over the dark overlay; it now uses a solid, opaque
+  background that reads cleanly in both light and dark themes.
 
 ## [0.1.0] - 2026-06-29
 
