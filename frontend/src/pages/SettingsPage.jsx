@@ -249,7 +249,7 @@ export default function SettingsPage() {
                         { key: 'default_issue_type', label: 'Default Issue Type', placeholder: 'e.g. Bug', defaultValue: 'Bug' },
                     ]}
                     tokenHintField="api_token_masked"
-                    renderTestConnection={(cfg, enabled) => <JiraTestConnection />}
+                    renderTestConnection={() => <JiraTestConnection />}
                 />
             )}
             {activeTab === 'confluence' && (
@@ -261,7 +261,7 @@ export default function SettingsPage() {
                     apiUpsertConfig={confApi.upsertConfig}
                     extraFields={[]}
                     tokenHintField="has_token"
-                    renderTestConnection={(cfg, enabled) => <ConfluenceTestConnection />}
+                    renderTestConnection={() => <ConfluenceTestConnection />}
                 />
             )}
             {activeTab === 'ai-test-generation' && (
@@ -678,7 +678,7 @@ function DemoDataSettings() {
             await seedApi.load();
             toast.success('Demo data loaded successfully');
             loadStatus();
-        } catch (err) {
+        } catch {
             // Global interceptor already shows a toast for errors; nothing extra needed.
         } finally {
             setOperating(false);
@@ -706,7 +706,7 @@ function DemoDataSettings() {
             await seedApi.remove();
             toast.success('Demo data removed');
             loadStatus();
-        } catch (err) {
+        } catch {
             // Global interceptor already shows a toast for errors.
         } finally {
             setOperating(false);
@@ -731,7 +731,7 @@ function DemoDataSettings() {
             await seedApi.resetAll();
             toast.success('All data has been erased');
             navigate('/');
-        } catch (err) {
+        } catch {
             // Global interceptor handles toast
         } finally {
             setOperating(false);

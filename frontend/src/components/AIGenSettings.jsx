@@ -377,7 +377,6 @@ export default function AIGenSettings() {
     const [modal, setModal]                 = useState(null);
     const [testingId, setTestingId]         = useState(null);
     const [testResults, setTestResults]     = useState({});
-    const [deletingId, setDeletingId]       = useState(null);
     const [confirmDelete, setConfirmDelete] = useState(null);
 
     const [template, setTemplate]           = useState(null);
@@ -444,7 +443,6 @@ export default function AIGenSettings() {
 
     const handleDeleteExecute = async () => {
         if (!confirmDelete) return;
-        setDeletingId(confirmDelete.id);
         setConfirmDelete(null);
         try {
             await aiGeneration.deleteProvider(confirmDelete.id);
@@ -452,8 +450,6 @@ export default function AIGenSettings() {
             loadProviders();
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to delete provider');
-        } finally {
-            setDeletingId(null);
         }
     };
 

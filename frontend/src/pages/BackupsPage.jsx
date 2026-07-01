@@ -59,7 +59,7 @@ export function BackupsSettings() {
         try {
             const data = await backups.list();
             setBackupList(data || []);
-        } catch (e) {
+        } catch {
             // silent — toast from interceptor
         } finally {
             setLoading(false);
@@ -75,7 +75,7 @@ export function BackupsSettings() {
                 interval_hours: data.interval_hours,
                 retention_count: data.retention_count,
             });
-        } catch (e) {
+        } catch {
             // silent
         }
     }, []);
@@ -137,7 +137,7 @@ export function BackupsSettings() {
             const result = await backups.create();
             toast.success(`Backup created (${formatBytes(result.file_size)})`);
             // loadBackups() removed — server broadcast updates via WebSocket
-        } catch (e) {
+        } catch {
             // toast from interceptor
         } finally {
             setCreating(false);
@@ -155,7 +155,7 @@ export function BackupsSettings() {
             link.click();
             link.parentNode.removeChild(link);
             window.URL.revokeObjectURL(url);
-        } catch (e) {
+        } catch {
             toast.error('Download failed');
         }
     };
@@ -172,7 +172,7 @@ export function BackupsSettings() {
                 try {
                     await backups.delete(backup.id);
                     toast.success('Backup deleted');
-                } catch (e) { /* toast from interceptor */ }
+                } catch { /* toast from interceptor */ }
             },
         });
     };
@@ -195,7 +195,7 @@ export function BackupsSettings() {
                 try {
                     const result = await backups.restore(backup.id, value);
                     toast.success(`Database restored. Safety backup: ${result.pre_restore_backup_id?.slice(0, 8)}...`);
-                } catch (e) {
+                } catch {
                     // toast from interceptor
                 } finally {
                     setRestoring(false);
@@ -229,7 +229,7 @@ export function BackupsSettings() {
                     toast.success(`Database restored from upload. Safety backup: ${result.pre_restore_backup_id?.slice(0, 8)}...`);
                     setUploadFile(null);
                     if (fileInputRef.current) fileInputRef.current.value = '';
-                } catch (e) {
+                } catch {
                     // toast from interceptor
                 } finally {
                     setRestoring(false);
@@ -245,7 +245,7 @@ export function BackupsSettings() {
             const result = await backups.schedule.update(scheduleForm);
             setSchedule(result);
             toast.success('Backup schedule updated');
-        } catch (e) {
+        } catch {
             // toast from interceptor
         } finally {
             setSavingSchedule(false);

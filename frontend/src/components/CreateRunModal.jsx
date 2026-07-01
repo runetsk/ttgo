@@ -61,11 +61,6 @@ export default function CreateRunModal({ categories, onClose, onSuccess, default
         if (e.key === 'Escape') onClose();
     };
 
-    // Toggle category selection (click again to deselect)
-    const toggleCategory = (id) => {
-        setCategoryId(prev => prev === id ? "" : id);
-    };
-
     return (
         <div className="modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 480, padding: 0, overflow: 'hidden' }}>

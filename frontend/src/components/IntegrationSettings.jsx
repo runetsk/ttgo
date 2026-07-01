@@ -17,7 +17,6 @@ import { toast } from '../toast';
  *   renderTestConnection  (config, enabled) => ReactNode
  */
 export default function IntegrationSettings({
-    provider,
     providerLabel,
     description,
     apiGetConfig,

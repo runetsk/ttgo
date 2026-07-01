@@ -88,8 +88,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         return Promise.resolve();
     }, [selectedFolders]);
 
-    const loadCategories = useCallback(() => getCategories().then(data => setCategories(data.categories || [])), []);
-
     // Dedup refs to prevent StrictMode double-fire
     const categoriesLoadedRef = useRef(false);
     const testsLoadingRef = useRef('');
