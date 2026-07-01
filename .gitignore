@@ -25,6 +25,7 @@ backend/backend_debug.log
 backend/test-results/
 backend/server
 backend/ttgo-linux
+backend/ttgo
 backend/uploads/
 backend/server.log
 *.db
