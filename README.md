@@ -36,7 +36,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 - ⌨️ **CLI & Claude Code automation.** A first-class `ttgo` CLI drives tests, runs, analytics and more from the terminal or CI — and a bundled Claude Code skill lets you operate TTGO in plain English.
 - ⚡ **Real-time collaboration.** WebSocket-powered live sync keeps every open tab and teammate up to date as runs are executed and test cases change.
 
-…plus rich-text editing with full version history, scheduled SQLite backups, API tokens & webhooks, and native Jira / Confluence integrations. See the [full feature list](#features) below.
+…plus built-in defect tracking, rich-text editing with full version history, scheduled SQLite backups, API tokens & webhooks, and Jira / Confluence integrations. See the [full feature list](#features) below.
 
 ## Feature tour
 
@@ -44,14 +44,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 |:--|:--|
 | <img src="docs/images/02-test-case-detail.png" width="100%"><br>**Rich test cases** — TipTap rich-text descriptions, ordered steps with expected results, full version history, and tabs for runs, defects and linked requirements. | <img src="docs/images/03-test-run-execution.png" width="100%"><br>**Run execution** — snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. |
 | <img src="docs/images/04-analytics-dashboard.png" width="100%"><br>**Analytics** — pass-rate trends, flaky-test detection, slowest tests, component health and side-by-side run comparison across any date range. | <img src="docs/images/05-traceability-matrix.png" width="100%"><br>**Requirements & traceability** — a coverage-at-a-glance matrix linking requirements to test cases and surfacing the gaps. |
-
-<div align="center">
-
-<img src="docs/images/06-ai-generate.png" alt="AI test generation studio" width="100%">
-
-<sub><i>AI test generation — pick a requirement for context, describe what you want, and let your configured model draft test cases for review.</i></sub>
-
-</div>
+| <img src="docs/images/07-defects.png" width="100%"><br>**Native defect tracking** — lightweight bugs with severity and status, linked to failing results and managed on a dedicated Defects page in the Quality workspace; optionally reference an external Jira issue. | <img src="docs/images/06-ai-generate.png" width="100%"><br>**AI test generation** — pick a requirement for context, describe what you want, and let your configured model draft test cases for review. |
 
 ## How TTGO compares
 
@@ -80,7 +73,7 @@ How TTGO stacks up against popular commercial and self-hosted test management to
 <b>6.</b> Webhooks vary by plan/host — e.g. Qase webhooks require a paid tier, and Xray typically relies on Jira's automation engine.
 </sub>
 
-> Competitor capabilities and pricing are summarized from public documentation as of mid-2026 and change frequently — verify the current details with each vendor. Spotted something out of date? [Open a PR](https://github.com/kirylRunets/ttgo/pulls).
+> Competitor capabilities and pricing are summarized from public documentation as of mid-2026 and change frequently — verify the current details with each vendor. Spotted something out of date? [Open a PR](https://github.com/runetsk/ttgo/pulls).
 
 ---
 
@@ -94,11 +87,12 @@ A self-hosted test case management tool built with Go and React.
 
 - **Test Suite & Folder Management** — hierarchical organization with drag-and-drop reordering
 - **Test Cases** — rich text descriptions and steps, full version history with diff view
-- **Test Runs** — snapshot-based execution, per-step pass/fail, screenshots, comments, defect linking
+- **Test Runs** — snapshot-based execution, per-step pass/fail, screenshots, comments, native defect linking
+- **Defect Tracking** — native, lightweight defects (title, description, severity, status) linked to test results and managed on a dedicated Defects page; optionally reference an external issue (e.g. Jira)
 - **Real-time Updates** — WebSocket-powered live sync across open browser tabs
 - **Analytics** — pass rate trends, flaky test detection, duration tracking, run comparisons
 - **Requirements & Traceability** — link test cases to requirements, traceability matrix view
-- **Jira Integration** — create and link Jira defects directly from test runs
+- **Jira Integration** — import requirements from Jira and post generated test cases back to the ticket
 - **Confluence Import** — import requirements from Confluence pages
 - **AI Test Generation** — generate test cases from requirements using LLM providers
 - **Database Backups** — manual and scheduled SQLite backups with restore support
