@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { resultDefects, defects as defectsApi } from '../api';
 import CreateDefectModal from './CreateDefectModal';
+import { useNavigate } from 'react-router-dom';
 
 const statusStyle = (status) => status === 'closed'
     ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }
@@ -8,6 +9,7 @@ const statusStyle = (status) => status === 'closed'
 const severityColor = { critical: '#ef4444', major: '#f97316', minor: '#eab308', trivial: '#6b7280' };
 
 export default function DefectLinkPanel({ resultId, runId, createDefectContext = null, containerStyle }) {
+    const navigate = useNavigate();
     const [links, setLinks] = useState([]);
     const [loading, setLoading] = useState(true);
     const [showCreate, setShowCreate] = useState(false);
@@ -61,7 +63,7 @@ export default function DefectLinkPanel({ resultId, runId, createDefectContext =
                 <div key={d.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 10px', borderRadius: 6, marginBottom: 6, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-color)' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <span style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)' }}>{d.title}</span>
+                            <button onClick={() => navigate(`/defects?focus=${d.id}`)} title="Open in Defects" style={{ fontWeight: 700, fontSize: '0.85rem', color: 'var(--text-primary)', background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left' }}>{d.title}</button>
                             <span style={{ ...statusStyle(d.status), padding: '1px 8px', borderRadius: 99, fontSize: '0.72rem', fontWeight: 600 }}>{d.status}</span>
                             <span style={{ fontSize: '0.72rem', color: severityColor[d.severity] || 'var(--text-secondary)', fontWeight: 600 }}>{d.severity}</span>
                             {d.external_url && <a href={d.external_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.75rem', color: 'var(--accent-purple, #a78bfa)' }}>{d.external_key || 'external'} ↗</a>}

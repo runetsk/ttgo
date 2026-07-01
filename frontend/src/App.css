@@ -529,6 +529,22 @@
     box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
 }
 
+/* Theme the native option popup so it matches the control (esp. in dark mode,
+   where the browser default is a jarring white list). Mirrors .status-select option. */
+.modern-input option,
+.modern-select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+/* Brand-color the selected row instead of the browser's off-brand system blue
+   (honored by Chromium; harmless fallback elsewhere). */
+.modern-input option:checked,
+.modern-select option:checked {
+    background: var(--accent-indigo);
+    color: #fff;
+}
+
 .context-menu {
     position: fixed;
     background: var(--bg-secondary);
