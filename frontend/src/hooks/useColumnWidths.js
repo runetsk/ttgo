@@ -110,7 +110,7 @@ export function useColumnWidths(gridId, columnDefs) {
 
     // Reset all columns to their default widths
     const resetWidths = useCallback(() => {
-        try { localStorage.removeItem(storageKey); } catch {}
+        try { localStorage.removeItem(storageKey); } catch { /* localStorage unavailable — state below still resets to defaults */ }
         setColumnWidths(buildWidthMap(columnDefs, {}));
     }, [columnDefs, storageKey]);
 
