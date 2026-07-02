@@ -3,14 +3,17 @@ package requirements_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	api "ttgo/internal/api"
+	"ttgo/internal/api/requirements"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
 
+	"github.com/microcosm-cc/bluemonday"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -393,6 +396,44 @@ func TestImportRequirement_ConfluenceNotConfigured(t *testing.T) {
 	})
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 	assert.Contains(t, w.Body.String(), "Confluence")
+}
+
+// TestImportRequirement_ReportsFailedChildren covers a Jira import with
+// include_children=true where one child fails to fetch: the failure must be
+// reported in child_import_errors rather than silently skipped. The real
+// do() helper routes through api.NewServer, which wires the real Jira
+// fetchers (would make network calls), so the Handler is constructed
+// directly here with stub fetchers instead.
+func TestImportRequirement_ReportsFailedChildren(t *testing.T) {
+	st := newStore(t)
+	_, err := st.UpsertJiraConfig("http://jira.example.com", "e@x.com", "x", true, "", "")
+	require.NoError(t, err)
+
+	stubTicket := func(cfg *models.JiraConfig, key string, san *bluemonday.Policy) (string, string, string, error) {
+		if key == "CHILD-B" {
+			return "", "", "", errors.New("boom")
+		}
+		return "Title " + key, "Desc", "http://jira/" + key, nil
+	}
+	stubChildren := func(cfg *models.JiraConfig, parent string, san *bluemonday.Policy) []models.JiraTicketChild {
+		return []models.JiraTicketChild{{Key: "CHILD-A"}, {Key: "CHILD-B"}}
+	}
+	h := requirements.NewHandler(st, nil, bluemonday.UGCPolicy(), stubTicket, stubChildren, nil, nil)
+
+	body, _ := json.Marshal(map[string]any{
+		"source_type": "jira", "source_key": "PARENT-1", "include_children": true,
+	})
+	r := httptest.NewRequest("POST", "/api/requirements/import", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	h.ImportRequirement(w, r)
+
+	require.Equal(t, http.StatusCreated, w.Code)
+	var resp struct {
+		ChildImportErrors []string `json:"child_import_errors"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	require.Len(t, resp.ChildImportErrors, 1)
+	assert.Contains(t, resp.ChildImportErrors[0], "CHILD-B")
 }
 
 func TestBulkImport_BadJSON(t *testing.T) {

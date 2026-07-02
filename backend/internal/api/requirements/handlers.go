@@ -386,7 +386,10 @@ func (h *Handler) ImportRequirement(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Import children if requested (Jira only)
+	// Import children if requested (Jira only). A transaction isn't viable here
+	// (the loop performs remote HTTP fetches), so partial failures are reported
+	// explicitly instead of silently skipped.
+	var childErrors []string
 	if req.IncludeChildren && req.SourceType == "jira" && h.fetchJiraChildren != nil {
 		cfg, _ := h.store.GetJiraConfig()
 		if cfg != nil && cfg.Enabled && cfg.APIToken != "" {
@@ -395,12 +398,15 @@ func (h *Handler) ImportRequirement(w http.ResponseWriter, r *http.Request) {
 				// Skip already-imported children
 				if existing, _ := h.store.FindRequirementBySource("jira", child.Key); existing != nil {
 					// If already imported, just set its parent
-					_ = h.store.SetRequirementParent(existing.ID, newReq.ID)
+					if perr := h.store.SetRequirementParent(existing.ID, newReq.ID); perr != nil {
+						childErrors = append(childErrors, fmt.Sprintf("%s: set parent failed: %v", child.Key, perr))
+					}
 					continue
 				}
 				// Fetch full details for the child
 				childTitle, childDesc, childURL, err := h.fetchJiraRequirement(cfg, child.Key)
 				if err != nil {
+					childErrors = append(childErrors, fmt.Sprintf("%s: fetch failed: %v", child.Key, err))
 					continue
 				}
 				childReq := &models.Requirement{
@@ -415,14 +421,19 @@ func (h *Handler) ImportRequirement(w http.ResponseWriter, r *http.Request) {
 				if err := h.store.CreateImportedRequirement(childReq); err != nil {
 					if errors.Is(err, models.ErrDuplicateRequirementIdentifier) {
 						childReq.Identifier = fmt.Sprintf("jira-%s", child.Key)
-						_ = h.store.CreateImportedRequirement(childReq)
+						if err2 := h.store.CreateImportedRequirement(childReq); err2 != nil {
+							childErrors = append(childErrors, fmt.Sprintf("%s: create failed: %v", child.Key, err2))
+						}
 					}
 				}
 			}
 		}
 	}
 
-	httpx.JSON(w, http.StatusCreated, newReq)
+	httpx.JSON(w, http.StatusCreated, struct {
+		*models.Requirement
+		ChildImportErrors []string `json:"child_import_errors,omitempty"`
+	}{newReq, childErrors})
 }
 
 // ────────────────────────────────────────────────────────────────────────────
