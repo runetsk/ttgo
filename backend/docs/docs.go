@@ -1700,6 +1700,49 @@ const docTemplate = `{
                 }
             }
         },
+        "/defects/{id}/tests": {
+            "get": {
+                "description": "Returns the distinct test cases linked to the defect (directly or via a run result), ordered by name.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "defects"
+                ],
+                "summary": "List a defect's affected test cases",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Defect ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ttgo_pkg_tracker_store.AffectedTestCase"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/folders": {
             "post": {
                 "description": "Creates a new folder, optionally nested under a parent folder.",
@@ -6897,6 +6940,17 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_store.AffectedTestCase": {
+            "type": "object",
+            "properties": {
+                "id": {
+                    "type": "string"
+                },
+                "name": {
                     "type": "string"
                 }
             }

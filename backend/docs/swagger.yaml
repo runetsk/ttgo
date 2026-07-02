@@ -698,6 +698,13 @@ definitions:
       title:
         type: string
     type: object
+  ttgo_pkg_tracker_store.AffectedTestCase:
+    properties:
+      id:
+        type: string
+      name:
+        type: string
+    type: object
 host: localhost:8080
 info:
   contact: {}
@@ -1804,6 +1811,35 @@ paths:
                 type: string
             type: object
       summary: Update a defect
+      tags:
+      - defects
+  /defects/{id}/tests:
+    get:
+      description: Returns the distinct test cases linked to the defect (directly
+        or via a run result), ordered by name.
+      parameters:
+      - description: Defect ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/ttgo_pkg_tracker_store.AffectedTestCase'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: List a defect's affected test cases
       tags:
       - defects
   /folders:
