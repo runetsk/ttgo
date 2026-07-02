@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { useLocation } from 'react-router-dom';
-import { getFolderTree, createFolder, deleteFolder, deleteFolders, moveFolder, bulkMoveFolders, deleteTests } from '../api';
+import { getFolderTree, createFolder, deleteFolders, moveFolder, bulkMoveFolders, deleteTests } from '../api';
 import Modal from './Modal';
 import FolderNode from './FolderNode';
 import { toast } from '../toast';
@@ -23,7 +23,7 @@ export default function Sidebar({ onSelectFolders, selectedFolderIds }) {
 
     // Resize and Zoom State
     const [width, setWidth] = useState(() => parseInt(localStorage.getItem('sidebarWidth')) || 240);
-    const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem('sidebarZoom')) || 1);
+    const [zoom] = useState(() => parseFloat(localStorage.getItem('sidebarZoom')) || 1);
     const isResizing = useRef(false);
 
     // Lifted state — persisted so expand state survives navigation away from the tests page
@@ -139,12 +139,6 @@ export default function Sidebar({ onSelectFolders, selectedFolderIds }) {
         window.addEventListener('mouseup', stopResizing);
         return () => { window.removeEventListener('mousemove', resize); window.removeEventListener('mouseup', stopResizing); };
     }, [resize, stopResizing]);
-
-    const handleZoom = (delta) => setZoom(prev => {
-        const newZoom = Math.max(0.8, Math.min(1.5, prev + delta));
-        localStorage.setItem('sidebarZoom', newZoom);
-        return newZoom;
-    });
 
     const flattenVisibleTree = useCallback((nodes, expandedList) => {
         let flat = [];

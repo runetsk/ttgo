@@ -317,11 +317,6 @@ export default function TestRunDetail() {
     const failed = latestResults.filter(r => r.status === 'FAIL' || r.status === 'ERROR').length;
     const skipped = latestResults.filter(r => r.status === 'SKIP').length;
     const pending = latestResults.filter(r => r.status === 'PENDING').length;
-    const failedResults = latestResults.filter(r => r.status === 'FAIL' || r.status === 'ERROR');
-    const productBug = failedResults.filter(r => r.defect_type === 'product_bug').length;
-    const automationBug = failedResults.filter(r => r.defect_type === 'automation_bug').length;
-    const systemIssue = failedResults.filter(r => r.defect_type === 'system_issue').length;
-    const toInvestigate = failedResults.filter(r => r.defect_type === 'to_investigate' || !r.defect_type).length;
 
     const handleStatusChange = async (newStatus) => {
         if (newStatus !== run.status) {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import StepsEditor from './StepsEditor';
 import RichTextField from './RichTextField';
@@ -403,10 +403,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                     {!execLoading && executions.length > 0 && (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                             {executions.map(ex => {
-                                const statusColor = ex.status === 'PASS' ? 'var(--accent-green)'
-                                    : ex.status === 'FAIL' ? 'var(--accent-red)'
-                                    : ex.status === 'SKIP' ? 'var(--text-secondary)'
-                                    : 'var(--warning-color)';
                                 const dur = ex.duration_ms
                                     ? (ex.duration_ms < 1000 ? `${ex.duration_ms}ms` : `${(ex.duration_ms / 1000).toFixed(1)}s`)
                                     : null;

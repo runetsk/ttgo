@@ -84,7 +84,6 @@ export default function BulkImportModal({ source, onClose, onImported }) {
     const items = source === 'jira' ? tickets : pages;
     const getKey = (item) => source === 'jira' ? item.key : item.id;
     const getLabel = (item) => source === 'jira' ? item.key : item.title;
-    const getSummary = (item) => source === 'jira' ? item.summary : item.title;
 
     const nonImportedItems = items.filter(i => !i.already_imported);
 

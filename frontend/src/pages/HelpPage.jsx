@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef } from 'react';
 
 /* ── Section config with icons ── */
 const SECTIONS = [
@@ -35,12 +35,6 @@ export default function HelpPage() {
         setActiveSection(id);
         setSearch('');
         contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
-    };
-
-    // Simple search across section content
-    const matchesSearch = (text) => {
-        if (!search.trim()) return true;
-        return text.toLowerCase().includes(search.toLowerCase());
     };
 
     return (

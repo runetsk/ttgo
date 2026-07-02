@@ -521,7 +521,7 @@ function LinkedReqCard({ req, disabled, onUnlink }) {
 }
 
 // ── Left pane: Context ───────────────────────────────────────────────────────
-function StudioContextPane({ ai, onCollapse, onChangeRequirement, allReqs, allReqsLoading, onPickReq, onCreateNew }) {
+function StudioContextPane({ ai, onCollapse, allReqs, allReqsLoading, onPickReq, onCreateNew }) {
     const [open, setOpen] = useState({ req: true, params: false, output: false });
     const toggle = k => setOpen(s => ({ ...s, [k]: !s[k] }));
     const provider = ai.providers.find(p => p.id === ai.selectedProviderId);
@@ -1619,9 +1619,6 @@ export default function AIGenerateStudio() {
         ai.discardAllPending();
     };
     const handleAcceptGroup = (group) => ai.acceptDrafts(group);
-
-    const hasSession = ai.hasSession;
-    const activeReq = ai.activeRequirement;
 
     const studioGridNode = (
         <>

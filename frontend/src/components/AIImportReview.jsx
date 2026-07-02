@@ -61,14 +61,9 @@ export default function AIImportReview({ onAccepted, onBack }) {
             .catch(() => setAllReqs([]));
     }, []);
 
-    // Provider info for display
-    const selectedProvider = ai.providers?.find(p => p.id === ai.selectedProviderId);
-    const noProviders = !ai.providers?.length;
-
     // Drafts with discarded removed
     const visibleDrafts = drafts.filter(d => !discardedIds.has(d.temp_id));
     const readyDrafts = visibleDrafts.filter(d => acceptedIds.has(d.temp_id));
-    const pendingCount = visibleDrafts.filter(d => !acceptedIds.has(d.temp_id)).length;
     const dupeSet = new Set((ai.importDuplicateNames || []).map(n => n.toLowerCase()));
 
     // ── Accept / Discard handlers for AIGenReviewPanel (use context methods) ──
@@ -114,7 +109,6 @@ export default function AIImportReview({ onAccepted, onBack }) {
         }
     };
 
-    const allProcessed = pendingCount === 0 && visibleDrafts.length > 0;
     const importDisabled = readyDrafts.length === 0 || !folderId || ai.importAccepting;
 
     return (
