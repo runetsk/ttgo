@@ -3,6 +3,25 @@ import StarterKit from '@tiptap/starter-kit'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import SafeHTML from './shared/SafeHTML'
 
+// Toolbar button helper — uses onMouseDown to keep editor focus. Hoisted to
+// module scope (not exported) since it doesn't close over anything from
+// RichTextField — all data comes in via props.
+function ToolbarButton({ onAction, title, children, isActive }) {
+  return (
+    <button
+      type="button"
+      className={`rich-text-toolbar-btn${isActive ? ' is-active' : ''}`}
+      onMouseDown={(e) => {
+        e.preventDefault()   // prevent blur before action fires
+        onAction()
+      }}
+      title={title}
+    >
+      {children}
+    </button>
+  )
+}
+
 /**
  * RichTextField — a click-to-expand inline rich text editor.
  *
@@ -28,7 +47,9 @@ export default function RichTextField({ value, onChange, placeholder, readOnly =
 
   // Keep a ref to onChange so TipTap's onUpdate closure is never stale.
   const onChangeRef = useRef(onChange)
-  onChangeRef.current = onChange
+  useEffect(() => {
+    onChangeRef.current = onChange
+  }, [onChange])
 
   // Track the last HTML we pushed to the parent so we can tell if an
   // incoming `value` change is external (API reload) vs our own echo.
@@ -75,21 +96,6 @@ export default function RichTextField({ value, onChange, placeholder, readOnly =
     if (e.currentTarget.contains(e.relatedTarget)) return
     setIsEditing(false)
   }, [])
-
-  // Toolbar button helper — uses onMouseDown to keep editor focus.
-  const ToolbarButton = ({ onAction, title, children, isActive }) => (
-    <button
-      type="button"
-      className={`rich-text-toolbar-btn${isActive ? ' is-active' : ''}`}
-      onMouseDown={(e) => {
-        e.preventDefault()   // prevent blur before action fires
-        onAction()
-      }}
-      title={title}
-    >
-      {children}
-    </button>
-  )
 
   const isEmpty = !value || value.trim() === '' || value === '<p></p>'
 

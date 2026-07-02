@@ -13,6 +13,11 @@ const CommentsPanel = ({ targetType, runId, resultId, compact, onCountChange }) 
     const [editingId, setEditingId] = useState(null);
     const [editContent, setEditContent] = useState('');
     const [loading, setLoading] = useState(true);
+    // "Now" for relative-time labels, captured when comments are (re)loaded
+    // rather than read inline during render (Date.now() must not be called
+    // in render). Refreshed on every fetch, matching how often the comment
+    // list itself — and therefore the labels — actually change.
+    const [now, setNow] = useState(() => Date.now());
 
     const fetchComments = () => {
         setLoading(true);
@@ -23,12 +28,16 @@ const CommentsPanel = ({ targetType, runId, resultId, compact, onCountChange }) 
         fetcher.then(data => {
             const list = data || [];
             setComments(list);
+            setNow(Date.now());
             if (onCountChange) onCountChange(list.length);
         }).catch(() => {})
           .finally(() => setLoading(false));
     };
 
-    useEffect(() => { fetchComments(); }, [targetType, runId, resultId]);
+    useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-existing pattern (fetchComments synchronously sets loading/comments state), unmasked by the purity fix above; out of scope for this task (owned by the set-state-in-effect cleanup)
+        fetchComments();
+    }, [targetType, runId, resultId]);
 
     const handleAdd = () => {
         const trimmed = newContent.trim();
@@ -53,8 +62,8 @@ const CommentsPanel = ({ targetType, runId, resultId, compact, onCountChange }) 
     const canModify = (comment) =>
         user && (user.role === 'admin' || user.id === comment.user_id);
 
-    const relativeTime = (isoStr) => {
-        const diff = Date.now() - new Date(isoStr).getTime();
+    const relativeTime = (isoStr, nowMs) => {
+        const diff = nowMs - new Date(isoStr).getTime();
         const mins = Math.floor(diff / 60000);
         if (mins < 1) return 'just now';
         if (mins < 60) return `${mins}m ago`;
@@ -92,7 +101,7 @@ const CommentsPanel = ({ targetType, runId, resultId, compact, onCountChange }) 
                                 {c.user_display_name || 'API'}
                             </span>
                             <span style={{ fontSize: compact ? '0.62rem' : '0.65rem', color: 'var(--text-secondary)', opacity: 0.6 }}>
-                                {relativeTime(c.created_at)}
+                                {relativeTime(c.created_at, now)}
                             </span>
                             {canModify(c) && editingId !== c.id && (
                                 <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>

@@ -50,7 +50,7 @@ export default function Sidebar({ onSelectFolders, selectedFolderIds }) {
         return () => window.removeEventListener('folder-tree-changed', handler);
     }, [refresh]);
 
-    const findPath = useCallback((nodes, targetTestId) => {
+    const findPath = useCallback(function findPath(nodes, targetTestId) {
         if (!nodes) return null;
         for (const node of nodes) {
             if (node.test_cases?.some(t => t.id === targetTestId)) return [node.id];
@@ -140,7 +140,7 @@ export default function Sidebar({ onSelectFolders, selectedFolderIds }) {
         return () => { window.removeEventListener('mousemove', resize); window.removeEventListener('mouseup', stopResizing); };
     }, [resize, stopResizing]);
 
-    const flattenVisibleTree = useCallback((nodes, expandedList) => {
+    const flattenVisibleTree = useCallback(function flattenVisibleTree(nodes, expandedList) {
         let flat = [];
         if (!nodes) return flat;
         nodes.forEach(node => {
@@ -152,7 +152,7 @@ export default function Sidebar({ onSelectFolders, selectedFolderIds }) {
     }, []);
 
     // Flat list of visible test IDs in render order — used for shift-range across folders.
-    const flattenVisibleTests = useCallback((nodes, expandedList) => {
+    const flattenVisibleTests = useCallback(function flattenVisibleTests(nodes, expandedList) {
         let ids = [];
         if (!nodes) return ids;
         nodes.forEach(node => {

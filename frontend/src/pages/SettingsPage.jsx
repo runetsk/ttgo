@@ -29,17 +29,18 @@ export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState(hashTab || 'custom-fields');
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-existing pattern, unmasked by the loadFields reordering below; out of scope for this task (owned by the set-state-in-effect cleanup)
         if (hashTab && hashTab !== activeTab) setActiveTab(hashTab);
     }, [hashTab]);
-
-    useEffect(() => {
-        loadFields();
-    }, []);
 
     const loadFields = () => {
         // T013: removed [DEBUG] log lines
         getCustomFields().then(setFields).catch(err => console.error('Failed to load fields:', err));
     };
+
+    useEffect(() => {
+        loadFields();
+    }, []);
 
     const handleAdd = () => {
         if (!name) return;
