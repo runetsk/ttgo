@@ -119,6 +119,7 @@ A self-hosted test case management tool built with Go and React.
 
 ```bash
 cd backend
+make setup             # one-time: enables the required sqlite_fts5 build tag (needs CGO + gcc)
 cp .env.example .env   # set ADMIN_EMAIL and ADMIN_PASSWORD
 go run ./cmd/server/
 ```
@@ -139,6 +140,7 @@ Runs on `http://localhost:5173`.
 
 ```bash
 cd backend
+make setup                     # if not already done
 go build -o ttgo ./cmd/ttgo/
 ttgo config set-server http://localhost:8080
 ttgo config set-token <your-api-token>
@@ -200,7 +202,7 @@ The backend is configured via environment variables (or a `.env` file in the `ba
 
 ## Deployment (Docker)
 
-Copy the example env file and fill in your values:
+Copy the example env file and fill in your values. The example file lives at the repo root.
 
 ```bash
 cp .env.example .env
