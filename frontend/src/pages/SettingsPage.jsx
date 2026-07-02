@@ -29,8 +29,8 @@ export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState(hashTab || 'custom-fields');
 
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-existing pattern, unmasked by the loadFields reordering below; out of scope for this task (owned by the set-state-in-effect cleanup)
         if (hashTab && hashTab !== activeTab) setActiveTab(hashTab);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- must run only when the URL hash changes; activeTab is read solely to skip a redundant set. Tab clicks update activeTab via a raw history.replaceState (not React Router navigation), so location.hash/hashTab doesn't change — adding activeTab here would re-run on every manual tab click and, since hashTab is now stale, immediately revert the click back to the old hash tab
     }, [hashTab]);
 
     const loadFields = () => {

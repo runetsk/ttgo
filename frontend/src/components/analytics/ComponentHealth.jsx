@@ -13,7 +13,7 @@ export default function ComponentHealth({ data, threshold: initialThreshold, onT
     const [sortKey, setSortKey] = useState('passing_rate');
     const [sortAsc, setSortAsc] = useState(true);
 
-    const components = data?.components || [];
+    const components = useMemo(() => data?.components || [], [data?.components]);
     const totals = data?.totals;
 
     const sorted = useMemo(() => {

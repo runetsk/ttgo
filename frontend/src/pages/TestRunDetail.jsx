@@ -125,7 +125,7 @@ export default function TestRunDetail() {
         // Register loadRun as refresh callback for reconnection
         registerRefresh('testRunDetail', loadRun);
         return () => unregisterRefresh('testRunDetail');
-    }, [runId]);
+    }, [runId, loadRun, loadCurrentAnalyses, registerRefresh, unregisterRefresh]);
 
     useEffect(() => {
         if (runId) {
@@ -177,7 +177,7 @@ export default function TestRunDetail() {
             .catch(() => { });
     };
 
-    const loadRun = () => {
+    const loadRun = useCallback(() => {
         getTestRun(runId)
             .then(data => {
                 if (data && data.id) setRun(data);
@@ -188,7 +188,7 @@ export default function TestRunDetail() {
                 console.error(err);
                 setLoading(false);
             });
-    };
+    }, [runId]);
 
     const toggleResult = (id) => {
         const newSet = new Set(expandedResults);
@@ -631,7 +631,7 @@ export default function TestRunDetail() {
                             targetType="run"
                             runId={runId}
                             compact={false}
-                            onCountChange={(count) => setRunCommentCount(count)}
+                            onCountChange={setRunCommentCount}
                         />
                     </div>
                 )}

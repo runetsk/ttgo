@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { versions as versionsApi } from '../api';
 import RestoreConfirmDialog from './RestoreConfirmDialog';
 import SafeHTML from './shared/SafeHTML';
@@ -209,12 +209,19 @@ export default function HistorySidebar({ testCaseId, onClose, onTestCaseRestored
     const [selectedId, setSelectedId]       = useState(null);
     const [restoreTarget, setRestoreTarget] = useState(null);
     const [restoring, setRestoring]         = useState(false);
+    // Tracks whether a version list has ever loaded successfully, so fetchVersions
+    // (below) can skip the full-loading spinner on refetches (avoids UI flicker on
+    // restore/retry) without needing versionList itself as a dependency — reading
+    // versionList.length directly would give fetchVersions a new identity on every
+    // successful load and re-trigger the mount effect, causing a fetch loop.
+    const hasLoadedRef = useRef(false);
 
     const fetchVersions = useCallback(async () => {
-        if (!versionList.length) setLoading(true);
+        if (!hasLoadedRef.current) setLoading(true);
         setError(null);
         try {
             const data = await versionsApi.list(testCaseId);
+            hasLoadedRef.current = true;
             setVersionList(data);
             // auto-select newest version
             if (data.length > 0) setSelectedId(id => id ?? data[0].id);

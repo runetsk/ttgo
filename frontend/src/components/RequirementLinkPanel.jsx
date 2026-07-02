@@ -28,17 +28,24 @@ export default function RequirementLinkPanel({ testCaseId }) {
 
     const searchRef = useRef(null);
     const dropdownRef = useRef(null);
+    // Tracks whether requirements have ever loaded successfully, so the load effect
+    // below can skip the full-loading spinner on refetches without needing
+    // linked/allReqs themselves as dependencies — reading their .length directly
+    // would give the effect new "missing deps" every time it sets them, and since
+    // they're set inside this same effect, including them would loop.
+    const hasLoadedRef = useRef(false);
 
     // Load linked requirements and all requirements on mount / testCaseId change.
     useEffect(() => {
         if (!testCaseId) return;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: only shows the spinner on first load, before fetching linked/all requirements
-        if (!linked.length && !allReqs.length) setLoading(true);
+        if (!hasLoadedRef.current) setLoading(true);
         Promise.all([
             reqApi.listByTestCase(testCaseId),
             reqApi.list(),
         ])
             .then(([linked, all]) => {
+                hasLoadedRef.current = true;
                 setLinked(linked || []);
                 setAllReqs(all || []);
             })

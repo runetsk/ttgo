@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import StepsEditor from './StepsEditor';
 import RichTextField from './RichTextField';
@@ -80,6 +80,10 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     const [moveFolderId, setMoveFolderId] = useState('');
     const [moving, setMoving] = useState(false);
     const getSignal = useAbortController();
+    // Tracks whether a test has ever loaded, so the load effect below can skip the
+    // loading spinner when switching between tests without needing `test` itself in
+    // its deps — `test` is set inside this same effect, so including it would loop.
+    const hasLoadedTestRef = useRef(false);
 
     // Load execution history when test is available
     useEffect(() => {
@@ -124,10 +128,11 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
             const signal = getSignal();
             // Only show loading spinner on first load, not when switching between tests
             // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: fetches the test record by id
-            if (!test) setLoading(true);
+            if (!hasLoadedTestRef.current) setLoading(true);
             getTest(testId, { signal })
                 .then(t => {
                     if (signal.aborted) return;
+                    hasLoadedTestRef.current = true;
                     setTest(t);
                     if (onTestLoad) onTestLoad(t);
                 })
@@ -140,6 +145,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                     if (!signal.aborted) setLoading(false);
                 });
         } else if (initialTest) {
+            hasLoadedTestRef.current = true;
             setTest(initialTest);
             setLoading(false);
             if (onTestLoad) onTestLoad(initialTest);

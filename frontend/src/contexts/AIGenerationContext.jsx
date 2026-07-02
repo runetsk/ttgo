@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- context/hook file intentionally co-exports its Provider and hook; splitting would ripple imports across the app with no runtime benefit */
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { aiGeneration, aiImport, getFolderTree, requirements as requirementsApi } from '../api';
 import { toast } from '../toast';
