@@ -96,6 +96,11 @@ export function AIGenerationProvider({ children }) {
     const [importAcceptedIds, setImportAcceptedIds] = useState(() => new Set(_cached?.importAcceptedIds || []));
     const [importDiscardedIds, setImportDiscardedIds] = useState(() => new Set(_cached?.importDiscardedIds || []));
 
+    // Sets are recreated per update; join to stable strings so the persist
+    // effect only fires when membership actually changes.
+    const acceptedSig = [...importAcceptedIds].sort().join('|');
+    const discardedSig = [...importDiscardedIds].sort().join('|');
+
     // ── Persist import state to sessionStorage ──────────────────────
     useEffect(() => {
         const hasData = importDrafts.length > 0 || importReviewDrafts.length > 0;
@@ -117,9 +122,10 @@ export function AIGenerationProvider({ children }) {
                 importDiscardedIds: [...importDiscardedIds],
             }));
         } catch { /* quota exceeded — non-critical */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- sig strings stand in for Set identity; effect body reads the Sets
     }, [importDrafts, importFormat, importUnparseable, importDuplicateNames,
         importTruncated, importTotalFound, importDebug,
-        importReviewDrafts, importAcceptedIds, importDiscardedIds]);
+        importReviewDrafts, acceptedSig, discardedSig]);
 
     // ── Persist active requirement id across reloads ─────────────────
     // Rehydrate active requirement on mount (one-shot) — must run BEFORE the
