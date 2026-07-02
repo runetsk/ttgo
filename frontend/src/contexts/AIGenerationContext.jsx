@@ -128,18 +128,18 @@ export function AIGenerationProvider({ children }) {
         if (rehydratedRef.current) return;
         rehydratedRef.current = true;
         let storedId = null;
-        try { storedId = sessionStorage.getItem('ttgo_aigen_active_req_id'); } catch {}
+        try { storedId = sessionStorage.getItem('ttgo_aigen_active_req_id'); } catch { /* sessionStorage unavailable — treat as no stored id */ }
         if (!storedId) return;
         requirementsApi.get(storedId)
             .then(req => { if (req?.id) setActiveRequirement(req); })
             .catch(() => {
-                try { sessionStorage.removeItem('ttgo_aigen_active_req_id'); } catch {}
+                try { sessionStorage.removeItem('ttgo_aigen_active_req_id'); } catch { /* sessionStorage quota/unavailable — non-critical, skip cleanup */ }
             });
     }, []);
 
     useEffect(() => {
         if (activeRequirement?.id) {
-            try { sessionStorage.setItem('ttgo_aigen_active_req_id', String(activeRequirement.id)); } catch {}
+            try { sessionStorage.setItem('ttgo_aigen_active_req_id', String(activeRequirement.id)); } catch { /* sessionStorage quota exceeded — non-critical, skip persistence */ }
         }
         // Note: we never clear here — the rehydrate effect would race with this
         // on mount (activeRequirement is null before fetch resolves). clearSession
@@ -454,7 +454,7 @@ export function AIGenerationProvider({ children }) {
     }, []);
 
     const clearSession = useCallback(() => {
-        try { sessionStorage.removeItem('ttgo_aigen_active_req_id'); } catch {}
+        try { sessionStorage.removeItem('ttgo_aigen_active_req_id'); } catch { /* sessionStorage unavailable — non-critical, state is still cleared below */ }
         setActiveRequirement(null);
         setInitialFolderId('');
         // Don't clear providers/folders — they're eagerly loaded and shared

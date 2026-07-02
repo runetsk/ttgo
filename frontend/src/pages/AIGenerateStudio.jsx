@@ -1505,7 +1505,7 @@ export default function AIGenerateStudio() {
     const [importOpen, setImportOpen] = useState(() => {
         try {
             if (sessionStorage.getItem('ttgo_import_state')) return true;
-        } catch {}
+        } catch { /* sessionStorage unavailable — fall through to default closed state */ }
         return false;
     });
     const [allReqs, setAllReqs] = useState([]);
@@ -1534,10 +1534,10 @@ export default function AIGenerateStudio() {
     const [dragging, setDragging] = useState(null);
 
     useEffect(() => {
-        try { localStorage.setItem('aig-studio-left-w', String(leftWidth)); } catch {}
+        try { localStorage.setItem('aig-studio-left-w', String(leftWidth)); } catch { /* localStorage quota exceeded — non-critical, skip persistence */ }
     }, [leftWidth]);
     useEffect(() => {
-        try { localStorage.setItem('aig-studio-right-w', String(rightWidth)); } catch {}
+        try { localStorage.setItem('aig-studio-right-w', String(rightWidth)); } catch { /* localStorage quota exceeded — non-critical, skip persistence */ }
     }, [rightWidth]);
 
     const startResize = (side) => (e) => {
