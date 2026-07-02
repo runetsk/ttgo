@@ -426,6 +426,7 @@ function UserSettings() {
     }, [loadUsers]));
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: loadUsers fetches the user list and wires up the websocket refresh subscription
         loadUsers();
         registerRefresh('settingsUsers', loadUsers);
         return () => unregisterRefresh('settingsUsers');

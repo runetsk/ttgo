@@ -18,6 +18,7 @@ export default function FolderTreeSelect({ folders, value, onChange, disabled })
     const searchRef = useRef(null);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- re-expands all folders when the folder set changes (e.g. reload/add); expanded stays independently user-togglable afterward via toggleExpanded
         setExpanded(new Set(folders.map(f => f.id)));
     }, [folders.length]);
 

@@ -385,6 +385,7 @@ export default function ImportFromConfluenceModal({ onClose, onImported, conflue
     // Load spaces on mount
     useEffect(() => {
         if (!confluenceEnabled) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: fetches Confluence spaces list
         setSpacesLoading(true);
         confApi.listSpaces(null, 100)
             .then(data => setSpaces(data.spaces || []))

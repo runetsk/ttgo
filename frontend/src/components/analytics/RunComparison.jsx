@@ -69,6 +69,7 @@ export default function RunComparison() {
     // Auto-select the two most recent runs
     useEffect(() => {
         if (runs.length >= 2 && !run1 && !run2) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time default fill once runs load; run1/run2 remain independently user-selectable afterward via the dropdowns
             setRun1(runs[0].id);
             setRun2(runs[1].id);
         }
@@ -76,6 +77,7 @@ export default function RunComparison() {
 
     useEffect(() => {
         if (!run1 || !run2 || run1 === run2) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale comparison when selection becomes invalid, guarding the fetch below
             setComparison(null);
             return;
         }

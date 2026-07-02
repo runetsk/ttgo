@@ -33,6 +33,7 @@ export default function TraceabilityMatrix() {
             .finally(() => setLoading(false));
     };
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: load() fetches the traceability matrix + test list on mount
     useEffect(() => { load(); }, []);
 
     // Close dropdown on outside click

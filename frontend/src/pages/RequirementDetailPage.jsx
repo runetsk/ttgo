@@ -109,6 +109,7 @@ export default function RequirementDetailPage() {
 
     useEffect(() => {
         const signal = getSignal();
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: loadData fetches the requirement + traceability matrix and wires up the websocket refresh subscription
         loadData(signal);
         registerRefresh('requirementDetail', () => loadData());
         return () => unregisterRefresh('requirementDetail');

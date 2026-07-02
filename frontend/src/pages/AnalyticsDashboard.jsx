@@ -160,6 +160,7 @@ export default function AnalyticsDashboard() {
         const controller = new AbortController();
         abortRef.current = controller;
 
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: fetchP1 fetches the P1 analytics sections (with AbortController cancellation) on mount/filter change
         fetchP1(filters, controller.signal);
 
         // Re-fetch any lazy sections that were already opened

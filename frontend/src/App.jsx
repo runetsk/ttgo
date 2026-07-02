@@ -278,6 +278,7 @@ function FolderViewWrapper({ onFolderLoad }) {
 
   useEffect(() => {
     if (!folderId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale folder when navigating away from a folder route
       setFolder(null);
       onFolderLoad([]);
       return;
@@ -369,6 +370,7 @@ function FolderWithTestPaneWrapper({ onFolderLoad }) {
   useEffect(() => {
     if (!folderId) return;
     const signal = getSignal();
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets loading/error state before starting an async folder fetch
     setFolderError(false);
     setFolder(null);
     getFolder(folderId, { _silent: true, signal }).then(f => {

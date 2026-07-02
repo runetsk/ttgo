@@ -52,6 +52,7 @@ export default function AIImportReview({ onAccepted, onBack }) {
 
     // Auto-select first folder if none selected
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time default fill once context-loaded folders become available; folderId remains user-editable afterward via FolderTreeSelect
         if (!folderId && folders.length > 0) setFolderId(folders[0].id);
     }, [folders.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
