@@ -8,7 +8,6 @@ import { activeColumns } from '../utils/columnFeatures';
 import { toast } from '../toast';
 
 import RunResultDetail from '../components/RunResultDetail';
-import RunTimeline from '../components/RunTimeline';
 import CommentsPanel from '../components/CommentsPanel';
 import ColumnPicker from '../components/ColumnPicker';
 import AIVerdictBadge from '../components/AIVerdictBadge';
@@ -19,11 +18,12 @@ import { useColumnWidths } from '../hooks/useColumnWidths';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
 import RunResultsToolbar from '../components/RunResultsToolbar';
-import RunCompareTab from '../components/runCompare/RunCompareTab';
 import { latestAttempts } from '../utils/runResults';
 import { useRunViewPreference } from '../hooks/useRunViewPreference';
 import { groupResults, GROUP_DIMENSIONS } from '../utils/runResultsGrouping';
 import DefectsTab from './testRunDetail/DefectsTab';
+import TimelineTab from './testRunDetail/TimelineTab';
+import CompareTab from './testRunDetail/CompareTab';
 
 const RESULT_COLUMN_DEFS = [
     { key: 'test_case',    label: 'Test Case',    mandatory: true,  defaultVisible: true,  defaultWidth: 200 },
@@ -1325,8 +1325,8 @@ export default function TestRunDetail() {
             )}
 
             {activeTab === 'timeline' && (
-                <RunTimeline
-                    results={run.run_results}
+                <TimelineTab
+                    run={run}
                     onNavigateToResult={(resultId) => {
                         setActiveTab('results');
                         setTimeout(() => {
@@ -1342,7 +1342,7 @@ export default function TestRunDetail() {
                 />
             )}
             {activeTab === 'compare' && (
-                <RunCompareTab run={run} />
+                <CompareTab run={run} />
             )}
         </div>
     );
