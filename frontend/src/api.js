@@ -357,6 +357,7 @@ export const defects = {
     create: (data) => api.post('/defects', data).then(res => res.data),
     update: (id, data) => api.patch(`/defects/${id}`, data).then(res => res.data),
     remove: (id) => api.delete(`/defects/${id}`),
+    affectedTests: (id) => api.get(`/defects/${id}/tests`).then(res => res.data),
 };
 
 export const resultDefects = {

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { defects as defectsApi } from '../api';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import DefectModal from '../components/DefectModal';
 
 const SEVERITIES = ['critical', 'major', 'minor', 'trivial'];
@@ -12,6 +12,25 @@ const severityChip = (sev) => {
 const statusPill = (status) => status === 'closed'
     ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }
     : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)' };
+
+const affMuted = { color: 'var(--text-secondary)', fontSize: '0.85rem' };
+const affLabel = { fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: 2 };
+const affLink = { fontSize: '0.85rem', color: 'var(--accent-purple, #a78bfa)', textDecoration: 'none' };
+
+// Renders the expanded "affected tests" content for one defect's cache entry.
+function renderAffected(entry) {
+    if (!entry || entry.loading) return <span style={affMuted}>Loading…</span>;
+    if (entry.error) return <span style={{ ...affMuted, color: '#ef4444' }}>Couldn't load affected tests.</span>;
+    if (entry.tests.length === 0) return <span style={{ ...affMuted, fontStyle: 'italic' }}>No linked tests.</span>;
+    return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={affLabel}>Affected tests</div>
+            {entry.tests.map(t => (
+                <Link key={t.id} to={`/library/tests/${t.id}`} style={affLink}>{t.name}</Link>
+            ))}
+        </div>
+    );
+}
 
 export default function DefectsPage() {
     const [rows, setRows] = useState([]);
@@ -55,6 +74,20 @@ export default function DefectsPage() {
         open: rows.filter(r => r.status === 'open').length,
         closed: rows.filter(r => r.status === 'closed').length,
     }), [rows]);
+
+    const [expandedId, setExpandedId] = useState(null);
+    const [affectedById, setAffectedById] = useState({}); // { [defectId]: { loading, error, tests } }
+
+    const toggleExpand = (d) => {
+        const willOpen = expandedId !== d.id;
+        setExpandedId(willOpen ? d.id : null);
+        if (willOpen && !affectedById[d.id]) {
+            setAffectedById(prev => ({ ...prev, [d.id]: { loading: true, error: false, tests: [] } }));
+            defectsApi.affectedTests(d.id)
+                .then(tests => setAffectedById(prev => ({ ...prev, [d.id]: { loading: false, error: false, tests: tests || [] } })))
+                .catch(() => setAffectedById(prev => ({ ...prev, [d.id]: { loading: false, error: true, tests: [] } })));
+        }
+    };
 
     const toggleStatus = (d) => {
         const next = d.status === 'open' ? 'closed' : 'open';
@@ -103,7 +136,8 @@ export default function DefectsPage() {
                         {loading && <tr><td colSpan={7} style={{ color: 'var(--text-secondary)' }}>Loading…</td></tr>}
                         {!loading && rows.length === 0 && <tr><td colSpan={7} style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>No defects.</td></tr>}
                         {rows.map(d => (
-                            <tr key={d.id} id={`defect-row-${d.id}`} onClick={() => setModal({ mode: 'edit', defect: d })} style={{ cursor: 'pointer', transition: 'background 0.8s', background: focusId === d.id ? 'rgba(99,102,241,0.14)' : undefined }}>
+                            <React.Fragment key={d.id}>
+                            <tr id={`defect-row-${d.id}`} onClick={() => setModal({ mode: 'edit', defect: d })} style={{ cursor: 'pointer', transition: 'background 0.8s', background: focusId === d.id ? 'rgba(99,102,241,0.14)' : undefined }}>
                                 <td>
                                     <div style={{ fontWeight: 600 }}>{d.title}</div>
                                     {d.description && (
@@ -119,13 +153,32 @@ export default function DefectsPage() {
                                     </button>
                                 </td>
                                 <td><span style={severityChip(d.severity)}>{d.severity}</span></td>
-                                <td style={{ textAlign: 'center' }}>{d.linked_test_count ?? 0}</td>
+                                <td style={{ textAlign: 'center' }}>
+                                    {(d.linked_test_count ?? 0) > 0 ? (
+                                        <button onClick={(e) => { e.stopPropagation(); toggleExpand(d); }}
+                                            title="Show affected tests"
+                                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-primary)', fontFamily: 'inherit', fontSize: '0.85rem', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                                            <span style={{ fontSize: '0.7rem' }}>{expandedId === d.id ? '▾' : '▸'}</span>
+                                            {d.linked_test_count}
+                                        </button>
+                                    ) : (
+                                        <span style={{ color: 'var(--text-secondary)' }}>0</span>
+                                    )}
+                                </td>
                                 <td>{d.external_url
                                     ? <a href={d.external_url} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}>{d.external_key || 'link'} ↗</a>
                                     : <span style={{ color: 'var(--text-secondary)' }}>—</span>}</td>
                                 <td style={{ whiteSpace: 'nowrap', fontSize: '0.82rem' }}>{d.updated_at ? new Date(d.updated_at).toLocaleDateString() : '—'}</td>
                                 <td><button className="meta-chip-remove" onClick={(e) => { e.stopPropagation(); remove(d); }} title="Delete">×</button></td>
                             </tr>
+                            {expandedId === d.id && (
+                                <tr>
+                                    <td colSpan={7} style={{ background: 'rgba(255,255,255,0.02)', padding: '10px 16px' }}>
+                                        {renderAffected(affectedById[d.id])}
+                                    </td>
+                                </tr>
+                            )}
+                            </React.Fragment>
                         ))}
                     </tbody>
                 </table>
