@@ -13,6 +13,28 @@ function getRateClass(pct) {
     return 'pass-rate-low';
 }
 
+// Hoisted to module scope (not exported) so it isn't recreated on every
+// SummaryCards render. `active`/`payload` are injected by Recharts at
+// render time; `total_runs` is passed through explicitly since it closes
+// over data from the parent.
+function CustomTooltip({ active, payload, total_runs }) {
+    if (!active || !payload?.length) return null;
+    const d = payload[0];
+    const pct = total_runs > 0 ? ((d.value / total_runs) * 100).toFixed(1) : 0;
+    return (
+        <div style={{
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 6,
+            padding: '8px 12px',
+            fontSize: '0.82rem',
+        }}>
+            <div style={{ fontWeight: 600, color: d.payload.color }}>{d.name}</div>
+            <div>{d.value} ({pct}%)</div>
+        </div>
+    );
+}
+
 export default function SummaryCards({ data }) {
     if (!data) return null;
 
@@ -35,24 +57,6 @@ export default function SummaryCards({ data }) {
         { name: 'Failed', value: fail_count, color: COLORS.fail },
         { name: 'Skipped', value: skip_count, color: COLORS.skip },
     ].filter(d => d.value > 0);
-
-    const CustomTooltip = ({ active, payload }) => {
-        if (!active || !payload?.length) return null;
-        const d = payload[0];
-        const pct = total_runs > 0 ? ((d.value / total_runs) * 100).toFixed(1) : 0;
-        return (
-            <div style={{
-                background: 'var(--bg-secondary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 6,
-                padding: '8px 12px',
-                fontSize: '0.82rem',
-            }}>
-                <div style={{ fontWeight: 600, color: d.payload.color }}>{d.name}</div>
-                <div>{d.value} ({pct}%)</div>
-            </div>
-        );
-    };
 
     return (
         <div className="analytics-summary-row">
@@ -96,7 +100,7 @@ export default function SummaryCards({ data }) {
                                 <Cell key={i} fill={entry.color} />
                             ))}
                         </Pie>
-                        <Tooltip content={<CustomTooltip />} />
+                        <Tooltip content={<CustomTooltip total_runs={total_runs} />} />
                     </PieChart>
                 </ResponsiveContainer>
             </div>

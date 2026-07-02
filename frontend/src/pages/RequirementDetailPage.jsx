@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { requirements as reqApi, traceability as tracApi } from '../api';
 import ErrorAlert from '../components/shared/ErrorAlert';
@@ -42,6 +42,11 @@ export default function RequirementDetailPage() {
     const aiGen = useAIGeneration();
 
     const [req, setReq] = useState(null);
+    // Mirrors `req` so loadData can check "have we loaded anything yet" without
+    // taking a reactive dependency on `req` itself (which would change identity
+    // every time it fetches and re-trigger the effect that calls it below).
+    const reqRef = useRef(null);
+    useEffect(() => { reqRef.current = req; }, [req]);
     const [linkedTests, setLinkedTests] = useState([]);
     const [children, setChildren] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -63,7 +68,7 @@ export default function RequirementDetailPage() {
     const getSignal = useAbortController();
 
     const loadData = useCallback((signal) => {
-        if (!req) setLoading(true);
+        if (!reqRef.current) setLoading(true);
         setError(null);
         Promise.all([reqApi.get(reqId, signal ? { signal } : undefined), tracApi.getMatrix(signal ? { signal } : undefined)])
             .then(([reqData, matrixData]) => {

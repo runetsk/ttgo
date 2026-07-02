@@ -1,14 +1,14 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 
 export default function CollapsibleSection({ title, description, defaultExpanded = false, onFirstExpand, children }) {
     const [expanded, setExpanded] = useState(defaultExpanded);
-    const hasExpandedOnce = useRef(defaultExpanded);
+    const [hasExpandedOnce, setHasExpandedOnce] = useState(defaultExpanded);
 
     const toggle = () => {
         const next = !expanded;
         setExpanded(next);
-        if (next && !hasExpandedOnce.current) {
-            hasExpandedOnce.current = true;
+        if (next && !hasExpandedOnce) {
+            setHasExpandedOnce(true);
             if (onFirstExpand) onFirstExpand();
         }
     };
@@ -30,7 +30,7 @@ export default function CollapsibleSection({ title, description, defaultExpanded
                     display: expanded ? 'block' : 'none',
                 }}
             >
-                {(expanded || hasExpandedOnce.current) && children}
+                {(expanded || hasExpandedOnce) && children}
             </div>
         </div>
     );

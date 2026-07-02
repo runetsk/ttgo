@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useAIGeneration, DETAIL_LEVELS, COVERAGE_LEVELS } from '../contexts/AIGenerationContext';
 import FolderTreeSelect from '../components/FolderTreeSelect';
@@ -1576,17 +1576,17 @@ export default function AIGenerateStudio() {
         : drafts.length > 0 ? 'review' : 'compose';
     const disabled = ai.generating || ai.accepting;
 
-    const statusOf = (d) => ai.acceptedIds.has(d.temp_id)
+    const statusOf = useCallback((d) => ai.acceptedIds.has(d.temp_id)
         ? 'accepted'
         : ai.discardedIds.has(d.temp_id)
             ? 'rejected'
-            : 'pending';
+            : 'pending', [ai.acceptedIds, ai.discardedIds]);
 
     const statuses = useMemo(() => {
         const o = {};
         drafts.forEach(d => { o[d.temp_id] = statusOf(d); });
         return o;
-    }, [drafts, ai.acceptedIds, ai.discardedIds]);
+    }, [drafts, statusOf]);
 
     const counts = useMemo(() => {
         const c = { pending: 0, accepted: 0, rejected: 0 };

@@ -68,7 +68,7 @@ export function WebSocketProvider({ children }) {
     }
   }, []);
 
-  const connect = useCallback(() => {
+  const connect = useCallback(function connect() {
     if (!mountedRef.current || !enabledRef.current) return;
 
     // Build ws:// or wss:// URL from current location
