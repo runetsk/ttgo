@@ -31,6 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   title, description, severity, and status; an inline status toggle; search by title or
   external key; status/severity filters; a per-row description preview; and a deep link from
   a run result's linked-defect title straight to that defect.
+- **View affected tests.** A defect row on the Defects page expands to list the test cases it
+  affects — each linking to its test-case detail — backed by a new `GET /api/defects/{id}/tests` endpoint.
 - Native `<select>` menus now theme their option popups to match the app — a dark-mode-friendly
   background and a brand-indigo selected row instead of the browser's default white list.
 
