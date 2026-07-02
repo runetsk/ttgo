@@ -7,6 +7,7 @@ import (
 
 	"ttgo/internal/api/httpx"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/store"
 )
 
 // List godoc
@@ -142,6 +143,28 @@ func DefectFromCreate(req models.CreateDefectRequest) *models.Defect {
 		Title: strings.TrimSpace(req.Title), Description: req.Description, Severity: req.Severity, Status: req.Status,
 		ExternalProvider: req.ExternalProvider, ExternalKey: req.ExternalKey, ExternalURL: strings.TrimSpace(req.ExternalURL),
 	}
+}
+
+// AffectedTests godoc
+//
+// @Summary      List a defect's affected test cases
+// @Description  Returns the distinct test cases linked to the defect (directly or via a run result), ordered by name.
+// @Tags         defects
+// @Produce      json
+// @Param        id  path  string  true  "Defect ID"
+// @Success      200  {array}   store.AffectedTestCase
+// @Failure      500  {object}  object{error=string}
+// @Router       /defects/{id}/tests [get]
+func (h *Handler) AffectedTests(w http.ResponseWriter, r *http.Request) {
+	tests, err := h.store.ListAffectedTestCases(r.PathValue("id"))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if tests == nil {
+		tests = []store.AffectedTestCase{}
+	}
+	httpx.JSON(w, http.StatusOK, tests)
 }
 
 func validateUpdate(req models.UpdateDefectRequest) string {

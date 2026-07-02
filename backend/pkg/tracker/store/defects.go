@@ -255,6 +255,27 @@ func (s *Store) UnlinkDefectFromTestCase(defectID, testCaseID string) error {
 	})
 }
 
+// AffectedTestCase is a distinct test case linked to a defect.
+type AffectedTestCase struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListAffectedTestCases returns the distinct test cases a defect affects,
+// ordered by name. Both link kinds (result-scoped and test-case-scoped) carry
+// test_case_id, so this matches the LinkedTestCount basis. Links whose test
+// case has been deleted are excluded by the JOIN.
+func (s *Store) ListAffectedTestCases(defectID string) ([]AffectedTestCase, error) {
+	var out []AffectedTestCase
+	err := s.db.Raw(`
+		SELECT DISTINCT tc.id, tc.name
+		FROM defect_links dl
+		JOIN test_cases tc ON tc.id = dl.test_case_id
+		WHERE dl.defect_id = ? AND dl.test_case_id IS NOT NULL
+		ORDER BY tc.name`, defectID).Scan(&out).Error
+	return out, err
+}
+
 func (s *Store) ListDefectsByResult(runResultID string) ([]models.Defect, error) {
 	var defects []models.Defect
 	err := s.db.Raw(`
