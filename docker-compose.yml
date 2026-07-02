@@ -15,6 +15,12 @@ services:
       - uploads:/app/uploads
     expose:
       - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/api/maintenance-status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   nginx:
     build:
@@ -26,7 +32,13 @@ services:
     volumes:
       - uploads:/opt/ttgo/uploads:ro
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   db_data:
