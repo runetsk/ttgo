@@ -4524,7 +4524,8 @@ paths:
       responses:
         "201":
           description: Created
-          schema: {}
+          schema:
+            type: object
         "400":
           description: Bad Request
           schema:
@@ -4595,6 +4596,40 @@ paths:
               type: string
             type: object
       summary: Get webhook dispatch logs
+      tags:
+      - webhooks
+  /webhooks/{id}/rotate-secret:
+    post:
+      description: Generate a new HMAC signing secret for a webhook, invalidating
+        the old one
+      parameters:
+      - description: Webhook ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: id and new plaintext secret
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: Rotate a webhook's signing secret
       tags:
       - webhooks
   /ws:
