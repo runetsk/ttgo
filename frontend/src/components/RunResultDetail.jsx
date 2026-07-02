@@ -12,8 +12,6 @@ const STATUS_DOT_COLORS = {
 };
 
 const RunResultDetail = ({ result, attempts }) => {
-    if (!result) return null;
-
     const [showLogs, setShowLogs] = useState(false);
     const [showSteps, setShowSteps] = useState(false);
     const [selectedAttemptId, setSelectedAttemptId] = useState(null);
@@ -22,6 +20,8 @@ const RunResultDetail = ({ result, attempts }) => {
     const [selectedVersion, setSelectedVersion] = useState(null);
     const [analyzing, setAnalyzing] = useState(false);
     const { aiFeaturesEnabled } = useAIGeneration();
+    const [galleryOpen, setGalleryOpen] = useState(false);
+    const [galleryIndex, setGalleryIndex] = useState(0);
 
     const loadAnalyses = async (resultId) => {
         try {
@@ -33,6 +33,8 @@ const RunResultDetail = ({ result, attempts }) => {
             setAnalyses([]);
         }
     };
+
+    if (!result) return null;
 
     // If attempts provided and user selected one, show that instead
     const hasMultipleAttempts = attempts && attempts.length > 1;
@@ -60,9 +62,6 @@ const RunResultDetail = ({ result, attempts }) => {
     } = activeResult;
 
     const isFailed = status === 'FAIL' || status === 'ERROR';
-
-    const [galleryOpen, setGalleryOpen] = useState(false);
-    const [galleryIndex, setGalleryIndex] = useState(0);
 
     // Parse screenshots JSON array
     const screenshotUrls = (() => {
