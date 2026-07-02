@@ -176,6 +176,7 @@ export const listWebhooks = () => api.get('/webhooks').then(res => res.data);
 export const createWebhook = (url, description, eventType = 'run.completed') =>
     api.post('/webhooks', { url, description, event_type: eventType }).then(res => res.data);
 export const deleteWebhook = (id) => api.delete(`/webhooks/${id}`);
+export const rotateWebhookSecret = (id) => api.post(`/webhooks/${id}/rotate-secret`).then(res => res.data);
 
 // Analytics (012-analytics-refactor: enhanced with global filter support)
 export const getAnalyticsSummary = (filters = {}, signal) =>
