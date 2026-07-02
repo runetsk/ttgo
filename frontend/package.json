@@ -1,6 +1,7 @@
 {
   "name": "test-tracker",
   "private": true,
+  "engines": { "node": ">=22" },
   "version": "0.2.0",
   "type": "module",
   "scripts": {
