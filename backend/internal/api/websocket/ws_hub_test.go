@@ -25,6 +25,18 @@ func makeTestClient(hub *Hub, role string, topics ...string) *Client {
 	return c
 }
 
+// drainAck reads and discards the "connected" ack the hub sends on register,
+// so tests that assert on subsequent broadcasts aren't reading the ack instead.
+func drainAck(t *testing.T, c *Client) {
+	t.Helper()
+	select {
+	case msg := <-c.send:
+		assert.Contains(t, string(msg), `"connected"`)
+	case <-time.After(time.Second):
+		t.Fatal("expected connected ack after register, timed out")
+	}
+}
+
 func TestHub_RegisterAndUnregister(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
@@ -34,6 +46,7 @@ func TestHub_RegisterAndUnregister(t *testing.T) {
 	// Register
 	hub.register <- client
 	time.Sleep(50 * time.Millisecond)
+	drainAck(t, client) // hub sends a "connected" ack on register
 
 	// Broadcast an event to confirm client is registered
 	hub.Broadcast(NewEvent(EventRunCreated, "runs:*", map[string]string{"id": "123"}))
@@ -64,6 +77,8 @@ func TestHub_BroadcastTopicFiltering(t *testing.T) {
 	hub.register <- runClient
 	hub.register <- backupClient
 	time.Sleep(50 * time.Millisecond)
+	drainAck(t, runClient)
+	drainAck(t, backupClient)
 
 	// Broadcast a run event — only runClient should receive
 	hub.Broadcast(NewEvent(EventRunUpdated, "run:abc", map[string]string{"name": "test"}))
@@ -94,6 +109,8 @@ func TestHub_BroadcastRoleFiltering(t *testing.T) {
 	hub.register <- memberClient
 	hub.register <- adminClient
 	time.Sleep(50 * time.Millisecond)
+	drainAck(t, memberClient)
+	drainAck(t, adminClient)
 
 	hub.Broadcast(NewEvent(EventBackupCreated, "backups:*", map[string]string{"id": "bk1"}))
 	time.Sleep(50 * time.Millisecond)
@@ -122,6 +139,7 @@ func TestHub_WildcardRunsMatchesRunID(t *testing.T) {
 	client := makeTestClient(hub, "member", "runs:*")
 	hub.register <- client
 	time.Sleep(50 * time.Millisecond)
+	drainAck(t, client)
 
 	// "runs:*" subscription should match "run:abc" topic
 	hub.Broadcast(NewEvent(EventRunUpdated, "run:abc", map[string]string{"id": "abc"}))
@@ -142,6 +160,7 @@ func TestHub_BroadcastFullPayload(t *testing.T) {
 	client := makeTestClient(hub, "member", "run:xyz")
 	hub.register <- client
 	time.Sleep(50 * time.Millisecond)
+	drainAck(t, client)
 
 	payload := map[string]interface{}{
 		"id":     "xyz",
@@ -184,6 +203,7 @@ func TestHub_MultipleSubscriptions(t *testing.T) {
 	client := makeTestClient(hub, "member", "run:abc", "runs:*")
 	hub.register <- client
 	time.Sleep(50 * time.Millisecond)
+	drainAck(t, client)
 
 	hub.Broadcast(NewEvent(EventRunUpdated, "run:abc", nil))
 	time.Sleep(50 * time.Millisecond)

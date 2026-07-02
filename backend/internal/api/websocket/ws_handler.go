@@ -1,7 +1,6 @@
 package websocket
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 	"ttgo/internal/api/httpx"
@@ -84,12 +83,6 @@ func NewHandler(hub *Hub, validateSession SessionValidator, allowedOrigin string
 		client.sessionToken = cookie.Value // for periodic session re-validation (F-018)
 		client.validate = validateSession
 		hub.register <- client
-
-		ack, _ := json.Marshal(map[string]interface{}{
-			"type": "connected",
-			"data": map[string]string{"client_id": client.ID},
-		})
-		client.send <- ack
 
 		go client.writePump()
 		go client.readPump()

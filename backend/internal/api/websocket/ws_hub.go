@@ -1,6 +1,7 @@
 package websocket
 
 import (
+	"encoding/json"
 	"time"
 
 	"log/slog"
@@ -47,11 +48,17 @@ func (h *Hub) Run() {
 			}
 
 		case client := <-h.register:
+			if client.User == nil {
+				slog.Warn("ws connection rejected: no user on client")
+				client.conn.Close()
+				continue
+			}
+
 			// Bound resource use: reject beyond a global cap and a per-user cap so
 			// a single user/token cannot exhaust goroutines/FDs/memory (F-040).
 			if len(h.clients) >= maxTotalClients {
 				slog.Warn("ws connection rejected: global client cap reached", "cap", maxTotalClients)
-				client.conn.Close() // reject without closing send (handler still sends an ack)
+				client.conn.Close() // reject without closing send; client was never registered/sent an ack
 				continue
 			}
 			perUser := 0
@@ -67,6 +74,19 @@ func (h *Hub) Run() {
 			}
 			h.clients[client] = true
 			slog.Info("ws client connected", "client_id", client.ID, "user", client.User.Email, "clients", len(h.clients))
+
+			// Deliver the connection ack from the hub goroutine — the hub is the
+			// single owner of client.send (sends and close), so no goroutine can
+			// race a send against close.
+			if ack, err := json.Marshal(map[string]any{
+				"type": "connected",
+				"data": map[string]string{"client_id": client.ID},
+			}); err == nil {
+				select {
+				case client.send <- ack:
+				default:
+				}
+			}
 
 		case client := <-h.unregister:
 			if _, ok := h.clients[client]; ok {
