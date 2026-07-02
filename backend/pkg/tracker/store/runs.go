@@ -340,25 +340,34 @@ func (s *Store) GetTestRun(id string) (*models.TestRun, error) {
 	}
 	if len(rrIDs) > 0 {
 		openCounts, closedCounts, err := s.CountDefectLinksByRunResults(rrIDs)
-		if err == nil {
-			for _, rr := range run.RunResults {
-				rr.OpenDefectLinkCount = openCounts[rr.ID]
-				rr.ClosedDefectLinkCount = closedCounts[rr.ID]
-			}
+		if err != nil {
+			return nil, fmt.Errorf("count defect links: %w", err)
+		}
+		for _, rr := range run.RunResults {
+			rr.OpenDefectLinkCount = openCounts[rr.ID]
+			rr.ClosedDefectLinkCount = closedCounts[rr.ID]
 		}
 	}
 
-	// Compute retry stats — a test case with more than one attempt counts as retried
-	s.db.Raw(`
-		SELECT COUNT(*) FROM (
-			SELECT rr.test_case_id FROM run_results rr
-			WHERE rr.test_run_id = ? AND rr.test_case_id IS NOT NULL
-			GROUP BY rr.test_case_id
-			HAVING MAX(rr.attempt_number) > 1
-		)
-	`, id).Scan(&run.RetriedCount)
-
-	s.db.Raw(`SELECT COUNT(*) FROM run_results WHERE test_run_id = ?`, id).Scan(&run.TotalAttempts)
+	// Retry stats in a single round-trip: total attempts + test cases with >1 attempt.
+	var stats struct {
+		Retried int
+		Total   int
+	}
+	if err := s.db.Raw(`
+		SELECT
+			(SELECT COUNT(*) FROM (
+				SELECT rr.test_case_id FROM run_results rr
+				WHERE rr.test_run_id = ? AND rr.test_case_id IS NOT NULL
+				GROUP BY rr.test_case_id
+				HAVING MAX(rr.attempt_number) > 1
+			)) AS retried,
+			(SELECT COUNT(*) FROM run_results WHERE test_run_id = ?) AS total
+	`, id, id).Scan(&stats).Error; err != nil {
+		return nil, fmt.Errorf("run stats: %w", err)
+	}
+	run.RetriedCount = stats.Retried
+	run.TotalAttempts = stats.Total
 
 	return &run, nil
 }
