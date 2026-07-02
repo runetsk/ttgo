@@ -32,8 +32,14 @@ func migrateDefects(db *gorm.DB) error {
 		if err := tx.Table("defect_links_legacy").Scan(&rows).Error; err != nil {
 			return fmt.Errorf("read legacy rows: %w", err)
 		}
-		tcSet := scanIDSet(tx, "test_cases")
-		rrSet := scanIDSet(tx, "run_results")
+		tcSet, err := scanIDSet(tx, "test_cases")
+		if err != nil {
+			return err
+		}
+		rrSet, err := scanIDSet(tx, "run_results")
+		if err != nil {
+			return err
+		}
 
 		byKey := map[string]*models.Defect{}
 		for _, r := range rows {
@@ -116,14 +122,16 @@ func hasColumn(db *gorm.DB, table, col string) bool {
 	return n > 0
 }
 
-func scanIDSet(tx *gorm.DB, table string) map[string]bool {
+func scanIDSet(tx *gorm.DB, table string) (map[string]bool, error) {
 	var ids []string
-	_ = tx.Table(table).Pluck("id", &ids).Error
+	if err := tx.Table(table).Pluck("id", &ids).Error; err != nil {
+		return nil, fmt.Errorf("scan %s ids: %w", table, err)
+	}
 	set := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		set[id] = true
 	}
-	return set
+	return set, nil
 }
 
 func firstNonEmpty(a, b string) string {

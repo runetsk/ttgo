@@ -331,7 +331,9 @@ func (s *Server) dispatchToEndpoint(webhookID, runID, url, secret string, payloa
 		if err != nil {
 			logEntry.Status = "retrying"
 			logEntry.ErrorMsg = err.Error()
-			_ = s.store.SaveDispatchLog(logEntry)
+			if lerr := s.store.SaveDispatchLog(logEntry); lerr != nil {
+				slog.Warn("webhook: failed to persist dispatch log", "webhook_id", webhookID, "error", lerr)
+			}
 			slog.Warn("webhook attempt failed", "attempt", attempt, "max_attempts", webhookMaxAttempts, "error", err)
 		} else {
 			code := resp.StatusCode
@@ -340,13 +342,17 @@ func (s *Server) dispatchToEndpoint(webhookID, runID, url, secret string, payloa
 
 			if code >= 200 && code < 300 {
 				logEntry.Status = "success"
-				_ = s.store.SaveDispatchLog(logEntry)
+				if lerr := s.store.SaveDispatchLog(logEntry); lerr != nil {
+					slog.Warn("webhook: failed to persist dispatch log", "webhook_id", webhookID, "error", lerr)
+				}
 				slog.Info("webhook delivered", "url", url, "attempt", attempt, "duration_ms", dur)
 				return
 			}
 			logEntry.Status = "retrying"
 			logEntry.ErrorMsg = fmt.Sprintf("HTTP %d", code)
-			_ = s.store.SaveDispatchLog(logEntry)
+			if lerr := s.store.SaveDispatchLog(logEntry); lerr != nil {
+				slog.Warn("webhook: failed to persist dispatch log", "webhook_id", webhookID, "error", lerr)
+			}
 			slog.Warn("webhook attempt got non-2xx", "attempt", attempt, "max_attempts", webhookMaxAttempts, "http_code", code)
 		}
 
@@ -360,7 +366,9 @@ func (s *Server) dispatchToEndpoint(webhookID, runID, url, secret string, payloa
 			time.Sleep(jitter)
 		} else {
 			logEntry.Status = "failed"
-			_ = s.store.SaveDispatchLog(logEntry)
+			if lerr := s.store.SaveDispatchLog(logEntry); lerr != nil {
+				slog.Warn("webhook: failed to persist dispatch log", "webhook_id", webhookID, "error", lerr)
+			}
 		}
 	}
 }

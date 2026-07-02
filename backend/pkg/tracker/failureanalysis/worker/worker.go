@@ -72,13 +72,17 @@ func (w *Worker) processOnce(ctx context.Context) error {
 
 	settings, err := w.store.GetFailureAnalysisSettings()
 	if err != nil {
-		_ = w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load settings: "+err.Error())
+		if uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load settings: "+err.Error()); uerr != nil {
+			slog.Error("failure-analysis: could not mark job failed", "job_id", job.ID, "error", uerr)
+		}
 		return err
 	}
 
 	failures, err := w.store.ListLatestFailingResults(job.TestRunID)
 	if err != nil {
-		_ = w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load failures: "+err.Error())
+		if uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load failures: "+err.Error()); uerr != nil {
+			slog.Error("failure-analysis: could not mark job failed", "job_id", job.ID, "error", uerr)
+		}
 		return err
 	}
 	total := len(failures)
