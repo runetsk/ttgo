@@ -28,6 +28,23 @@ func addTestAuth(t *testing.T, s *store.Store, req *http.Request) {
 	req.AddCookie(&http.Cookie{Name: "session_token", Value: sess.ID})
 }
 
+// chdirTemp chdirs the process into a fresh t.TempDir() for the duration of the
+// test and restores the original working directory on cleanup.
+//
+// store.New (called by every test in this file, including with dsn ":memory:")
+// unconditionally runs os.MkdirAll("backups", 0755) relative to the process CWD
+// — not the store's DSN. Without chdir'ing first, that call would create a stray
+// backups/ directory in the source tree on every test run.
+func chdirTemp(t *testing.T) string {
+	t.Helper()
+	tmp := t.TempDir()
+	oldWd, err := os.Getwd()
+	require.NoError(t, err)
+	require.NoError(t, os.Chdir(tmp))
+	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	return tmp
+}
+
 // newFileBackedServer sets up a store and server backed by real files on disk.
 //
 // The backups Manager uses hardcoded relative paths — filepath.Join("backups", ...)
@@ -38,11 +55,7 @@ func addTestAuth(t *testing.T, s *store.Store, req *http.Request) {
 // relative filename "tracker.db" the Manager expects, then pre-create "backups/".
 func newFileBackedServer(t *testing.T) (*store.Store, *api.Server) {
 	t.Helper()
-	tmp := t.TempDir()
-	oldWd, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir(tmp))
-	t.Cleanup(func() { _ = os.Chdir(oldWd) })
+	chdirTemp(t)
 	require.NoError(t, os.MkdirAll("backups", 0o755))
 	st, err := store.New("tracker.db")
 	require.NoError(t, err)
@@ -58,6 +71,7 @@ func newFileBackedServer(t *testing.T) (*store.Store, *api.Server) {
 // TestBackups_NonAdminForbidden verifies a member-role (non-admin) session is
 // rejected with 403 on an admin-gated backups route.
 func TestBackups_NonAdminForbidden(t *testing.T) {
+	chdirTemp(t)
 	st, err := store.New(":memory:")
 	require.NoError(t, err)
 	srv := api.NewServer(st)
@@ -80,6 +94,7 @@ func TestBackups_NonAdminForbidden(t *testing.T) {
 // TestBackups_Unauthenticated verifies a request with no session cookie is
 // rejected with 401 on an admin-gated backups route.
 func TestBackups_Unauthenticated(t *testing.T) {
+	chdirTemp(t)
 	st, err := store.New(":memory:")
 	require.NoError(t, err)
 	srv := api.NewServer(st)
@@ -96,6 +111,7 @@ func TestBackups_Unauthenticated(t *testing.T) {
 // authentication and returns 200, since the frontend must be able to poll it
 // during a restore when the caller may not have a valid session.
 func TestMaintenanceStatus_Public(t *testing.T) {
+	chdirTemp(t)
 	st, err := store.New(":memory:")
 	require.NoError(t, err)
 	srv := api.NewServer(st)
@@ -205,8 +221,8 @@ func TestDeleteBackup(t *testing.T) {
 }
 
 // TestUploadRestore_BadSignature verifies uploading a garbage (non-SQLite)
-// "backup" file is rejected with a 4xx status and, critically, that the live
-// database is left intact — a bad-signature restore must never clobber it.
+// "backup" file is rejected with 400 and, critically, that the live database
+// is left intact — a bad-signature restore must never clobber it.
 func TestUploadRestore_BadSignature(t *testing.T) {
 	st, srv := newFileBackedServer(t)
 
@@ -226,8 +242,7 @@ func TestUploadRestore_BadSignature(t *testing.T) {
 	w := httptest.NewRecorder()
 	srv.ServeHTTP(w, req)
 
-	assert.GreaterOrEqual(t, w.Code, 400, "bad-signature restore should be rejected, got %d: %s", w.Code, w.Body.String())
-	assert.Less(t, w.Code, 500, "bad-signature restore should be a client error, got %d: %s", w.Code, w.Body.String())
+	assert.Equal(t, http.StatusBadRequest, w.Code, "bad-signature restore should be rejected with 400, got %d: %s", w.Code, w.Body.String())
 
 	// Prove the live DB was not clobbered: it must still accept ordinary writes.
 	_, err = st.CreateWebhookConfig("https://example.com/hook", "post-restore-check", "run.completed")
