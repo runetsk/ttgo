@@ -260,6 +260,7 @@ function AIGenerateRoute() {
 function HomeViewWrapper({ onLoad, selectedFolders }) {
   useEffect(() => {
     onLoad();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- must fire once per Home-view mount only; onLoad (handleHomeLoad) is re-created on every location.state change, so including it would re-clear selectedFolders on unrelated navigations within /library instead of just on mount
   }, []);
 
   return (

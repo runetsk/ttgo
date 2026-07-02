@@ -101,7 +101,6 @@ export default function RequirementsPage() {
     };
 
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: load() fetches requirements + traceability matrix on mount
         load();
         jiraApi.getConfig()
             .then(cfg => setJiraEnabled(cfg?.enabled === true))
@@ -111,6 +110,7 @@ export default function RequirementsPage() {
             .catch(() => setConfluenceEnabled(false));
         // Register callback so accepting AI-generated drafts refreshes this page
         aiGen.setOnAcceptedCallback(() => load());
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only: aiGen is the whole AIGenerationContext value object, recreated every provider render, so including it would re-run this effect (and re-fetch requirements/matrix/configs) on every unrelated context change instead of once on mount
     }, []);
 
     // ── Derived state ─────────────────────────────────────────────────────────

@@ -16,11 +16,18 @@ export default function FolderTreeSelect({ folders, value, onChange, disabled })
     const [expanded, setExpanded] = useState(() => new Set(folders.map(f => f.id)));
     const containerRef = useRef(null);
     const searchRef = useRef(null);
+    // Tracks the folder count we last auto-expanded for, so the reset effect below
+    // only fires when the folder *set* actually changes size (e.g. reload/add) —
+    // not on every re-render that hands us a new `folders` array with the same
+    // length. expanded stays independently user-togglable afterward via toggleExpanded.
+    const lastExpandedCountRef = useRef(folders.length);
 
     useEffect(() => {
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- re-expands all folders when the folder set changes (e.g. reload/add); expanded stays independently user-togglable afterward via toggleExpanded
+        if (folders.length === lastExpandedCountRef.current) return;
+        lastExpandedCountRef.current = folders.length;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- re-expands all folders when the folder set size changes (e.g. reload/add); gated above so it only runs on an actual count change, not every re-render
         setExpanded(new Set(folders.map(f => f.id)));
-    }, [folders.length]);
+    }, [folders]);
 
     useEffect(() => {
         if (!open) return;

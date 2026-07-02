@@ -1570,7 +1570,7 @@ export default function AIGenerateStudio() {
         else setRightWidth(RIGHT_DEFAULT);
     };
 
-    const drafts = ai.drafts || [];
+    const drafts = useMemo(() => ai.drafts || [], [ai.drafts]);
     const stage = ai.generating
         ? 'generating'
         : drafts.length > 0 ? 'review' : 'compose';

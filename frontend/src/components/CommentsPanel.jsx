@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
     listRunComments, addRunComment,
@@ -19,7 +19,7 @@ const CommentsPanel = ({ targetType, runId, resultId, compact, onCountChange }) 
     // list itself — and therefore the labels — actually change.
     const [now, setNow] = useState(() => Date.now());
 
-    const fetchComments = () => {
+    const fetchComments = useCallback(() => {
         setLoading(true);
         setComments([]);
         const fetcher = targetType === 'run'
@@ -32,12 +32,12 @@ const CommentsPanel = ({ targetType, runId, resultId, compact, onCountChange }) 
             if (onCountChange) onCountChange(list.length);
         }).catch(() => {})
           .finally(() => setLoading(false));
-    };
+    }, [targetType, runId, resultId, onCountChange]);
 
     useEffect(() => {
         // eslint-disable-next-line react-hooks/set-state-in-effect -- pre-existing pattern (fetchComments synchronously sets loading/comments state), unmasked by the purity fix above; out of scope for this task (owned by the set-state-in-effect cleanup)
         fetchComments();
-    }, [targetType, runId, resultId]);
+    }, [fetchComments]);
 
     const handleAdd = () => {
         const trimmed = newContent.trim();

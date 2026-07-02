@@ -30,6 +30,7 @@ export default function ResyncModal({ requirement, onClose, onResynced }) {
             })
             .catch(err => setError(err.response?.data?.error || err.message || 'Re-sync failed.'))
             .finally(() => setLoading(false));
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- must call reqApi.resync exactly once per modal-open for this requirement; onResynced is passed as a fresh inline arrow by RequirementsPage, so including it would re-trigger the resync call (and a duplicate toast) on unrelated parent re-renders while the modal is open
     }, [requirement.id]);
 
     const handleResolve = (resolution) => {
