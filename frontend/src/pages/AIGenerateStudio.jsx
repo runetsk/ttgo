@@ -1,22 +1,17 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { useAIGeneration, DETAIL_LEVELS, COVERAGE_LEVELS } from '../contexts/AIGenerationContext';
-import FolderTreeSelect from '../components/FolderTreeSelect';
+import { useAIGeneration } from '../contexts/AIGenerationContext';
 import AIGenReviewPanel from '../components/AIGenReviewPanel';
 import AIImportPanel from '../components/AIImportPanel';
 import AIImportReview from '../components/AIImportReview';
-import SafeHTML from '../components/shared/SafeHTML';
 import { requirements as requirementsApi } from '../api';
 import {
-    AIC, MONO, Icon,
+    AIC, Icon,
     LEFT_MIN, LEFT_MAX, LEFT_DEFAULT, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT,
     clamp, readStoredWidth, pageStyles,
 } from './aiStudio/constants';
 import { AIBtn } from './aiStudio/primitives';
-import {
-    LinkedReqCard, StudioContextPane, RequirementSwitcher,
-    CreateRequirementModal, ContextReqPicker,
-} from './aiStudio/context';
+import { StudioContextPane, CreateRequirementModal } from './aiStudio/context';
 import {
     StudioHeader, StudioComposer, StudioDraftsList, StudioDraftDetail,
 } from './aiStudio/drafts';
@@ -322,6 +317,4 @@ export default function AIGenerateStudio() {
         </>
     );
 }
-
-
 
