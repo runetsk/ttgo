@@ -138,7 +138,7 @@ export function readStoredWidth(key, def, lo, hi) {
     } catch { return def; }
 }
 
-// ── Page shell styles (for header/tabs/empty state/import modal/etc.) ───────
+// ── Page shell styles (for header/tabs/empty state) ─────────────────────────
 export const pageStyles = {
     root: { padding: '24px 28px', minHeight: '100%' },
     container: { maxWidth: 860, margin: '0 auto' },
