@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Webhook signing-secret rotation.** `POST /api/webhooks/{id}/rotate-secret` generates
+  a new HMAC signing secret and invalidates the old one; a matching action in Settings →
+  Webhooks lets you rotate a secret from the UI. The signing secret is also now revealed
+  once on webhook creation (previously returned by the API but never shown in the UI).
+- CI now runs a frontend job — ESLint (`--max-warnings 0`), a production build, and the
+  reporter unit tests — alongside the existing backend test job, which now runs with
+  coverage. Node is pinned to 22 (`.nvmrc` + `package.json` `engines`).
+- Docker health checks for the backend and nginx services.
+- Handler test coverage for authentication, webhooks, and backups.
+- `.env.example` templates for Docker (repo root) and local backend development.
+
+### Fixed
+- WebSocket "connected" acknowledgements no longer race the hub closing a slow client's
+  channel (the client send channel now has a single owner).
+- The failure-analysis worker, defect migration, and webhook dispatch no longer silently
+  swallow logging errors.
+- Screenshot serving now strictly validates the result ID (UUID) and filename
+  (path-traversal hardening).
+- `GetTestRun` propagates database errors from its defect-count and retry-stat queries
+  instead of ignoring them; retry stats are now computed in a single query.
+- Jira child-requirement imports report per-child failures (`child_import_errors`)
+  instead of silently skipping them.
+- The AI-generation context no longer rewrites `sessionStorage` on every render.
+
+### Changed
+- Frontend lint baseline cleared to zero; CI enforces it going forward.
+- Large components split into focused files, behavior-preserving: `TestRunDetail`,
+  `AIGenSettings`, and `AIGenerateStudio`.
+- The backend Docker image now runs as a non-root user (uid 1000).
+- Documentation refresh: updated `CLAUDE.md` project structure, fixed the README
+  quick-start (`make setup`, `.env.example`), and added an `AGENTS.md` pointer.
+
+### Upgrade notes
+- **Non-root container, existing deployments:** the backend now runs as uid 1000. If your
+  `db_data` volume was created by an older, root-run container, it's root-owned and the
+  new container can't write to it. One-time fix:
+  `docker compose run --rm --user root backend chown -R 1000:1000 /data`, then
+  `docker compose up -d`. Fresh installs are unaffected.
+- **Known limitation (pre-existing):** `secret.key` (the at-rest encryption key) and the
+  `backups/` directory aren't yet on named volumes, so they don't survive container
+  recreation. Back up `secret.key` before recreating/upgrading the container — losing it
+  makes previously-encrypted integration/LLM credentials undecryptable. Tracked as a
+  follow-up.
+
 ## [0.2.0] - 2026-07-01
 
 ### Added
