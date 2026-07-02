@@ -32,6 +32,7 @@ export default function RequirementLinkPanel({ testCaseId }) {
     // Load linked requirements and all requirements on mount / testCaseId change.
     useEffect(() => {
         if (!testCaseId) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: only shows the spinner on first load, before fetching linked/all requirements
         if (!linked.length && !allReqs.length) setLoading(true);
         Promise.all([
             reqApi.listByTestCase(testCaseId),

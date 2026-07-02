@@ -101,6 +101,7 @@ export default function RequirementsPage() {
     };
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: load() fetches requirements + traceability matrix on mount
         load();
         jiraApi.getConfig()
             .then(cfg => setJiraEnabled(cfg?.enabled === true))
@@ -579,6 +580,7 @@ function RequirementRow({ req, count, covered, childCount, selected, onToggleSel
         let left = r.right - MENU_W;
         if (left < 8) left = 8;
         if (left + MENU_W > vw - 8) left = vw - MENU_W - 8;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- layout measurement: position depends on the button's live getBoundingClientRect(), only available post-mount/paint
         setMenuPos({ top, left });
     }, [menuOpen]);
 

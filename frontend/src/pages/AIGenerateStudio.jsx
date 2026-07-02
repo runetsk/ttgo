@@ -1513,6 +1513,7 @@ export default function AIGenerateStudio() {
     const [createModalOpen, setCreateModalOpen] = useState(false);
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: fetches the requirements catalog on mount
         setAllReqsLoading(true);
         requirementsApi.list()
             .then(data => setAllReqs(Array.isArray(data) ? data : []))
@@ -1602,6 +1603,7 @@ export default function AIGenerateStudio() {
     useEffect(() => {
         if (selectedDraftId && drafts.find(d => d.temp_id === selectedDraftId)) return;
         const pending = drafts.find(d => statuses[d.temp_id] === 'pending');
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- repairs the selection when it becomes stale/unset as drafts change; selectedDraftId remains independently user-selectable afterward via onSelect
         setSelectedDraftId(pending?.temp_id || drafts[0]?.temp_id || null);
     }, [drafts, selectedDraftId, statuses]);
 

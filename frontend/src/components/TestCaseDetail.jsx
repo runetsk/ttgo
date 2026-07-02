@@ -85,6 +85,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     useEffect(() => {
         const id = test?.id || testId;
         if (!id) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: fetches this test's execution history
         setExecLoading(true);
         listTestExecutions(id)
             .then(data => setExecutions(Array.isArray(data) ? data : []))
@@ -96,6 +97,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     useEffect(() => {
         const id = test?.id || testId;
         if (!id || !inlinePane) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets stale data before starting async version/requirement/defect fetches for the new test id
         setVersionHistory([]);
         setLinkedReqs([]);
         setLinkedDefects([]);
@@ -121,6 +123,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
         if (testId && !initialTest) {
             const signal = getSignal();
             // Only show loading spinner on first load, not when switching between tests
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: fetches the test record by id
             if (!test) setLoading(true);
             getTest(testId, { signal })
                 .then(t => {
@@ -146,6 +149,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     // Update state when test data is available
     useEffect(() => {
         if (test) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- re-seeds editable form-draft fields whenever the underlying test record changes (load/switch/save); fields stay independently user-editable afterward
             setName(test.name);
             setDescription(test.description || "");
             setSteps(test.steps || []);

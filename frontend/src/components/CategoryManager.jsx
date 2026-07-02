@@ -43,6 +43,7 @@ export default function CategoryManager({ onUpdate }) {
             .finally(() => setLoading(false));
     }, [page, pageSize, search]);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- load() fetches categories from the server and stores the result; refetches on page/pageSize/search change
     useEffect(() => { load(); }, [load]);
 
     // Debounced search: update `search` state 300 ms after typing stops
