@@ -107,6 +107,32 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleRotateSecret handles POST /api/webhooks/{id}/rotate-secret
+//
+//	@Summary		Rotate a webhook's signing secret
+//	@Description	Generate a new HMAC signing secret for a webhook, invalidating the old one
+//	@Tags			webhooks
+//	@Produce		json
+//	@Param			id	path		string	true	"Webhook ID"
+//	@Success		200	{object}	map[string]string	"id and new plaintext secret"
+//	@Failure		400	{object}	map[string]string
+//	@Failure		500	{object}	map[string]string
+//	@Router			/webhooks/{id}/rotate-secret [post]
+func (h *Handler) RotateSecret(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "id required"})
+		return
+	}
+	wh, err := h.store.RotateWebhookSecret(id)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to rotate webhook secret", "id", id, "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"id": wh.ID, "secret": wh.Secret})
+}
+
 // handleGetWebhookLogs handles GET /api/webhooks/{id}/logs
 //
 //	@Summary		Get webhook dispatch logs

@@ -65,6 +65,27 @@ func (s *Store) CreateWebhookConfig(url, description, eventType string) (*models
 	return wh, nil
 }
 
+// RotateWebhookSecret replaces the signing secret of a webhook and returns the
+// config with the new plaintext secret populated (shown to the caller once).
+func (s *Store) RotateWebhookSecret(id string) (*models.WebhookConfig, error) {
+	var wh models.WebhookConfig
+	if err := s.db.First(&wh, "id = ?", id).Error; err != nil {
+		return nil, err
+	}
+
+	secretBytes := make([]byte, 32)
+	if _, err := rand.Read(secretBytes); err != nil {
+		return nil, fmt.Errorf("failed to generate webhook secret: %w", err)
+	}
+	wh.Secret = hex.EncodeToString(secretBytes) // HMAC signing key (F-066)
+	wh.UpdatedAt = time.Now()
+
+	if err := s.db.Save(&wh).Error; err != nil {
+		return nil, err
+	}
+	return &wh, nil
+}
+
 // ListWebhookConfigs returns all webhook configurations.
 func (s *Store) ListWebhookConfigs() ([]models.WebhookConfig, error) {
 	var configs []models.WebhookConfig
