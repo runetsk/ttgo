@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
+	"regexp"
 	"time"
 	"ttgo/internal/api/httpx"
 	apiws "ttgo/internal/api/websocket"
@@ -20,6 +20,12 @@ import (
 )
 
 const screenshotUploadLimit = 50 << 20 // 50 MB total per upload
+
+// Server-generated screenshot filenames: "step_NNN.ext" (see UploadScreenshots
+// below) — allow the underscore alongside alphanumerics/hyphen so real files
+// aren't rejected, while still excluding path separators, ".." and other
+// traversal-relevant characters.
+var screenshotFilenameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,5}$`)
 
 // handleUploadScreenshots handles POST /runs/{id}/results/{result_id}/screenshots
 //
@@ -216,8 +222,13 @@ func (h *Handler) ServeScreenshot(w http.ResponseWriter, r *http.Request) {
 	resultID := r.PathValue("result_id")
 	filename := r.PathValue("filename")
 
-	// Sanitize to prevent path traversal
-	if strings.Contains(resultID, "..") || strings.Contains(filename, "..") {
+	// Strict validation: result IDs are UUIDs and filenames are server-generated
+	// (e.g. "step_001.png") — reject anything else outright (path traversal defense).
+	if _, err := uuid.Parse(resultID); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
+		return
+	}
+	if filename == "" || !screenshotFilenameRe.MatchString(filename) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid path"})
 		return
 	}

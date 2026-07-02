@@ -13,6 +13,8 @@ import (
 	api "ttgo/internal/api"
 	"ttgo/pkg/tracker/models"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -90,4 +92,51 @@ func TestUploadScreenshotsReplacesExistingGalleryAndTouchesRun(t *testing.T) {
 	require.FileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, "step_001.png"))
 	require.FileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, "step_002.png"))
 	require.NoFileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, "step_003.png"))
+}
+
+// TestServeScreenshot_RejectsNonUUIDResultID: result IDs are always UUIDs, so a
+// non-UUID result_id segment must be rejected outright with 400 (path traversal
+// defense), not fall through to a 404 "not found" on the filesystem lookup.
+func TestServeScreenshot_RejectsNonUUIDResultID(t *testing.T) {
+	s, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := api.NewServer(s)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/uploads/screenshots/notauuid/foo.png", nil)
+	addTestAuth(t, s, req)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+// TestServeScreenshot_RejectsBadFilename: filenames are always server-generated
+// (e.g. "step_001.png"), so anything containing a path separator or otherwise
+// not matching the expected shape must be rejected with 400.
+func TestServeScreenshot_RejectsBadFilename(t *testing.T) {
+	s, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := api.NewServer(s)
+
+	id := uuid.New().String()
+	req := httptest.NewRequest(http.MethodGet, "/api/uploads/screenshots/"+id+"/bad%2Ffile.png", nil)
+	addTestAuth(t, s, req)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+}
+
+// TestServeScreenshot_ValidUUIDAndFilenamePassesValidation: a well-formed UUID
+// result_id and a real generated filename shape should pass validation and reach
+// the filesystem lookup — 404 (no such file) rather than 400 (invalid path).
+func TestServeScreenshot_ValidUUIDAndFilenamePassesValidation(t *testing.T) {
+	s, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := api.NewServer(s)
+
+	id := uuid.New().String()
+	req := httptest.NewRequest(http.MethodGet, "/api/uploads/screenshots/"+id+"/step_001.png", nil)
+	addTestAuth(t, s, req)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 }
