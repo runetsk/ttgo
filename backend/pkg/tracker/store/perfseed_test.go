@@ -110,3 +110,25 @@ func TestSeedPerfDatasetRejectsImpossibleConfig(t *testing.T) {
 	_, err := s.SeedPerfDataset(cfg)
 	assert.ErrorContains(t, err, "results per run")
 }
+
+func TestSeedPerfPrincipals(t *testing.T) {
+	s := newTestStore(t)
+
+	p, err := s.SeedPerfPrincipals(3, 5, "pw-for-tests")
+	require.NoError(t, err)
+	require.Len(t, p.Tokens, 5)
+	require.Len(t, p.UserEmails, 3)
+
+	// Raw tokens must validate as write-scoped.
+	tok, err := s.ValidateToken(p.Tokens[0])
+	require.NoError(t, err)
+	require.NotNil(t, tok)
+	assert.Equal(t, "write", tok.Scope)
+
+	// Users exist, active, member role.
+	u, err := s.FindUserByEmail("perf-user-01@perf.local")
+	require.NoError(t, err)
+	require.NotNil(t, u)
+	assert.True(t, u.Active)
+	assert.Equal(t, "member", u.Role)
+}

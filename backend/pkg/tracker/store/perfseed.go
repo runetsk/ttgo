@@ -9,6 +9,7 @@ import (
 	"ttgo/pkg/tracker/models"
 
 	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
 
@@ -265,4 +266,39 @@ func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
 		RunResults:        len(results),
 		IngestPoolCaseIDs: poolIDs,
 	}, nil
+}
+
+// PerfPrincipals carries raw load-test credentials. Raw token values exist
+// only in memory here and in the manifest file cmd/perfseed writes (0600,
+// gitignored) — they are never persisted server-side (only hashes are).
+type PerfPrincipals struct {
+	Tokens     []string // raw write-scoped bearer tokens
+	UserEmails []string
+}
+
+// SeedPerfPrincipals creates nUsers member users (sharing one bcrypt hash of
+// password — they exist for connection-cap fan-out, not for auth strength)
+// and nTokens write-scoped API tokens for load-test clients. Tokens rather
+// than logins because POST /api/auth/login is rate-limited per IP.
+func (s *Store) SeedPerfPrincipals(nUsers, nTokens int, password string) (PerfPrincipals, error) {
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return PerfPrincipals{}, err
+	}
+	var p PerfPrincipals
+	for i := 1; i <= nUsers; i++ {
+		email := fmt.Sprintf("perf-user-%02d@perf.local", i)
+		if _, err := s.CreateUser(email, fmt.Sprintf("Perf User %02d", i), string(hash), "member"); err != nil {
+			return PerfPrincipals{}, fmt.Errorf("create perf user %s: %w", email, err)
+		}
+		p.UserEmails = append(p.UserEmails, email)
+	}
+	for i := 1; i <= nTokens; i++ {
+		_, raw, err := s.CreateToken(fmt.Sprintf("perf-token-%02d", i), "write", nil)
+		if err != nil {
+			return PerfPrincipals{}, fmt.Errorf("create perf token %d: %w", i, err)
+		}
+		p.Tokens = append(p.Tokens, raw)
+	}
+	return p, nil
 }
