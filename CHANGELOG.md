@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Performance test harness (phase 1): a `perf/` k6 suite for the result-ingest
+  write path — smoke check plus the S1 "CI ingest storm" capacity scenario —
+  and a `perfseed` CLI that provisions scratch databases with a deterministic
+  dataset, perf users, and write-scoped API tokens (refusing to touch any
+  non-`perf-*.db` database).
 - **Webhook signing-secret rotation.** `POST /api/webhooks/{id}/rotate-secret` generates
   a new HMAC signing secret and invalidates the old one; a matching action in Settings →
   Webhooks lets you rotate a secret from the UI. The signing secret is also now revealed
