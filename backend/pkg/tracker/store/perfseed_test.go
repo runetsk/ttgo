@@ -5,6 +5,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"ttgo/pkg/tracker/models"
 )
 
 func TestPerfTierSmall(t *testing.T) {
@@ -30,4 +31,82 @@ func TestIsPerfDBPath(t *testing.T) {
 	assert.False(t, IsPerfDBPath("perf-small.db.bak"))
 	assert.False(t, IsPerfDBPath(":memory:"))
 	assert.False(t, IsPerfDBPath("/data/perf/production.db")) // perf dir name is not enough
+}
+
+func smallTestCfg() PerfSeedConfig {
+	cfg, _ := PerfTier("small")
+	// Shrink for test speed; ratios stay realistic.
+	cfg.Folders = 4
+	cfg.Categories = 3
+	cfg.TestCases = 40
+	cfg.Runs = 6
+	cfg.Results = 180 // 30 per run — must stay ≤ TestCases (distinct per run)
+	cfg.IngestPoolCases = 25
+	return cfg
+}
+
+func TestSeedPerfDatasetCounts(t *testing.T) {
+	s := newTestStore(t)
+	cfg := smallTestCfg()
+
+	res, err := s.SeedPerfDataset(cfg)
+	require.NoError(t, err)
+
+	assert.Equal(t, cfg.Folders+2, res.Folders)       // + "Perf" root + "Perf Ingest Pool"
+	assert.Equal(t, cfg.Categories+1, res.Categories) // + "perf-ingest"
+	assert.Equal(t, cfg.TestCases, res.TestCases)
+	assert.Equal(t, cfg.Runs, res.TestRuns)
+	assert.Equal(t, cfg.Runs*(cfg.Results/cfg.Runs), res.RunResults)
+	require.Len(t, res.IngestPoolCaseIDs, cfg.IngestPoolCases)
+
+	// The ingest pool must have zero historical results — load tests write there.
+	var poolResults int64
+	err = s.db.Model(&models.RunResult{}).
+		Where("test_case_id IN ?", res.IngestPoolCaseIDs).
+		Count(&poolResults).Error
+	require.NoError(t, err)
+	assert.Zero(t, poolResults)
+
+	// Every result row is well-formed for analytics: run FK + snapshot name set.
+	var badRows int64
+	err = s.db.Model(&models.RunResult{}).
+		Where("test_run_id = '' OR test_name_snapshot = ''").
+		Count(&badRows).Error
+	require.NoError(t, err)
+	assert.Zero(t, badRows)
+
+	// Both PASS and FAIL results exist (analytics needs signal, not all-green).
+	var failCount int64
+	err = s.db.Model(&models.RunResult{}).Where("status = ?", models.StatusFail).Count(&failCount).Error
+	require.NoError(t, err)
+	assert.Positive(t, failCount)
+}
+
+func TestSeedPerfDatasetDeterministic(t *testing.T) {
+	s1 := newTestStore(t)
+	s2 := newTestStore(t)
+	cfg := smallTestCfg()
+
+	res1, err := s1.SeedPerfDataset(cfg)
+	require.NoError(t, err)
+	res2, err := s2.SeedPerfDataset(cfg)
+	require.NoError(t, err)
+
+	// Same seed => identical IDs (uuid.NewSHA1 over seed+kind+index).
+	assert.Equal(t, res1.IngestPoolCaseIDs, res2.IngestPoolCaseIDs)
+
+	// Different seed => disjoint IDs.
+	s3 := newTestStore(t)
+	cfg.Seed = 2
+	res3, err := s3.SeedPerfDataset(cfg)
+	require.NoError(t, err)
+	assert.NotEqual(t, res1.IngestPoolCaseIDs[0], res3.IngestPoolCaseIDs[0])
+}
+
+func TestSeedPerfDatasetRejectsImpossibleConfig(t *testing.T) {
+	s := newTestStore(t)
+	cfg := smallTestCfg()
+	cfg.Results = cfg.TestCases * cfg.Runs * 2 // per-run results would exceed distinct cases
+	_, err := s.SeedPerfDataset(cfg)
+	assert.ErrorContains(t, err, "results per run")
 }
