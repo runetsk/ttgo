@@ -7,7 +7,7 @@ the harness, the seeder, a smoke check, and S1 "CI ingest storm".
 ## Prerequisites
 
 - Go toolchain (same as the backend; run `make setup` in `backend/` once).
-- [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) v1.x on PATH
+- [k6](https://grafana.com/docs/k6/latest/set-up/install-k6/) v1.x or later on PATH
   (`brew install k6` on macOS).
 - `bash`, `curl` (used by the runner script).
 

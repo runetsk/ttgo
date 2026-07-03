@@ -79,6 +79,7 @@ echo "==> server up (probe returned HTTP $code)"
 SAMPLER_PID=$!
 
 echo "==> running $(basename "$SCENARIO")"
+# --summary-export below is deprecated upstream in favor of handleSummary; works today, phase-4 cleanup candidate.
 k6 run \
   -e TTGO_BASE_URL="http://localhost:$PORT" \
   -e TTGO_MANIFEST="$MANIFEST" \
