@@ -67,3 +67,9 @@ frontend/multi_select_verification.png
 /docs/*
 !/docs/images/
 /specs/
+
+# Performance test harness (perf/README.md) — scratch state and outputs.
+# The manifest holds raw API tokens; never commit it.
+perf/.scratch/
+perf/.seed-manifest.json
+perf/results/
