@@ -34,7 +34,7 @@ fi
 echo "==> starting server on :$PORT"
 (
   cd "$SCRATCH"
-  DB_PATH="$DB" LISTEN_ADDR=":$PORT" \
+  DB_PATH="$DB" LISTEN_ADDR="127.0.0.1:$PORT" \
   ADMIN_EMAIL="perf-admin@perf.local" ADMIN_PASSWORD="perfseed-local-only" \
   CORS_ORIGIN="http://localhost:5173" \
   ./ttgo-perf-server >"$OUT_DIR/server.log" 2>&1 &
@@ -58,6 +58,10 @@ for _ in $(seq 1 50); do
 done
 if [[ "$code" == "000" ]]; then
   echo "server did not come up; see $OUT_DIR/server.log"
+  exit 1
+fi
+if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+  echo "server process exited early — port $PORT already in use? see $OUT_DIR/server.log"
   exit 1
 fi
 echo "==> server up (probe returned HTTP $code)"
