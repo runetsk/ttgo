@@ -2,13 +2,14 @@
 .PHONY: seed smoke capacity capacity-rate clean
 
 TIER ?= small
+TOKENS ?= 100
 SCRATCH := .scratch
 MANIFEST := .seed-manifest.json
 
 seed:
 	mkdir -p $(SCRATCH)
 	cd ../backend && go run -tags sqlite_fts5 ./cmd/perfseed \
-	  -db "$(CURDIR)/$(SCRATCH)/perf-$(TIER).db" -tier $(TIER) \
+	  -db "$(CURDIR)/$(SCRATCH)/perf-$(TIER).db" -tier $(TIER) -tokens $(TOKENS) \
 	  -manifest "$(CURDIR)/$(MANIFEST)" -wipe
 
 smoke:

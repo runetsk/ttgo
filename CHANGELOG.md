@@ -11,8 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Performance test harness (phase 1): a `perf/` k6 suite for the result-ingest
   write path — smoke check plus the S1 "CI ingest storm" capacity scenario —
   and a `perfseed` CLI that provisions scratch databases with a deterministic
-  dataset, perf users, and write-scoped API tokens (refusing to touch any
-  non-`perf-*.db` database).
+  dataset, perf users, and write-scoped API tokens. The CLI refuses to touch any
+  non-`perf-*.db` database (or a symlinked one) and writes its token manifest at
+  mode 0600. Load pipelines send `test_name_snapshot` and spread across a
+  `TOKENS`-sized (default 100) token pool so the measured write path matches
+  real clients rather than harness artifacts.
 - **Webhook signing-secret rotation.** `POST /api/webhooks/{id}/rotate-secret` generates
   a new HMAC signing secret and invalidates the old one; a matching action in Settings →
   Webhooks lets you rotate a secret from the UI. The signing secret is also now revealed

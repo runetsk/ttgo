@@ -38,7 +38,7 @@ func run(args []string, out io.Writer) error {
 	tier := fs.String("tier", "small", "dataset tier (phase 1: small)")
 	seed := fs.Uint64("seed", 1, "seed for deterministic data generation")
 	users := fs.Int("users", 10, "number of perf users to create")
-	tokens := fs.Int("tokens", 10, "number of write-scoped API tokens to create")
+	tokens := fs.Int("tokens", 100, "number of write-scoped API tokens (keep >= peak VUs so ingest load spreads across token rows rather than hammering last_used_at on a few)")
 	password := fs.String("password", "perfseed-local-only", "password shared by perf users")
 	manifestPath := fs.String("manifest", "", "path for the k6 seed manifest JSON")
 	wipe := fs.Bool("wipe", false, "delete the database (and -wal/-shm siblings) before seeding")
@@ -59,6 +59,15 @@ func run(args []string, out io.Writer) error {
 	absManifest, err := filepath.Abs(*manifestPath)
 	if err != nil {
 		return err
+	}
+
+	// IsPerfDBPath only checks the basename, so a symlink named perf-*.db could
+	// point at a real database. Refuse symlinks (and their -wal/-shm siblings)
+	// before we wipe or open anything.
+	for _, p := range []string{absDB, absDB + "-wal", absDB + "-shm"} {
+		if fi, lerr := os.Lstat(p); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to touch %q: it is a symlink; perfseed only operates on regular scratch files", p)
+		}
 	}
 
 	if *wipe {
@@ -108,8 +117,13 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	// 0600: the manifest holds raw bearer tokens.
+	// 0600: the manifest holds raw bearer tokens. WriteFile does not tighten
+	// permissions on an already-existing file, so chmod explicitly to ensure a
+	// stale, looser manifest cannot keep world-readable perms after a rewrite.
 	if err := os.WriteFile(absManifest, data, 0o600); err != nil {
+		return err
+	}
+	if err := os.Chmod(absManifest, 0o600); err != nil {
 		return err
 	}
 

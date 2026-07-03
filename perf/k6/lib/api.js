@@ -54,11 +54,19 @@ const BROWSERS = ['chromium', 'firefox', 'webkit'];
 // Mirrors what the Playwright reporter sends per result. Deterministic by
 // index (~12% FAIL with a realistic stack trace, ~3% SKIP) — no Math.random,
 // so runs are comparable.
+//
+// test_name_snapshot is sent on purpose: the real reporter always sends it
+// (frontend/e2e/reporters/reporter-helpers.js), and when it is empty the server
+// backfills the name with an extra `SELECT` on test_cases per result POST
+// (store AddRunResult). Omitting it would make every POST measure a heavier
+// path than production clients hit, skewing the capacity numbers. The value
+// matches the seeded ingest-pool case names (`Ingest TC %04d`, 1-based).
 export function resultBody(testCaseId, i) {
   const roll = (i * 2654435761) % 100;
   let status = 'PASS';
   const body = {
     test_case_id: testCaseId,
+    test_name_snapshot: `Ingest TC ${String(i + 1).padStart(4, '0')}`,
     status,
     duration_ms: 50 + ((i * 97) % 4950),
     browser: BROWSERS[i % BROWSERS.length],

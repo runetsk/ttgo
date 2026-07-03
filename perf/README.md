@@ -43,6 +43,7 @@ Environment knobs (pass as `VAR=value make -C perf <target>`):
 |---|---|---|
 | `TIER` | `small` | Dataset tier (phase 1: small ≈ 10k historical results) |
 | `PORT` | `8877` | Server port (avoid 8080 to not collide with a dev server) |
+| `TOKENS` | `100` | Write tokens minted at seed; keep ≥ peak VUs so ingest spreads across token rows (see methodology) |
 | `RESEED` | `0` | `1` forces wipe + reseed before the scenario |
 | `RESULTS_PER_RUN` | `200` | Results per simulated pipeline (max 500 = ingest pool size) |
 | `STAGES` | 10-min ramp to 100 VUs | JSON stages for closed-loop mode |
@@ -61,8 +62,15 @@ Environment knobs (pass as `VAR=value make -C perf <target>`):
   request — TTGO has no batch-ingest endpoint) → `POST /api/runs/{id}/complete`.
 - Auth uses pre-minted write-scoped API tokens from the seed manifest — the
   login endpoint is rate-limited (~30/min per IP) and must not appear in load
-  paths. Note the server updates `last_used_at` on every token validation, so
-  each authenticated request already carries one extra SQLite write.
+  paths. The server updates `last_used_at` on every token validation, so each
+  authenticated request carries one extra SQLite write; the seed mints `TOKENS`
+  (default 100) of them so that at peak VUs each pipeline gets its own token row
+  instead of concentrating those writes onto a few. Bump `TOKENS` if you raise
+  the VU ceiling above 100.
+- Each result POST sends `test_name_snapshot`, exactly as the Playwright
+  reporter does. Omitting it makes the server backfill the name with an extra
+  `test_cases` lookup per result, which would measure a heavier path than real
+  clients hit.
 - The scratch DB has **no LLM provider and no webhooks configured**, so AI
   failure analysis and webhook dispatch stay out of the measurements.
 - Load generator and server share this machine: absolute numbers are
@@ -71,8 +79,10 @@ Environment knobs (pass as `VAR=value make -C perf <target>`):
 
 ## Caveats / safety
 
-- `perfseed` refuses any DB not named `perf-*.db`; everything lives under
-  `perf/.scratch/` (gitignored). `perf/.seed-manifest.json` contains raw
-  bearer tokens — it is gitignored and written with mode 0600; don't move it.
+- `perfseed` refuses any DB not named `perf-*.db`, and refuses a `perf-*.db`
+  path that is a symlink (so it can't be aimed at a real database indirectly);
+  everything lives under `perf/.scratch/` (gitignored). `perf/.seed-manifest.json`
+  contains raw bearer tokens — it is gitignored and written (and re-chmod'd) to
+  mode 0600 even if it already existed; don't move it.
 - Later phases (read-path scenarios, WebSocket fan-out, regression gate) are
   specified in the design doc and land separately.

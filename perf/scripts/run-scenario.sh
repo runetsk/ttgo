@@ -2,7 +2,7 @@
 # Runs one k6 scenario against a freshly started TTGO server on a scratch DB.
 #
 # Usage:  scripts/run-scenario.sh k6/scenarios/smoke.js
-# Env:    TIER=small PORT=8877 RESEED=1 K6_ARGS="--vus 1" plus any
+# Env:    TIER=small PORT=8877 RESEED=1 TOKENS=100 K6_ARGS="--vus 1" plus any
 #         scenario-specific vars (RESULTS_PER_RUN, STAGES, MODE, ...) which
 #         k6 exposes to scripts via __ENV.
 set -euo pipefail
@@ -13,6 +13,7 @@ SCENARIO="${1:?usage: run-scenario.sh <path relative to perf/, e.g. k6/scenarios
 
 TIER="${TIER:-small}"
 PORT="${PORT:-8877}"
+TOKENS="${TOKENS:-100}"
 SCRATCH="$PERF_DIR/.scratch"
 DB="$SCRATCH/perf-$TIER.db"
 MANIFEST="$PERF_DIR/.seed-manifest.json"
@@ -26,9 +27,9 @@ echo "==> building server"
 (cd "$REPO_DIR/backend" && go build -tags sqlite_fts5 -o "$SCRATCH/ttgo-perf-server" ./cmd/server)
 
 if [[ "${RESEED:-0}" == "1" || ! -f "$DB" || ! -f "$MANIFEST" ]]; then
-  echo "==> seeding $DB (tier=$TIER)"
+  echo "==> seeding $DB (tier=$TIER, tokens=$TOKENS)"
   (cd "$REPO_DIR/backend" && go run -tags sqlite_fts5 ./cmd/perfseed \
-    -db "$DB" -tier "$TIER" -manifest "$MANIFEST" -wipe)
+    -db "$DB" -tier "$TIER" -tokens "$TOKENS" -manifest "$MANIFEST" -wipe)
 fi
 
 echo "==> starting server on :$PORT"
