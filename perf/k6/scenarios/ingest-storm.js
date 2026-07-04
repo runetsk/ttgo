@@ -16,18 +16,15 @@
 // the whole point is to keep ramping past the breaking point and map it. The
 // capacity Make targets treat k6's threshold-failure exit (99) as expected.
 import { ciPipeline, resultsPerRun, assertTokenPool, tokenPoolSize } from '../lib/api.js';
+import { INGEST_THRESHOLDS } from '../config/thresholds.js';
+import { DEFAULT_CAPACITY_STAGES } from '../config/workloads.js';
 
 const RESULTS_PER_RUN = resultsPerRun(200);
 const MODE = __ENV.MODE || 'vus';
 
-const thresholds = {
-  // Breaking-point definition from the spec: add-result p95 > 500ms or
-  // error rate > 1% marks the run as over the line.
-  'http_req_duration{op:add_result}': ['p(95)<500'],
-  'http_req_duration{op:create_run}': ['p(95)<1000'],
-  'http_req_duration{op:complete_run}': ['p(95)<1000'],
-  http_req_failed: ['rate<0.01'],
-};
+// Breaking-point definition from the spec: add-result p95 > 500ms or
+// error rate > 1% marks the run as over the line.
+const thresholds = { ...INGEST_THRESHOLDS };
 
 let scenarios;
 if (MODE === 'rate') {
@@ -46,10 +43,7 @@ if (MODE === 'rate') {
   // summary would otherwise read healthier than the configured arrival rate.
   thresholds.dropped_iterations = ['count==0'];
 } else {
-  const stages = JSON.parse(
-    __ENV.STAGES ||
-      '[{"duration":"2m","target":10},{"duration":"3m","target":40},{"duration":"4m","target":100},{"duration":"1m","target":0}]'
-  );
+  const stages = __ENV.STAGES ? JSON.parse(__ENV.STAGES) : DEFAULT_CAPACITY_STAGES;
   assertTokenPool(Math.max(...stages.map((s) => s.target)));
   scenarios = {
     ci_pipelines: {
