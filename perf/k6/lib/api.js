@@ -11,7 +11,7 @@ export const BASE_URL = __ENV.TTGO_BASE_URL || 'http://localhost:8877';
 // resolves it against this lib file or the main scenario script — both live
 // two levels below perf/. The runner script always passes TTGO_MANIFEST as an
 // absolute path anyway.
-const MANIFEST_PATH = __ENV.TTGO_MANIFEST || '../../.seed-manifest.json';
+export const MANIFEST_PATH = __ENV.TTGO_MANIFEST || '../../.seed-manifest.json';
 
 // SharedArray: the loader runs once and every VU reads the same frozen copy.
 // Plain init-context parsing would give each VU its own manifest copy (k6
@@ -111,6 +111,18 @@ export function resultsPerRun(defaultN) {
     throw new Error(
       `RESULTS_PER_RUN=${raw} must be an integer between 1 and ${resultBodies.length} (the ingest pool size)`
     );
+  }
+  return n;
+}
+
+// Generic init-context integer knob: __ENV values are strings and
+// Number('abc') is NaN, which sails past < comparisons — validate here so a
+// typo aborts the run instead of silently running a different workload.
+export function intKnob(name, fallback) {
+  const raw = __ENV[name];
+  const n = raw === undefined || raw === '' ? fallback : Number(raw);
+  if (!Number.isInteger(n) || n < 1) {
+    throw new Error(`${name}=${raw} must be a positive integer`);
   }
   return n;
 }
