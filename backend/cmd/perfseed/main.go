@@ -36,7 +36,7 @@ func main() {
 func run(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("perfseed", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "path to the perf scratch database (basename must match perf-*.db)")
-	tier := fs.String("tier", "small", "dataset tier (phase 1: small)")
+	tier := fs.String("tier", "small", "dataset tier: small (~10k results), medium (~100k), large (~1M)")
 	seed := fs.Uint64("seed", 1, "seed for deterministic data generation")
 	users := fs.Int("users", 10, "number of perf users to create")
 	tokens := fs.Int("tokens", 100, "number of write-scoped API tokens (keep >= peak VUs so ingest load spreads across token rows rather than hammering last_used_at on a few)")

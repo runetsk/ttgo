@@ -159,3 +159,31 @@ func TestSeedPerfDatasetRejectsUnevenResults(t *testing.T) {
 	_, err := s.SeedPerfDataset(cfg)
 	assert.ErrorContains(t, err, "divisible")
 }
+
+func TestPerfTierMediumAndLarge(t *testing.T) {
+	med, err := PerfTier("medium")
+	require.NoError(t, err)
+	assert.Equal(t, 100_000, med.Results)
+	assert.Equal(t, 200, med.Runs) // 500 results per run
+	assert.Equal(t, 2000, med.TestCases)
+
+	lg, err := PerfTier("large")
+	require.NoError(t, err)
+	assert.Equal(t, 1_000_000, lg.Results)
+	assert.Equal(t, 1000, lg.Runs) // 1000 results per run
+	assert.Equal(t, 8000, lg.TestCases)
+}
+
+// Every tier must satisfy the seeder's own guards and the k6 contract.
+func TestPerfTierInvariants(t *testing.T) {
+	for _, name := range []string{"small", "medium", "large"} {
+		cfg, err := PerfTier(name)
+		require.NoError(t, err, name)
+		require.Positive(t, cfg.Runs, name)
+		assert.Zero(t, cfg.Results%cfg.Runs, "%s: results must divide runs evenly", name)
+		assert.LessOrEqual(t, cfg.Results/cfg.Runs, cfg.TestCases,
+			"%s: per-run results must not exceed distinct cases", name)
+		assert.Equal(t, 500, cfg.IngestPoolCases,
+			"%s: ingest pool size is a contract with k6 RESULTS_PER_RUN validation", name)
+	}
+}

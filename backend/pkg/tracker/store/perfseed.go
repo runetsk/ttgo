@@ -29,8 +29,11 @@ type PerfSeedConfig struct {
 	DaysSpread      int     // runs are spread over the trailing N days
 }
 
-// PerfTier returns the preset config for a named dataset tier. Phase 1 ships
-// "small"; "medium" and "large" arrive with the read-path scenarios (phase 2).
+// PerfTier returns the preset config for a named dataset tier: small ≈ 10k
+// historical results, medium ≈ 100k, large ≈ 1M (spec §4.1). All tiers keep
+// the same 500-case ingest pool — the k6 RESULTS_PER_RUN ceiling — and the
+// same flaky/failure distributions so read-path scaling comparisons across
+// tiers measure dataset size, not shape.
 func PerfTier(name string) (PerfSeedConfig, error) {
 	switch name {
 	case "small":
@@ -46,8 +49,34 @@ func PerfTier(name string) (PerfSeedConfig, error) {
 			FailRate:        0.15,
 			DaysSpread:      90,
 		}, nil
+	case "medium":
+		return PerfSeedConfig{
+			Seed:            1,
+			Folders:         40,
+			Categories:      20,
+			TestCases:       2000,
+			Runs:            200, // 500 per run
+			Results:         100_000,
+			IngestPoolCases: 500,
+			FlakyFraction:   0.05,
+			FailRate:        0.15,
+			DaysSpread:      90,
+		}, nil
+	case "large":
+		return PerfSeedConfig{
+			Seed:            1,
+			Folders:         80,
+			Categories:      40,
+			TestCases:       8000,
+			Runs:            1000, // 1000 per run
+			Results:         1_000_000,
+			IngestPoolCases: 500,
+			FlakyFraction:   0.05,
+			FailRate:        0.15,
+			DaysSpread:      90,
+		}, nil
 	default:
-		return PerfSeedConfig{}, fmt.Errorf("unknown perf tier %q (phase 1 supports: small)", name)
+		return PerfSeedConfig{}, fmt.Errorf("unknown perf tier %q (small, medium, large)", name)
 	}
 }
 
