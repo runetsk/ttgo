@@ -13,17 +13,18 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 	"ttgo/pkg/tracker/store"
 )
 
 type manifest struct {
-	Tier              string    `json:"tier"`
-	DB                string    `json:"db"`
-	SeededAt          time.Time `json:"seeded_at"`
-	Tokens            []string  `json:"tokens"`
-	UserEmails        []string  `json:"user_emails"`
-	IngestTestCaseIDs []string  `json:"ingest_test_case_ids"`
+	Tier            string           `json:"tier"`
+	DB              string           `json:"db"`
+	SeededAt        time.Time        `json:"seeded_at"`
+	Tokens          []string         `json:"tokens"`
+	UserEmails      []string         `json:"user_emails"`
+	IngestTestCases []store.PerfCase `json:"ingest_test_cases"`
 }
 
 func main() {
@@ -61,12 +62,28 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 
-	// IsPerfDBPath only checks the basename, so a symlink named perf-*.db could
-	// point at a real database. Refuse symlinks (and their -wal/-shm siblings)
-	// before we wipe or open anything.
-	for _, p := range []string{absDB, absDB + "-wal", absDB + "-shm"} {
-		if fi, lerr := os.Lstat(p); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+	// IsPerfDBPath only checks the basename, so indirection could still aim the
+	// seeder at a real database or redirect the token manifest. Before wiping,
+	// opening, or writing anything, refuse for the DB, its -wal/-shm siblings,
+	// AND the manifest: symlinks (WriteFile/Chmod follow them), hard links
+	// (Lstat reports a regular file but the inode is shared), and a symlinked
+	// immediate parent directory (which relocates every per-file check here;
+	// deeper ancestors like macOS's /var stay allowed).
+	for _, p := range []string{absDB, absDB + "-wal", absDB + "-shm", absManifest} {
+		fi, lerr := os.Lstat(p)
+		if lerr != nil {
+			continue
+		}
+		if fi.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refusing to touch %q: it is a symlink; perfseed only operates on regular scratch files", p)
+		}
+		if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink > 1 {
+			return fmt.Errorf("refusing to touch %q: it is a hard link (%d links); perfseed only operates on regular scratch files", p, st.Nlink)
+		}
+	}
+	for _, d := range []string{filepath.Dir(absDB), filepath.Dir(absManifest)} {
+		if fi, lerr := os.Lstat(d); lerr == nil && fi.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to use directory %q: it is a symlink", d)
 		}
 	}
 
@@ -111,7 +128,7 @@ func run(args []string, out io.Writer) error {
 	m := manifest{
 		Tier: *tier, DB: absDB, SeededAt: time.Now(),
 		Tokens: principals.Tokens, UserEmails: principals.UserEmails,
-		IngestTestCaseIDs: res.IngestPoolCaseIDs,
+		IngestTestCases: res.IngestPool,
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
@@ -130,7 +147,7 @@ func run(args []string, out io.Writer) error {
 	fmt.Fprintf(out,
 		"seeded %s tier=%s: folders=%d categories=%d cases=%d (+%d ingest-pool) runs=%d results=%d users=%d tokens=%d\nmanifest: %s\n",
 		absDB, *tier, res.Folders, res.Categories, res.TestCases,
-		len(res.IngestPoolCaseIDs), res.TestRuns, res.RunResults,
+		len(res.IngestPool), res.TestRuns, res.RunResults,
 		len(principals.UserEmails), len(principals.Tokens), absManifest)
 	return nil
 }

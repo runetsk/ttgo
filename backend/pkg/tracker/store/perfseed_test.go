@@ -57,12 +57,17 @@ func TestSeedPerfDatasetCounts(t *testing.T) {
 	assert.Equal(t, cfg.TestCases, res.TestCases)
 	assert.Equal(t, cfg.Runs, res.TestRuns)
 	assert.Equal(t, cfg.Runs*(cfg.Results/cfg.Runs), res.RunResults)
-	require.Len(t, res.IngestPoolCaseIDs, cfg.IngestPoolCases)
+	require.Len(t, res.IngestPool, cfg.IngestPoolCases)
+	assert.Equal(t, "Ingest TC 0001", res.IngestPool[0].Name)
 
 	// The ingest pool must have zero historical results — load tests write there.
+	poolIDs := make([]string, len(res.IngestPool))
+	for i, c := range res.IngestPool {
+		poolIDs[i] = c.ID
+	}
 	var poolResults int64
 	err = s.db.Model(&models.RunResult{}).
-		Where("test_case_id IN ?", res.IngestPoolCaseIDs).
+		Where("test_case_id IN ?", poolIDs).
 		Count(&poolResults).Error
 	require.NoError(t, err)
 	assert.Zero(t, poolResults)
@@ -93,14 +98,14 @@ func TestSeedPerfDatasetDeterministic(t *testing.T) {
 	require.NoError(t, err)
 
 	// Same seed => identical IDs (uuid.NewSHA1 over seed+kind+index).
-	assert.Equal(t, res1.IngestPoolCaseIDs, res2.IngestPoolCaseIDs)
+	assert.Equal(t, res1.IngestPool, res2.IngestPool)
 
 	// Different seed => disjoint IDs.
 	s3 := newTestStore(t)
 	cfg.Seed = 2
 	res3, err := s3.SeedPerfDataset(cfg)
 	require.NoError(t, err)
-	assert.NotEqual(t, res1.IngestPoolCaseIDs[0], res3.IngestPoolCaseIDs[0])
+	assert.NotEqual(t, res1.IngestPool[0].ID, res3.IngestPool[0].ID)
 }
 
 func TestSeedPerfDatasetRejectsImpossibleConfig(t *testing.T) {

@@ -1,25 +1,18 @@
 # Performance test harness — see perf/README.md.
+# TIER/TOKENS defaults live in scripts/seed.sh (single owner).
 .PHONY: seed smoke capacity capacity-rate clean
 
-TIER ?= small
-TOKENS ?= 100
-SCRATCH := .scratch
-MANIFEST := .seed-manifest.json
-
 seed:
-	mkdir -p $(SCRATCH)
-	cd ../backend && go run -tags sqlite_fts5 ./cmd/perfseed \
-	  -db "$(CURDIR)/$(SCRATCH)/perf-$(TIER).db" -tier $(TIER) -tokens $(TOKENS) \
-	  -manifest "$(CURDIR)/$(MANIFEST)" -wipe
+	scripts/seed.sh
 
 smoke:
 	scripts/run-scenario.sh k6/scenarios/smoke.js
 
 capacity:
-	scripts/run-scenario.sh k6/scenarios/ingest-storm.js
+	EXPECT_THRESHOLD_BREACH=1 scripts/run-scenario.sh k6/scenarios/ingest-storm.js
 
 capacity-rate:
-	MODE=rate scripts/run-scenario.sh k6/scenarios/ingest-storm.js
+	EXPECT_THRESHOLD_BREACH=1 MODE=rate scripts/run-scenario.sh k6/scenarios/ingest-storm.js
 
 clean:
-	rm -rf $(SCRATCH) results $(MANIFEST)
+	rm -rf .scratch results .seed-manifest.json

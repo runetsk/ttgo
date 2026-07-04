@@ -19,13 +19,16 @@ make -C perf smoke      # ~1 min sanity check of the whole harness
 make -C perf capacity   # S1: ramp 0→100 concurrent CI pipelines (~10 min)
 ```
 
-Every scenario run gets a fresh directory under `perf/results/<timestamp>-<scenario>/`:
+Every scenario run gets a fresh directory under `perf/results/<timestamp>-<scenario>/`
+(`-<mode>` is appended when `MODE` is set, so closed-loop `capacity` and
+open-loop `capacity-rate` results stay distinguishable):
 
 | File | Contents |
 |---|---|
 | `summary.json` | k6 metrics summary (per-op latency percentiles, error rates) |
 | `telemetry.csv` | server RSS (KB), %CPU, and SQLite WAL size (bytes), sampled every 2 s |
 | `server.log` | server stdout/stderr for the run |
+| `run-config.json` | provenance: git SHA (+dirty flag), k6/Go versions, machine specs, and every knob value (`null` = unset, i.e. the scenario default at that SHA) |
 
 ## Targets and knobs
 
@@ -43,45 +46,140 @@ Environment knobs (pass as `VAR=value make -C perf <target>`):
 |---|---|---|
 | `TIER` | `small` | Dataset tier (phase 1: small ≈ 10k historical results) |
 | `PORT` | `8877` | Server port (avoid 8080 to not collide with a dev server) |
-| `TOKENS` | `100` | Write tokens minted at seed; keep ≥ peak VUs so ingest spreads across token rows (see methodology) |
+| `TOKENS` | `100` | Write tokens minted at seed (needs `RESEED=1` to change); scenarios abort at init if the pool < peak VUs (see methodology) |
+| `MAX_VUS` | token pool size | Rate-mode VU ceiling for `capacity-rate`; must be ≤ the seeded token pool |
 | `RESEED` | `0` | `1` forces wipe + reseed before the scenario |
-| `RESULTS_PER_RUN` | `200` | Results per simulated pipeline (max 500 = ingest pool size) |
+| `RESULTS_PER_RUN` | `200` capacity / `20` smoke | Results per simulated pipeline (max 500 = ingest pool size) |
 | `STAGES` | 10-min ramp to 100 VUs | JSON stages for closed-loop mode |
 | `PIPELINES_PER_MIN` | `6` | Arrival rate for `capacity-rate` |
 | `RATE_DURATION` | `10m` | Duration for `capacity-rate` |
 | `K6_ARGS` | — | Extra flags appended to `k6 run` |
 
-## Methodology (short version — the spec has the full one)
+## Methodology
 
-- **Breaking point** = add-result p95 > 500 ms sustained, or error rate > 1 %.
-  Thresholds mark a run failed but never abort it: capacity runs are meant to
-  ramp *past* the ceiling and map it. Read `summary.json` percentiles together
-  with `telemetry.csv` (WAL growth, RSS) to see what gave out first.
-- Each simulated pipeline behaves exactly like the real Playwright reporter:
-  `POST /api/runs` → N × `POST /api/runs/{id}/results` (one result per
-  request — TTGO has no batch-ingest endpoint) → `POST /api/runs/{id}/complete`.
-- Auth uses pre-minted write-scoped API tokens from the seed manifest — the
-  login endpoint is rate-limited (~30/min per IP) and must not appear in load
-  paths. The server updates `last_used_at` on every token validation, so each
-  authenticated request carries one extra SQLite write; the seed mints `TOKENS`
-  (default 100) of them so that at peak VUs each pipeline gets its own token row
-  instead of concentrating those writes onto a few. Bump `TOKENS` if you raise
-  the VU ceiling above 100.
-- Each result POST sends `test_name_snapshot`, exactly as the Playwright
-  reporter does. Omitting it makes the server backfill the name with an extra
-  `test_cases` lookup per result, which would measure a heavier path than real
-  clients hit.
-- The scratch DB has **no LLM provider and no webhooks configured**, so AI
-  failure analysis and webhook dispatch stay out of the measurements.
-- Load generator and server share this machine: absolute numbers are
-  conservative; relative comparisons and regressions are what count. Record
-  machine specs when you keep a result.
+The local design spec holds the full rationale; this section is self-contained
+for operators: what a run measures, what it deliberately excludes, and how to
+read the output.
+
+### What a simulated pipeline does
+
+Each VU emulates one CI pipeline making the same calls in the same order as the
+real Playwright reporter (`frontend/e2e/reporters/ttgo-client.js`):
+`POST /api/runs` → N × `POST /api/runs/{id}/results` (one result per request —
+TTGO has no batch-ingest endpoint) → `POST /api/runs/{id}/complete`.
+
+That is call-sequence parity on the ingest hot path, not full reporter parity:
+the real reporter can also create folders/test cases on first sight, attach
+categories, and send attempt/OS/defect metadata. None of that happens in the
+load path here, so S1 measures steady-state ingest cost, not first-run setup.
+
+Payloads are deterministic by loop index (no `Math.random`): ~12 % FAIL with a
+realistic multi-line stack trace, ~3 % SKIP, durations spread 50–5000 ms. Two
+consequences: runs are directly comparable with each other, and every result
+POST carries `test_name_snapshot` exactly as the real reporter does — omitting
+it would make the server backfill the name with an extra `test_cases` SELECT
+per result, i.e. measure a heavier path than production clients hit.
+
+### Closed loop vs open loop
+
+- `capacity` (MODE=vus, ramping VUs) is **closed-loop**: each VU waits for its
+  previous request before sending the next, like a real reporter process. Under
+  overload a closed-loop client slows down *with* the server (coordinated
+  omission), so the ramp answers "how many concurrent pipelines before
+  degradation", not "how many results/sec".
+- `capacity-rate` (MODE=rate, constant arrival rate) is **open-loop**: new
+  pipelines start on schedule no matter how slow the server gets. Use it after
+  the ramp has bracketed the ceiling, to measure sustained results/sec at a
+  fixed load level.
+- In rate mode `dropped_iterations` has an observational `count==0` threshold:
+  nonzero means k6 ran out of VUs (`MAX_VUS`, default = the token pool size)
+  and offered *less* load than requested — the run would otherwise look
+  healthier than it is.
+
+### Breaking point, and how to read a run
+
+**Breaking point** = add-result p95 > 500 ms sustained, or error rate > 1 %.
+Thresholds mark the run failed but never abort it: capacity runs are meant to
+ramp *past* the ceiling and map it. Accordingly the capacity Make targets treat
+k6's threshold-failure exit code (99) as the expected outcome; `smoke` still
+hard-fails on it. Read the three outputs together:
+
+- `summary.json` — per-op percentiles (`op:create_run` / `op:add_result` /
+  `op:complete_run`) and `http_req_failed`. The per-op split matters:
+  create/complete are 1/N of requests, so blended latency hides the add-result
+  signal.
+- `telemetry.csv` — server RSS, %CPU, WAL size every 2 s. Sustained WAL growth
+  means checkpointing is not keeping up with the write rate; that usually gives
+  out before CPU does.
+- `server.log` — the first busy-timeout / `database is locked` 5xx marks when
+  SQLite's single-writer limit became the bottleneck. Expect this file to be
+  large: one log line per request, so a full capacity run writes 10⁵–10⁶ lines
+  (tens of MB).
+
+*What breaks first* is the finding; the VU level and results/sec where it
+breaks are the capacity numbers. The runner records machine specs, git SHA
+(with a dirty flag), k6/Go versions, tier, and knob values in each run's
+`run-config.json`, so a kept result carries its own provenance — a `null` knob
+means it was unset and the scenario default at that SHA applied. `results/` is
+never pruned automatically — `make clean` removes it, but also deletes the DB
+and manifest.
+
+### Auth and write amplification
+
+Load traffic authenticates with pre-minted write-scoped API tokens from the
+seed manifest — the login endpoint is rate-limited (~30/min per IP) and must
+never appear in a load path. Token validation updates `last_used_at` on every
+request, so each authenticated request carries one extra SQLite write. That
+amplification is part of the real write path and is deliberately measured.
+
+To keep that update from concentrating on a few hot rows, the seed mints
+`TOKENS` (default 100) tokens and each VU takes its own (`(__VU-1) % pool`).
+The invariant is **tokens ≥ peak VUs** — including rate mode, which can scale
+VUs up exactly when the server slows down. The scenarios assert this at init
+(a run aborts immediately, before any load, if the manifest pool is smaller
+than the configured peak), and rate mode's `MAX_VUS` defaults to the pool
+size. Raising a VU ceiling therefore means reseeding with a bigger `TOKENS`
+(see the reseed note below).
+
+### Reseeding and run comparability
+
+The runner reseeds only when `RESEED=1` or when the DB/manifest is missing.
+Two consequences:
+
+- Seed-time knobs (`TOKENS`, tier contents) **no-op** against an existing
+  scratch DB — changing them requires `RESEED=1`. The runner warns when the
+  reused manifest's token count differs from `TOKENS`.
+- Without reseeding, each run's rows stay in the DB, so run N+1 executes
+  against a bigger database than run N. Reseed before every run you intend to
+  keep; reuse the DB only for quick iteration.
+
+The seeder is deterministic (`-seed`, default 1): same seed + tier ⇒ identical
+dataset with stable IDs.
+
+### What is deliberately excluded
+
+- **No LLM provider, no webhooks** in the scratch DB — AI failure analysis and
+  webhook dispatch stay out of the measurements.
+- WebSocket broadcasts *do* fire on every result (the hub is part of the write
+  path), but with zero subscribers connected the fan-out is a no-op; S4
+  (phase 3) measures it under real subscriber load.
+- No read traffic in S1; S2 (phase 2) adds the dashboards-under-ingest mix.
+
+### Same-machine caveat
+
+Load generator and server share this machine: k6's own CPU (payload building,
+HTTP, metric collection) competes with the server exactly at the ramp peak, so
+absolute numbers are conservative. Relative comparisons, scaling curves, and
+regression deltas are what count. The k6 scripts honor `TTGO_BASE_URL`, so for
+publishable absolute numbers run k6 directly against a remote instance — the
+runner script always provisions a local server.
 
 ## Caveats / safety
 
 - `perfseed` refuses any DB not named `perf-*.db`, and refuses a `perf-*.db`
-  path that is a symlink (so it can't be aimed at a real database indirectly);
-  everything lives under `perf/.scratch/` (gitignored). `perf/.seed-manifest.json`
+  path that is a symlink. Treat that as a seatbelt against local mistakes, not
+  a security boundary — it does not detect hard links or a symlinked parent
+  directory. Everything lives under `perf/.scratch/` (gitignored). `perf/.seed-manifest.json`
   contains raw bearer tokens — it is gitignored and written (and re-chmod'd) to
   mode 0600 even if it already existed; don't move it.
 - Later phases (read-path scenarios, WebSocket fan-out, regression gate) are

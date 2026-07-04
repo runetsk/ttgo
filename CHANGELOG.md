@@ -16,6 +16,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mode 0600. Load pipelines send `test_name_snapshot` and spread across a
   `TOKENS`-sized (default 100) token pool so the measured write path matches
   real clients rather than harness artifacts.
+- Perf harness hardening (post-review): the runner refuses a busy port and ties
+  the readiness probe to the server it started (a stale listener can no longer
+  be measured as the current build); the server is a direct child with the
+  cleanup trap installed first, so teardown genuinely waits for graceful
+  shutdown; capacity targets treat k6's threshold-failure exit (99) as the
+  expected mapping-run outcome while `smoke` still hard-fails; `RESULTS_PER_RUN`
+  is validated in the init context (a typo aborts the run instead of producing
+  a vacuously green summary); scenarios assert `tokens ≥ peak VUs` at init and
+  rate mode's new `MAX_VUS` knob defaults to the token-pool size, with an
+  observational `dropped_iterations` threshold; `perfseed` additionally refuses
+  hard links, symlinked parent directories, and a symlinked manifest path; the
+  seed manifest now carries `{id,name}` pairs so k6 no longer re-derives the
+  seeded case-name format (reseed with `RESEED=1` after upgrading); the k6 lib
+  loads the manifest via `SharedArray` and pre-serializes result payloads to
+  cut load-generator overhead; seeding is owned by a single `perf/scripts/seed.sh`
+  used by both `make seed` and the runner's auto-reseed.
+- Perf run provenance: every results directory now gets a `run-config.json`
+  recording git SHA (+dirty flag), k6/Go versions, machine specs, and all knob
+  values (`null` = scenario default), replacing the "record these manually"
+  instruction; rate-mode runs append `-rate` to the results directory name so
+  closed- and open-loop `ingest-storm` results stay distinguishable.
 - **Webhook signing-secret rotation.** `POST /api/webhooks/{id}/rotate-secret` generates
   a new HMAC signing secret and invalidates the old one; a matching action in Settings →
   Webhooks lets you rotate a secret from the UI. The signing secret is also now revealed

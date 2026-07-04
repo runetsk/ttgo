@@ -5,6 +5,9 @@
 # Env:    TIER=small PORT=8877 RESEED=1 TOKENS=100 K6_ARGS="--vus 1" plus any
 #         scenario-specific vars (RESULTS_PER_RUN, STAGES, MODE, ...) which
 #         k6 exposes to scripts via __ENV.
+#         EXPECT_THRESHOLD_BREACH=1 treats k6's threshold-failure exit (99) as
+#         success — set by the capacity Make targets, whose runs are *meant*
+#         to ramp past the thresholds and map the ceiling.
 set -euo pipefail
 
 PERF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -18,51 +21,124 @@ SCRATCH="$PERF_DIR/.scratch"
 DB="$SCRATCH/perf-$TIER.db"
 MANIFEST="$PERF_DIR/.seed-manifest.json"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-OUT_DIR="$PERF_DIR/results/$STAMP-$(basename "$SCENARIO" .js)"
+# MODE lands in the directory name so closed-loop (vus) and open-loop (rate)
+# runs of the same scenario file stay distinguishable in results/ history.
+OUT_DIR="$PERF_DIR/results/$STAMP-$(basename "$SCENARIO" .js)${MODE:+-$MODE}"
 mkdir -p "$SCRATCH" "$OUT_DIR"
 
 command -v k6 >/dev/null || { echo "k6 not found — install it first (see perf/README.md)"; exit 1; }
 
+# Refuse a busy port up front: the readiness probe below cannot tell our
+# server from a stale/foreign listener, so starting on a busy port means k6
+# would measure the wrong process.
+if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
+  echo "port $PORT is already in use — kill the stale server (or set PORT) and retry"
+  exit 1
+fi
+
 echo "==> building server"
 (cd "$REPO_DIR/backend" && go build -tags sqlite_fts5 -o "$SCRATCH/ttgo-perf-server" ./cmd/server)
 
+reseeded=false
 if [[ "${RESEED:-0}" == "1" || ! -f "$DB" || ! -f "$MANIFEST" ]]; then
   echo "==> seeding $DB (tier=$TIER, tokens=$TOKENS)"
-  (cd "$REPO_DIR/backend" && go run -tags sqlite_fts5 ./cmd/perfseed \
-    -db "$DB" -tier "$TIER" -tokens "$TOKENS" -manifest "$MANIFEST" -wipe)
+  "$PERF_DIR/scripts/seed.sh"
+  reseeded=true
+fi
+manifest_tokens="$(awk '/"tokens": \[/{f=1;next} f&&/\]/{exit} f{n++} END{print n+0}' "$MANIFEST")"
+if [[ "$reseeded" == "false" && "$manifest_tokens" -ne "$TOKENS" ]]; then
+  # Seed-time knobs only apply at seed time; warn when the reused manifest
+  # disagrees with the requested pool so a stale seed can't silently
+  # reintroduce token-row contention.
+  echo "==> WARNING: reusing existing seed with $manifest_tokens tokens (TOKENS=$TOKENS has no effect without RESEED=1)"
 fi
 
-echo "==> starting server on :$PORT"
-(
-  cd "$SCRATCH"
-  DB_PATH="$DB" LISTEN_ADDR="127.0.0.1:$PORT" \
-  ADMIN_EMAIL="perf-admin@perf.local" ADMIN_PASSWORD="perfseed-local-only" \
-  CORS_ORIGIN="http://localhost:5173" \
-  ./ttgo-perf-server >"$OUT_DIR/server.log" 2>&1 &
-  echo $! >"$SCRATCH/server.pid"
-)
-SERVER_PID="$(cat "$SCRATCH/server.pid")"
+# Record everything that shaped this run next to its outputs, so kept results
+# stay interpretable later without relying on the operator's notes. Knob
+# values are the raw environment strings; null means unset, i.e. the scenario
+# default at the recorded git SHA.
+json_escape() {
+  local s=${1//\\/\\\\}
+  s=${s//\"/\\\"}
+  s=${s//$'\n'/\\n}
+  s=${s//$'\r'/\\r}
+  s=${s//$'\t'/\\t}
+  printf '%s' "$s"
+}
+jstr() { if [[ -z "${1:-}" ]]; then printf 'null'; else printf '"%s"' "$(json_escape "$1")"; fi; }
 
+git_sha="$(git -C "$REPO_DIR" rev-parse HEAD 2>/dev/null || echo unknown)"
+git_dirty=false
+[[ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]] && git_dirty=true
+cpu_model="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
+mem_bytes="$(sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/{print $2*1024; exit}' /proc/meminfo 2>/dev/null || echo 0)"
+cat >"$OUT_DIR/run-config.json" <<EOF
+{
+  "scenario": "$SCENARIO",
+  "started_utc": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+  "git_sha": "$git_sha",
+  "git_dirty": $git_dirty,
+  "k6_version": $(jstr "$(k6 version 2>/dev/null | head -1)"),
+  "go_version": $(jstr "$(go version 2>/dev/null)"),
+  "machine": {
+    "os": $(jstr "$(uname -srm)"),
+    "cpu": $(jstr "$cpu_model"),
+    "cores": $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0),
+    "mem_bytes": ${mem_bytes:-0}
+  },
+  "knobs": {
+    "tier": $(jstr "$TIER"),
+    "port": $(jstr "$PORT"),
+    "tokens_requested": $(jstr "$TOKENS"),
+    "tokens_in_manifest": ${manifest_tokens:-0},
+    "reseeded": $reseeded,
+    "mode": $(jstr "${MODE:-}"),
+    "results_per_run": $(jstr "${RESULTS_PER_RUN:-}"),
+    "stages": $(jstr "${STAGES:-}"),
+    "pipelines_per_min": $(jstr "${PIPELINES_PER_MIN:-}"),
+    "rate_duration": $(jstr "${RATE_DURATION:-}"),
+    "max_vus": $(jstr "${MAX_VUS:-}"),
+    "k6_args": $(jstr "${K6_ARGS:-}"),
+    "expect_threshold_breach": $(jstr "${EXPECT_THRESHOLD_BREACH:-}")
+  }
+}
+EOF
+
+SERVER_PID=""
 SAMPLER_PID=""
 cleanup() {
   [[ -n "$SAMPLER_PID" ]] && kill "$SAMPLER_PID" 2>/dev/null || true
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
+  if [[ -n "$SERVER_PID" ]]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    # The server is a direct child (exec'd in a backgrounded subshell), so
+    # this genuinely waits for its graceful shutdown / WAL flush.
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
+echo "==> starting server on :$PORT"
+(
+  cd "$SCRATCH" &&
+    DB_PATH="$DB" LISTEN_ADDR="127.0.0.1:$PORT" \
+    ADMIN_EMAIL="perf-admin@perf.local" ADMIN_PASSWORD="perfseed-local-only" \
+    exec ./ttgo-perf-server
+) >"$OUT_DIR/server.log" 2>&1 &
+SERVER_PID=$!
+
 code="000"
 for _ in $(seq 1 50); do
-  code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/api/categories" || true)"
+  kill -0 "$SERVER_PID" 2>/dev/null || break # server died — stop probing
+  code="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/api/categories" || true)"
   [[ "$code" != "000" ]] && break
   sleep 0.2
 done
-if [[ "$code" == "000" ]]; then
-  echo "server did not come up; see $OUT_DIR/server.log"
+if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+  echo "server process exited early; see $OUT_DIR/server.log"
   exit 1
 fi
-if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-  echo "server process exited early — port $PORT already in use? see $OUT_DIR/server.log"
+if [[ "$code" == "000" ]]; then
+  echo "server did not come up; see $OUT_DIR/server.log"
   exit 1
 fi
 echo "==> server up (probe returned HTTP $code)"
@@ -81,11 +157,23 @@ SAMPLER_PID=$!
 
 echo "==> running $(basename "$SCENARIO")"
 # --summary-export below is deprecated upstream in favor of handleSummary; works today, phase-4 cleanup candidate.
+k6_status=0
 k6 run \
-  -e TTGO_BASE_URL="http://localhost:$PORT" \
+  -e TTGO_BASE_URL="http://127.0.0.1:$PORT" \
   -e TTGO_MANIFEST="$MANIFEST" \
   --summary-export "$OUT_DIR/summary.json" \
   ${K6_ARGS:-} \
-  "$PERF_DIR/$SCENARIO"
+  "$PERF_DIR/$SCENARIO" || k6_status=$?
 
-echo "==> done. results in $OUT_DIR (summary.json, telemetry.csv, server.log)"
+# k6 exits 99 when thresholds fail at the end of a run. For capacity runs that
+# is the expected outcome — the ramp is supposed to cross the breaking point —
+# so the capacity targets set EXPECT_THRESHOLD_BREACH=1. Anything else nonzero
+# is a real failure.
+if [[ "$k6_status" -eq 99 && "${EXPECT_THRESHOLD_BREACH:-0}" == "1" ]]; then
+  echo "==> thresholds breached — expected for a capacity mapping run (k6 exit 99)"
+elif [[ "$k6_status" -ne 0 ]]; then
+  echo "==> k6 failed (exit $k6_status); partial results in $OUT_DIR"
+  exit "$k6_status"
+fi
+
+echo "==> done. results in $OUT_DIR (summary.json, run-config.json, telemetry.csv, server.log)"

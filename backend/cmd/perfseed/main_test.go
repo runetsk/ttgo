@@ -37,6 +37,46 @@ func TestRunRefusesSymlinkDB(t *testing.T) {
 	require.ErrorContains(t, err, "symlink")
 }
 
+// A hard link named perf-*.db shares the target's inode; Lstat reports a
+// regular file, so the symlink check alone would let a no-wipe run seed
+// straight into a real database. The guard must refuse link count > 1.
+func TestRunRefusesHardLinkDB(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real-tracker.db")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
+	link := filepath.Join(dir, "perf-evil.db")
+	require.NoError(t, os.Link(target, link))
+
+	err := run([]string{"-db", link, "-manifest", filepath.Join(dir, "m.json")}, &bytes.Buffer{})
+	require.ErrorContains(t, err, "hard link")
+}
+
+// os.WriteFile and os.Chmod follow symlinks, so a symlinked manifest would
+// redirect raw bearer-token JSON over an arbitrary user-writable file.
+func TestRunRefusesSymlinkManifest(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "victim.json")
+	require.NoError(t, os.WriteFile(target, []byte("{}"), 0o600))
+	link := filepath.Join(dir, "manifest.json")
+	require.NoError(t, os.Symlink(target, link))
+
+	err := run([]string{"-db", filepath.Join(dir, "perf-x.db"), "-manifest", link}, &bytes.Buffer{})
+	require.ErrorContains(t, err, "symlink")
+}
+
+// A symlinked scratch directory relocates every per-file check above it, so
+// the immediate parent of the DB (and manifest) must not be a symlink.
+func TestRunRefusesSymlinkParentDir(t *testing.T) {
+	dir := t.TempDir()
+	real := filepath.Join(dir, "real-data")
+	require.NoError(t, os.Mkdir(real, 0o755))
+	scratch := filepath.Join(dir, "scratch")
+	require.NoError(t, os.Symlink(real, scratch))
+
+	err := run([]string{"-db", filepath.Join(scratch, "perf-x.db"), "-manifest", filepath.Join(dir, "m.json")}, &bytes.Buffer{})
+	require.ErrorContains(t, err, "symlink")
+}
+
 // Full integration: seeds the small tier into a temp scratch DB (~10k rows,
 // a few seconds), writes the manifest, and validates a token end-to-end.
 func TestRunSeedsAndWritesManifest(t *testing.T) {
@@ -62,7 +102,11 @@ func TestRunSeedsAndWritesManifest(t *testing.T) {
 	assert.Equal(t, "small", m.Tier)
 	assert.Len(t, m.Tokens, 3)
 	assert.Len(t, m.UserEmails, 2)
-	assert.Len(t, m.IngestTestCaseIDs, 500)
+	require.Len(t, m.IngestTestCases, 500)
+	// k6 sends test_name_snapshot straight from the manifest, so the pairs
+	// must carry the real seeded names — not leave JS to re-derive the format.
+	assert.NotEmpty(t, m.IngestTestCases[0].ID)
+	assert.Equal(t, "Ingest TC 0001", m.IngestTestCases[0].Name)
 
 	info, err := os.Stat(mf)
 	require.NoError(t, err)

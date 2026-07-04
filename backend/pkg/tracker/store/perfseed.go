@@ -66,15 +66,24 @@ func perfID(seed uint64, kind string, n int) string {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte(fmt.Sprintf("ttgo-perf:%d:%s:%d", seed, kind, n))).String()
 }
 
-// PerfSeedResult reports what SeedPerfDataset created. IngestPoolCaseIDs is
-// consumed by cmd/perfseed to build the k6 seed manifest.
+// PerfCase identifies one ingest-pool test case. Name rides along so the k6
+// manifest carries {id,name} pairs — scenarios send test_name_snapshot straight
+// from the manifest instead of re-deriving the Go naming format in JS (a
+// cross-language contract that would drift silently).
+type PerfCase struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// PerfSeedResult reports what SeedPerfDataset created. IngestPool is consumed
+// by cmd/perfseed to build the k6 seed manifest.
 type PerfSeedResult struct {
-	Folders           int
-	Categories        int
-	TestCases         int
-	TestRuns          int
-	RunResults        int
-	IngestPoolCaseIDs []string
+	Folders    int
+	Categories int
+	TestCases  int
+	TestRuns   int
+	RunResults int
+	IngestPool []PerfCase
 }
 
 var perfBrowsers = [...]string{"chromium", "firefox", "webkit"}
@@ -131,17 +140,12 @@ func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
 	}
 
 	// --- Catalog test cases (with history) --------------------------------
-	caseIDs := make([]string, cfg.TestCases)
-	caseNames := make([]string, cfg.TestCases)
-	cases := make([]models.TestCase, 0, cfg.TestCases)
+	cases := make([]models.TestCase, 0, cfg.TestCases+cfg.IngestPoolCases)
 	assignments := make([]models.CategoryTestCase, 0, cfg.TestCases+cfg.IngestPoolCases)
 	for i := 0; i < cfg.TestCases; i++ {
 		id := perfID(cfg.Seed, "case", i)
-		name := fmt.Sprintf("Perf TC %04d", i+1)
-		caseIDs[i] = id
-		caseNames[i] = name
 		cases = append(cases, models.TestCase{
-			ID: id, FolderID: areaIDs[i%len(areaIDs)], Name: name,
+			ID: id, FolderID: areaIDs[i%len(areaIDs)], Name: fmt.Sprintf("Perf TC %04d", i+1),
 			Description: fmt.Sprintf(
 				"Validates workflow %d of the perf catalog. Covers boundary and regression checks for area %02d, including retry and timeout handling.",
 				i+1, (i%len(areaIDs))+1),
@@ -153,12 +157,13 @@ func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
 	}
 
 	// --- Ingest pool test cases (no history) -------------------------------
-	poolIDs := make([]string, cfg.IngestPoolCases)
+	pool := make([]PerfCase, cfg.IngestPoolCases)
 	for i := 0; i < cfg.IngestPoolCases; i++ {
 		id := perfID(cfg.Seed, "ingest-case", i)
-		poolIDs[i] = id
+		name := fmt.Sprintf("Ingest TC %04d", i+1)
+		pool[i] = PerfCase{ID: id, Name: name}
 		cases = append(cases, models.TestCase{
-			ID: id, FolderID: ingestRootID, Name: fmt.Sprintf("Ingest TC %04d", i+1),
+			ID: id, FolderID: ingestRootID, Name: name,
 			Description: "Reserved test case for perf load-test result ingestion.",
 			CreatedAt:   now, UpdatedAt: now,
 		})
@@ -202,13 +207,13 @@ func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
 			}
 			dur := 50 + rng.Int64N(4950)
 			start := runCreated.Add(time.Duration(j) * time.Second)
-			id := caseIDs[caseIdx]
+			id := cases[caseIdx].ID // catalog cases occupy indices 0..TestCases-1
 			results = append(results, models.RunResult{
 				ID:               perfID(cfg.Seed, "result", r*perRun+j),
 				TestRunID:        runID,
 				TestCaseID:       &id,
 				AttemptNumber:    1,
-				TestNameSnapshot: caseNames[caseIdx],
+				TestNameSnapshot: cases[caseIdx].Name,
 				Status:           status,
 				DurationMs:       dur,
 				StartTime:        start,
@@ -225,9 +230,8 @@ func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
 		if runFailed {
 			runStatus = models.StatusFail
 		}
-		runCat := catID
 		runs = append(runs, models.TestRun{
-			ID: runID, Name: fmt.Sprintf("Perf Run %03d", r+1), CategoryID: &runCat,
+			ID: runID, Name: fmt.Sprintf("Perf Run %03d", r+1), CategoryID: &catID,
 			Status: runStatus, CreatedAt: runCreated, UpdatedAt: runCreated,
 		})
 	}
@@ -259,12 +263,12 @@ func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
 	}
 
 	return PerfSeedResult{
-		Folders:           len(folders),
-		Categories:        len(categories),
-		TestCases:         cfg.TestCases,
-		TestRuns:          len(runs),
-		RunResults:        len(results),
-		IngestPoolCaseIDs: poolIDs,
+		Folders:    len(folders),
+		Categories: len(categories),
+		TestCases:  cfg.TestCases,
+		TestRuns:   len(runs),
+		RunResults: len(results),
+		IngestPool: pool,
 	}, nil
 }
 
