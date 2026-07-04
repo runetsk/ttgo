@@ -19,12 +19,13 @@ import (
 )
 
 type manifest struct {
-	Tier            string           `json:"tier"`
-	DB              string           `json:"db"`
-	SeededAt        time.Time        `json:"seeded_at"`
-	Tokens          []string         `json:"tokens"`
-	UserEmails      []string         `json:"user_emails"`
-	IngestTestCases []store.PerfCase `json:"ingest_test_cases"`
+	Tier             string           `json:"tier"`
+	DB               string           `json:"db"`
+	SeededAt         time.Time        `json:"seeded_at"`
+	Tokens           []string         `json:"tokens"`
+	UserEmails       []string         `json:"user_emails"`
+	IngestTestCases  []store.PerfCase `json:"ingest_test_cases"`
+	HistoricalRunIDs []string         `json:"historical_run_ids"`
 }
 
 func main() {
@@ -128,7 +129,8 @@ func run(args []string, out io.Writer) error {
 	m := manifest{
 		Tier: *tier, DB: absDB, SeededAt: time.Now(),
 		Tokens: principals.Tokens, UserEmails: principals.UserEmails,
-		IngestTestCases: res.IngestPool,
+		IngestTestCases:  res.IngestPool,
+		HistoricalRunIDs: res.HistoricalRunIDs,
 	}
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {

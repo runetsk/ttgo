@@ -107,12 +107,13 @@ type PerfCase struct {
 // PerfSeedResult reports what SeedPerfDataset created. IngestPool is consumed
 // by cmd/perfseed to build the k6 seed manifest.
 type PerfSeedResult struct {
-	Folders    int
-	Categories int
-	TestCases  int
-	TestRuns   int
-	RunResults int
-	IngestPool []PerfCase
+	Folders          int
+	Categories       int
+	TestCases        int
+	TestRuns         int
+	RunResults       int
+	IngestPool       []PerfCase
+	HistoricalRunIDs []string // first min(50, Runs) run IDs, newest first — for read-scenario detail views
 }
 
 var perfBrowsers = [...]string{"chromium", "firefox", "webkit"}
@@ -298,13 +299,23 @@ func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
 		return PerfSeedResult{}, err
 	}
 
+	nHist := cfg.Runs
+	if nHist > 50 {
+		nHist = 50
+	}
+	histIDs := make([]string, nHist)
+	for r := 0; r < nHist; r++ {
+		histIDs[r] = perfID(cfg.Seed, "run", r)
+	}
+
 	return PerfSeedResult{
-		Folders:    len(folders),
-		Categories: len(categories),
-		TestCases:  cfg.TestCases,
-		TestRuns:   len(runs),
-		RunResults: len(results),
-		IngestPool: pool,
+		Folders:          len(folders),
+		Categories:       len(categories),
+		TestCases:        cfg.TestCases,
+		TestRuns:         len(runs),
+		RunResults:       len(results),
+		IngestPool:       pool,
+		HistoricalRunIDs: histIDs,
 	}, nil
 }
 

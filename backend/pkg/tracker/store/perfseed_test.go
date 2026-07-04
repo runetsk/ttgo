@@ -187,3 +187,22 @@ func TestPerfTierInvariants(t *testing.T) {
 			"%s: ingest pool size is a contract with k6 RESULTS_PER_RUN validation", name)
 	}
 }
+
+func TestSeedPerfDatasetHistoricalRunIDs(t *testing.T) {
+	s := newTestStore(t)
+	res, err := s.SeedPerfDataset(smallTestCfg())
+	require.NoError(t, err)
+	// smallTestCfg has 6 runs — fewer than the 50 cap, so all are exported.
+	require.Len(t, res.HistoricalRunIDs, 6)
+	assert.Equal(t, perfID(1, "run", 0), res.HistoricalRunIDs[0])
+}
+
+func TestSeedPerfDatasetCapsHistoricalRunIDs(t *testing.T) {
+	s := newTestStore(t)
+	cfg := smallTestCfg()
+	cfg.Runs = 60
+	cfg.Results = 60 // 1 per run; still ≤ TestCases
+	res, err := s.SeedPerfDataset(cfg)
+	require.NoError(t, err)
+	assert.Len(t, res.HistoricalRunIDs, 50)
+}

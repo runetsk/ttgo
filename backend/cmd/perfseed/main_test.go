@@ -108,6 +108,10 @@ func TestRunSeedsAndWritesManifest(t *testing.T) {
 	assert.NotEmpty(t, m.IngestTestCases[0].ID)
 	assert.Equal(t, "Ingest TC 0001", m.IngestTestCases[0].Name)
 
+	// Read scenarios GET /api/runs/{id} using these; small tier has 50 runs.
+	require.Len(t, m.HistoricalRunIDs, 50)
+	assert.NotEmpty(t, m.HistoricalRunIDs[0])
+
 	info, err := os.Stat(mf)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "manifest with raw tokens must be 0600 even if it pre-existed")
