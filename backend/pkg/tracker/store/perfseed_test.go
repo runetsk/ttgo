@@ -137,3 +137,25 @@ func TestSeedPerfPrincipals(t *testing.T) {
 	assert.True(t, u.Active)
 	assert.Equal(t, "member", u.Role)
 }
+
+func TestSeedPerfDatasetRejectsNonPositiveCounts(t *testing.T) {
+	s := newTestStore(t)
+	for name, mutate := range map[string]func(*PerfSeedConfig){
+		"folders":     func(c *PerfSeedConfig) { c.Folders = 0 },
+		"categories":  func(c *PerfSeedConfig) { c.Categories = -1 },
+		"ingest pool": func(c *PerfSeedConfig) { c.IngestPoolCases = 0 },
+	} {
+		cfg := smallTestCfg()
+		mutate(&cfg)
+		_, err := s.SeedPerfDataset(cfg)
+		assert.ErrorContains(t, err, "must be positive", name)
+	}
+}
+
+func TestSeedPerfDatasetRejectsUnevenResults(t *testing.T) {
+	s := newTestStore(t)
+	cfg := smallTestCfg()
+	cfg.Results = cfg.Runs*30 + 7 // would silently truncate 7 results today
+	_, err := s.SeedPerfDataset(cfg)
+	assert.ErrorContains(t, err, "divisible")
+}

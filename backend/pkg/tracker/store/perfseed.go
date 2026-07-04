@@ -93,8 +93,15 @@ var perfBrowsers = [...]string{"chromium", "firefox", "webkit"}
 // the trailing cfg.DaysSpread days, plus a reserved "ingest pool" of test
 // cases (no history) that load-test scenarios post fresh results against.
 func (s *Store) SeedPerfDataset(cfg PerfSeedConfig) (PerfSeedResult, error) {
-	if cfg.Runs <= 0 || cfg.TestCases <= 0 {
-		return PerfSeedResult{}, fmt.Errorf("runs and test cases must be positive")
+	if cfg.Runs <= 0 || cfg.TestCases <= 0 || cfg.Folders <= 0 ||
+		cfg.Categories <= 0 || cfg.IngestPoolCases <= 0 {
+		return PerfSeedResult{}, fmt.Errorf(
+			"folders, categories, test cases, runs, and ingest pool cases must be positive")
+	}
+	if cfg.Results%cfg.Runs != 0 {
+		return PerfSeedResult{}, fmt.Errorf(
+			"results (%d) must be divisible by runs (%d) — refusing to silently truncate",
+			cfg.Results, cfg.Runs)
 	}
 	perRun := cfg.Results / cfg.Runs
 	if perRun > cfg.TestCases {
