@@ -17,5 +17,8 @@ capacity-rate:
 dataset:
 	EXPECT_THRESHOLD_BREACH=1 scripts/run-scenario.sh k6/scenarios/dataset-scaling.js
 
+mixed:
+	scripts/run-scenario.sh k6/scenarios/mixed-workload.js
+
 clean:
 	rm -rf .scratch results .seed-manifest.json
