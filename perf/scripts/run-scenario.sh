@@ -44,6 +44,16 @@ if [[ "${RESEED:-0}" == "1" || ! -f "$DB" || ! -f "$MANIFEST" ]]; then
   echo "==> seeding $DB (tier=$TIER, tokens=$TOKENS)"
   "$PERF_DIR/scripts/seed.sh"
   reseeded=true
+else
+  # The manifest is shared across tiers but its tokens exist only in the DB it
+  # was seeded against. Reusing it against another tier's DB would 401 every
+  # request, so a mismatch forces a reseed of the requested tier.
+  manifest_db="$(awk -F'"' '/"db":/ {print $4; exit}' "$MANIFEST")"
+  if [[ "$manifest_db" != "$DB" ]]; then
+    echo "==> manifest belongs to ${manifest_db:-unknown} but this run targets $DB — reseeding"
+    "$PERF_DIR/scripts/seed.sh"
+    reseeded=true
+  fi
 fi
 manifest_tokens="$(awk '/"tokens": \[/{f=1;next} f&&/\]/{exit} f{n++} END{print n+0}' "$MANIFEST")"
 if [[ "$reseeded" == "false" && "$manifest_tokens" -ne "$TOKENS" ]]; then
