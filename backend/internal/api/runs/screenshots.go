@@ -196,9 +196,7 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 	_ = os.RemoveAll(backupDir)
 
 	// Broadcast update
-	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
-		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultUpdated, "run:"+runID, fullRun))
-	}
+	h.broadcastResultDelta(apiws.EventResultUpdated, runID, []string{resultID}, nil, nil)
 
 	httpx.JSON(w, http.StatusCreated, map[string]interface{}{
 		"screenshots": urls,

@@ -253,10 +253,7 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 
 	h.store.TouchTestRun(runID)
 
-	// native: Task 6 — Jira write-back removed; native defect status update restored here.
-	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
-		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultUpdated, "run:"+runID, fullRun))
-	}
+	h.broadcastResultDelta(apiws.EventResultUpdated, runID, []string{resultID}, nil, nil)
 
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
@@ -371,9 +368,7 @@ func (h *Handler) AddRunResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
-		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultUpdated, "run:"+runID, fullRun))
-	}
+	h.broadcastResultDelta(apiws.EventResultUpdated, runID, []string{result.ID}, nil, nil)
 
 	httpx.JSON(w, http.StatusCreated, result)
 }
@@ -388,9 +383,7 @@ func (h *Handler) DeleteRunResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
-		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultDeleted, "run:"+runID, fullRun))
-	}
+	h.broadcastResultDelta(apiws.EventResultDeleted, runID, nil, nil, []string{resultID})
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -589,9 +582,10 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	now := time.Now()
 	updateMap := map[string]interface{}{
 		"status":     req.Status,
-		"updated_at": time.Now(),
+		"updated_at": now,
 	}
 	switch status := models.ExecutionStatus(req.Status); status {
 	case models.StatusFail:
@@ -612,10 +606,11 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 
 	h.store.TouchTestRun(runID)
 
-	// native: Task 6 — Jira write-back removed; native defect status update restored here.
-	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
-		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultBulkUpdated, "run:"+runID, fullRun))
-	}
+	h.broadcastResultDelta(apiws.EventResultBulkUpdated, runID, req.ResultIDs, map[string]any{
+		"status":      req.Status,
+		"defect_type": updateMap["defect_type"],
+		"updated_at":  now,
+	}, nil)
 
 	resp := map[string]interface{}{
 		"status":  "updated",
@@ -643,9 +638,7 @@ func (h *Handler) RetryRunResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
-		h.hub.Broadcast(apiws.NewEvent(apiws.EventResultRetried, "run:"+runID, fullRun))
-	}
+	h.broadcastResultDelta(apiws.EventResultRetried, runID, []string{newResult.ID}, nil, nil)
 
 	httpx.JSON(w, http.StatusCreated, map[string]interface{}{
 		"id":             newResult.ID,
