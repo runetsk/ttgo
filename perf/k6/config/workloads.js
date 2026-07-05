@@ -16,3 +16,7 @@ export const MIXED_DEFAULTS = { readVUs: 20, pipelinesPerMin: 75, phaseMinutes: 
 
 // S3: low, fixed read work per tier; the cross-tier p95 curve is the finding.
 export const SCALING_DEFAULTS = { vus: 5, iterations: 2000, maxDuration: '20m' };
+
+// S4: WebSocket fan-out — 200 clients fits the default 10-user seed
+// (20-connections-per-user cap); 1000 clients needs USERS=50 RESEED=1.
+export const WS_DEFAULTS = { clients: 200, holdMinutes: 3, resultsPerSec: 20 };
