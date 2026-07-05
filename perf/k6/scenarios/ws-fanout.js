@@ -83,7 +83,16 @@ export function wsClient(data) {
   // scenario's hard end, or the executor force-interrupts it and the clean
   // close never runs.
   const scenarioElapsedMs = Date.now() - exec.scenario.startTime;
-  const holdMs = Math.max(1000, (RAMP_MINUTES + HOLD_MINUTES) * 60 * 1000 + 5000 - scenarioElapsedMs);
+  const holdEndMs = (RAMP_MINUTES + HOLD_MINUTES) * 60 * 1000 + 5000;
+  // Ramp-down guard: after the synchronized close instant, ramping-vus can
+  // still start fresh iterations while the VU target falls — each would
+  // reconnect for the 1s floor and spam connect/disconnect noise into
+  // server.log, which operators read for loss attribution. Idle instead.
+  if (scenarioElapsedMs > holdEndMs) {
+    sleep(5);
+    return;
+  }
+  const holdMs = Math.max(1000, holdEndMs - scenarioElapsedMs);
 
   const res = ws.connect(url, wsParams(cookie), (socket) => {
     socket.on('open', () => {

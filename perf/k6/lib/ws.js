@@ -37,6 +37,8 @@ export function usersForClients(clients) {
   for (let i = 0; i < needed; i++) {
     emails.push(userPool[i].split('\n')[0]);
   }
+  // All seeded perf users share one password (SeedPerfPrincipals mints a
+  // single bcrypt hash), so reading it from index 0 is valid for any slice.
   return { emails, password: userPool[0].split('\n')[1] };
 }
 

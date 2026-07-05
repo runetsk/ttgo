@@ -5,6 +5,8 @@ Load and capacity tests for the TTGO tracking API, per
 the harness, the seeder, a smoke check, and S1 "CI ingest storm". Phase 2 adds
 the read-path scenarios — S2 "dashboards under ingest" (`mixed`) and S3
 dataset scaling (`dataset`) — plus medium/large tiers and `scripts/analyze.sh`.
+Phases 3–4 add S4 WebSocket fan-out (`ws`) and the S6 regression gate
+(`gate` / `gate-baseline`).
 
 ## Prerequisites
 
