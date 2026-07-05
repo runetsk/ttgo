@@ -94,6 +94,28 @@ export default function TestRunDetail() {
         }
     }, []), { debounceMs: 300, buffer: true });
 
+    // Declared before the mount effect below — its dependency array reads
+    // these bindings during render, so declaring them later is a TDZ crash.
+    const loadCurrentAnalyses = useCallback(() => {
+        if (!runId) return;
+        import('../api').then(({ getCurrentRunAnalyses }) =>
+            getCurrentRunAnalyses(runId).then(setCurrentAnalyses).catch(() => {})
+        );
+    }, [runId]);
+
+    const loadRun = useCallback(() => {
+        getTestRun(runId)
+            .then(data => {
+                if (data && data.id) setRun(data);
+                else setRun(null);
+                setLoading(false);
+            })
+            .catch(err => {
+                console.error(err);
+                setLoading(false);
+            });
+    }, [runId]);
+
     useEffect(() => {
         loadRun();
         loadAllTests(); // Pre-fetch for "Add Test"
@@ -111,13 +133,6 @@ export default function TestRunDetail() {
             .finally(() => setDefectsLoading(false));
     }, [runId]);
 
-    const loadCurrentAnalyses = useCallback(() => {
-        if (!runId) return;
-        import('../api').then(({ getCurrentRunAnalyses }) =>
-            getCurrentRunAnalyses(runId).then(setCurrentAnalyses).catch(() => {})
-        );
-    }, [runId]);
-
     useEffect(() => {
         if (activeTab === 'defects') loadRunDefectLinks();
     }, [activeTab, loadRunDefectLinks]);
@@ -127,19 +142,6 @@ export default function TestRunDetail() {
             .then(data => setAllTests(Array.isArray(data) ? data : []))
             .catch(() => { });
     };
-
-    const loadRun = useCallback(() => {
-        getTestRun(runId)
-            .then(data => {
-                if (data && data.id) setRun(data);
-                else setRun(null);
-                setLoading(false);
-            })
-            .catch(err => {
-                console.error(err);
-                setLoading(false);
-            });
-    }, [runId]);
 
     // Derive latest-attempt-only view and group attempts by test case
     const { latestResults, attemptsByTestCase } = React.useMemo(() => {
