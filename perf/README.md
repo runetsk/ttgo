@@ -193,7 +193,8 @@ dataset with stable IDs.
 - WebSocket broadcasts *do* fire on every result (the hub is part of the write
   path), but with zero subscribers connected the fan-out is a no-op; S4
   (phase 3) measures it under real subscriber load.
-- No read traffic in S1; S2 (phase 2) adds the dashboards-under-ingest mix.
+- No read traffic in S1 — the dashboards-under-ingest mix is S2's `mixed`
+  scenario (see the read-path subsection above).
 
 ### Same-machine caveat
 
@@ -215,5 +216,5 @@ runner script always provisions a local server.
 - The `large` tier seeds ~1M results: expect ~1–3 min of seeding, ~1.5–2 GB
   on disk under `perf/.scratch/`, and a few hundred MB of transient seeder
   RAM (rows are generated in memory before batch insert).
-- Later phases (read-path scenarios, WebSocket fan-out, regression gate) are
-  specified in the design doc and land separately.
+- Later phases (WebSocket fan-out, regression gate) are specified in the
+  design doc and land separately.
