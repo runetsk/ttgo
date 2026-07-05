@@ -135,9 +135,9 @@ export function probe() {
     return;
   }
   // Post RESULTS_PER_RUN results at the paced rate (200 at 20/s ≈ 10 s per
-  // run), then complete and start a fresh run next iteration. Bounding
-  // results per run bounds broadcast frame sizes — the event payload is the
-  // FULL re-fetched run, so an ever-growing run would inflate every frame.
+  // run), then complete and start a fresh run next iteration. Result events
+  // carry O(1) delta payloads (affected row + run summary), so this bound is
+  // run hygiene rather than frame-size control.
   for (let i = 0; i < RESULTS_PER_RUN; i++) {
     addResult(token, run.id, resultBodiesAt(i));
     probePosted.add(1);

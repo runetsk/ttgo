@@ -7,7 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- WebSocket result-level events (`result_updated`, `result_bulk_updated`,
+  `result_retried`, `result_deleted`) now carry a delta payload
+  (`{run_id, run, results | result_ids+patch | deleted_result_ids}` where
+  `run` is a summary with latest-attempt counters and no `run_results`)
+  instead of the full re-fetched test run. External WS consumers must merge
+  deltas or re-fetch the run. Fan-out frame size is now O(changed rows)
+  (~100× smaller by the end of a 200-result run) and result ingestion no
+  longer re-reads the whole run per posted result (S4 finding: full-run
+  frames overflowed per-client egress buffers at 1000 subscribers and
+  throttled the probe to ~5 results/s of the configured 20).
+
 ### Fixed
+- Run detail page crashed on load ("Something went wrong") since the effect
+  dependency-array lint cleanup: the mount effect read `loadRun` /
+  `loadCurrentAnalyses` from its dependency array before their `const`
+  declarations (TDZ `ReferenceError`). Declarations now precede the effect.
 - Read-path query scaling on large databases (S3 finding, ~1M results): the
   runs list computed status and defect-type counts in two passes, and the
   defect pass's `status IN ('FAIL','ERROR')` predicate baited SQLite into
