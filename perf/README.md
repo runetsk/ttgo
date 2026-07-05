@@ -265,5 +265,5 @@ runner script always provisions a local server.
 - The `large` tier seeds ~1M results: expect ~1–3 min of seeding, ~1.5–2 GB
   on disk under `perf/.scratch/`, and a few hundred MB of transient seeder
   RAM (rows are generated in memory before batch insert).
-- Later phases (WebSocket fan-out, regression gate) are specified in the
-  design doc and land separately.
+- Remaining design-doc options (S5 soak, CI wiring for the gate, the
+  webhook-overflow probe) land separately.
