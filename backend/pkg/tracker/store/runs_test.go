@@ -386,6 +386,51 @@ func TestGetTestRunsAggregationLatestAttemptOnly(t *testing.T) {
 	assert.Equal(t, 1, runs[0].TotalResults)
 }
 
+func TestGetTestRunsDefectTypeCounts(t *testing.T) {
+	s := newTestStore(t)
+	folder, _ := s.CreateFolder("Root", nil)
+	tcA := &models.TestCase{Name: "A", FolderID: folder.ID}
+	_ = s.CreateTestCase(tcA)
+	tcB := &models.TestCase{Name: "B", FolderID: folder.ID}
+	_ = s.CreateTestCase(tcB)
+	tcC := &models.TestCase{Name: "C", FolderID: folder.ID}
+	_ = s.CreateTestCase(tcC)
+
+	run := &models.TestRun{Name: "Defect Counts"}
+	require.NoError(t, s.CreateTestRun(run))
+
+	// tcA: attempt 1 FAIL/product_bug superseded by attempt 2 FAIL/automation_bug
+	a1 := &models.RunResult{TestRunID: run.ID, TestCaseID: &tcA.ID, TestNameSnapshot: tcA.Name, Status: models.StatusFail, DefectType: "product_bug"}
+	require.NoError(t, s.AddRunResult(a1))
+	a2, err := s.RetryRunResult(run.ID, a1.ID)
+	require.NoError(t, err)
+	require.NoError(t, s.UpdateRunResult(run.ID, a2.ID, map[string]interface{}{
+		"status": string(models.StatusFail), "defect_type": "automation_bug",
+	}))
+
+	// tcB: FAIL with empty defect_type counts as to_investigate
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &tcB.ID, TestNameSnapshot: tcB.Name, Status: models.StatusFail}))
+
+	// tcC: PASS, in no defect bucket
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &tcC.ID, TestNameSnapshot: tcC.Name, Status: models.StatusPass}))
+
+	// Orphan result (no test case): ERROR/system_issue is always included
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestNameSnapshot: "orphan", Status: models.StatusError, DefectType: "system_issue"}))
+
+	runs, _, err := s.GetTestRuns(RunFilter{Limit: 50})
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	assert.Equal(t, 4, runs[0].TotalResults, "latest attempts only: tcA(1) + tcB + tcC + orphan")
+	assert.Equal(t, 1, runs[0].PassedResults)
+	assert.Equal(t, 3, runs[0].FailedResults, "FAIL, FAIL, ERROR")
+	assert.Equal(t, 0, runs[0].ProductBug, "attempt 1 defect type superseded by retry")
+	assert.Equal(t, 1, runs[0].AutomationBug)
+	assert.Equal(t, 1, runs[0].SystemIssue)
+	assert.Equal(t, 1, runs[0].ToInvestigate, "empty defect_type on failed result")
+	assert.Equal(t, 1, runs[0].RetriedCount)
+	assert.Equal(t, 4, runs[0].TotalAttempts, "tcA×2 + tcB + tcC; orphans excluded")
+}
+
 func TestGetTestRunRetriedCountAndTotalAttempts(t *testing.T) {
 	s := newTestStore(t)
 	folder, _ := s.CreateFolder("Root", nil)

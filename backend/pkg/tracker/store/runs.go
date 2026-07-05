@@ -211,76 +211,57 @@ func (s *Store) GetTestRuns(f RunFilter) ([]models.TestRun, int64, error) {
 			runIndex[runs[i].ID] = &runs[i]
 		}
 
-		// Status counts — latest attempt per test case only
+		// Status + defect-type counts in one pass — latest attempt per test case
+		// only. Grouping by (status, defect_type) with no status predicate keeps
+		// the planner on the test_run_id index; a separate FAIL/ERROR-filtered
+		// query baited it into scanning idx_run_results_status across the whole
+		// table (2s+ per page at 1M rows).
 		type runCount struct {
-			TestRunID string
-			Status    string
-			Count     int
-		}
-		var counts []runCount
-		s.db.Raw(`
-			SELECT rr.test_run_id, rr.status, COUNT(*) as count
-			FROM run_results rr
-			WHERE rr.test_run_id IN ?
-			  AND (rr.test_case_id IS NULL OR rr.attempt_number = (
-			    SELECT MAX(rr2.attempt_number)
-			    FROM run_results rr2
-			    WHERE rr2.test_run_id = rr.test_run_id
-			      AND rr2.test_case_id = rr.test_case_id
-			  ))
-			GROUP BY rr.test_run_id, rr.status
-		`, runIDs).Scan(&counts)
-
-		for _, c := range counts {
-			if run, ok := runIndex[c.TestRunID]; ok {
-				run.TotalResults += c.Count
-				switch models.ExecutionStatus(c.Status) {
-				case models.StatusPass:
-					run.PassedResults += c.Count
-				case models.StatusFail, models.StatusError:
-					run.FailedResults += c.Count
-				case models.StatusSkip:
-					run.SkippedResults += c.Count
-				case models.StatusPending:
-					run.PendingResults += c.Count
-				}
-			}
-		}
-
-		// Defect type counts for failed results
-		type defectCount struct {
 			TestRunID  string
+			Status     string
 			DefectType string
 			Count      int
 		}
-		var defects []defectCount
+		var counts []runCount
 		s.db.Raw(`
-			SELECT rr.test_run_id, rr.defect_type, COUNT(*) as count
+			SELECT rr.test_run_id, rr.status, rr.defect_type, COUNT(*) as count
 			FROM run_results rr
 			WHERE rr.test_run_id IN ?
-			  AND rr.status IN ('FAIL','ERROR')
 			  AND (rr.test_case_id IS NULL OR rr.attempt_number = (
 			    SELECT MAX(rr2.attempt_number)
 			    FROM run_results rr2
 			    WHERE rr2.test_run_id = rr.test_run_id
 			      AND rr2.test_case_id = rr.test_case_id
 			  ))
-			GROUP BY rr.test_run_id, rr.defect_type
-		`, runIDs).Scan(&defects)
+			GROUP BY rr.test_run_id, rr.status, rr.defect_type
+		`, runIDs).Scan(&counts)
 
-		for _, d := range defects {
-			if run, ok := runIndex[d.TestRunID]; ok {
-				switch d.DefectType {
+		for _, c := range counts {
+			run, ok := runIndex[c.TestRunID]
+			if !ok {
+				continue
+			}
+			run.TotalResults += c.Count
+			switch models.ExecutionStatus(c.Status) {
+			case models.StatusPass:
+				run.PassedResults += c.Count
+			case models.StatusFail, models.StatusError:
+				run.FailedResults += c.Count
+				switch c.DefectType {
 				case "product_bug":
-					run.ProductBug += d.Count
+					run.ProductBug += c.Count
 				case "automation_bug":
-					run.AutomationBug += d.Count
+					run.AutomationBug += c.Count
 				case "system_issue":
-					run.SystemIssue += d.Count
+					run.SystemIssue += c.Count
 				default:
 					// "to_investigate" or empty defect_type
-					run.ToInvestigate += d.Count
+					run.ToInvestigate += c.Count
 				}
+			case models.StatusSkip:
+				run.SkippedResults += c.Count
+			case models.StatusPending:
+				run.PendingResults += c.Count
 			}
 		}
 

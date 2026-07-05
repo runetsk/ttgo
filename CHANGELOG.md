@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Read-path query scaling on large databases (S3 finding, ~1M results): the
+  runs list computed status and defect-type counts in two passes, and the
+  defect pass's `status IN ('FAIL','ERROR')` predicate baited SQLite into
+  scanning the whole table via the status index (~2s per page); both counts
+  now come from one grouped query pinned to the `test_run_id` index.
+  Analytics summary/trend/flaky-candidate queries are now answered entirely
+  from a new covering index `run_results(start_time, status, test_case_id)`
+  instead of fetching every wide row in the date window, and the flaky
+  detector's per-test-case history reads are index-only ordered scans on
+  `run_results(test_case_id, start_time, status)` (names are resolved only
+  for the returned page). Superseded single-column/duplicate indexes on
+  `run_results` are dropped at startup (`test_case_id` ×2, `start_time`, and
+  the old `(test_case_id, status, start_time)` composite), so ingest writes
+  fewer index entries than before. At the large perf tier this takes
+  `GET /api/runs` from ~2.1s p95 to ~35ms, `/api/analytics/summary` from
+  ~740ms to ~50ms, and `/api/analytics/trend` / `flaky` from ~2.3–2.4s to
+  ~220–300ms.
+
 ### Added
 - Performance test harness (phase 1): a `perf/` k6 suite for the result-ingest
   write path — smoke check plus the S1 "CI ingest storm" capacity scenario —

@@ -89,10 +89,13 @@ func (s *Store) DetectFlakyTestsSwitchMethod(startDate, endDate time.Time, folde
 		var runs []struct {
 			Status    string    `gorm:"column:status"`
 			StartTime time.Time `gorm:"column:start_time"`
-			TestName  string    `gorm:"column:test_name_snapshot"`
 		}
+		// Only indexed columns, so this stays an index-only scan of
+		// idx_run_results_case_time with early LIMIT termination — it runs once
+		// per candidate test case. Names are fetched after the ranking, for the
+		// returned page only.
 		if err := s.db.Raw(`
-			SELECT status, start_time, COALESCE(test_name_snapshot, test_case_id) as test_name_snapshot
+			SELECT status, start_time
 			FROM run_results
 			WHERE test_case_id = ? AND status IN ('PASS','FAIL','ERROR')
 			ORDER BY start_time DESC
@@ -130,7 +133,6 @@ func (s *Store) DetectFlakyTestsSwitchMethod(startDate, endDate time.Time, folde
 
 		results = append(results, models.FlakyTestCase{
 			TestCaseID:       tcID,
-			TestCaseName:     runs[0].TestName,
 			SwitchCount:      switchCount,
 			PossibleSwitches: possibleSwitches,
 			SwitchPercentage: switchPct,
@@ -146,6 +148,20 @@ func (s *Store) DetectFlakyTestsSwitchMethod(startDate, endDate time.Time, folde
 
 	if len(results) > limit {
 		results = results[:limit]
+	}
+
+	// Name of the newest qualifying result, fetched only for the returned page.
+	for i := range results {
+		var name string
+		if err := s.db.Raw(`
+			SELECT COALESCE(test_name_snapshot, test_case_id)
+			FROM run_results
+			WHERE test_case_id = ? AND status IN ('PASS','FAIL','ERROR')
+			ORDER BY start_time DESC
+			LIMIT 1
+		`, results[i].TestCaseID).Scan(&name).Error; err == nil {
+			results[i].TestCaseName = name
+		}
 	}
 
 	return results, nil

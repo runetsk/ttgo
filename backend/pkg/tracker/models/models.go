@@ -235,7 +235,7 @@ type TestRun struct {
 type RunResult struct {
 	ID               string          `json:"id" gorm:"primaryKey"`
 	TestRunID        string          `json:"test_run_id" gorm:"index"`
-	TestCaseID       *string         `json:"test_case_id" gorm:"index"` // Nullable if test case is deleted
+	TestCaseID       *string         `json:"test_case_id"` // Nullable if test case is deleted; covered by idx_run_results_case_time
 	AttemptNumber    int             `json:"attempt_number" gorm:"default:1;not null"`
 	TestNameSnapshot string          `json:"test_name_snapshot"` // Preserved name
 	Status           ExecutionStatus `json:"status"`
