@@ -2,7 +2,9 @@
 
 Load and capacity tests for the TTGO tracking API, per
 `specs/2026-07-03-performance-testing-design.md` (local-only). Phase 1 covers
-the harness, the seeder, a smoke check, and S1 "CI ingest storm".
+the harness, the seeder, a smoke check, and S1 "CI ingest storm". Phase 2 adds
+the read-path scenarios — S2 "dashboards under ingest" (`mixed`) and S3
+dataset scaling (`dataset`) — plus medium/large tiers and `scripts/analyze.sh`.
 
 ## Prerequisites
 
@@ -49,9 +51,9 @@ Environment knobs (pass as `VAR=value make -C perf <target>`):
 | `TIER` | `small` | Dataset tier: `small` ≈ 10k results, `medium` ≈ 100k, `large` ≈ 1M (switching tiers auto-reseeds — the manifest is checked against the target DB) |
 | `PORT` | `8877` | Server port (avoid 8080 to not collide with a dev server) |
 | `TOKENS` | `100` | Write tokens minted at seed (needs `RESEED=1` to change); scenarios abort at init if the pool < peak VUs (see methodology) |
-| `MAX_VUS` | token pool size | Rate-mode VU ceiling for `capacity-rate`; must be ≤ the seeded token pool |
+| `MAX_VUS` | token pool size | Rate-mode VU ceiling for `capacity-rate`; also caps ingest VUs for `mixed`, where it defaults to the token pool minus `READ_VUS`; must be ≤ the seeded token pool |
 | `RESEED` | `0` | `1` forces wipe + reseed before the scenario |
-| `RESULTS_PER_RUN` | `200` capacity / `20` smoke | Results per simulated pipeline (max 500 = ingest pool size) |
+| `RESULTS_PER_RUN` | `200` capacity/mixed / `20` smoke | Results per simulated pipeline (max 500 = ingest pool size) |
 | `STAGES` | 10-min ramp to 100 VUs | JSON stages for closed-loop mode |
 | `PIPELINES_PER_MIN` | `6` capacity-rate / `75` mixed | Arrival rate for `capacity-rate`; also the ingest-storm rate for `mixed` (S2) |
 | `RATE_DURATION` | `10m` | Duration for `capacity-rate` |
@@ -145,7 +147,7 @@ runs passed aggregate thresholds that their peak windows violated 2×).
   lighter than configured.
 - **S3 (`dataset`)** runs the same weighted read mix (30 % runs list, 30 %
   run detail, 15 % analytics summary, 10 % trend, 10 % FTS search, 5 % flaky)
-  at low fixed concurrency, once per tier: `make dataset`, then
+  at low fixed concurrency, once per tier: `RESEED=1 make dataset`, then
   `TIER=medium make dataset`, then `TIER=large make dataset`. Reseed is
   automatic on tier switch. Compare per-op p95 across the three summaries —
   super-linear growth with dataset size flags missing indexes or full scans.

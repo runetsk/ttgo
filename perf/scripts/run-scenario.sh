@@ -108,6 +108,9 @@ cat >"$OUT_DIR/run-config.json" <<EOF
     "pipelines_per_min": $(jstr "${PIPELINES_PER_MIN:-}"),
     "rate_duration": $(jstr "${RATE_DURATION:-}"),
     "max_vus": $(jstr "${MAX_VUS:-}"),
+    "read_vus": $(jstr "${READ_VUS:-}"),
+    "iterations": $(jstr "${ITERATIONS:-}"),
+    "phase_minutes": $(jstr "${PHASE_MINUTES:-}"),
     "k6_args": $(jstr "${K6_ARGS:-}"),
     "expect_threshold_breach": $(jstr "${EXPECT_THRESHOLD_BREACH:-}")
   }
