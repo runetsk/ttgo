@@ -13,6 +13,7 @@ import { assertTokenPool, intKnob } from '../lib/api.js';
 import { browseOnce } from '../lib/reads.js';
 import { READ_THRESHOLDS } from '../config/thresholds.js';
 import { SCALING_DEFAULTS } from '../config/workloads.js';
+export { handleSummary } from '../lib/summary.js';
 
 const READ_VUS = intKnob('READ_VUS', SCALING_DEFAULTS.vus);
 const ITERATIONS = intKnob('ITERATIONS', SCALING_DEFAULTS.iterations);

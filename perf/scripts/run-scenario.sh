@@ -169,12 +169,11 @@ echo "==> server up (probe returned HTTP $code)"
 SAMPLER_PID=$!
 
 echo "==> running $(basename "$SCENARIO")"
-# --summary-export below is deprecated upstream in favor of handleSummary; works today, phase-4 cleanup candidate.
 k6_status=0
 k6 run \
   -e TTGO_BASE_URL="http://127.0.0.1:$PORT" \
   -e TTGO_MANIFEST="$MANIFEST" \
-  --summary-export "$OUT_DIR/summary.json" \
+  -e TTGO_SUMMARY_PATH="$OUT_DIR/summary.json" \
   ${K6_ARGS:-} \
   "$PERF_DIR/$SCENARIO" || k6_status=$?
 

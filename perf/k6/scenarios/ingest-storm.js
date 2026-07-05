@@ -18,6 +18,7 @@
 import { ciPipeline, resultsPerRun, assertTokenPool, tokenPoolSize } from '../lib/api.js';
 import { INGEST_THRESHOLDS } from '../config/thresholds.js';
 import { DEFAULT_CAPACITY_STAGES } from '../config/workloads.js';
+export { handleSummary } from '../lib/summary.js';
 
 const RESULTS_PER_RUN = resultsPerRun(200);
 const MODE = __ENV.MODE || 'vus';

@@ -13,6 +13,7 @@ import { ciPipeline, resultsPerRun, assertTokenPool, tokenPoolSize, intKnob } fr
 import { browseOnce } from '../lib/reads.js';
 import { INGEST_THRESHOLDS, READ_THRESHOLDS } from '../config/thresholds.js';
 import { MIXED_DEFAULTS } from '../config/workloads.js';
+export { handleSummary } from '../lib/summary.js';
 
 const RESULTS_PER_RUN = resultsPerRun(200);
 const READ_VUS = intKnob('READ_VUS', MIXED_DEFAULTS.readVUs);
