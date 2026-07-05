@@ -241,28 +241,7 @@ func (s *Store) GetTestRuns(f RunFilter) ([]models.TestRun, int64, error) {
 			if !ok {
 				continue
 			}
-			run.TotalResults += c.Count
-			switch models.ExecutionStatus(c.Status) {
-			case models.StatusPass:
-				run.PassedResults += c.Count
-			case models.StatusFail, models.StatusError:
-				run.FailedResults += c.Count
-				switch c.DefectType {
-				case "product_bug":
-					run.ProductBug += c.Count
-				case "automation_bug":
-					run.AutomationBug += c.Count
-				case "system_issue":
-					run.SystemIssue += c.Count
-				default:
-					// "to_investigate" or empty defect_type
-					run.ToInvestigate += c.Count
-				}
-			case models.StatusSkip:
-				run.SkippedResults += c.Count
-			case models.StatusPending:
-				run.PendingResults += c.Count
-			}
+			applyResultStatusCount(run, c.Status, c.DefectType, c.Count)
 		}
 
 		// Retry stats per run
@@ -346,6 +325,93 @@ func (s *Store) GetTestRun(id string) (*models.TestRun, error) {
 			(SELECT COUNT(*) FROM run_results WHERE test_run_id = ?) AS total
 	`, id, id).Scan(&stats).Error; err != nil {
 		return nil, fmt.Errorf("run stats: %w", err)
+	}
+	run.RetriedCount = stats.Retried
+	run.TotalAttempts = stats.Total
+
+	return &run, nil
+}
+
+// applyResultStatusCount folds one (status, defect_type, count) aggregate row
+// into a run's computed counter fields. Shared by GetTestRuns and
+// GetTestRunSummary so list rows and WS delta summaries agree.
+func applyResultStatusCount(run *models.TestRun, status, defectType string, count int) {
+	run.TotalResults += count
+	switch models.ExecutionStatus(status) {
+	case models.StatusPass:
+		run.PassedResults += count
+	case models.StatusFail, models.StatusError:
+		run.FailedResults += count
+		switch defectType {
+		case "product_bug":
+			run.ProductBug += count
+		case "automation_bug":
+			run.AutomationBug += count
+		case "system_issue":
+			run.SystemIssue += count
+		default:
+			// "to_investigate" or empty defect_type
+			run.ToInvestigate += count
+		}
+	case models.StatusSkip:
+		run.SkippedResults += count
+	case models.StatusPending:
+		run.PendingResults += count
+	}
+}
+
+// GetTestRunSummary returns the run row with latest-attempt status counters
+// and retry stats populated and RunResults left nil — the O(1)-payload
+// companion to GetTestRun for WS delta broadcasts (S4 fan-out: event bytes
+// must not scale with run size).
+func (s *Store) GetTestRunSummary(id string) (*models.TestRun, error) {
+	var run models.TestRun
+	if err := s.db.First(&run, "id = ?", id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	type statusCount struct {
+		Status     string
+		DefectType string
+		Count      int
+	}
+	var counts []statusCount
+	if err := s.db.Raw(`
+		SELECT rr.status, rr.defect_type, COUNT(*) as count
+		FROM run_results rr
+		WHERE rr.test_run_id = ?
+		  AND (rr.test_case_id IS NULL OR rr.attempt_number = (
+		    SELECT MAX(rr2.attempt_number)
+		    FROM run_results rr2
+		    WHERE rr2.test_run_id = rr.test_run_id
+		      AND rr2.test_case_id = rr.test_case_id
+		  ))
+		GROUP BY rr.status, rr.defect_type
+	`, id).Scan(&counts).Error; err != nil {
+		return nil, err
+	}
+	for _, c := range counts {
+		applyResultStatusCount(&run, c.Status, c.DefectType, c.Count)
+	}
+
+	var stats struct {
+		Retried int
+		Total   int
+	}
+	if err := s.db.Raw(`
+		SELECT
+			(SELECT COUNT(*) FROM (
+				SELECT rr.test_case_id FROM run_results rr
+				WHERE rr.test_run_id = ? AND rr.test_case_id IS NOT NULL
+				GROUP BY rr.test_case_id
+				HAVING MAX(rr.attempt_number) > 1
+			)) AS retried,
+			(SELECT COUNT(*) FROM run_results WHERE test_run_id = ?) AS total
+	`, id, id).Scan(&stats).Error; err != nil {
+		return nil, err
 	}
 	run.RetriedCount = stats.Retried
 	run.TotalAttempts = stats.Total

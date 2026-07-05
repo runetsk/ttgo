@@ -578,3 +578,45 @@ func TestGetTestRunsFilterByCreatedRange(t *testing.T) {
 	require.Len(t, runs, 1)
 	assert.Equal(t, "Old", runs[0].Name)
 }
+
+func TestGetTestRunSummary(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "Summary Run"}
+	require.NoError(t, s.CreateTestRun(run))
+
+	folder, _ := s.CreateFolder("Root", nil)
+	tc1 := &models.TestCase{Name: "Retried then passed", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc1))
+	tc2 := &models.TestCase{Name: "Failing", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc2))
+	tc3 := &models.TestCase{Name: "Pending", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc3))
+
+	// tc1: FAIL attempt 1, PASS attempt 2 — latest-attempt counters must see one PASS.
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &tc1.ID, Status: models.StatusFail, DefectType: "product_bug"}))
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &tc1.ID, Status: models.StatusPass}))
+	// tc2: FAIL with default defect type.
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &tc2.ID, Status: models.StatusFail, DefectType: "to_investigate"}))
+	// tc3: PENDING.
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &tc3.ID, Status: models.StatusPending}))
+
+	summary, err := s.GetTestRunSummary(run.ID)
+	require.NoError(t, err)
+	require.NotNil(t, summary)
+
+	assert.Equal(t, run.ID, summary.ID)
+	assert.Empty(t, summary.RunResults, "summary must not load result rows")
+	assert.Equal(t, 3, summary.TotalResults, "latest attempts only")
+	assert.Equal(t, 1, summary.PassedResults)
+	assert.Equal(t, 1, summary.FailedResults)
+	assert.Equal(t, 1, summary.PendingResults)
+	assert.Equal(t, 0, summary.SkippedResults)
+	assert.Equal(t, 1, summary.ToInvestigate)
+	assert.Equal(t, 0, summary.ProductBug, "superseded FAIL attempt must not count")
+	assert.Equal(t, 1, summary.RetriedCount)
+	assert.Equal(t, 4, summary.TotalAttempts)
+
+	missing, err := s.GetTestRunSummary("nope")
+	require.NoError(t, err)
+	assert.Nil(t, missing)
+}
