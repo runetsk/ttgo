@@ -24,7 +24,7 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 # MODE lands in the directory name so closed-loop (vus) and open-loop (rate)
 # runs of the same scenario file stay distinguishable in results/ history.
 OUT_DIR="$PERF_DIR/results/$STAMP-$(basename "$SCENARIO" .js)${MODE:+-$MODE}"
-mkdir -p "$SCRATCH" "$OUT_DIR"
+mkdir -p "$SCRATCH" "$OUT_DIR" "$PERF_DIR/baselines"
 
 command -v k6 >/dev/null || { echo "k6 not found — install it first (see perf/README.md)"; exit 1; }
 
@@ -111,6 +111,8 @@ cat >"$OUT_DIR/run-config.json" <<EOF
     "read_vus": $(jstr "${READ_VUS:-}"),
     "iterations": $(jstr "${ITERATIONS:-}"),
     "phase_minutes": $(jstr "${PHASE_MINUTES:-}"),
+    "write_baseline": $(jstr "${WRITE_BASELINE:-}"),
+    "gate_ignore_machine": $(jstr "${GATE_IGNORE_MACHINE:-}"),
     "k6_args": $(jstr "${K6_ARGS:-}"),
     "expect_threshold_breach": $(jstr "${EXPECT_THRESHOLD_BREACH:-}")
   }
@@ -174,6 +176,9 @@ k6 run \
   -e TTGO_BASE_URL="http://127.0.0.1:$PORT" \
   -e TTGO_MANIFEST="$MANIFEST" \
   -e TTGO_SUMMARY_PATH="$OUT_DIR/summary.json" \
+  -e TTGO_BASELINE_PATH="$PERF_DIR/baselines/gate-$TIER.json" \
+  -e TTGO_MACHINE="$cpu_model" \
+  -e TTGO_TIER="$TIER" \
   ${K6_ARGS:-} \
   "$PERF_DIR/$SCENARIO" || k6_status=$?
 
