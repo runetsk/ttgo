@@ -112,6 +112,11 @@ func TestRunSeedsAndWritesManifest(t *testing.T) {
 	require.Len(t, m.HistoricalRunIDs, 50)
 	assert.NotEmpty(t, m.HistoricalRunIDs[0])
 
+	// The S4 WebSocket scenario logs perf users in for session cookies
+	// (Bearer tokens cannot open WS connections), so the manifest must
+	// carry the shared password alongside the emails.
+	assert.Equal(t, "perfseed-local-only", m.UserPassword)
+
 	info, err := os.Stat(mf)
 	require.NoError(t, err)
 	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "manifest with raw tokens must be 0600 even if it pre-existed")

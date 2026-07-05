@@ -24,6 +24,7 @@ type manifest struct {
 	SeededAt         time.Time        `json:"seeded_at"`
 	Tokens           []string         `json:"tokens"`
 	UserEmails       []string         `json:"user_emails"`
+	UserPassword     string           `json:"user_password"`
 	IngestTestCases  []store.PerfCase `json:"ingest_test_cases"`
 	HistoricalRunIDs []string         `json:"historical_run_ids"`
 }
@@ -129,6 +130,7 @@ func run(args []string, out io.Writer) error {
 	m := manifest{
 		Tier: *tier, DB: absDB, SeededAt: time.Now(),
 		Tokens: principals.Tokens, UserEmails: principals.UserEmails,
+		UserPassword:     *password,
 		IngestTestCases:  res.IngestPool,
 		HistoricalRunIDs: res.HistoricalRunIDs,
 	}

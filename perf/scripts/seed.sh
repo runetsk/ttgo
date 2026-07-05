@@ -9,10 +9,11 @@ PERF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(dirname "$PERF_DIR")"
 TIER="${TIER:-small}"
 TOKENS="${TOKENS:-100}"
+USERS="${USERS:-10}"
 SCRATCH="$PERF_DIR/.scratch"
 
 mkdir -p "$SCRATCH"
 cd "$REPO_DIR/backend"
 exec go run -tags sqlite_fts5 ./cmd/perfseed \
-  -db "$SCRATCH/perf-$TIER.db" -tier "$TIER" -tokens "$TOKENS" \
+  -db "$SCRATCH/perf-$TIER.db" -tier "$TIER" -tokens "$TOKENS" -users "$USERS" \
   -manifest "$PERF_DIR/.seed-manifest.json" -wipe
