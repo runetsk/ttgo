@@ -67,6 +67,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `historical_run_ids`; the runner reseeds automatically when the manifest
   and target tier DB disagree; the seeder rejects non-positive counts and
   results not divisible by runs.
+- Perf phase 4: S6 regression gate — `make -C perf gate` runs a fixed 3-minute
+  mixed profile against a freshly-seeded small tier and fails if any
+  operation's p95 exceeds its committed, machine-stamped baseline
+  (`perf/baselines/gate-<tier>.json`, refreshed via `make -C perf
+  gate-baseline`) by more than 30 %; all perf scenarios moved from the
+  deprecated `--summary-export` to a shared `handleSummary` (vendored
+  k6-summary keeps the terminal output; `summary.json` now uses the
+  handleSummary shape with values under `.values`).
+- Perf phase 3: S4 WebSocket fan-out scenario (`make -C perf ws`) — session-
+  cookie authenticated clients (Bearer tokens cannot open WS connections)
+  subscribe to `runs:*` while a paced probe posts results; measures broadcast
+  lag from server timestamps, count-based delivery loss, and behavior at the
+  1000-global/20-per-user connection caps. The seed manifest now carries the
+  perf users' shared password, and `seed.sh` exposes a `USERS` knob.
 - **Webhook signing-secret rotation.** `POST /api/webhooks/{id}/rotate-secret` generates
   a new HMAC signing secret and invalidates the old one; a matching action in Settings →
   Webhooks lets you rotate a secret from the UI. The signing secret is also now revealed

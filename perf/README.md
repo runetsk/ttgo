@@ -27,7 +27,7 @@ open-loop `capacity-rate` results stay distinguishable):
 
 | File | Contents |
 |---|---|
-| `summary.json` | k6 metrics summary (per-op latency percentiles, error rates) |
+| `summary.json` | k6 end-of-run summary via `handleSummary` (metric values nested under `.values`, e.g. `.metrics["http_req_duration{op:add_result}"].values["p(95)"]`) |
 | `telemetry.csv` | server RSS (KB), %CPU, and SQLite WAL size (bytes), sampled every 2 s |
 | `server.log` | server stdout/stderr for the run |
 | `run-config.json` | provenance: git SHA (+dirty flag), k6/Go versions, machine specs, and every knob value (`null` = unset, i.e. the scenario default at that SHA) |
@@ -42,6 +42,9 @@ open-loop `capacity-rate` results stay distinguishable):
 | `capacity-rate` | `ingest-storm.js` (MODE=rate) | Open-loop fixed pipeline arrival rate |
 | `mixed` | `mixed-workload.js` | S2: browsing reads, ingest storm joins at half-time (read-latency delta) |
 | `dataset` | `dataset-scaling.js` | S3: fixed read mix per tier; compare p95 across small/medium/large |
+| `ws` | `ws-fanout.js` | S4: WebSocket fan-out — CLIENTS subscribed sockets + a paced ingest probe (lag/loss/caps) |
+| `gate` | `gate.js` | S6: 3-min fixed mixed profile; **fails (exit ≠ 0) if any op's p95 exceeds its committed baseline × 1.3** |
+| `gate-baseline` | `gate.js` | Re-measure and rewrite `baselines/gate-<tier>.json` (commit the result) |
 | `clean` | — | Delete scratch DB, manifest, and results |
 
 Environment knobs (pass as `VAR=value make -C perf <target>`):
@@ -60,6 +63,10 @@ Environment knobs (pass as `VAR=value make -C perf <target>`):
 | `READ_VUS` | `5` dataset / `20` mixed | Browsing VUs for the read-path scenarios |
 | `ITERATIONS` | `2000` | Total read operations for `dataset` |
 | `PHASE_MINUTES` | `4` | `mixed` phase length: reads-only for one phase, reads+ingest for one more |
+| `USERS` | `10` | Perf users minted at seed (needs `RESEED=1`); WS clients need `ceil(CLIENTS/20)` users |
+| `CLIENTS` | `200` | Concurrent WS clients for `ws` (cap-probing at 1000 needs `USERS=50 RESEED=1`) |
+| `HOLD_MINUTES` | `3` | `ws` hold phase at full client count |
+| `RESULTS_PER_SEC` | `20` | `ws` probe post rate |
 | `K6_ARGS` | — | Extra flags appended to `k6 run` |
 
 ## Methodology
@@ -155,6 +162,46 @@ runs passed aggregate thresholds that their peak windows violated 2×).
   manifest's `historical_run_ids`), `/api/analytics/{summary,trend,flaky}`,
   and `/api/search` — all with the same write-scoped bearer tokens (write
   scope satisfies read-scoped endpoints).
+
+### Regression gate (S6)
+
+`make -C perf gate` answers "did this change make it slower?" in ~4 minutes:
+a fixed 3-minute blended profile (10 browsing VUs with think time + 25
+pipelines/min ≈ 83 results/s) on a freshly-reseeded small tier, with hard
+per-op thresholds derived at init from `baselines/gate-small.json`:
+`p95 < baseline × 1.3` (floor 25 ms), plus failsafes (`http_req_failed
+< 1 %`, checks > 99 %, `dropped_iterations == 0`). A breach exits non-zero.
+
+- Baselines are **committed and machine-stamped** — the gate refuses a
+  baseline recorded on other hardware (`GATE_IGNORE_MACHINE=1` overrides,
+  at your own risk). Re-run `make -C perf gate-baseline` and commit the new
+  file after intentional performance changes, dependency bumps that touch
+  the write path, or a hardware change.
+- Both targets force `RESEED=1`: gate numbers are only comparable against a
+  fresh small tier.
+- CI wiring is a documented option in the design spec, not wired here — the
+  gate is local-first by design.
+
+### WebSocket fan-out (S4)
+
+WS connections authenticate with **session cookies** — Bearer tokens are
+rejected before the upgrade — so `ws` logs in `ceil(CLIENTS/20)` seeded perf
+users during k6 setup, paced under the per-IP login limiter (burst 10, then
+one login per ~2 s; 50 users ≈ 90 s of setup before any load). Each client
+subscribes to `runs:*`; a single probe VU posts results at `RESULTS_PER_SEC`
+during the hold phase only, so every connected client should receive every
+probe event:
+
+- **Lag** — `ws_lag_ms` (client receive time − server `timestamp`; same
+  machine ⇒ no clock skew). Events arrive as `result_updated`.
+- **Loss** — `1 − ws_events_received / (ws_probe_results_posted × CLIENTS)`,
+  computed from the summary. Attribute loss via `server.log`: hub-ingress
+  drops (256-slot broadcast channel full — logged warning) and per-client
+  egress drops (256-slot send buffer overflow — client force-disconnected)
+  are different failure modes.
+- **Caps** — global 1000 clients / 20 per user. `ws_connect_errors` counts
+  rejected upgrades; probing past the caps is the point, so the `ws` target
+  tolerates k6 exit 99.
 
 ### Auth and write amplification
 
