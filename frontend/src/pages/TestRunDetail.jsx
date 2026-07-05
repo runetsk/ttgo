@@ -10,7 +10,7 @@ import { useColumnPreference } from '../hooks/useColumnPreference';
 import { useColumnWidths } from '../hooks/useColumnWidths';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
-import { latestAttempts } from '../utils/runResults';
+import { latestAttempts, applyResultDelta } from '../utils/runResults';
 import DefectsTab from './testRunDetail/DefectsTab';
 import TimelineTab from './testRunDetail/TimelineTab';
 import CompareTab from './testRunDetail/CompareTab';
@@ -82,10 +82,17 @@ export default function TestRunDetail() {
             }));
             return;
         }
-        if (event.data && event.data.id) {
-            setRun(event.data);
+        const d = event.data;
+        // Result-level events carry deltas (affected rows + run summary);
+        // run-level events still carry the full run.
+        if (d && d.run_id && d.run) {
+            setRun(prev => applyResultDelta(prev, d));
+            return;
         }
-    }, []), { debounceMs: 300 });
+        if (d && d.id) {
+            setRun(d);
+        }
+    }, []), { debounceMs: 300, buffer: true });
 
     useEffect(() => {
         loadRun();
