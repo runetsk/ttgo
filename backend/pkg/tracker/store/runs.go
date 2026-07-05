@@ -1045,3 +1045,33 @@ func (s *Store) GetRunResultByID(id string) (*models.RunResult, error) {
 	}
 	return &r, nil
 }
+
+// GetRunResultsByIDs returns the given results of a run with TestCase (and
+// its categories) preloaded and defect-link counts populated — the same row
+// shape GetTestRun produces, for WS delta broadcasts. IDs not belonging to
+// the run are silently dropped.
+func (s *Store) GetRunResultsByIDs(runID string, ids []string) ([]*models.RunResult, error) {
+	var rows []*models.RunResult
+	if err := s.db.
+		Preload("TestCase.Categories").
+		Where("test_run_id = ? AND id IN ?", runID, ids).
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return rows, nil
+	}
+	rrIDs := make([]string, len(rows))
+	for i, rr := range rows {
+		rrIDs[i] = rr.ID
+	}
+	openCounts, closedCounts, err := s.CountDefectLinksByRunResults(rrIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, rr := range rows {
+		rr.OpenDefectLinkCount = openCounts[rr.ID]
+		rr.ClosedDefectLinkCount = closedCounts[rr.ID]
+	}
+	return rows, nil
+}

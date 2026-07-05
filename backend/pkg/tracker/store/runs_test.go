@@ -620,3 +620,36 @@ func TestGetTestRunSummary(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, missing)
 }
+
+func TestGetRunResultsByIDs(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "Delta Run"}
+	require.NoError(t, s.CreateTestRun(run))
+	otherRun := &models.TestRun{Name: "Other Run"}
+	require.NoError(t, s.CreateTestRun(otherRun))
+
+	folder, _ := s.CreateFolder("Root", nil)
+	tc := &models.TestCase{Name: "Cased", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc))
+
+	r1 := &models.RunResult{TestRunID: run.ID, TestCaseID: &tc.ID, Status: models.StatusFail}
+	require.NoError(t, s.AddRunResult(r1))
+	r2 := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: "orphan", Status: models.StatusPass}
+	require.NoError(t, s.AddRunResult(r2))
+	foreign := &models.RunResult{TestRunID: otherRun.ID, TestNameSnapshot: "foreign", Status: models.StatusPass}
+	require.NoError(t, s.AddRunResult(foreign))
+
+	rows, err := s.GetRunResultsByIDs(run.ID, []string{r1.ID, r2.ID, foreign.ID})
+	require.NoError(t, err)
+	require.Len(t, rows, 2, "foreign-run id must be excluded")
+
+	byID := map[string]*models.RunResult{}
+	for _, r := range rows {
+		byID[r.ID] = r
+	}
+	require.NotNil(t, byID[r1.ID])
+	require.NotNil(t, byID[r1.ID].TestCase, "TestCase must be preloaded")
+	assert.Equal(t, "Cased", byID[r1.ID].TestCase.Name)
+	require.NotNil(t, byID[r2.ID])
+	assert.Nil(t, byID[r2.ID].TestCase)
+}
