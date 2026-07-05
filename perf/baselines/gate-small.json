@@ -1,0 +1,16 @@
+{
+  "machine": "Apple M1 Pro",
+  "tier": "small",
+  "derivation": "gate thresholds = p95 x 1.3, floor 25ms",
+  "ops": {
+    "create_run": 1.9182999999999986,
+    "add_result": 4.346049999999999,
+    "complete_run": 4.664499999999999,
+    "runs_list": 15.46575,
+    "run_detail": 14.9725,
+    "analytics_summary": 6.880199999999999,
+    "analytics_trend": 10.950099999999996,
+    "analytics_flaky": 36.229,
+    "search": 7.452099999999998
+  }
+}
