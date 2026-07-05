@@ -115,6 +115,12 @@ export function resultsPerRun(defaultN) {
   return n;
 }
 
+// Read-only accessor for scenarios that pace their own result posts (S4's
+// probe) instead of using ciPipeline's sequential burst.
+export function resultBodiesAt(i) {
+  return resultBodies[i % resultBodies.length];
+}
+
 // Generic init-context integer knob: __ENV values are strings and
 // Number('abc') is NaN, which sails past < comparisons — validate here so a
 // typo aborts the run instead of silently running a different workload.
