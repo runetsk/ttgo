@@ -9,14 +9,17 @@ import { useWebSocket } from './useWebSocket';
  * @param {Function} handler - Called with the event object when a matching event arrives
  * @param {Object} [options] - Optional configuration
  * @param {number} [options.debounceMs=0] - Debounce window in ms. If > 0, rapid events
- *   within the window are collapsed and only the latest is delivered.
+ *   within the window are held until the window closes.
+ * @param {boolean} [options.buffer=false] - With debounceMs: replay every held event
+ *   at flush (in order) instead of collapsing to the latest. Use when events carry
+ *   deltas that must all be applied; collapse is only safe for full-state payloads.
  */
 export function useSubscription(topic, handler, options = {}) {
-  const { debounceMs = 0 } = options;
+  const { debounceMs = 0, buffer = false } = options;
   const { subscribe, unsubscribe, addListener, removeListener } = useWebSocket();
   const handlerRef = useRef(handler);
   const debounceTimerRef = useRef(null);
-  const latestEventRef = useRef(null);
+  const pendingEventsRef = useRef([]);
 
   // Keep handler ref current without re-subscribing
   useEffect(() => {
@@ -29,20 +32,26 @@ export function useSubscription(topic, handler, options = {}) {
     if (!topicMatches(topic, event.topic)) return;
 
     if (debounceMs > 0) {
-      latestEventRef.current = event;
+      if (buffer) {
+        pendingEventsRef.current.push(event);
+      } else {
+        pendingEventsRef.current = [event];
+      }
       if (!debounceTimerRef.current) {
         debounceTimerRef.current = setTimeout(() => {
           debounceTimerRef.current = null;
-          if (latestEventRef.current) {
-            handlerRef.current(latestEventRef.current);
-            latestEventRef.current = null;
+          const events = pendingEventsRef.current;
+          pendingEventsRef.current = [];
+          // React 18 batches the state updates from one flush into one render.
+          for (const e of events) {
+            handlerRef.current(e);
           }
         }, debounceMs);
       }
     } else {
       handlerRef.current(event);
     }
-  }, [topic, debounceMs]);
+  }, [topic, debounceMs, buffer]);
 
   useEffect(() => {
     if (!topic) return;
@@ -57,6 +66,7 @@ export function useSubscription(topic, handler, options = {}) {
         clearTimeout(debounceTimerRef.current);
         debounceTimerRef.current = null;
       }
+      pendingEventsRef.current = [];
     };
   }, [topic, subscribe, unsubscribe, addListener, removeListener, listener]);
 }
