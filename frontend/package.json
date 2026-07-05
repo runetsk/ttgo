@@ -9,7 +9,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:unit": "node --test \"e2e/reporters/*.test.js\"",
+    "test:unit": "node --test \"e2e/reporters/*.test.js\" \"src/**/*.test.js\"",
     "test:e2e": "playwright test",
     "test:e2e:nomock": "playwright test --grep-invert \"@needs-mock\"",
     "test:e2e:integration": "playwright test --grep \"@needs-mock\"",
