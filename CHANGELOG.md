@@ -37,6 +37,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   values (`null` = scenario default), replacing the "record these manually"
   instruction; rate-mode runs append `-rate` to the results directory name so
   closed- and open-loop `ingest-storm` results stay distinguishable.
+- Perf phase 2 (read paths): `medium` (~100k results) and `large` (~1M)
+  seeder tiers; S2 `mixed` scenario (browsing reads with an ingest storm
+  joining at half-time — the read-latency delta is the finding); S3 `dataset`
+  scenario (fixed read mix per tier for a dataset-scaling curve); a weighted
+  read-mix k6 lib driving runs list/detail, analytics, and FTS search with
+  per-op thresholds; `perf/scripts/analyze.sh` for windowed per-op
+  p95/error tables from server logs; shared k6 config (`perf/k6/config/`)
+  for thresholds and workload profiles; the seed manifest carries
+  `historical_run_ids`; the runner reseeds automatically when the manifest
+  and target tier DB disagree; the seeder rejects non-positive counts and
+  results not divisible by runs.
 - **Webhook signing-secret rotation.** `POST /api/webhooks/{id}/rotate-secret` generates
   a new HMAC signing secret and invalidates the old one; a matching action in Settings →
   Webhooks lets you rotate a secret from the UI. The signing secret is also now revealed

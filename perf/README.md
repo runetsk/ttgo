@@ -38,21 +38,26 @@ open-loop `capacity-rate` results stay distinguishable):
 | `smoke` | `smoke.js` | Fail-fast harness sanity check (2 VUs, strict thresholds) |
 | `capacity` | `ingest-storm.js` | Closed-loop VU ramp to find the write-path ceiling |
 | `capacity-rate` | `ingest-storm.js` (MODE=rate) | Open-loop fixed pipeline arrival rate |
+| `mixed` | `mixed-workload.js` | S2: browsing reads, ingest storm joins at half-time (read-latency delta) |
+| `dataset` | `dataset-scaling.js` | S3: fixed read mix per tier; compare p95 across small/medium/large |
 | `clean` | — | Delete scratch DB, manifest, and results |
 
 Environment knobs (pass as `VAR=value make -C perf <target>`):
 
 | Var | Default | Meaning |
 |---|---|---|
-| `TIER` | `small` | Dataset tier (phase 1: small ≈ 10k historical results) |
+| `TIER` | `small` | Dataset tier: `small` ≈ 10k results, `medium` ≈ 100k, `large` ≈ 1M (switching tiers auto-reseeds — the manifest is checked against the target DB) |
 | `PORT` | `8877` | Server port (avoid 8080 to not collide with a dev server) |
 | `TOKENS` | `100` | Write tokens minted at seed (needs `RESEED=1` to change); scenarios abort at init if the pool < peak VUs (see methodology) |
 | `MAX_VUS` | token pool size | Rate-mode VU ceiling for `capacity-rate`; must be ≤ the seeded token pool |
 | `RESEED` | `0` | `1` forces wipe + reseed before the scenario |
 | `RESULTS_PER_RUN` | `200` capacity / `20` smoke | Results per simulated pipeline (max 500 = ingest pool size) |
 | `STAGES` | 10-min ramp to 100 VUs | JSON stages for closed-loop mode |
-| `PIPELINES_PER_MIN` | `6` | Arrival rate for `capacity-rate` |
+| `PIPELINES_PER_MIN` | `6` capacity-rate / `75` mixed | Arrival rate for `capacity-rate`; also the ingest-storm rate for `mixed` (S2) |
 | `RATE_DURATION` | `10m` | Duration for `capacity-rate` |
+| `READ_VUS` | `5` dataset / `20` mixed | Browsing VUs for the read-path scenarios |
+| `ITERATIONS` | `2000` | Total read operations for `dataset` |
+| `PHASE_MINUTES` | `4` | `mixed` phase length: reads-only for one phase, reads+ingest for one more |
 | `K6_ARGS` | — | Extra flags appended to `k6 run` |
 
 ## Methodology
@@ -124,6 +129,31 @@ means it was unset and the scenario default at that SHA applied. `results/` is
 never pruned automatically — `make clean` removes it, but also deletes the DB
 and manifest.
 
+### Read-path scenarios (S2/S3) and windowed analysis
+
+`scripts/analyze.sh results/<run-dir> [window-seconds]` turns `server.log`
+into a per-window, per-operation p95/error table. Use it instead of the k6
+aggregate whenever the question is *when* latency changed: the summary blends
+a run's quiet and loaded stretches into one number (both 2026-07-04 capacity
+runs passed aggregate thresholds that their peak windows violated 2×).
+
+- **S2 (`mixed`)** runs browsing VUs for `2 × PHASE_MINUTES`; the ingest
+  storm (default 75 pipelines/min × 200 results ≈ 250 results/s, ~50 % of the
+  measured S1 ceiling) joins at half-time. The finding is the read-op p95
+  delta between the two halves in the analyze.sh output — not the blended
+  summary. `dropped_iterations` must be 0, or the background write load was
+  lighter than configured.
+- **S3 (`dataset`)** runs the same weighted read mix (30 % runs list, 30 %
+  run detail, 15 % analytics summary, 10 % trend, 10 % FTS search, 5 % flaky)
+  at low fixed concurrency, once per tier: `make dataset`, then
+  `TIER=medium make dataset`, then `TIER=large make dataset`. Reseed is
+  automatic on tier switch. Compare per-op p95 across the three summaries —
+  super-linear growth with dataset size flags missing indexes or full scans.
+- Read scenarios hit `GET /api/runs`, `/api/runs/{id}` (IDs come from the
+  manifest's `historical_run_ids`), `/api/analytics/{summary,trend,flaky}`,
+  and `/api/search` — all with the same write-scoped bearer tokens (write
+  scope satisfies read-scoped endpoints).
+
 ### Auth and write amplification
 
 Load traffic authenticates with pre-minted write-scoped API tokens from the
@@ -182,5 +212,8 @@ runner script always provisions a local server.
   directory. Everything lives under `perf/.scratch/` (gitignored). `perf/.seed-manifest.json`
   contains raw bearer tokens — it is gitignored and written (and re-chmod'd) to
   mode 0600 even if it already existed; don't move it.
+- The `large` tier seeds ~1M results: expect ~1–3 min of seeding, ~1.5–2 GB
+  on disk under `perf/.scratch/`, and a few hundred MB of transient seeder
+  RAM (rows are generated in memory before batch insert).
 - Later phases (read-path scenarios, WebSocket fan-out, regression gate) are
   specified in the design doc and land separately.
