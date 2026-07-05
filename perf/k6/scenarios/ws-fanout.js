@@ -14,6 +14,7 @@
 // Thresholds are observational (the whole point of a cap run is to cross
 // the caps); the ws Make target treats k6 exit 99 as expected.
 import ws from 'k6/ws';
+import exec from 'k6/execution';
 import { check, sleep } from 'k6';
 import { Trend, Counter } from 'k6/metrics';
 import { usersForClients, loginAll, wsParams } from '../lib/ws.js';
@@ -34,8 +35,6 @@ const wsEvents = new Counter('ws_events_received');
 const wsConnectErrors = new Counter('ws_connect_errors');
 const probePosted = new Counter('ws_probe_results_posted');
 
-const TOTAL = `${RAMP_MINUTES + HOLD_MINUTES + 1}m`; // ramp + hold + drain
-
 export const options = {
   setupTimeout: '240s', // 50 paced logins ≈ 90s; headroom for more
   scenarios: {
@@ -54,8 +53,9 @@ export const options = {
       executor: 'constant-vus',
       exec: 'probe',
       vus: 1,
-      // Probe runs only during the hold: every connected client should see
-      // every probe event, making expected-count loss math clean.
+      // Probe runs only during the hold: every client still connected
+      // through the hold should see every probe event, making
+      // expected-count loss math clean.
       startTime: `${RAMP_MINUTES}m`,
       duration: `${HOLD_MINUTES}m`,
       gracefulStop: '60s',
@@ -78,7 +78,12 @@ export function wsClient(data) {
   // Stable VU→user spread keeps every user ≤ 20 connections at full ramp.
   const cookie = data.cookies[(__VU - 1) % data.cookies.length];
   const url = `${BASE_URL.replace('http', 'ws')}/api/ws`;
-  const holdMs = (RAMP_MINUTES + HOLD_MINUTES + 0.5) * 60 * 1000;
+  // Close 5s after the hold phase ends, SCENARIO-relative (not per-VU): a VU
+  // that connects late in the ramp must not schedule its close past the
+  // scenario's hard end, or the executor force-interrupts it and the clean
+  // close never runs.
+  const scenarioElapsedMs = Date.now() - exec.scenario.startTime;
+  const holdMs = Math.max(1000, (RAMP_MINUTES + HOLD_MINUTES) * 60 * 1000 + 5000 - scenarioElapsedMs);
 
   const res = ws.connect(url, wsParams(cookie), (socket) => {
     socket.on('open', () => {
@@ -102,7 +107,6 @@ export function wsClient(data) {
     socket.on('error', () => {
       wsConnectErrors.add(1);
     });
-    // Hold the socket for the remainder of the test, then let the iteration end.
     socket.setTimeout(() => socket.close(), holdMs);
   });
   const ok = check(res, { 'ws upgrade 101': (r) => r && r.status === 101 });
