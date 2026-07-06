@@ -300,6 +300,15 @@ export default function TestRunDetail() {
                     </button>
                     <button
                         className="action-btn"
+                        onClick={() => navigate(`/runs/run/${runId}/execute`)}
+                        title="Execute tests one by one"
+                        style={{ color: 'var(--accent-indigo)', borderColor: 'rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)', padding: '5px 12px', fontSize: '0.8rem' }}
+                        data-testid="execute-run-button"
+                    >
+                        ▶ Execute
+                    </button>
+                    <button
+                        className="action-btn"
                         onClick={() => setIsAddMode(!isAddMode)}
                         style={{ color: 'var(--accent-indigo)', borderColor: 'rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)', padding: '5px 12px', fontSize: '0.8rem' }}
                         data-testid="add-test-to-run-button"

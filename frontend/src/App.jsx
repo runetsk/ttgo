@@ -20,6 +20,7 @@ const CategoryManager = lazy(() => import('./components/CategoryManager'))
 const TestCaseDetail = lazy(() => import('./components/TestCaseDetail'))
 const TestRunList = lazy(() => import('./pages/TestRunList'))
 const TestRunDetail = lazy(() => import('./pages/TestRunDetail'))
+const RunExecutePage = lazy(() => import('./pages/RunExecutePage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const AnalyticsDashboard = lazy(() => import('./pages/AnalyticsDashboard'))
@@ -197,6 +198,7 @@ function App() {
               <Route path="/runs" element={<TestRunListPage selectedFolderId={null} onRunsLoaded={setRunRuns} runListKey={runListKey} />} />
               <Route path="/runs/folders/:runFolderId" element={<RunFolderViewWrapper onRunsLoaded={setRunRuns} runListKey={runListKey} />} />
               <Route path="/runs/run/:runId" element={<TestRunDetailPage />} />
+              <Route path="/runs/run/:runId/execute" element={<RunExecutePage />} />
               <Route path="/settings" element={<SettingsPage />} />
               <Route path="/library/tests/:testId" element={<TestCaseDetailWrapper onFolderLoad={handleFolderLoad} />} />
               <Route element={<QualityLayout />}>

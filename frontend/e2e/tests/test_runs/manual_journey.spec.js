@@ -48,4 +48,41 @@ test.describe('Manual run journey', () => {
             await expect(page.getByTestId('reopen-run-button')).not.toBeVisible();
         });
     });
+
+    test('execution mode walks through the run queue', async ({ page, request }) => {
+        const runName = 'Exec Run ' + Date.now();
+        let run;
+
+        await test.step('Seed a run with three cases via API', async () => {
+            const folder = await createFolderAPI(request, 'Exec Folder ' + Date.now());
+            run = await createRunAPI(request, runName);
+            for (const name of ['Alpha check', 'Beta check', 'Gamma check']) {
+                const tc = await createTestAPI(request, name, folder.id);
+                await addRunResultAPI(request, run.id, tc.id);
+            }
+        });
+
+        await test.step('Enter execution mode from the run header', async () => {
+            await page.goto(`/runs/run/${run.id}`);
+            await page.getByTestId('execute-run-button').click();
+            await expect(page).toHaveURL(new RegExp(`/runs/run/${run.id}/execute$`));
+        });
+
+        await test.step('First pending test is shown with progress', async () => {
+            await expect(page.getByTestId('execute-current-name')).toHaveText('Alpha check');
+            await expect(page.getByTestId('execute-progress')).toContainText('0 / 3');
+        });
+
+        await test.step('Next / Prev navigate the queue', async () => {
+            await page.getByTestId('execute-next').click();
+            await expect(page.getByTestId('execute-current-name')).toHaveText('Beta check');
+            await page.getByTestId('execute-prev').click();
+            await expect(page.getByTestId('execute-current-name')).toHaveText('Alpha check');
+        });
+
+        await test.step('Sidebar jump selects a specific test', async () => {
+            await page.getByText('Gamma check', { exact: true }).click();
+            await expect(page.getByTestId('execute-current-name')).toHaveText('Gamma check');
+        });
+    });
 });
