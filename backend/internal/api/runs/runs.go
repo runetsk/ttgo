@@ -251,6 +251,12 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Status != nil {
+		if _, err := h.store.MarkRunRunningIfPending(runID); err != nil {
+			slog.WarnContext(r.Context(), "failed to auto-start run", "run_id", runID, "error", err)
+		}
+	}
+
 	h.store.TouchTestRun(runID)
 
 	h.broadcastResultDelta(apiws.EventResultUpdated, runID, []string{resultID}, nil, nil)
@@ -603,6 +609,10 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "failed to bulk update results in run", "run_id", runID, "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
+	}
+
+	if _, err := h.store.MarkRunRunningIfPending(runID); err != nil {
+		slog.WarnContext(r.Context(), "failed to auto-start run", "run_id", runID, "error", err)
 	}
 
 	h.store.TouchTestRun(runID)

@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   longer re-reads the whole run per posted result (S4 finding: full-run
   frames overflowed per-client egress buffers at 1000 subscribers and
   throttled the probe to ~5 results/s of the configured 20).
+- A PENDING run switches to RUNNING automatically when its first result is updated manually.
 
 ### Fixed
 - Test Runs list: "Passed"/"Failed" status filters matched nothing (sent PASSED/FAILED instead of PASS/FAIL).

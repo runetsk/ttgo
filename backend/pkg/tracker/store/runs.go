@@ -444,6 +444,19 @@ func (s *Store) TouchTestRun(runID string) {
 	s.db.Model(&models.TestRun{}).Where("id = ?", runID).Update("updated_at", time.Now())
 }
 
+// MarkRunRunningIfPending flips a PENDING run to RUNNING; a no-op for any
+// other status so completed runs never silently reopen. Returns true when
+// the status actually changed.
+func (s *Store) MarkRunRunningIfPending(runID string) (bool, error) {
+	res := s.db.Model(&models.TestRun{}).
+		Where("id = ? AND status = ?", runID, models.StatusPending).
+		Updates(map[string]interface{}{
+			"status":     string(models.StatusRunning),
+			"updated_at": time.Now(),
+		})
+	return res.RowsAffected > 0, res.Error
+}
+
 // UpdateRunResult updates the status and other fields of a specific run result by its primary key.
 func (s *Store) UpdateRunResult(runID string, resultID string, updates interface{}) error {
 	return s.db.Model(&models.RunResult{}).
