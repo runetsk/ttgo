@@ -18,9 +18,10 @@ import (
 
 func (h *Handler) CreateTestRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		CategoryID  *string `json:"category_id"`
-		Name        string  `json:"name"`
-		RunFolderID *string `json:"run_folder_id"`
+		CategoryID  *string  `json:"category_id"`
+		Name        string   `json:"name"`
+		RunFolderID *string  `json:"run_folder_id"`
+		TestCaseIDs []string `json:"test_case_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -29,6 +30,15 @@ func (h *Handler) CreateTestRun(w http.ResponseWriter, r *http.Request) {
 
 	if req.CategoryID != nil && *req.CategoryID == "" {
 		req.CategoryID = nil
+	}
+
+	if len(req.TestCaseIDs) > 0 && req.CategoryID != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "provide either category_id or test_case_ids, not both"})
+		return
+	}
+	if len(req.TestCaseIDs) > httpx.MaxBulkIDs {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "too many test_case_ids (max 500 per request)"})
+		return
 	}
 
 	if req.RunFolderID != nil && *req.RunFolderID != "" {
@@ -48,7 +58,11 @@ func (h *Handler) CreateTestRun(w http.ResponseWriter, r *http.Request) {
 		Name:        req.Name,
 		RunFolderID: req.RunFolderID,
 	}
-	if err := h.store.CreateTestRun(run); err != nil {
+	if err := h.store.CreateTestRunWithCases(run, req.TestCaseIDs); err != nil {
+		if errors.Is(err, store.ErrUnknownTestCases) {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "one or more test_case_ids do not exist"})
+			return
+		}
 		slog.ErrorContext(r.Context(), "failed to create test run", "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return

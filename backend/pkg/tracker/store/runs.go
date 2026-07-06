@@ -32,15 +32,50 @@ func (s *Store) UpdateTestRun(runID string, name *string, categoryID *string, st
 	return s.db.Model(&models.TestRun{}).Where("id = ?", runID).Updates(updates).Error
 }
 
+// ErrUnknownTestCases is returned when CreateTestRunWithCases receives an ID
+// that doesn't resolve to an existing test case.
+var ErrUnknownTestCases = errors.New("one or more test_case_ids do not exist")
+
 // CreateTestRun creates a new test run, optionally based on a Test Category.
 // When a category is provided it snapshots all its tests into individual RunResults.
 // When no category is given an empty run is created.
 func (s *Store) CreateTestRun(run *models.TestRun) error {
+	return s.CreateTestRunWithCases(run, nil)
+}
+
+// CreateTestRunWithCases creates a run seeded with an explicit set of test
+// cases. testCaseIDs are deduped (order preserved) and must all exist —
+// ErrUnknownTestCases otherwise. With no IDs it falls back to the category
+// snapshot (or an empty run), i.e. the historical CreateTestRun behavior.
+func (s *Store) CreateTestRunWithCases(run *models.TestRun, testCaseIDs []string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		var categoryName string
 		var testCases []models.TestCase
 
-		if run.CategoryID != nil && *run.CategoryID != "" {
+		if len(testCaseIDs) > 0 {
+			seen := make(map[string]bool, len(testCaseIDs))
+			ids := make([]string, 0, len(testCaseIDs))
+			for _, id := range testCaseIDs {
+				if id != "" && !seen[id] {
+					seen[id] = true
+					ids = append(ids, id)
+				}
+			}
+			var found []models.TestCase
+			if err := tx.Where("id IN ?", ids).Find(&found).Error; err != nil {
+				return err
+			}
+			if len(found) != len(ids) {
+				return ErrUnknownTestCases
+			}
+			byID := make(map[string]models.TestCase, len(found))
+			for _, tc := range found {
+				byID[tc.ID] = tc
+			}
+			for _, id := range ids {
+				testCases = append(testCases, byID[id])
+			}
+		} else if run.CategoryID != nil && *run.CategoryID != "" {
 			// Validate Category existence and fetch associated test cases
 			var category models.Category
 			if err := tx.First(&category, "id = ?", *run.CategoryID).Error; err != nil {
@@ -61,9 +96,12 @@ func (s *Store) CreateTestRun(run *models.TestRun) error {
 		run.UpdatedAt = time.Now()
 		// Default name if empty
 		if run.Name == "" {
-			if categoryName != "" {
+			switch {
+			case categoryName != "":
 				run.Name = fmt.Sprintf("%s Run - %s", categoryName, run.CreatedAt.Format("2006-01-02 15:04"))
-			} else {
+			case len(testCases) > 0:
+				run.Name = fmt.Sprintf("Manual Run - %s", run.CreatedAt.Format("2006-01-02 15:04"))
+			default:
 				run.Name = fmt.Sprintf("Empty Run - %s", run.CreatedAt.Format("2006-01-02 15:04"))
 			}
 		}
@@ -73,7 +111,7 @@ func (s *Store) CreateTestRun(run *models.TestRun) error {
 			return err
 		}
 
-		// Create RunResults (Snapshot) — only when a category was selected
+		// Create RunResults (Snapshot)
 		if len(testCases) > 0 {
 			now := time.Now()
 			var results []models.RunResult
