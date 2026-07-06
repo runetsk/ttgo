@@ -47,9 +47,9 @@ export default function CreateRunModal({ categories, onClose, onSuccess, default
         setLoading(true);
         setError(null);
         createTestRun(categoryId || null, name, runFolderId || null)
-            .then(() => {
+            .then((run) => {
                 setLoading(false);
-                onSuccess();
+                onSuccess(run);
             })
             .catch(err => {
                 setLoading(false);

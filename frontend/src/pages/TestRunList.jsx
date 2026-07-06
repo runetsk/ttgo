@@ -113,8 +113,9 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
         setPage(1);
     }, [filterCategoryIds, filterStatus, sortBy, sortOrder, selectedFolderId, filterCreated, filterUpdated]);
 
-    const handleCreateSuccess = () => {
+    const handleCreateSuccess = (run) => {
         setShowModal(false);
+        if (run?.id) navigate(`/runs/run/${run.id}`);
     };
 
     const handleBulkDelete = () => {

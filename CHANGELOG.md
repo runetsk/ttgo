@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Creating a test run now opens its detail page immediately.
 - WebSocket result-level events (`result_updated`, `result_bulk_updated`,
   `result_retried`, `result_deleted`) now carry a delta payload
   (`{run_id, run, results | result_ids+patch | deleted_result_ids}` where
