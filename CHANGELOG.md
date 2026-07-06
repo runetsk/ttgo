@@ -125,6 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker health checks for the backend and nginx services.
 - Handler test coverage for authentication, webhooks, and backups.
 - `.env.example` templates for Docker (repo root) and local backend development.
+- Execution mode on run detail: step-by-step manual execution with Pass/Fail/Skip, defect classification, auto-advance, and duration capture.
 
 ### Fixed
 - WebSocket "connected" acknowledgements no longer race the hub closing a slow client's

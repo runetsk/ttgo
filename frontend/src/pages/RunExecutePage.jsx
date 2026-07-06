@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- STATUS_COLORS is a plain constant map consumed by later execution-mode tasks; splitting it into its own file would ripple imports with no runtime benefit */
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getTestRun, getTest } from '../api';
+import { getTestRun, getTest, updateRunResult } from '../api';
 import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
 
@@ -17,6 +17,19 @@ export default function RunExecutePage() {
     const [currentIdx, setCurrentIdx] = useState(0);
     const [loading, setLoading] = useState(true);
     const [caseCache, setCaseCache] = useState({}); // test_case_id -> test case (or {steps: []} on error)
+    const [failPanelOpen, setFailPanelOpen] = useState(false);
+    const [defectType, setDefectType] = useState('to_investigate');
+    const [failNote, setFailNote] = useState('');
+    const startedAtRef = useRef(null);
+
+    // Restart the informal timer whenever a different test becomes current.
+    useEffect(() => {
+        startedAtRef.current = Date.now();
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the fail panel/defect-type/note draft for the newly-current test
+        setFailPanelOpen(false);
+        setDefectType('to_investigate');
+        setFailNote('');
+    }, [currentIdx]);
 
     useEffect(() => {
         getTestRun(runId)
@@ -50,6 +63,42 @@ export default function RunExecutePage() {
     const goPrev = useCallback(() => setCurrentIdx(i => Math.max(0, i - 1)), []);
     const goNext = useCallback(() => setCurrentIdx(i => Math.min(queue.length - 1, i + 1)), [queue.length]);
 
+    // Advance to the next PENDING test after the current one (wrapping around);
+    // stay put when none remain — the done banner takes over.
+    const advance = useCallback((fromIdx, updatedQueue) => {
+        const n = updatedQueue.length;
+        for (let step = 1; step <= n; step++) {
+            const i = (fromIdx + step) % n;
+            if (updatedQueue[i].status === 'PENDING') {
+                setCurrentIdx(i);
+                return;
+            }
+        }
+    }, []);
+
+    const submitVerdict = useCallback(async (status) => {
+        const r = queue[currentIdx];
+        if (!r || r.status === status) return;
+        const payload = { status, duration_ms: Date.now() - startedAtRef.current };
+        if (status === 'FAIL') {
+            payload.defect_type = defectType;
+            if (failNote.trim()) payload.error_message = failNote.trim();
+        }
+        try {
+            await updateRunResult(runId, r.id, payload);
+        } catch {
+            return; // leave the queue untouched; the user can retry
+        }
+        const updated = queue.map((item, i) =>
+            i === currentIdx
+                ? { ...item, status, defect_type: payload.defect_type ?? item.defect_type, error_message: payload.error_message ?? item.error_message }
+                : item
+        );
+        setQueue(updated);
+        setFailPanelOpen(false);
+        advance(currentIdx, updated);
+    }, [queue, currentIdx, runId, defectType, failNote, advance]);
+
     if (loading) return <div style={{ padding: 24 }}>Loading run…</div>;
     if (!run) return <div style={{ padding: 24 }}>Run not found</div>;
 
@@ -76,7 +125,19 @@ export default function RunExecutePage() {
                     <p>This run has no tests yet. Add tests from the run page first.</p>
                 </div>
             ) : (
-                <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                <>
+                    {queue.length > 0 && queue.every(r => r.status !== 'PENDING') && (
+                        <div data-testid="execute-done-banner" style={{
+                            display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+                            marginBottom: 14, borderRadius: 10,
+                            background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.3)',
+                        }}>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--accent-green)' }}>
+                                All tests executed.
+                            </span>
+                        </div>
+                    )}
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                     {/* Sidebar queue */}
                     <div style={{
                         width: 260, flexShrink: 0, maxHeight: 'calc(100vh - 180px)', overflowY: 'auto',
@@ -171,7 +232,50 @@ export default function RunExecutePage() {
                             );
                         })()}
 
-                        {/* Verdict bar mounts here (Task 7) */}
+                        <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
+                            <button data-testid="execute-pass" onClick={() => submitVerdict('PASS')}
+                                style={{ padding: '9px 22px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', color: 'var(--accent-green)', background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)' }}>
+                                ✓ Pass
+                            </button>
+                            <button data-testid="execute-fail" onClick={() => setFailPanelOpen(true)}
+                                style={{ padding: '9px 22px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', color: 'var(--accent-red)', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)' }}>
+                                ✕ Fail
+                            </button>
+                            <button data-testid="execute-skip" onClick={() => submitVerdict('SKIP')}
+                                style={{ padding: '9px 22px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', color: '#9ca3af', background: 'rgba(156,163,175,0.12)', border: '1px solid rgba(156,163,175,0.35)' }}>
+                                ⊘ Skip
+                            </button>
+                        </div>
+
+                        {failPanelOpen && (
+                            <div style={{
+                                marginTop: 12, padding: 14, borderRadius: 10,
+                                background: 'rgba(239,68,68,0.05)', border: '1px solid rgba(239,68,68,0.25)',
+                                display: 'flex', flexDirection: 'column', gap: 10,
+                            }}>
+                                <select className="modern-select" value={defectType}
+                                    onChange={e => setDefectType(e.target.value)}
+                                    data-testid="execute-defect-type" style={{ maxWidth: 260 }}>
+                                    <option value="to_investigate">🔍 To Investigate</option>
+                                    <option value="product_bug">🐞 Product Bug</option>
+                                    <option value="automation_bug">🤖 Automation Bug</option>
+                                    <option value="system_issue">⚙️ System Issue</option>
+                                </select>
+                                <textarea className="modern-input" rows={3} placeholder="What went wrong? (optional)"
+                                    value={failNote} onChange={e => setFailNote(e.target.value)}
+                                    data-testid="execute-fail-note" style={{ width: '100%', resize: 'vertical' }} />
+                                <div style={{ display: 'flex', gap: 8 }}>
+                                    <button className="primary-btn" onClick={() => submitVerdict('FAIL')}
+                                        data-testid="execute-fail-confirm" style={{ padding: '7px 18px', fontSize: '0.85rem' }}>
+                                        Mark Failed
+                                    </button>
+                                    <button className="text-btn" onClick={() => setFailPanelOpen(false)}
+                                        data-testid="execute-fail-cancel">
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
                             <button className="action-btn" onClick={goPrev} disabled={currentIdx === 0}
@@ -184,7 +288,8 @@ export default function RunExecutePage() {
                             </button>
                         </div>
                     </div>
-                </div>
+                    </div>
+                </>
             )}
         </div>
     );

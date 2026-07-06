@@ -5,6 +5,7 @@ import {
     createTestAPI,
     createRunAPI,
     addRunResultAPI,
+    getRunAPI,
 } from '../../helpers/api.js';
 
 test.describe('Manual run journey', () => {
@@ -109,6 +110,53 @@ test.describe('Manual run journey', () => {
             await expect(steps.getByText('Open the login page')).toBeVisible();
             await expect(steps.getByText('Form is visible')).toBeVisible();
             await expect(steps.getByText('Submit valid credentials')).toBeVisible();
+        });
+    });
+
+    test('verdicts advance the queue and persist details', async ({ page, request }) => {
+        const runName = 'Verdict Run ' + Date.now();
+        let run;
+
+        await test.step('Seed a run with three cases via API', async () => {
+            const folder = await createFolderAPI(request, 'Verdict Folder ' + Date.now());
+            run = await createRunAPI(request, runName);
+            for (const name of ['V-Alpha', 'V-Beta', 'V-Gamma']) {
+                const tc = await createTestAPI(request, name, folder.id);
+                await addRunResultAPI(request, run.id, tc.id);
+            }
+        });
+
+        await test.step('Pass the first test — auto-advances to the second', async () => {
+            await page.goto(`/runs/run/${run.id}/execute`);
+            await expect(page.getByTestId('execute-current-name')).toHaveText('V-Alpha');
+            await page.getByTestId('execute-pass').click();
+            await expect(page.getByTestId('execute-current-name')).toHaveText('V-Beta');
+            await expect(page.getByTestId('execute-progress')).toContainText('1 / 3');
+        });
+
+        await test.step('Fail the second test with a note and defect type', async () => {
+            await page.getByTestId('execute-fail').click();
+            await page.getByTestId('execute-defect-type').selectOption('product_bug');
+            await page.getByTestId('execute-fail-note').fill('Button did nothing');
+            await page.getByTestId('execute-fail-confirm').click();
+            await expect(page.getByTestId('execute-current-name')).toHaveText('V-Gamma');
+        });
+
+        await test.step('Skip the last test — completion banner appears', async () => {
+            await page.getByTestId('execute-skip').click();
+            await expect(page.getByTestId('execute-done-banner')).toBeVisible();
+            await expect(page.getByTestId('execute-progress')).toContainText('3 / 3');
+        });
+
+        await test.step('Verdicts persisted to the API', async () => {
+            const fresh = await getRunAPI(request, run.id);
+            const byName = Object.fromEntries(fresh.run_results.map(r => [r.test_name_snapshot, r]));
+            if (byName['V-Alpha'].status !== 'PASS') throw new Error('V-Alpha not PASS');
+            if (byName['V-Beta'].status !== 'FAIL') throw new Error('V-Beta not FAIL');
+            if (byName['V-Beta'].defect_type !== 'product_bug') throw new Error('defect_type not saved');
+            if (byName['V-Beta'].error_message !== 'Button did nothing') throw new Error('error_message not saved');
+            if (byName['V-Gamma'].status !== 'SKIP') throw new Error('V-Gamma not SKIP');
+            if (fresh.status !== 'RUNNING') throw new Error('run did not auto-start');
         });
     });
 });
