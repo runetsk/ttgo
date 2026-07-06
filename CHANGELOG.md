@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   throttled the probe to ~5 results/s of the configured 20).
 
 ### Fixed
+- Perf harness `run-config.json` now records the S4 `ws` knobs (`CLIENTS`,
+  `HOLD_MINUTES`, `RESULTS_PER_SEC`, `USERS`); previously omitted, so a kept
+  `ws` run's provenance did not capture its client count, hold length, or
+  probe rate.
 - Perf harness measurement-validity fixes (external Codex review): per-op
   `count>0` thresholds everywhere a duration threshold exists (a tag-scoped
   p95 over zero samples evaluates to 0 and passes — the gate could pass an op
