@@ -151,7 +151,7 @@ Run `ttgo --help` for all available commands (tests, runs, folders, analytics, r
 
 **Claude Code Integration**
 
-The project includes a Claude Code skill (`.claude/skills/ttgo.md`) that lets you operate TTGO through natural language. With [Claude Code](https://claude.com/claude-code) installed, just describe what you need:
+The project includes a Claude Code skill (`.claude/skills/ttgo/SKILL.md`) that lets you operate TTGO through natural language. With [Claude Code](https://claude.com/claude-code) installed, just describe what you need:
 
 ```
 > "Run the smoke tests and report the results"
@@ -222,6 +222,27 @@ The app will be available on port `80`. The backend API is proxied under `/api/`
 git pull
 docker compose up -d --build
 ```
+
+## Performance
+
+Measured with the load-test suite in [`perf/`](perf/README.md) (k6 against a single
+instance — one Go binary, one SQLite file — on an M1 Pro laptop, load generator on
+the same machine, so the numbers are conservative):
+
+- **Result ingestion:** one instance sustains **~500 results/s**; up to **~55
+  concurrent CI pipelines** report simultaneously before add-result p95 exceeds
+  500 ms. Overload degrades gracefully — latency rises, errors stay near zero
+  (first 5xx at ~135 concurrent pipelines), recovery is immediate.
+- **Dashboards stay fast while CI reports:** read latencies are statistically
+  unchanged under a sustained 250 results/s ingest load (SQLite WAL concurrent
+  reads, verified empirically).
+- **Large datasets:** full-text search and run-detail pages stay flat up to
+  **1M results** (search ≤16 ms p95); the runs list serves a page in ~61 ms p95
+  at that scale.
+- **Live updates:** **1,000 concurrent WebSocket clients** receive result events
+  with ~26 ms p95 broadcast lag.
+- A regression gate (`make -C perf gate`) guards these numbers against future
+  changes. Methodology, caveats, and reproduction: [`perf/README.md`](perf/README.md).
 
 ## API
 
