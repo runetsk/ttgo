@@ -119,7 +119,13 @@ export const getTestRuns = (categoryIds, status, sortBy, order, page = 1, pageSi
     return api.get('/runs', { params }).then(res => res.data);
 };
 export const getTestRun = (id) => api.get(`/runs/${id}`).then(res => res.data);
-export const createTestRun = (categoryId, name, runFolderId = null) => api.post('/runs', { category_id: categoryId || null, name, run_folder_id: runFolderId }).then(res => res.data);
+export const createTestRun = (categoryId, name, runFolderId = null, testCaseIds = null) =>
+    api.post('/runs', {
+        category_id: categoryId || null,
+        name,
+        run_folder_id: runFolderId,
+        ...(Array.isArray(testCaseIds) && testCaseIds.length > 0 ? { test_case_ids: testCaseIds } : {}),
+    }).then(res => res.data);
 export const updateTestRun = (id, name, categoryId, status) => api.put(`/runs/${id}`, { name, ...(categoryId ? { category_id: categoryId } : {}), ...(status ? { status } : {}) }).then(res => res.data);
 export const completeTestRun = (id) => api.post(`/runs/${id}/complete`).then(res => res.data);
 export const reopenTestRun = (id) => api.post(`/runs/${id}/reopen`).then(res => res.data);

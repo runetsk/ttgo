@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { createTestRun, getRunFolderTree } from '../api';
+import { createTestRun, getRunFolderTree, getTests } from '../api';
 
 // Flatten a folder tree into indented options for display
 function flattenFolderTree(folders, depth = 0) {
@@ -21,6 +21,10 @@ export default function CreateRunModal({ categories, onClose, onSuccess, default
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
     const nameRef = useRef(null);
+    const [source, setSource] = useState('category'); // 'category' | 'pick'
+    const [allTests, setAllTests] = useState(null);   // null until loaded
+    const [testSearch, setTestSearch] = useState('');
+    const [selectedTestIds, setSelectedTestIds] = useState(new Set());
 
     useEffect(() => {
         getRunFolderTree()
@@ -37,16 +41,37 @@ export default function CreateRunModal({ categories, onClose, onSuccess, default
         setTimeout(() => nameRef.current?.focus(), 100);
     }, []);
 
+    // Load the test library lazily when pick mode is first opened
+    useEffect(() => {
+        if (source !== 'pick' || allTests !== null) return;
+        getTests([], undefined, { view: 'list' })
+            .then(data => setAllTests(Array.isArray(data) ? data : []))
+            .catch(() => setAllTests([]));
+    }, [source, allTests]);
+
     const flatFolders = useMemo(() => flattenFolderTree(folderTree), [folderTree]);
 
     const selectedCategory = categories.find(s => s.id === categoryId);
     const selectedFolder = flatFolders.find(f => f.id === runFolderId);
 
+    const visibleTests = useMemo(() => {
+        const q = testSearch.trim().toLowerCase();
+        const list = allTests || [];
+        return q ? list.filter(t => (t.name || '').toLowerCase().includes(q)) : list;
+    }, [allTests, testSearch]);
+
+    const toggleTest = (id) => setSelectedTestIds(prev => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id); else next.add(id);
+        return next;
+    });
+
     const handleSubmit = (e) => {
         e.preventDefault();
         setLoading(true);
         setError(null);
-        createTestRun(categoryId || null, name, runFolderId || null)
+        const pickedIds = source === 'pick' ? Array.from(selectedTestIds) : null;
+        createTestRun(source === 'category' ? (categoryId || null) : null, name, runFolderId || null, pickedIds)
             .then((run) => {
                 setLoading(false);
                 onSuccess(run);
@@ -130,29 +155,101 @@ export default function CreateRunModal({ categories, onClose, onSuccess, default
                             <p style={hintStyle}>Leave blank for auto-generated name</p>
                         </div>
 
-                        {/* Category + Folder — side by side */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                            {/* Category */}
-                            <div>
-                                <label style={labelStyle}>
-                                    Category
-                                </label>
-                                <select
-                                    className="modern-select"
-                                    value={categoryId}
-                                    onChange={e => setCategoryId(e.target.value)}
-                                    style={{ width: '100%' }}
-                                    data-testid="create-run-category-select"
+                        {/* Source: category snapshot vs hand-picked tests */}
+                        <div style={{ display: 'flex', gap: 6 }}>
+                            {[
+                                { key: 'category', label: 'From category', testId: 'create-run-source-category' },
+                                { key: 'pick', label: 'Pick tests', testId: 'create-run-source-pick' },
+                            ].map(opt => (
+                                <button
+                                    key={opt.key}
+                                    type="button"
+                                    data-testid={opt.testId}
+                                    onClick={() => setSource(opt.key)}
+                                    style={{
+                                        flex: 1, padding: '7px 0', borderRadius: 8, cursor: 'pointer',
+                                        fontSize: '0.8rem', fontWeight: 600,
+                                        border: source === opt.key ? '1px solid var(--accent-indigo)' : '1px solid var(--border-color)',
+                                        background: source === opt.key ? 'rgba(99,102,241,0.1)' : 'transparent',
+                                        color: source === opt.key ? 'var(--accent-indigo)' : 'var(--text-secondary)',
+                                    }}
                                 >
-                                    <option value="">None (empty run)</option>
-                                    {(categories || []).map(s => (
-                                        <option key={s.id} value={s.id}>{s.name}</option>
-                                    ))}
-                                </select>
-                                <p style={hintStyle}>
-                                    {categoryId ? 'Pre-populates with category tests' : 'Add tests manually later'}
-                                </p>
-                            </div>
+                                    {opt.label}
+                                </button>
+                            ))}
+                        </div>
+
+                        {/* Category/Pick + Folder — side by side */}
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                            {source === 'category' && (
+                                <div>
+                                    <label style={labelStyle}>
+                                        Category
+                                    </label>
+                                    <select
+                                        className="modern-select"
+                                        value={categoryId}
+                                        onChange={e => setCategoryId(e.target.value)}
+                                        style={{ width: '100%' }}
+                                        data-testid="create-run-category-select"
+                                    >
+                                        <option value="">None (empty run)</option>
+                                        {(categories || []).map(s => (
+                                            <option key={s.id} value={s.id}>{s.name}</option>
+                                        ))}
+                                    </select>
+                                    <p style={hintStyle}>
+                                        {categoryId ? 'Pre-populates with category tests' : 'Add tests manually later'}
+                                    </p>
+                                </div>
+                            )}
+                            {source === 'pick' && (
+                                <div>
+                                    <label style={labelStyle}>Tests</label>
+                                    <input
+                                        type="text"
+                                        className="modern-input"
+                                        style={{ width: '100%', marginBottom: 6 }}
+                                        placeholder="Search tests…"
+                                        value={testSearch}
+                                        onChange={e => setTestSearch(e.target.value)}
+                                        data-testid="create-run-test-search"
+                                    />
+                                    <div style={{
+                                        maxHeight: 180, overflowY: 'auto', border: '1px solid var(--border-color)',
+                                        borderRadius: 8, padding: 4,
+                                    }}>
+                                        {allTests === null ? (
+                                            <p style={{ ...hintStyle, padding: 8 }}>Loading tests…</p>
+                                        ) : visibleTests.length === 0 ? (
+                                            <p style={{ ...hintStyle, padding: 8 }}>No tests match.</p>
+                                        ) : visibleTests.map(t => (
+                                            <label
+                                                key={t.id}
+                                                data-testid={`create-run-test-option-${t.id}`}
+                                                style={{
+                                                    display: 'flex', alignItems: 'center', gap: 8,
+                                                    padding: '5px 8px', borderRadius: 6, cursor: 'pointer',
+                                                    fontSize: '0.8rem',
+                                                    background: selectedTestIds.has(t.id) ? 'rgba(99,102,241,0.08)' : 'transparent',
+                                                }}
+                                            >
+                                                <input
+                                                    type="checkbox"
+                                                    checked={selectedTestIds.has(t.id)}
+                                                    onChange={() => toggleTest(t.id)}
+                                                />
+                                                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                    {t.name}
+                                                </span>
+                                            </label>
+                                        ))}
+                                    </div>
+                                    <p style={hintStyle} data-testid="create-run-selected-count">
+                                        {selectedTestIds.size} test{selectedTestIds.size === 1 ? '' : 's'} selected
+                                    </p>
+                                </div>
+                            )}
 
                             {/* Folder */}
                             <div>
@@ -187,7 +284,12 @@ export default function CreateRunModal({ categories, onClose, onSuccess, default
                     }}>
                         {/* Summary preview */}
                         <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', maxWidth: '55%' }}>
-                            {selectedCategory ? (
+                            {source === 'pick' ? (
+                                <span>
+                                    <strong style={{ color: 'var(--text-primary)' }}>{selectedTestIds.size} picked test{selectedTestIds.size === 1 ? '' : 's'}</strong>
+                                    {selectedFolder && <span> &middot; {selectedFolder.name}</span>}
+                                </span>
+                            ) : selectedCategory ? (
                                 <span>
                                     <strong style={{ color: 'var(--text-primary)' }}>{selectedCategory.name}</strong>
                                     {selectedFolder && (
@@ -213,10 +315,10 @@ export default function CreateRunModal({ categories, onClose, onSuccess, default
                             <button
                                 type="submit"
                                 className="primary-btn"
-                                disabled={loading}
+                                disabled={loading || (source === 'pick' && selectedTestIds.size === 0)}
                                 style={{
                                     padding: '8px 20px', fontSize: '0.85rem',
-                                    opacity: loading ? 0.5 : 1,
+                                    opacity: (loading || (source === 'pick' && selectedTestIds.size === 0)) ? 0.5 : 1,
                                 }}
                                 data-testid="create-run-submit"
                             >

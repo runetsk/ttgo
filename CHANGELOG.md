@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Create-run modal can build a run from hand-picked tests (searchable multi-select) instead of a whole category.
+
 ### Changed
 - Creating a test run now opens its detail page immediately.
 - WebSocket result-level events (`result_updated`, `result_bulk_updated`,
