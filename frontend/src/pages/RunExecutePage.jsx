@@ -1,11 +1,11 @@
-/* eslint-disable react-refresh/only-export-components -- STATUS_COLORS is a plain constant map consumed by later execution-mode tasks; splitting it into its own file would ripple imports with no runtime benefit */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { getTestRun, getTest, updateRunResult, completeTestRun } from '../api';
 import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
+import { toast } from '../toast';
 
-export const STATUS_COLORS = {
+const STATUS_COLORS = {
     PASS: 'var(--accent-green)', FAIL: 'var(--accent-red)', ERROR: 'var(--accent-red)',
     PENDING: 'var(--warning-color)', SKIP: '#94a3b8', RUNNING: '#3b82f6',
 };
@@ -88,6 +88,7 @@ export default function RunExecutePage() {
         try {
             await updateRunResult(runId, r.id, payload);
         } catch {
+            toast.error('Failed to save verdict');
             return; // leave the queue untouched; the user can retry
         }
         const updated = queue.map((item, i) =>
@@ -164,7 +165,9 @@ export default function RunExecutePage() {
                                     try {
                                         await completeTestRun(runId);
                                         navigate(`/runs/run/${runId}`);
-                                    } catch { /* stay on the page; user can exit manually */ }
+                                    } catch {
+                                        toast.error('Failed to complete run'); // stay on the page; user can exit manually
+                                    }
                                 }}
                                 style={{ marginLeft: 'auto', padding: '7px 18px', fontSize: '0.85rem' }}
                             >

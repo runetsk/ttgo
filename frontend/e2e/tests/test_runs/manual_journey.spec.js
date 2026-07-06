@@ -1,5 +1,4 @@
 import { test, expect } from '@playwright/test';
-import { API_URL } from '../../config.js';
 import {
     createFolderAPI,
     createTestAPI,

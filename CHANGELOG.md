@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Create-run modal can build a run from hand-picked tests (searchable multi-select) instead of a whole category.
+- Complete Run / Reopen buttons on the run detail header (derive PASS/FAIL from results).
+- Execution mode on run detail: step-by-step manual execution with Pass/Fail/Skip, defect classification, auto-advance, and duration capture.
 
 ### Changed
 - Creating a test run now opens its detail page immediately.
@@ -63,7 +65,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~220–300ms.
 
 ### Added
-- Complete Run / Reopen buttons on the run detail header (derive PASS/FAIL from results).
 - Performance test harness (phase 1): a `perf/` k6 suite for the result-ingest
   write path — smoke check plus the S1 "CI ingest storm" capacity scenario —
   and a `perfseed` CLI that provisions scratch databases with a deterministic
@@ -128,7 +129,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docker health checks for the backend and nginx services.
 - Handler test coverage for authentication, webhooks, and backups.
 - `.env.example` templates for Docker (repo root) and local backend development.
-- Execution mode on run detail: step-by-step manual execution with Pass/Fail/Skip, defect classification, auto-advance, and duration capture.
 
 ### Fixed
 - WebSocket "connected" acknowledgements no longer race the hub closing a slow client's
