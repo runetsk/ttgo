@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getTestRun, deleteTestRun, updateTestRun, addRunResult, getTests, listRunDefects, analyzeRunFailures } from '../api';
+import { getTestRun, deleteTestRun, updateTestRun, addRunResult, getTests, listRunDefects, analyzeRunFailures, completeTestRun, reopenTestRun } from '../api';
 import { activeColumns } from '../utils/columnFeatures';
 import { toast } from '../toast';
 
@@ -193,6 +193,22 @@ export default function TestRunDetail() {
         }
     };
 
+    const handleComplete = async () => {
+        try {
+            await completeTestRun(runId);
+        } catch {
+            toast.error('Failed to complete run');
+        }
+    };
+
+    const handleReopen = async () => {
+        try {
+            await reopenTestRun(runId);
+        } catch {
+            toast.error('Failed to reopen run');
+        }
+    };
+
     const handleDelete = async () => {
         if (window.confirm('Are you sure you want to delete this test run?')) {
             await deleteTestRun(runId);
@@ -246,6 +262,28 @@ export default function TestRunDetail() {
                     <option value="ERROR">ERROR</option>
                 </select>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {(run.status === 'PENDING' || run.status === 'RUNNING' || run.status === 'SKIP') && (
+                        <button
+                            className="action-btn"
+                            onClick={handleComplete}
+                            title="Derive PASS/FAIL from the results and finalize the run"
+                            style={{ color: 'var(--accent-green)', borderColor: 'rgba(34,197,94,0.3)', background: 'rgba(34,197,94,0.05)', padding: '5px 12px', fontSize: '0.8rem' }}
+                            data-testid="complete-run-button"
+                        >
+                            ✓ Complete Run
+                        </button>
+                    )}
+                    {(run.status === 'PASS' || run.status === 'FAIL') && (
+                        <button
+                            className="action-btn"
+                            onClick={handleReopen}
+                            title="Set the run back to RUNNING to keep updating results"
+                            style={{ color: 'var(--accent-indigo)', borderColor: 'rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)', padding: '5px 12px', fontSize: '0.8rem' }}
+                            data-testid="reopen-run-button"
+                        >
+                            ↻ Reopen
+                        </button>
+                    )}
                     <ColumnPicker
                         columnDefs={featureColumnDefs}
                         visibleKeys={visibleKeys}

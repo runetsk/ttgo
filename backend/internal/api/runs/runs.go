@@ -501,6 +501,7 @@ func (h *Handler) CompleteRun(w http.ResponseWriter, r *http.Request) {
 			h.notifyRunCompleted(r.Context(), run)
 		}
 		if fullRun, err := h.store.GetTestRun(id); err == nil && fullRun != nil && h.hub != nil {
+			h.hub.Broadcast(apiws.NewEvent(apiws.EventRunUpdated, "run:"+id, fullRun))
 			h.hub.Broadcast(apiws.NewEvent(apiws.EventRunUpdated, "runs:*", fullRun))
 		}
 

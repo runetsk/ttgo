@@ -59,6 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ~220–300ms.
 
 ### Added
+- Complete Run / Reopen buttons on the run detail header (derive PASS/FAIL from results).
 - Performance test harness (phase 1): a `perf/` k6 suite for the result-ingest
   write path — smoke check plus the S1 "CI ingest storm" capacity scenario —
   and a `perfseed` CLI that provisions scratch databases with a deterministic
