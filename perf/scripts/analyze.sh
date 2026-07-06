@@ -20,6 +20,9 @@ awk -v win="$WIN" '
 /INFO http request/ {
   split($2, t, ":"); sec = t[1]*3600 + t[2]*60 + t[3];
   if (!t0) t0 = sec;
+  # Midnight rollover: time-of-day seconds wrap once for a run crossing
+  # 00:00 (runs are <24h, so one wrap is the only case).
+  if (sec < t0) sec += 86400;
   w = int((sec - t0) / win);
   method = ""; path = ""; dur = -1; st = 0;
   for (i = 1; i <= NF; i++) {
@@ -47,7 +50,10 @@ awk -v win="$WIN" '
   if (key != cur) { if (NR > 1) flush(); cur = key; w = $1; op = $2; n = 0; e = 0 }
   v[n++] = $3; e += $4
 }
-function flush() {
-  printf "%6ds  %-18s %7d reqs  p95=%6dms  5xx=%d\n", w * win, op, n, v[int(n * 0.95)], e
+function flush(  i) {
+  # Nearest-rank p95: ceil(0.95*n)-th smallest, 0-based index ceil(0.95n)-1
+  # (v[int(n*0.95)] was one rank high, e.g. sample 20 of 20 instead of 19).
+  i = int(n * 0.95); if (i * 100 < n * 95) i++; i--; if (i < 0) i = 0;
+  printf "%6ds  %-18s %7d reqs  p95=%6dms  5xx=%d\n", w * win, op, n, v[i], e
 }
 END { if (NR) flush() }'

@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   throttled the probe to ~5 results/s of the configured 20).
 
 ### Fixed
+- Perf harness measurement-validity fixes (external Codex review): per-op
+  `count>0` thresholds everywhere a duration threshold exists (a tag-scoped
+  p95 over zero samples evaluates to 0 and passes — the gate could pass an op
+  it never exercised); the S4 probe starts after a 10 s subscribe-settle
+  window so late handshakes are not misattributed as fan-out loss; gate
+  baselines are stamped with CPU/cores/RAM/arch instead of CPU model alone
+  (baseline re-measured, capturing the delta-payload write-path gain:
+  add-result baseline 4.3 → 1.3 ms); `analyze.sh` uses exact nearest-rank
+  p95 and survives midnight rollover; the perfseed caveat in `perf/README.md`
+  now matches the implemented hard-link/parent-symlink guards.
 - Run detail page crashed on load ("Something went wrong") since the effect
   dependency-array lint cleanup: the mount effect read `loadRun` /
   `loadCurrentAnalyses` from its dependency array before their `const`

@@ -35,6 +35,13 @@ const thresholds = {
   checks: ['rate>0.99'],
   dropped_iterations: ['count==0'],
 };
+// Anti-vacuous guard (Codex review 2026-07-06, verified on k6 v2.1.0): a
+// tag-scoped duration threshold over ZERO samples reports p(95)=0 and
+// passes — the gate could "pass" an op it never exercised, and a baseline
+// could record 0. Requiring per-op request counts makes silence a failure.
+for (const op of GATE_OPS) {
+  thresholds[`http_reqs{op:${op}}`] = ['count>0'];
+}
 
 if (!WRITE_BASELINE) {
   let baseline;
@@ -103,7 +110,9 @@ export function handleSummary(data) {
     const ops = {};
     for (const op of GATE_OPS) {
       const m = data.metrics[`http_req_duration{op:${op}}`];
-      if (!m) {
+      const reqs = data.metrics[`http_reqs{op:${op}}`];
+      const count = reqs && reqs.values && reqs.values.count;
+      if (!m || !count) {
         throw new Error(`baseline run produced no samples for op "${op}" — profile too short or mix broken`);
       }
       ops[op] = m.values['p(95)'];

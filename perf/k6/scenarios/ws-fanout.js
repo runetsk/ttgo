@@ -53,11 +53,14 @@ export const options = {
       executor: 'constant-vus',
       exec: 'probe',
       vus: 1,
-      // Probe runs only during the hold: every client still connected
-      // through the hold should see every probe event, making
-      // expected-count loss math clean.
-      startTime: `${RAMP_MINUTES}m`,
-      duration: `${HOLD_MINUTES}m`,
+      // Probe starts 10s AFTER the ramp ends (settle window: the last
+      // upgrades/subscribes must complete before events flow, or late
+      // handshakes get misattributed as fan-out loss — Codex review
+      // 2026-07-06) and stops at hold end, before the synchronized close:
+      // every client still connected through the hold sees every probe
+      // event, keeping the expected-count loss math clean.
+      startTime: `${RAMP_MINUTES * 60 + 10}s`,
+      duration: `${HOLD_MINUTES * 60 - 10}s`,
       gracefulStop: '60s',
     },
   },

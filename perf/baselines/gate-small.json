@@ -1,16 +1,16 @@
 {
-  "machine": "Apple M1 Pro",
+  "machine": "Apple M1 Pro/10c/16GB/arm64",
   "tier": "small",
   "derivation": "gate thresholds = p95 x 1.3, floor 25ms",
   "ops": {
-    "create_run": 1.9182999999999986,
-    "add_result": 4.346049999999999,
-    "complete_run": 4.664499999999999,
-    "runs_list": 15.46575,
-    "run_detail": 14.9725,
-    "analytics_summary": 6.880199999999999,
-    "analytics_trend": 10.950099999999996,
-    "analytics_flaky": 36.229,
-    "search": 7.452099999999998
+    "create_run": 3.6685999999999988,
+    "add_result": 1.318,
+    "complete_run": 4.6718,
+    "runs_list": 15.8286,
+    "run_detail": 14.413399999999994,
+    "analytics_summary": 8.07004999999999,
+    "analytics_trend": 10.584799999999996,
+    "analytics_flaky": 32.2009,
+    "search": 7.4804
   }
 }

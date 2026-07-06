@@ -258,10 +258,11 @@ runner script always provisions a local server.
 
 ## Caveats / safety
 
-- `perfseed` refuses any DB not named `perf-*.db`, and refuses a `perf-*.db`
-  path that is a symlink. Treat that as a seatbelt against local mistakes, not
-  a security boundary — it does not detect hard links or a symlinked parent
-  directory. Everything lives under `perf/.scratch/` (gitignored). `perf/.seed-manifest.json`
+- `perfseed` refuses any DB not named `perf-*.db`, and refuses symlinks, hard
+  links, and a symlinked immediate parent directory for the DB (and its
+  `-wal`/`-shm` siblings) and the manifest. Treat that as a seatbelt against
+  local mistakes, not a security boundary — deeper ancestor symlinks (e.g.
+  macOS's `/var`) are deliberately not checked. Everything lives under `perf/.scratch/` (gitignored). `perf/.seed-manifest.json`
   contains raw bearer tokens — it is gitignored and written (and re-chmod'd) to
   mode 0600 even if it already existed; don't move it.
 - The `large` tier seeds ~1M results: expect ~1–3 min of seeding, ~1.5–2 GB

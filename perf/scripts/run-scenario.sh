@@ -82,6 +82,10 @@ git_dirty=false
 [[ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]] && git_dirty=true
 cpu_model="$(sysctl -n machdep.cpu.brand_string 2>/dev/null || awk -F': ' '/model name/{print $2; exit}' /proc/cpuinfo 2>/dev/null || echo unknown)"
 mem_bytes="$(sysctl -n hw.memsize 2>/dev/null || awk '/MemTotal/{print $2*1024; exit}' /proc/meminfo 2>/dev/null || echo 0)"
+cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0)"
+# Gate baselines compare this full stamp, not just the CPU model: two boxes
+# with the same CPU but different cores/RAM/arch are not comparable.
+machine_stamp="$cpu_model/${cores}c/$((mem_bytes / 1073741824))GB/$(uname -m)"
 cat >"$OUT_DIR/run-config.json" <<EOF
 {
   "scenario": "$SCENARIO",
@@ -93,7 +97,7 @@ cat >"$OUT_DIR/run-config.json" <<EOF
   "machine": {
     "os": $(jstr "$(uname -srm)"),
     "cpu": $(jstr "$cpu_model"),
-    "cores": $(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 0),
+    "cores": ${cores:-0},
     "mem_bytes": ${mem_bytes:-0}
   },
   "knobs": {
@@ -177,7 +181,7 @@ k6 run \
   -e TTGO_MANIFEST="$MANIFEST" \
   -e TTGO_SUMMARY_PATH="$OUT_DIR/summary.json" \
   -e TTGO_BASELINE_PATH="$PERF_DIR/baselines/gate-$TIER.json" \
-  -e TTGO_MACHINE="$cpu_model" \
+  -e TTGO_MACHINE="$machine_stamp" \
   -e TTGO_TIER="$TIER" \
   ${K6_ARGS:-} \
   "$PERF_DIR/$SCENARIO" || k6_status=$?
