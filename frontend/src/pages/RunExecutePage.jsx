@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components -- STATUS_COLORS is a plain constant map consumed by later execution-mode tasks; splitting it into its own file would ripple imports with no runtime benefit */
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getTestRun, getTest, updateRunResult } from '../api';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { getTestRun, getTest, updateRunResult, completeTestRun } from '../api';
 import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
 
@@ -12,6 +12,7 @@ export const STATUS_COLORS = {
 
 export default function RunExecutePage() {
     const { runId } = useParams();
+    const navigate = useNavigate();
     const [run, setRun] = useState(null);
     const [queue, setQueue] = useState([]);
     const [currentIdx, setCurrentIdx] = useState(0);
@@ -99,6 +100,21 @@ export default function RunExecutePage() {
         advance(currentIdx, updated);
     }, [queue, currentIdx, runId, defectType, failNote, advance]);
 
+    useEffect(() => {
+        const onKey = (e) => {
+            const tag = e.target.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
+            if (failPanelOpen) return; // don't fire verdicts under the fail form
+            if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
+            else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
+            else if (e.key === 'p' || e.key === 'P') submitVerdict('PASS');
+            else if (e.key === 's' || e.key === 'S') submitVerdict('SKIP');
+            else if (e.key === 'f' || e.key === 'F') setFailPanelOpen(true);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [failPanelOpen, goNext, goPrev, submitVerdict]);
+
     if (loading) return <div style={{ padding: 24 }}>Loading run…</div>;
     if (!run) return <div style={{ padding: 24 }}>Run not found</div>;
 
@@ -135,6 +151,19 @@ export default function RunExecutePage() {
                             <span style={{ fontSize: '0.9rem', fontWeight: 600, color: 'var(--accent-green)' }}>
                                 All tests executed.
                             </span>
+                            <button
+                                className="primary-btn"
+                                data-testid="execute-complete-run"
+                                onClick={async () => {
+                                    try {
+                                        await completeTestRun(runId);
+                                        navigate(`/runs/run/${runId}`);
+                                    } catch { /* stay on the page; user can exit manually */ }
+                                }}
+                                style={{ marginLeft: 'auto', padding: '7px 18px', fontSize: '0.85rem' }}
+                            >
+                                ✓ Complete Run
+                            </button>
                         </div>
                     )}
                     <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -245,6 +274,9 @@ export default function RunExecutePage() {
                                 style={{ padding: '9px 22px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', color: '#9ca3af', background: 'rgba(156,163,175,0.12)', border: '1px solid rgba(156,163,175,0.35)' }}>
                                 ⊘ Skip
                             </button>
+                            <span style={{ alignSelf: 'center', marginLeft: 8, fontSize: '0.72rem', color: 'var(--text-secondary)', opacity: 0.7 }}>
+                                Keys: P pass · F fail · S skip · ←/→ navigate
+                            </span>
                         </div>
 
                         {failPanelOpen && (

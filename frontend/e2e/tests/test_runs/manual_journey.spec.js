@@ -159,4 +159,33 @@ test.describe('Manual run journey', () => {
             if (fresh.status !== 'RUNNING') throw new Error('run did not auto-start');
         });
     });
+
+    test('keyboard-driven execution and run completion', async ({ page, request }) => {
+        const runName = 'Keyboard Run ' + Date.now();
+        let run;
+
+        await test.step('Seed a run with two cases via API', async () => {
+            const folder = await createFolderAPI(request, 'Kbd Folder ' + Date.now());
+            run = await createRunAPI(request, runName);
+            for (const name of ['K-One', 'K-Two']) {
+                const tc = await createTestAPI(request, name, folder.id);
+                await addRunResultAPI(request, run.id, tc.id);
+            }
+        });
+
+        await test.step('Pass both tests with the P key', async () => {
+            await page.goto(`/runs/run/${run.id}/execute`);
+            await expect(page.getByTestId('execute-current-name')).toHaveText('K-One');
+            await page.keyboard.press('p');
+            await expect(page.getByTestId('execute-current-name')).toHaveText('K-Two');
+            await page.keyboard.press('p');
+            await expect(page.getByTestId('execute-done-banner')).toBeVisible();
+        });
+
+        await test.step('Complete the run from the banner — back on the detail page as PASS', async () => {
+            await page.getByTestId('execute-complete-run').click();
+            await expect(page).toHaveURL(new RegExp(`/runs/run/${run.id}$`));
+            await expect(page.getByTestId('run-status-select')).toHaveValue('PASS');
+        });
+    });
 });
