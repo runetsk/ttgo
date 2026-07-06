@@ -115,6 +115,23 @@ A self-hosted test case management tool built with Go and React.
 
 ## Quick Start (local)
 
+**System requirements**
+
+TTGO is deliberately light — a single Go binary and one SQLite file. Measured
+footprint (see [Performance](#performance)): ~30 MB RAM idle, under 200 MB even
+at maximum load with 1,000 live WebSocket clients; the database grows roughly
+2 GB per million stored results.
+
+| | Minimum (evaluation / small team) | Recommended (busy CI, large history) |
+|---|---|---|
+| CPU | 1 core | 2+ cores (the ~500 results/s ingest ceiling was measured on 10) |
+| RAM | 512 MB | 1 GB (covers Docker + nginx comfortably) |
+| Disk | 1 GB | 10 GB+ — ~2 GB per 1M results, plus WAL headroom during sustained CI bursts |
+
+Any small VPS or spare machine qualifies. Building from source needs the Go
+toolchain (1.25+, CGO with a C compiler for SQLite FTS5) and Node 22 for the
+frontend; the Docker deployment needs neither.
+
 **Backend**
 
 ```bash
