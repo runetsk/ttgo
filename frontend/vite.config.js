@@ -8,7 +8,8 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',
+        // Override when :8080 is taken (e.g. TTGO_DEV_API_TARGET=http://localhost:8090)
+        target: process.env.TTGO_DEV_API_TARGET || 'http://localhost:8080',
         ws: true
       }
     }
