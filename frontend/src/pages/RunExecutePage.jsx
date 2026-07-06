@@ -107,13 +107,19 @@ export default function RunExecutePage() {
             if (failPanelOpen) return; // don't fire verdicts under the fail form
             if (e.key === 'ArrowRight') { e.preventDefault(); goNext(); }
             else if (e.key === 'ArrowLeft') { e.preventDefault(); goPrev(); }
-            else if (e.key === 'p' || e.key === 'P') submitVerdict('PASS');
-            else if (e.key === 's' || e.key === 'S') submitVerdict('SKIP');
-            else if (e.key === 'f' || e.key === 'F') setFailPanelOpen(true);
+            else {
+                // Verdict keys disarm once the run is fully executed so a stray keypress
+                // can't mutate a resolved result; arrows keep working for review.
+                const allDone = queue.length > 0 && queue.every(r => r.status !== 'PENDING');
+                if (allDone) return;
+                if (e.key === 'p' || e.key === 'P') submitVerdict('PASS');
+                else if (e.key === 's' || e.key === 'S') submitVerdict('SKIP');
+                else if (e.key === 'f' || e.key === 'F') setFailPanelOpen(true);
+            }
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [failPanelOpen, goNext, goPrev, submitVerdict]);
+    }, [failPanelOpen, goNext, goPrev, submitVerdict, queue]);
 
     if (loading) return <div style={{ padding: 24 }}>Loading run…</div>;
     if (!run) return <div style={{ padding: 24 }}>Run not found</div>;

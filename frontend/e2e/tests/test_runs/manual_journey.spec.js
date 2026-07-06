@@ -182,6 +182,16 @@ test.describe('Manual run journey', () => {
             await expect(page.getByTestId('execute-done-banner')).toBeVisible();
         });
 
+        await test.step('Verdict keys are disarmed once the run is fully executed', async () => {
+            await page.keyboard.press('s');
+            await page.keyboard.press('f');
+            await expect(page.getByTestId('execute-fail-note')).not.toBeVisible();
+            const fresh = await getRunAPI(request, run.id);
+            const byName = Object.fromEntries(fresh.run_results.map(r => [r.test_name_snapshot, r]));
+            if (byName['K-One'].status !== 'PASS') throw new Error('K-One was mutated by a stray key');
+            if (byName['K-Two'].status !== 'PASS') throw new Error('K-Two was mutated by a stray key');
+        });
+
         await test.step('Complete the run from the banner — back on the detail page as PASS', async () => {
             await page.getByTestId('execute-complete-run').click();
             await expect(page).toHaveURL(new RegExp(`/runs/run/${run.id}$`));
