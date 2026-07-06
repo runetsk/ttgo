@@ -375,8 +375,10 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                                             <option value="">All</option>
                                             <option value="PENDING">Pending</option>
                                             <option value="RUNNING">Running</option>
-                                            <option value="PASSED">Passed</option>
-                                            <option value="FAILED">Failed</option>
+                                            <option value="PASS">Passed</option>
+                                            <option value="FAIL">Failed</option>
+                                            <option value="SKIP">Skipped</option>
+                                            <option value="ERROR">Error</option>
                                         </select>
                                     </th>
                                 )}

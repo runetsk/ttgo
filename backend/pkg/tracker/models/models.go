@@ -199,7 +199,7 @@ type TestRun struct {
 	Name        string          `json:"name"`
 	CategoryID  *string         `json:"category_id"      gorm:"index"` // nullable — empty runs have no category
 	RunFolderID *string         `json:"run_folder_id" gorm:"index"`    // nullable FK to RunFolder
-	Status      ExecutionStatus `json:"status"`                        // PENDING, RUNNING, PASSED, FAILED, etc.
+	Status      ExecutionStatus `json:"status"`                        // PENDING, RUNNING, PASS, FAIL, SKIP, ERROR
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
 

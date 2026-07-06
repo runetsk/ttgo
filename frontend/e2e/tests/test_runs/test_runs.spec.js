@@ -6,6 +6,7 @@ import {
     createTestAPI,
     linkTestToCategoryAPI,
     createRunAPI,
+    addRunResultAPI,
     getResultId,
 } from '../../helpers/api.js';
 
@@ -81,12 +82,20 @@ test.describe('Test Runs Management', () => {
         const run3Name = 'Run 3 A ' + Date.now();
         let catA;
 
+        let run2;
         await test.step('Seed two categories and three runs via API', async () => {
             catA = await createCategoryAPI(request, catNameA);
             const catB = await createCategoryAPI(request, catNameB);
             await createRunAPI(request, run1Name, { categoryId: catA.id });
-            await createRunAPI(request, run2Name, { categoryId: catB.id });
+            run2 = await createRunAPI(request, run2Name, { categoryId: catB.id });
             await createRunAPI(request, run3Name, { categoryId: catA.id });
+
+            // Give run2 a failing result and finalize it so its run status is FAIL.
+            const folder = await createFolderAPI(request, 'Filter Folder ' + Date.now());
+            const tc = await createTestAPI(request, 'Failing case', folder.id);
+            await addRunResultAPI(request, run2.id, tc.id, { status: 'FAIL' });
+            const completeRes = await request.post(`${API_URL}/runs/${run2.id}/complete`);
+            if (!completeRes.ok()) throw new Error('failed to complete seeded run');
         });
 
         await test.step('Open the test runs page and reveal column filters', async () => {
@@ -114,10 +123,12 @@ test.describe('Test Runs Management', () => {
         await test.step('Filtering by Pending status keeps the pending run', async () => {
             await page.getByTestId('filter-status-select').selectOption('PENDING');
             await expect(page.getByText(run1Name)).toBeVisible();
+            await expect(page.getByText(run2Name)).not.toBeVisible();
         });
 
-        await test.step('Filtering by Failed status hides the pending run', async () => {
-            await page.getByTestId('filter-status-select').selectOption('FAILED');
+        await test.step('Filtering by Failed status shows only the failed run', async () => {
+            await page.getByTestId('filter-status-select').selectOption('FAIL');
+            await expect(page.getByText(run2Name)).toBeVisible();
             await expect(page.getByText(run1Name)).not.toBeVisible();
         });
     });

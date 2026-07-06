@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   throttled the probe to ~5 results/s of the configured 20).
 
 ### Fixed
+- Test Runs list: "Passed"/"Failed" status filters matched nothing (sent PASSED/FAILED instead of PASS/FAIL).
 - Perf harness `run-config.json` now records the S4 `ws` knobs (`CLIENTS`,
   `HOLD_MINUTES`, `RESULTS_PER_SEC`, `USERS`); previously omitted, so a kept
   `ws` run's provenance did not capture its client count, hold length, or
