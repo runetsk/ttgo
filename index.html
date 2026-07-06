@@ -32,6 +32,7 @@
         <a href="#automation">Automation</a>
         <a href="#compare">Compare</a>
         <a href="#tech">Tech</a>
+        <a href="#performance">Performance</a>
         <a href="#license">License</a>
         <a class="btn btn--ghost btn--sm" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">
           <span aria-hidden="true">★</span> GitHub
@@ -231,6 +232,39 @@
           <li>Gorilla WebSocket</li><li>React 19.2</li><li>Vite</li><li>TipTap</li>
           <li>Recharts</li><li>@dnd-kit</li><li>Cobra CLI</li><li>Docker</li>
         </ul>
+      </div>
+    </section>
+
+    <!-- ───────────────────────── Performance ───────────────────────── -->
+    <section class="section" id="performance">
+      <div class="container">
+        <header class="section__head reveal">
+          <h2>Measured, not promised</h2>
+          <p>Every number below comes from the k6 load-test suite that ships in the repo, measured against a single instance — one Go binary, one SQLite file — on an ordinary laptop (M1 Pro), so they're conservative. A committed regression gate keeps them honest on every change.</p>
+        </header>
+        <div class="cards">
+          <article class="card reveal">
+            <div class="card__icon">🚀</div>
+            <h3>~500 results/s ingest</h3>
+            <p>Around 55 CI pipelines can report simultaneously before add-result p95 crosses 500&nbsp;ms — and overload degrades gracefully: latency rises, errors stay near zero, recovery is immediate.</p>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon">📊</div>
+            <h3>Dashboards unfazed by CI</h3>
+            <p>Read latencies are statistically unchanged while CI ingests at half the write ceiling — SQLite's concurrent-read promise, verified empirically, not assumed.</p>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon">🔍</div>
+            <h3>A million results, still fast</h3>
+            <p>Full-text search stays at ≤16&nbsp;ms and the runs list serves a page in ~61&nbsp;ms p95 with 1M results in the database.</p>
+          </article>
+          <article class="card reveal">
+            <div class="card__icon">🔔</div>
+            <h3>1,000 live viewers</h3>
+            <p>A thousand concurrent WebSocket clients receive result updates with ~26&nbsp;ms p95 broadcast lag.</p>
+          </article>
+        </div>
+        <p class="license__note">Methodology, caveats, and how to reproduce every number: <a href="https://github.com/runetsk/ttgo/blob/main/perf/README.md" target="_blank" rel="noopener">perf/README.md</a>.</p>
       </div>
     </section>
 
