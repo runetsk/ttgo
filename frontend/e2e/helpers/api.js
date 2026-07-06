@@ -61,8 +61,10 @@ async function createFolderAPI(request, name, parentId = null) {
     return res.json();
 }
 
-async function createTestAPI(request, name, folderId, description = 'API Test') {
-    const res = await request.post(`${API_URL}/tests`, { data: { name, folder_id: folderId, description } });
+async function createTestAPI(request, name, folderId, description = 'API Test', extra = {}) {
+    const res = await request.post(`${API_URL}/tests`, {
+        data: { name, folder_id: folderId, description, ...extra },
+    });
     await ensureOk(res);
     return res.json();
 }

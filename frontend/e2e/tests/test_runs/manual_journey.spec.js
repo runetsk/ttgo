@@ -85,4 +85,30 @@ test.describe('Manual run journey', () => {
             await expect(page.getByTestId('execute-current-name')).toHaveText('Gamma check');
         });
     });
+
+    test('execution mode shows the authored steps of the current test', async ({ page, request }) => {
+        const runName = 'Steps Run ' + Date.now();
+        let run;
+
+        await test.step('Seed a run whose test has two authored steps', async () => {
+            const folder = await createFolderAPI(request, 'Steps Folder ' + Date.now());
+            const tc = await createTestAPI(request, 'Stepped case', folder.id, 'API Test', {
+                steps: [
+                    { action: '<p>Open the login page</p>', expected_result: '<p>Form is visible</p>', order_index: 0 },
+                    { action: '<p>Submit valid credentials</p>', expected_result: '<p>Dashboard loads</p>', order_index: 1 },
+                ],
+            });
+            run = await createRunAPI(request, runName);
+            await addRunResultAPI(request, run.id, tc.id);
+        });
+
+        await test.step('Steps render on the execute page', async () => {
+            await page.goto(`/runs/run/${run.id}/execute`);
+            await expect(page.getByTestId('execute-current-name')).toHaveText('Stepped case');
+            const steps = page.getByTestId('execute-steps');
+            await expect(steps.getByText('Open the login page')).toBeVisible();
+            await expect(steps.getByText('Form is visible')).toBeVisible();
+            await expect(steps.getByText('Submit valid credentials')).toBeVisible();
+        });
+    });
 });

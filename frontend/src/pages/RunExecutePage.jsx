@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components -- STATUS_COLORS is a plain constant map consumed by later execution-mode tasks; splitting it into its own file would ripple imports with no runtime benefit */
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { getTestRun } from '../api';
+import { getTestRun, getTest } from '../api';
 import { latestAttempts } from '../utils/runResults';
+import SafeHTML from '../components/shared/SafeHTML';
 
 export const STATUS_COLORS = {
     PASS: 'var(--accent-green)', FAIL: 'var(--accent-red)', ERROR: 'var(--accent-red)',
@@ -15,6 +16,7 @@ export default function RunExecutePage() {
     const [queue, setQueue] = useState([]);
     const [currentIdx, setCurrentIdx] = useState(0);
     const [loading, setLoading] = useState(true);
+    const [caseCache, setCaseCache] = useState({}); // test_case_id -> test case (or {steps: []} on error)
 
     useEffect(() => {
         getTestRun(runId)
@@ -34,6 +36,16 @@ export default function RunExecutePage() {
             })
             .catch(() => setLoading(false));
     }, [runId]);
+
+    const currentTestCaseId = queue[currentIdx]?.test_case_id || null;
+    useEffect(() => {
+        if (!currentTestCaseId || caseCache[currentTestCaseId]) return;
+        let cancelled = false;
+        getTest(currentTestCaseId)
+            .then(tc => { if (!cancelled) setCaseCache(prev => ({ ...prev, [currentTestCaseId]: tc })); })
+            .catch(() => { if (!cancelled) setCaseCache(prev => ({ ...prev, [currentTestCaseId]: { steps: [] } })); });
+        return () => { cancelled = true; };
+    }, [currentTestCaseId, caseCache]);
 
     const goPrev = useCallback(() => setCurrentIdx(i => Math.max(0, i - 1)), []);
     const goNext = useCallback(() => setCurrentIdx(i => Math.min(queue.length - 1, i + 1)), [queue.length]);
@@ -110,7 +122,56 @@ export default function RunExecutePage() {
                             {current.test_name_snapshot}
                         </h3>
 
-                        {/* Steps panel mounts here (Task 6); verdict bar mounts here (Task 7) */}
+                        {(() => {
+                            if (!current.test_case_id) {
+                                return (
+                                    <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
+                                        The original test case was deleted — only the recorded name remains.
+                                    </p>
+                                );
+                            }
+                            const tc = caseCache[current.test_case_id];
+                            if (!tc) return <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)' }}>Loading steps…</p>;
+                            const steps = [...(tc.steps || [])].sort((a, b) => (a.order_index || 0) - (b.order_index || 0));
+                            return (
+                                <div data-testid="execute-steps">
+                                    {tc.description && (
+                                        <SafeHTML html={tc.description}
+                                            style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 12 }} />
+                                    )}
+                                    {steps.length === 0 ? (
+                                        <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
+                                            No steps authored for this test case.
+                                        </p>
+                                    ) : steps.map((s, i) => (
+                                        <div key={s.id || i} data-testid={`execute-step-${s.order_index}`}
+                                            style={{
+                                                display: 'flex', gap: 12, padding: '10px 12px', marginBottom: 8,
+                                                background: 'var(--bg-secondary)', borderRadius: 8,
+                                                border: '1px solid var(--border-color)',
+                                            }}>
+                                            <span style={{
+                                                minWidth: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                                                background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
+                                                color: 'var(--text-secondary)', fontSize: '0.7rem', fontWeight: 600,
+                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            }}>{i + 1}</span>
+                                            <div style={{ flex: 1, minWidth: 0 }}>
+                                                <SafeHTML html={s.action} style={{ fontSize: '0.87rem' }} />
+                                                {s.expected_result && (
+                                                    <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--accent-green)', textTransform: 'uppercase', flexShrink: 0 }}>Expected</span>
+                                                        <SafeHTML html={s.expected_result} style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }} />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            );
+                        })()}
+
+                        {/* Verdict bar mounts here (Task 7) */}
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
                             <button className="action-btn" onClick={goPrev} disabled={currentIdx === 0}
