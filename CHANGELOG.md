@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Test case page shows linked active (open) bugs, each navigable to its tracker (external) or the Defects register (native); linked requirement chips now open the requirement detail page.
 - Create-run modal can build a run from hand-picked tests (searchable multi-select) instead of a whole category.
 - Complete Run / Reopen buttons on the run detail header (derive PASS/FAIL from results).
 - Execution mode on run detail: step-by-step manual execution with Pass/Fail/Skip, defect classification, auto-advance, and duration capture.
