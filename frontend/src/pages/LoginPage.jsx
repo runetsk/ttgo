@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import { auth } from '../api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -25,10 +25,10 @@ export default function LoginPage() {
         return () => { cancelled = true; };
     }, []);
 
-    // If already logged in, redirect away
+    // If already logged in, redirect away. Rendered declaratively — calling
+    // navigate() during render triggers React's setState-in-render error.
     if (!loading && user) {
-        navigate('/library', { replace: true });
-        return null;
+        return <Navigate to="/library" replace />;
     }
 
     if (needsSetup === null) return null;

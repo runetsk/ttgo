@@ -2,6 +2,7 @@
 import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import { aiGeneration, aiImport, getFolderTree, requirements as requirementsApi } from '../api';
 import { toast } from '../toast';
+import { useAuth } from './AuthContext';
 
 // ── Constants (re-exported for AIGeneratePage) ──────────────────────
 export const DETAIL_LEVELS = [
@@ -31,6 +32,11 @@ export function flattenFolderTree(nodes, depth = 0) {
 const AIGenerationContext = createContext(null);
 
 export function AIGenerationProvider({ children }) {
+    // All app-level fetches below are gated on the authenticated user (same
+    // pattern as WebSocketProvider): a logged-out visitor on /login must not
+    // fire protected calls that 401.
+    const { user } = useAuth();
+
     // Session identity
     const [activeRequirement, setActiveRequirement] = useState(null);
     const [initialFolderId, setInitialFolderId] = useState('');
@@ -132,7 +138,7 @@ export function AIGenerationProvider({ children }) {
     // persist effect so it doesn't clobber the stored id while state is null.
     const rehydratedRef = useRef(false);
     useEffect(() => {
-        if (rehydratedRef.current) return;
+        if (!user || rehydratedRef.current) return;
         rehydratedRef.current = true;
         let storedId = null;
         try { storedId = sessionStorage.getItem('ttgo_aigen_active_req_id'); } catch { /* sessionStorage unavailable — treat as no stored id */ }
@@ -142,7 +148,7 @@ export function AIGenerationProvider({ children }) {
             .catch(() => {
                 try { sessionStorage.removeItem('ttgo_aigen_active_req_id'); } catch { /* sessionStorage quota/unavailable — non-critical, skip cleanup */ }
             });
-    }, []);
+    }, [user]);
 
     useEffect(() => {
         if (activeRequirement?.id) {
@@ -153,9 +159,14 @@ export function AIGenerationProvider({ children }) {
         // removes the key explicitly.
     }, [activeRequirement?.id]);
 
-    // ── Eager-load folders & providers on mount ──────────────────────
+    // ── Eager-load folders & providers once authenticated ────────────
     const foldersLoadedRef = useRef(false);
     useEffect(() => {
+        if (!user) {
+            // Re-arm on logout so the next sign-in refetches fresh data.
+            foldersLoadedRef.current = false;
+            return;
+        }
         if (foldersLoadedRef.current) return;
         foldersLoadedRef.current = true;
 
@@ -185,7 +196,7 @@ export function AIGenerationProvider({ children }) {
                 if (cfg && typeof cfg.enabled === 'boolean') setAiFeaturesEnabled(cfg.enabled);
             })
             .catch(() => { /* fail-open: leave AI visible on error */ });
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Derived values ──────────────────────────────────────────────
     const pendingDrafts = drafts.filter(

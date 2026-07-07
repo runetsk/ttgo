@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Execution-status colors (dots, bars, chart cells) now come from a single shared palette, so PASS/RUNNING/SKIP render consistently across the run pages, timeline, folder sidebar, and analytics.
 
 ### Fixed
+- Logged-out visits to /login no longer fire unauthenticated app-level API calls (folder tree, LLM providers, AI features) — they 401'd noisily and popped the session-expired modal over the login form; these fetches now wait for sign-in and refetch on each login. Also fixed a React "setState in render" error from the login page's already-signed-in redirect.
 - Test Runs list: "Passed"/"Failed" status filters matched nothing (sent PASSED/FAILED instead of PASS/FAIL).
 - Perf harness `run-config.json` now records the S4 `ws` knobs (`CLIENTS`,
   `HOLD_MINUTES`, `RESULTS_PER_SEC`, `USERS`); previously omitted, so a kept
