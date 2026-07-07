@@ -3,6 +3,7 @@ package runs_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestUploadScreenshotsReplacesExistingGalleryAndTouchesRun(t *testing.T) {
+func TestUploadScreenshotsAppendsToExistingGalleryAndTouchesRun(t *testing.T) {
 	s, err := newTestStore(t)
 	require.NoError(t, err)
 	srv := api.NewServer(s)
@@ -76,12 +77,19 @@ func TestUploadScreenshotsReplacesExistingGalleryAndTouchesRun(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond)
 
-	secondURLs := upload("a.png", "b.png")
-	require.Len(t, secondURLs, 2)
+	// A second upload appends to the existing gallery rather than replacing it:
+	// the response is the full merged set and the earlier files survive.
+	secondURLs := upload("d.png", "e.png")
+	require.Len(t, secondURLs, 5)
 
 	var updated models.RunResult
 	require.NoError(t, s.DB().First(&updated, "id = ?", result.ID).Error)
-	require.JSONEq(t, `["/api/uploads/screenshots/`+result.ID+`/step_001.png","/api/uploads/screenshots/`+result.ID+`/step_002.png"]`, updated.Screenshots)
+	require.JSONEq(t, `[`+
+		`"/api/uploads/screenshots/`+result.ID+`/step_001.png",`+
+		`"/api/uploads/screenshots/`+result.ID+`/step_002.png",`+
+		`"/api/uploads/screenshots/`+result.ID+`/step_003.png",`+
+		`"/api/uploads/screenshots/`+result.ID+`/step_004.png",`+
+		`"/api/uploads/screenshots/`+result.ID+`/step_005.png"]`, updated.Screenshots)
 	require.True(t, updated.UpdatedAt.After(result.UpdatedAt))
 
 	refreshedRun, err := s.GetTestRun(run.ID)
@@ -89,9 +97,10 @@ func TestUploadScreenshotsReplacesExistingGalleryAndTouchesRun(t *testing.T) {
 	require.NotNil(t, refreshedRun)
 	require.True(t, refreshedRun.UpdatedAt.After(initialUpdatedAt))
 
-	require.FileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, "step_001.png"))
-	require.FileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, "step_002.png"))
-	require.NoFileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, "step_003.png"))
+	for i := 1; i <= 5; i++ {
+		require.FileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, fmt.Sprintf("step_%03d.png", i)))
+	}
+	require.NoFileExists(t, filepath.Join(tmpDir, "uploads", "screenshots", result.ID, "step_006.png"))
 }
 
 // TestServeScreenshot_RejectsNonUUIDResultID: result IDs are always UUIDs, so a

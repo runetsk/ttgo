@@ -3,9 +3,10 @@ import DefectLinkPanel from './DefectLinkPanel';
 import CommentsPanel from './CommentsPanel';
 import ScreenshotGallery from './ScreenshotGallery';
 import AIVerdictBadge from './AIVerdictBadge';
-import { analyzeRunResult, listRunResultAnalyses } from '../api';
+import { analyzeRunResult, listRunResultAnalyses, uploadScreenshots } from '../api';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
+import { toast } from '../toast';
 
 const RunResultDetail = ({ result, attempts }) => {
     const [showLogs, setShowLogs] = useState(false);
@@ -18,6 +19,7 @@ const RunResultDetail = ({ result, attempts }) => {
     const { aiFeaturesEnabled } = useAIGeneration();
     const [galleryOpen, setGalleryOpen] = useState(false);
     const [galleryIndex, setGalleryIndex] = useState(0);
+    const [uploadingShots, setUploadingShots] = useState(false);
 
     const loadAnalyses = async (resultId) => {
         try {
@@ -37,6 +39,23 @@ const RunResultDetail = ({ result, attempts }) => {
     const activeResult = hasMultipleAttempts && selectedAttemptId
         ? attempts.find(a => a.id === selectedAttemptId) || result
         : result;
+
+    // Attach screenshots to the displayed attempt. The gallery refreshes on its
+    // own via the run:{id} WS delta this triggers, so no local state juggling.
+    const handleScreenshotUpload = async (e) => {
+        const files = Array.from(e.target.files || []);
+        e.target.value = '';
+        if (files.length === 0) return;
+        setUploadingShots(true);
+        try {
+            await uploadScreenshots(activeResult.test_run_id, activeResult.id, files);
+            toast.success(`${files.length} screenshot${files.length > 1 ? 's' : ''} attached`);
+        } catch {
+            toast.error('Failed to upload screenshots');
+        } finally {
+            setUploadingShots(false);
+        }
+    };
 
     const {
         status,
@@ -293,6 +312,33 @@ const RunResultDetail = ({ result, attempts }) => {
                     </div>
                 )}
             </div>
+
+            {/* Attach screenshots — manual evidence; appends to the gallery */}
+            {activeResult.id && (
+                <div style={{ marginBottom: 10 }}>
+                    <label
+                        data-testid="attach-screenshots"
+                        style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 6,
+                            padding: '5px 12px', borderRadius: 7, cursor: uploadingShots ? 'default' : 'pointer',
+                            border: '1px solid var(--border-color)', background: 'var(--bg-secondary)',
+                            color: 'var(--text-secondary)', fontSize: '0.78rem', fontWeight: 600,
+                            opacity: uploadingShots ? 0.6 : 1,
+                        }}
+                    >
+                        {"📎"} {uploadingShots ? 'Uploading…' : 'Attach screenshots'}
+                        <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/gif,image/webp"
+                            multiple
+                            disabled={uploadingShots}
+                            onChange={handleScreenshotUpload}
+                            data-testid="attach-screenshots-input"
+                            style={{ display: 'none' }}
+                        />
+                    </label>
+                </div>
+            )}
 
             {/* Screenshot inline strip */}
             {screenshotUrls.length > 0 && (

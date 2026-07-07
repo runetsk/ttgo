@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getTestRun, getTest, updateRunResult, completeTestRun } from '../api';
+import { getTestRun, getTest, updateRunResult, completeTestRun, uploadScreenshots } from '../api';
 import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
 import { toast } from '../toast';
@@ -17,15 +17,18 @@ export default function RunExecutePage() {
     const [failPanelOpen, setFailPanelOpen] = useState(false);
     const [defectType, setDefectType] = useState('to_investigate');
     const [failNote, setFailNote] = useState('');
+    const [failShotCount, setFailShotCount] = useState(0);
+    const [uploadingFailShots, setUploadingFailShots] = useState(false);
     const startedAtRef = useRef(null);
 
     // Restart the informal timer whenever a different test becomes current.
     useEffect(() => {
         startedAtRef.current = Date.now();
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the fail panel/defect-type/note draft for the newly-current test
         setFailPanelOpen(false);
         setDefectType('to_investigate');
         setFailNote('');
+        setFailShotCount(0);
+        setUploadingFailShots(false);
     }, [currentIdx]);
 
     useEffect(() => {
@@ -301,6 +304,42 @@ export default function RunExecutePage() {
                                 <textarea className="modern-input" rows={3} placeholder="What went wrong? (optional)"
                                     value={failNote} onChange={e => setFailNote(e.target.value)}
                                     data-testid="execute-fail-note" style={{ width: '100%', resize: 'vertical' }} />
+                                <label
+                                    data-testid="execute-attach-screenshots"
+                                    style={{
+                                        display: 'inline-flex', alignItems: 'center', gap: 6, alignSelf: 'flex-start',
+                                        padding: '5px 12px', borderRadius: 7, cursor: uploadingFailShots ? 'default' : 'pointer',
+                                        border: '1px solid var(--border-color)', background: 'var(--bg-secondary)',
+                                        color: 'var(--text-secondary)', fontSize: '0.78rem', fontWeight: 600,
+                                        opacity: uploadingFailShots ? 0.6 : 1,
+                                    }}
+                                >
+                                    {"📎"} {uploadingFailShots ? 'Uploading…' : failShotCount > 0 ? `${failShotCount} attached — add more` : 'Attach screenshots'}
+                                    <input
+                                        type="file"
+                                        accept="image/png,image/jpeg,image/gif,image/webp"
+                                        multiple
+                                        disabled={uploadingFailShots}
+                                        data-testid="execute-attach-screenshots-input"
+                                        style={{ display: 'none' }}
+                                        onChange={async (e) => {
+                                            const files = Array.from(e.target.files || []);
+                                            e.target.value = '';
+                                            const r = queue[currentIdx];
+                                            if (files.length === 0 || !r) return;
+                                            setUploadingFailShots(true);
+                                            try {
+                                                await uploadScreenshots(runId, r.id, files);
+                                                setFailShotCount(c => c + files.length);
+                                                toast.success(`${files.length} screenshot${files.length > 1 ? 's' : ''} attached`);
+                                            } catch {
+                                                toast.error('Failed to upload screenshots');
+                                            } finally {
+                                                setUploadingFailShots(false);
+                                            }
+                                        }}
+                                    />
+                                </label>
                                 <div style={{ display: 'flex', gap: 8 }}>
                                     <button className="primary-btn" onClick={() => submitVerdict('FAIL')}
                                         data-testid="execute-fail-confirm" style={{ padding: '7px 18px', fontSize: '0.85rem' }}>

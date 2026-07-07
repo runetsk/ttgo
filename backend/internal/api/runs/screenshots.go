@@ -27,10 +27,28 @@ const screenshotUploadLimit = 50 << 20 // 50 MB total per upload
 // traversal-relevant characters.
 var screenshotFilenameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,5}$`)
 
+// copyFileInto copies srcPath to dstPath, truncating/creating the destination.
+// Used to carry already-attached screenshots through the atomic staging swap
+// so an upload appends to (rather than replaces) a result's gallery.
+func copyFileInto(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	dst, err := os.Create(dstPath)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	_, err = io.Copy(dst, src)
+	return err
+}
+
 // handleUploadScreenshots handles POST /runs/{id}/results/{result_id}/screenshots
 //
 // @Summary      Upload screenshots
-// @Description  Upload one or more screenshot files for a run result. Accepts multipart/form-data with files under "screenshots". Max 50 MB total.
+// @Description  Append one or more screenshot files to a run result. Accepts multipart/form-data with files under "screenshots". Max 10 MB per file, 50 per result.
 // @Tags         runs
 // @Accept       multipart/form-data
 // @Produce      json
@@ -47,9 +65,10 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	resultID := r.PathValue("result_id")
 
-	// Verify result exists and belongs to this run
+	// Verify result exists and belongs to this run; load its existing
+	// screenshots so this upload appends rather than replaces them.
 	var result models.RunResult
-	if err := h.store.DB().Select("id").
+	if err := h.store.DB().Select("id", "screenshots").
 		Where("id = ? AND test_run_id = ?", resultID, runID).
 		First(&result).Error; err != nil {
 		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "result not found"})
@@ -73,6 +92,7 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
+	finalDir := filepath.Join(parentDir, resultID)
 
 	stageDir := filepath.Join(parentDir, resultID+".tmp-"+uuid.NewString())
 	if err := os.MkdirAll(stageDir, 0o755); err != nil {
@@ -84,13 +104,40 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 
 	const maxScreenshots = 50
 	const maxScreenshotBytes = 10 << 20 // 10 MB per file
-	if len(files) > maxScreenshots {
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "too many screenshots (max 50)"})
+
+	// Append semantics: copy any already-attached files into the staging dir so
+	// the atomic swap below keeps them, then number new uploads after them. Their
+	// URLs (plus any external ones already recorded) merge ahead of the new ones.
+	var existingURLs []string
+	if result.Screenshots != "" {
+		_ = json.Unmarshal([]byte(result.Screenshots), &existingURLs)
+	}
+	existingFileCount := 0
+	if entries, err := os.ReadDir(finalDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			if err := copyFileInto(filepath.Join(finalDir, e.Name()), filepath.Join(stageDir, e.Name())); err != nil {
+				slog.ErrorContext(r.Context(), "failed to stage existing screenshot", "name", e.Name(), "error", err)
+				httpx.Error(w, http.StatusInternalServerError, err)
+				return
+			}
+			existingFileCount++
+		}
+	} else if !os.IsNotExist(err) {
+		slog.ErrorContext(r.Context(), "failed to read existing screenshot directory", "dir", finalDir, "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if existingFileCount+len(files) > maxScreenshots {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "too many screenshots (max 50 per result)"})
 		return
 	}
 	allowedExt := map[string]string{"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
 
-	var urls []string
+	var newURLs []string
 	for i, fh := range files {
 		if fh.Size > maxScreenshotBytes {
 			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "screenshot too large (max 10 MB each)"})
@@ -120,7 +167,7 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		filename := fmt.Sprintf("step_%03d%s", i+1, ext)
+		filename := fmt.Sprintf("step_%03d%s", existingFileCount+i+1, ext)
 		destPath := filepath.Join(stageDir, filename)
 
 		dst, err := os.Create(destPath)
@@ -142,10 +189,9 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 		dst.Close()
 
 		url := fmt.Sprintf("/api/uploads/screenshots/%s/%s", resultID, filename)
-		urls = append(urls, url)
+		newURLs = append(newURLs, url)
 	}
 
-	finalDir := filepath.Join(parentDir, resultID)
 	backupDir := filepath.Join(parentDir, resultID+".bak-"+uuid.NewString())
 	hadExistingDir := false
 	if _, err := os.Stat(finalDir); err == nil {
@@ -170,7 +216,8 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	urlsJSON, _ := json.Marshal(urls)
+	mergedURLs := append(existingURLs, newURLs...)
+	urlsJSON, _ := json.Marshal(mergedURLs)
 	now := time.Now()
 	if err := h.store.DB().Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&models.RunResult{}).
@@ -199,7 +246,7 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 	h.broadcastResultDelta(apiws.EventResultUpdated, runID, []string{resultID}, nil, nil)
 
 	httpx.JSON(w, http.StatusCreated, map[string]interface{}{
-		"screenshots": urls,
+		"screenshots": mergedURLs,
 	})
 }
 
