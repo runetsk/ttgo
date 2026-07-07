@@ -5,6 +5,7 @@ import { activeColumns } from '../utils/columnFeatures';
 import { toast } from '../toast';
 
 import ColumnPicker from '../components/ColumnPicker';
+import AssigneePicker from '../components/AssigneePicker';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { useColumnPreference } from '../hooks/useColumnPreference';
 import { useColumnWidths } from '../hooks/useColumnWidths';
@@ -261,6 +262,11 @@ export default function TestRunDetail() {
                     <option value="SKIP">SKIP</option>
                     <option value="ERROR">ERROR</option>
                 </select>
+                <AssigneePicker
+                    runId={runId}
+                    assigneeId={run.assignee_id}
+                    assigneeName={run.assignee_name}
+                />
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
                     {(run.status === 'PENDING' || run.status === 'RUNNING' || run.status === 'SKIP') && (
                         <button

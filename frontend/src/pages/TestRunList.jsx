@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getTestRuns, getCategories, getRunFolders } from '../api';
+import { getTestRuns, getCategories, getRunFolders, getAssignableUsers } from '../api';
 import CreateRunModal from '../components/CreateRunModal';
 import Modal from '../components/Modal';
 import DateRangeFilter from '../components/filters/DateRangeFilter';
@@ -26,6 +26,7 @@ const COLUMN_DEFS = [
     { key: 'total',        label: 'Total',        mandatory: false, defaultVisible: true,  defaultWidth: 60 },
     { key: 'folder',       label: 'Folder',       mandatory: false, defaultVisible: false, defaultWidth: 120 },
     { key: 'category',        label: 'Category',        mandatory: false, defaultVisible: true,  defaultWidth: 120 },
+    { key: 'assignee',     label: 'Assignee',     mandatory: false, defaultVisible: true,  defaultWidth: 140 },
     { key: 'comments',     label: 'Comments',     mandatory: false, defaultVisible: true,  defaultWidth: 80 },
     { key: 'created_at',   label: 'Created At',   mandatory: false, defaultVisible: true,  defaultWidth: 160 },
     { key: 'updated_at',   label: 'Updated At',   mandatory: false, defaultVisible: false, defaultWidth: 160 },
@@ -42,6 +43,8 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
     const [filterCategoryIds, setFilterCategoryIds] = useState([]);
     const [filterCreated, setFilterCreated] = useState({ from: null, to: null });
     const [filterUpdated, setFilterUpdated] = useState({ from: null, to: null });
+    const [filterAssignee, setFilterAssignee] = useState(""); // "", "me", "unassigned", or a user id
+    const [assignableUsers, setAssignableUsers] = useState([]);
     const [sortBy, setSortBy] = useState("created_at");
     const [sortOrder, setSortOrder] = useState("DESC");
     const [page, setPage] = useState(1);
@@ -68,6 +71,7 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
         getTestRuns(filterCategoryIds, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId, {
             createdFrom: filterCreated.from, createdTo: filterCreated.to,
             updatedFrom: filterUpdated.from, updatedTo: filterUpdated.to,
+            assigneeId: filterAssignee,
         })
             .then(data => {
                 const loadedRuns = data.runs || [];
@@ -82,7 +86,7 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                 if (resetSelection) setSelectedRunIds([]);
                 if (onRunsLoaded) onRunsLoaded([]);
             });
-    }, [filterCategoryIds, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId, filterCreated, filterUpdated, onRunsLoaded]);
+    }, [filterCategoryIds, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId, filterCreated, filterUpdated, filterAssignee, onRunsLoaded]);
 
     useEffect(() => {
         getCategories()
@@ -91,6 +95,9 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
         getRunFolders()
             .then(data => setFolders(data.run_folders || []))
             .catch(() => setFolders([]));
+        getAssignableUsers()
+            .then(setAssignableUsers)
+            .catch(() => setAssignableUsers([]));
     }, []);
 
     // 018-websocket-realtime: subscribe to run list updates
@@ -111,7 +118,7 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
     // Reset page when filters change (including folder selection)
     useEffect(() => {
         setPage(1);
-    }, [filterCategoryIds, filterStatus, sortBy, sortOrder, selectedFolderId, filterCreated, filterUpdated]);
+    }, [filterCategoryIds, filterStatus, sortBy, sortOrder, selectedFolderId, filterCreated, filterUpdated, filterAssignee]);
 
     const handleCreateSuccess = (run) => {
         setShowModal(false);
@@ -342,6 +349,12 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                                     <div className={`col-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={(e) => startResize('category', e)} onDoubleClick={(e) => { e.stopPropagation(); resetColumnWidth('category'); }} />
                                 </th>
                             )}
+                            {isVisible('assignee') && (
+                                <th className="col-resize-th" style={{ width: columnWidths['assignee'], userSelect: 'none' }}>
+                                    Assignee
+                                    <div className={`col-resize-handle${isResizing ? ' active' : ''}`} onMouseDown={(e) => startResize('assignee', e)} onDoubleClick={(e) => { e.stopPropagation(); resetColumnWidth('assignee'); }} />
+                                </th>
+                            )}
                             {isVisible('comments') && (
                                 <th className="col-resize-th" style={{ width: columnWidths['comments'] }}>
                                     Comments
@@ -400,6 +413,23 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                                             onChange={(ids) => { setFilterCategoryIds(ids); setPage(1); }}
                                             testId="filter-run-category"
                                         />
+                                    </th>
+                                )}
+                                {isVisible('assignee') && (
+                                    <th>
+                                        <select
+                                            className="col-filter-select"
+                                            value={filterAssignee}
+                                            onChange={e => { setFilterAssignee(e.target.value); setPage(1); }}
+                                            data-testid="filter-run-assignee"
+                                        >
+                                            <option value="">All</option>
+                                            <option value="me">Assigned to me</option>
+                                            <option value="unassigned">Unassigned</option>
+                                            {assignableUsers.map(u => (
+                                                <option key={u.id} value={u.id}>{u.display_name || u.email}</option>
+                                            ))}
+                                        </select>
                                     </th>
                                 )}
                                 {isVisible('comments') && <th></th>}
@@ -530,6 +560,13 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
                                         <td>
                                             <span className="category-tag" style={{ fontSize: '0.75rem', padding: '2px 8px' }}>
                                                 {(categories || []).find(s => s.id === run.category_id)?.name || run.category_id}
+                                            </span>
+                                        </td>
+                                    )}
+                                    {isVisible('assignee') && (
+                                        <td>
+                                            <span data-testid={`run-assignee-${run.id}`} style={{ fontSize: '0.8rem', color: run.assignee_name ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                                                {run.assignee_name || '—'}
                                             </span>
                                         </td>
                                     )}

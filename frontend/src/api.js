@@ -111,6 +111,7 @@ export const getTestRuns = (categoryIds, status, sortBy, order, page = 1, pageSi
     if (dateFilters.createdTo) params.append('created_to', dateFilters.createdTo);
     if (dateFilters.updatedFrom) params.append('updated_from', dateFilters.updatedFrom);
     if (dateFilters.updatedTo) params.append('updated_to', dateFilters.updatedTo);
+    if (dateFilters.assigneeId) params.append('assignee_id', dateFilters.assigneeId);
 
     const offset = (page - 1) * pageSize;
     params.append('limit', pageSize);
@@ -129,6 +130,9 @@ export const createTestRun = (categoryId, name, runFolderId = null, testCaseIds 
 export const updateTestRun = (id, name, categoryId, status) => api.put(`/runs/${id}`, { name, ...(categoryId ? { category_id: categoryId } : {}), ...(status ? { status } : {}) }).then(res => res.data);
 export const completeTestRun = (id) => api.post(`/runs/${id}/complete`).then(res => res.data);
 export const reopenTestRun = (id) => api.post(`/runs/${id}/reopen`).then(res => res.data);
+export const getAssignableUsers = () => api.get('/users/assignable').then(res => res.data.users || []);
+export const assignRun = (runId, assigneeId) =>
+    api.put(`/runs/${runId}/assignee`, { assignee_id: assigneeId || null }).then(res => res.data);
 export const deleteTestRun = (id) => api.delete(`/runs/${id}`);
 export const deleteTestRuns = (ids) => api.post('/runs/bulk-delete', { ids });
 
