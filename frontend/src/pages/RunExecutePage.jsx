@@ -5,6 +5,7 @@ import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
 import { toast } from '../toast';
 import { STATUS_COLORS } from '../utils/statusColors';
+import { buildStepResults, parseStepVerdicts } from '../utils/stepResults';
 
 export default function RunExecutePage() {
     const { runId } = useParams();
@@ -19,6 +20,8 @@ export default function RunExecutePage() {
     const [failNote, setFailNote] = useState('');
     const [failShotCount, setFailShotCount] = useState(0);
     const [uploadingFailShots, setUploadingFailShots] = useState(false);
+    const [stepVerdicts, setStepVerdicts] = useState({}); // order_index -> { status, note }
+    const stepSaveTimer = useRef(null);
     const startedAtRef = useRef(null);
 
     // Restart the informal timer whenever a different test becomes current.
@@ -29,7 +32,8 @@ export default function RunExecutePage() {
         setFailNote('');
         setFailShotCount(0);
         setUploadingFailShots(false);
-    }, [currentIdx]);
+        setStepVerdicts(parseStepVerdicts(queue[currentIdx]?.steps));
+    }, [currentIdx, queue]);
 
     useEffect(() => {
         getTestRun(runId)
@@ -79,10 +83,15 @@ export default function RunExecutePage() {
     const submitVerdict = useCallback(async (status) => {
         const r = queue[currentIdx];
         if (!r || r.status === status) return;
+        if (stepSaveTimer.current) clearTimeout(stepSaveTimer.current);
         const payload = { status, duration_ms: Date.now() - startedAtRef.current };
         if (status === 'FAIL') {
             payload.defect_type = defectType;
             if (failNote.trim()) payload.error_message = failNote.trim();
+        }
+        const markedTc = r.test_case_id ? caseCache[r.test_case_id] : null;
+        if (markedTc && Object.keys(stepVerdicts).length > 0) {
+            payload.steps = buildStepResults(markedTc.steps || [], stepVerdicts);
         }
         try {
             await updateRunResult(runId, r.id, payload);
@@ -92,13 +101,37 @@ export default function RunExecutePage() {
         }
         const updated = queue.map((item, i) =>
             i === currentIdx
-                ? { ...item, status, defect_type: payload.defect_type ?? item.defect_type, error_message: payload.error_message ?? item.error_message }
+                ? { ...item, status, defect_type: payload.defect_type ?? item.defect_type, error_message: payload.error_message ?? item.error_message, steps: payload.steps ?? item.steps }
                 : item
         );
         setQueue(updated);
         setFailPanelOpen(false);
         advance(currentIdx, updated);
-    }, [queue, currentIdx, runId, defectType, failNote, advance]);
+    }, [queue, currentIdx, runId, defectType, failNote, advance, caseCache, stepVerdicts]);
+
+    const persistSteps = useCallback((verdicts) => {
+        const r = queue[currentIdx];
+        const tc = r?.test_case_id ? caseCache[r.test_case_id] : null;
+        if (!r || !tc) return;
+        const steps = buildStepResults(tc.steps || [], verdicts);
+        if (stepSaveTimer.current) clearTimeout(stepSaveTimer.current);
+        stepSaveTimer.current = setTimeout(() => {
+            updateRunResult(runId, r.id, { steps }).catch(() => toast.error('Failed to save step result'));
+        }, 500);
+    }, [queue, currentIdx, caseCache, runId]);
+
+    const markStep = useCallback((orderIndex, status) => {
+        const next = { ...stepVerdicts, [orderIndex]: { status, note: stepVerdicts[orderIndex]?.note || '' } };
+        setStepVerdicts(next);
+        persistSteps(next);
+        if (status === 'FAIL') setFailPanelOpen(true);
+    }, [stepVerdicts, persistSteps]);
+
+    const setStepNote = useCallback((orderIndex, note) => {
+        const next = { ...stepVerdicts, [orderIndex]: { status: stepVerdicts[orderIndex]?.status || '', note } };
+        setStepVerdicts(next);
+        persistSteps(next);
+    }, [stepVerdicts, persistSteps]);
 
     useEffect(() => {
         const onKey = (e) => {
@@ -241,30 +274,60 @@ export default function RunExecutePage() {
                                         <p style={{ fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
                                             No steps authored for this test case.
                                         </p>
-                                    ) : steps.map((s, i) => (
+                                    ) : steps.map((s, i) => {
+                                        const v = stepVerdicts[s.order_index] || { status: '', note: '' };
+                                        const btn = (active, color, bg) => ({
+                                            width: 30, height: 30, borderRadius: 7, cursor: 'pointer', fontSize: '0.9rem',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                            color: active ? '#fff' : color,
+                                            background: active ? color : bg,
+                                            border: `1px solid ${active ? color : 'var(--border-color)'}`,
+                                        });
+                                        return (
                                         <div key={s.id || i} data-testid={`execute-step-${s.order_index}`}
                                             style={{
-                                                display: 'flex', gap: 12, padding: '10px 12px', marginBottom: 8,
-                                                background: 'var(--bg-secondary)', borderRadius: 8,
-                                                border: '1px solid var(--border-color)',
+                                                display: 'flex', flexDirection: 'column', gap: 8, padding: '10px 12px', marginBottom: 8,
+                                                background: v.status === 'FAIL' ? 'rgba(239,68,68,0.06)' : 'var(--bg-secondary)', borderRadius: 8,
+                                                border: `1px solid ${v.status === 'FAIL' ? 'rgba(239,68,68,0.3)' : 'var(--border-color)'}`,
                                             }}>
-                                            <span style={{
-                                                minWidth: 22, height: 22, borderRadius: '50%', flexShrink: 0,
-                                                background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
-                                                color: 'var(--text-secondary)', fontSize: '0.7rem', fontWeight: 600,
-                                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                            }}>{i + 1}</span>
-                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                <SafeHTML html={s.action} style={{ fontSize: '0.87rem' }} />
-                                                {s.expected_result && (
-                                                    <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'baseline' }}>
-                                                        <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--accent-green)', textTransform: 'uppercase', flexShrink: 0 }}>Expected</span>
-                                                        <SafeHTML html={s.expected_result} style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }} />
-                                                    </div>
-                                                )}
+                                            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                                                <span style={{
+                                                    minWidth: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+                                                    background: 'var(--bg-primary)', border: '1px solid var(--border-color)',
+                                                    color: 'var(--text-secondary)', fontSize: '0.7rem', fontWeight: 600,
+                                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                                }}>{i + 1}</span>
+                                                <div style={{ flex: 1, minWidth: 0 }}>
+                                                    <SafeHTML html={s.action} style={{ fontSize: '0.87rem' }} />
+                                                    {s.expected_result && (
+                                                        <div style={{ marginTop: 4, display: 'flex', gap: 6, alignItems: 'baseline' }}>
+                                                            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--accent-green)', textTransform: 'uppercase', flexShrink: 0 }}>Expected</span>
+                                                            <SafeHTML html={s.expected_result} style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }} />
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                                    <button data-testid={`execute-step-pass-${s.order_index}`} title="Pass"
+                                                        onClick={() => markStep(s.order_index, 'PASS')}
+                                                        style={btn(v.status === 'PASS', 'var(--accent-green)', 'rgba(34,197,94,0.1)')}>✓</button>
+                                                    <button data-testid={`execute-step-fail-${s.order_index}`} title="Fail"
+                                                        onClick={() => markStep(s.order_index, 'FAIL')}
+                                                        style={btn(v.status === 'FAIL', 'var(--accent-red)', 'rgba(239,68,68,0.1)')}>✕</button>
+                                                    <button data-testid={`execute-step-skip-${s.order_index}`} title="Skip"
+                                                        onClick={() => markStep(s.order_index, 'SKIP')}
+                                                        style={btn(v.status === 'SKIP', '#9ca3af', 'rgba(156,163,175,0.1)')}>⊘</button>
+                                                </div>
                                             </div>
+                                            {v.status && (
+                                                <input type="text" className="modern-input"
+                                                    data-testid={`execute-step-note-${s.order_index}`}
+                                                    placeholder="Note (optional)" value={v.note}
+                                                    onChange={e => setStepNote(s.order_index, e.target.value)}
+                                                    style={{ fontSize: '0.8rem', marginLeft: 34, width: 'calc(100% - 34px)' }} />
+                                            )}
                                         </div>
-                                    ))}
+                                        );
+                                    })}
                                 </div>
                             );
                         })()}

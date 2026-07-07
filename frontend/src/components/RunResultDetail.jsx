@@ -6,6 +6,8 @@ import AIVerdictBadge from './AIVerdictBadge';
 import { analyzeRunResult, listRunResultAnalyses, uploadScreenshots } from '../api';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
+import { isManualStepResults } from '../utils/stepResults';
+import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
 const RunResultDetail = ({ result, attempts }) => {
@@ -427,7 +429,27 @@ const RunResultDetail = ({ result, attempts }) => {
                             )}
                         </div>
                     )}
-                    {steps && (
+                    {steps && isManualStepResults(steps) && (
+                        <div data-testid="result-step-checklist" style={{ flex: 1 }}>
+                            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--accent-indigo)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Steps</div>
+                            {[...steps].sort((a, b) => (a.order_index || 0) - (b.order_index || 0)).map((s, i) => {
+                                const dot = s.status === 'PASS' ? { c: 'var(--accent-green)', m: '✓' }
+                                    : s.status === 'FAIL' ? { c: 'var(--accent-red)', m: '✕' }
+                                    : s.status === 'SKIP' ? { c: '#9ca3af', m: '⊘' }
+                                    : { c: 'var(--text-secondary)', m: '○' };
+                                return (
+                                    <div key={i} style={{ display: 'flex', gap: 10, padding: '6px 0', borderTop: i > 0 ? '1px solid var(--border-color)' : 'none' }}>
+                                        <span style={{ color: dot.c, fontWeight: 700, flexShrink: 0, width: 16, textAlign: 'center' }}>{dot.m}</span>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                            <SafeHTML html={s.action} style={{ fontSize: '0.82rem' }} />
+                                            {s.note && <div style={{ fontSize: '0.76rem', color: 'var(--accent-red)', marginTop: 2 }}>{s.note}</div>}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    )}
+                    {steps && !isManualStepResults(steps) && (
                         <div style={{ flex: 1 }}>
                             <button
                                 onClick={() => setShowSteps(!showSteps)}
