@@ -266,6 +266,7 @@ export default function TestRunDetail() {
                     runId={runId}
                     assigneeId={run.assignee_id}
                     assigneeName={run.assignee_name}
+                    onAssigned={loadRun}
                 />
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
                     {(run.status === 'PENDING' || run.status === 'RUNNING' || run.status === 'SKIP') && (
