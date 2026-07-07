@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Execution mode on run detail: step-by-step manual execution with Pass/Fail/Skip, defect classification, auto-advance, and duration capture.
 - Attach screenshots to a run result as manual evidence — from the execution-mode fail panel and the expandable result detail. Uploads now append to a result's gallery instead of replacing it.
 - Per-step Pass/Fail/Skip verdicts with optional notes during manual execution; marking a step fail derives the result to FAIL, and the result detail shows the captured step checklist.
+- Assign a test run to a user from the run detail header, and filter the runs list by assignee — including "assigned to me" and "unassigned".
 
 ### Changed
 - Creating a test run now opens its detail page immediately.

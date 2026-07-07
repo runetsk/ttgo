@@ -597,6 +597,12 @@ definitions:
     type: object
   ttgo_pkg_tracker_models.TestRun:
     properties:
+      assignee_id:
+        description: nullable, app-validated ref to users.id
+        type: string
+      assignee_name:
+        description: Assignee display name (not persisted, populated by GetTestRuns/GetTestRun/GetTestRunSummary)
+        type: string
       automation_bug_count:
         type: integer
       category_id:
@@ -4478,6 +4484,23 @@ paths:
       security:
       - SessionCookie: []
       summary: Restore deleted user
+      tags:
+      - users
+  /users/assignable:
+    get:
+      description: Returns active, non-deleted users (minimal fields) for assignee
+        pickers. Any authenticated user.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              users:
+                type: array
+            type: object
+      summary: List assignable users
       tags:
       - users
   /webhooks:

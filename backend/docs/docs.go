@@ -5535,6 +5535,31 @@ const docTemplate = `{
                 }
             }
         },
+        "/users/assignable": {
+            "get": {
+                "description": "Returns active, non-deleted users (minimal fields) for assignee pickers. Any authenticated user.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "users"
+                ],
+                "summary": "List assignable users",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "users": {
+                                    "type": "array"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/users/{id}": {
             "delete": {
                 "security": [
@@ -6849,6 +6874,14 @@ const docTemplate = `{
         "ttgo_pkg_tracker_models.TestRun": {
             "type": "object",
             "properties": {
+                "assignee_id": {
+                    "description": "nullable, app-validated ref to users.id",
+                    "type": "string"
+                },
+                "assignee_name": {
+                    "description": "Assignee display name (not persisted, populated by GetTestRuns/GetTestRun/GetTestRunSummary)",
+                    "type": "string"
+                },
                 "automation_bug_count": {
                     "type": "integer"
                 },
