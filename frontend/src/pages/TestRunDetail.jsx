@@ -196,8 +196,8 @@ export default function TestRunDetail() {
     const selectedInRun = latestResults.filter(r => selectedResults.has(r.id));
     const execCount = selectedInRun.length;
     const handleExecute = () => {
-        const qs = execCount > 0 ? `?only=${selectedInRun.map(r => r.id).join(',')}` : '';
-        navigate(`/runs/run/${runId}/execute${qs}`);
+        if (execCount === 0) return;
+        navigate(`/runs/run/${runId}/execute?only=${selectedInRun.map(r => r.id).join(',')}`);
     };
 
     const handleStatusChange = async (newStatus) => {
@@ -320,8 +320,9 @@ export default function TestRunDetail() {
                     <button
                         className="action-btn"
                         onClick={handleExecute}
-                        title={execCount > 0 ? `Execute ${execCount} selected test${execCount === 1 ? '' : 's'}` : 'Execute all tests one by one'}
-                        style={{ color: 'var(--accent-indigo)', borderColor: 'rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)', padding: '5px 12px', fontSize: '0.8rem' }}
+                        disabled={execCount === 0}
+                        title={execCount > 0 ? `Execute ${execCount} selected test${execCount === 1 ? '' : 's'}` : 'Select one or more tests to execute'}
+                        style={{ color: 'var(--accent-indigo)', borderColor: 'rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)', padding: '5px 12px', fontSize: '0.8rem', opacity: execCount === 0 ? 0.5 : 1, cursor: execCount === 0 ? 'not-allowed' : 'pointer' }}
                         data-testid="execute-run-button"
                     >
                         ▶ Execute{execCount > 0 ? ` (${execCount})` : ''}

@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - New Test Run modal is now a larger folder/test tree picker (tri-state folder checkboxes), and newly created runs appear in the run sidebar live.
-- Run detail's Execute button now runs only the checked results when any rows are selected — showing the count (e.g. "Execute (3)") and scoping the execution queue to that subset; with nothing checked it walks the whole run as before.
+- Run detail's Execute button now runs only the checked results — showing the count (e.g. "Execute (3)") and scoping the execution queue to that subset. It is disabled until at least one result is checked (use the header select-all checkbox to run the whole run).
 - Creating a test run now opens its detail page immediately.
 - WebSocket result-level events (`result_updated`, `result_bulk_updated`,
   `result_retried`, `result_deleted`) now carry a delta payload

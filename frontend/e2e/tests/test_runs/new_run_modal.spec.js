@@ -58,17 +58,19 @@ test.describe('New run modal — tree picker', () => {
             }
         });
 
-        await test.step('With nothing checked, Execute carries no count', async () => {
+        await test.step('With nothing checked, Execute is disabled and countless', async () => {
             await page.goto(`/runs/run/${run.id}`);
             await expect(page.getByTestId('stats-passed')).toContainText('/ 3');
+            await expect(page.getByTestId('execute-run-button')).toBeDisabled();
             await expect(page.getByTestId('execute-run-button')).not.toContainText('(');
         });
 
-        await test.step('Checking two rows updates the Execute count to (2)', async () => {
+        await test.step('Checking two rows enables Execute and shows the count (2)', async () => {
             // The row checkbox is a custom-styled label wrapping a collapsed native
             // input; clicking the label natively toggles it and fires onChange.
             await page.getByTestId(`select-result-${tc['Beta exec'].id}`).click();
             await page.getByTestId(`select-result-${tc['Gamma exec'].id}`).click();
+            await expect(page.getByTestId('execute-run-button')).toBeEnabled();
             await expect(page.getByTestId('execute-run-button')).toContainText('(2)');
         });
 

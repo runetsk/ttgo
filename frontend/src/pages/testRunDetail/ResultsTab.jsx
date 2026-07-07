@@ -370,7 +370,7 @@ export default function ResultsTab({
             <thead>
                 <tr>
                     <th style={{ width: 32, textAlign: 'center', padding: '6px 0', position: 'relative' }}>
-                        <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: selectedResults.size > 0 ? '2px solid var(--accent-indigo)' : '2px solid var(--border-color)', background: selectedResults.size === filteredResults.length && filteredResults.length > 0 ? 'var(--accent-indigo)' : selectedResults.size > 0 ? 'rgba(99,102,241,0.2)' : 'transparent', transition: 'all 0.15s ease', position: 'relative' }}>
+                        <label data-testid="select-all-results" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: 20, height: 20, borderRadius: 5, border: selectedResults.size > 0 ? '2px solid var(--accent-indigo)' : '2px solid var(--border-color)', background: selectedResults.size === filteredResults.length && filteredResults.length > 0 ? 'var(--accent-indigo)' : selectedResults.size > 0 ? 'rgba(99,102,241,0.2)' : 'transparent', transition: 'all 0.15s ease', position: 'relative' }}>
                             <input
                                 type="checkbox"
                                 checked={filteredResults.length > 0 && selectedResults.size === filteredResults.length}

@@ -64,8 +64,10 @@ test.describe('Manual run journey', () => {
 
         await test.step('Enter execution mode from the run header', async () => {
             await page.goto(`/runs/run/${run.id}`);
+            // Execute is scoped to checked rows; select-all runs the whole queue.
+            await page.getByTestId('select-all-results').click();
             await page.getByTestId('execute-run-button').click();
-            await expect(page).toHaveURL(new RegExp(`/runs/run/${run.id}/execute$`));
+            await expect(page).toHaveURL(new RegExp(`/runs/run/${run.id}/execute`));
         });
 
         await test.step('First pending test is shown with progress', async () => {
