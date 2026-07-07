@@ -531,7 +531,7 @@ definitions:
         - $ref: '#/definitions/ttgo_pkg_tracker_models.TestCase'
         description: Association (not stored, loaded via preload)
       test_case_id:
-        description: Nullable if test case is deleted
+        description: Nullable if test case is deleted; covered by idx_run_results_case_time
         type: string
       test_name_snapshot:
         description: Preserved name
@@ -640,7 +640,7 @@ definitions:
       status:
         allOf:
         - $ref: '#/definitions/ttgo_pkg_tracker_models.ExecutionStatus'
-        description: PENDING, RUNNING, PASSED, FAILED, etc.
+        description: PENDING, RUNNING, PASS, FAIL, SKIP, ERROR
       system_issue_count:
         type: integer
       to_investigate_count:
@@ -3318,8 +3318,8 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Upload one or more screenshot files for a run result. Accepts multipart/form-data
-        with files under "screenshots". Max 50 MB total.
+      description: Append one or more screenshot files to a run result. Accepts multipart/form-data
+        with files under "screenshots". Max 10 MB per file, 50 per result.
       parameters:
       - description: Test run ID
         in: path
@@ -3368,7 +3368,7 @@ paths:
             type: object
       security:
       - BearerAuth: []
-      summary: Upload screenshots
+      summary: Append screenshots
       tags:
       - runs
   /search:

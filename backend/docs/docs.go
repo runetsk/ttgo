@@ -3965,7 +3965,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Upload one or more screenshot files for a run result. Accepts multipart/form-data with files under \"screenshots\". Max 50 MB total.",
+                "description": "Append one or more screenshot files to a run result. Accepts multipart/form-data with files under \"screenshots\". Max 10 MB per file, 50 per result.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -3975,7 +3975,7 @@ const docTemplate = `{
                 "tags": [
                     "runs"
                 ],
-                "summary": "Upload screenshots",
+                "summary": "Append screenshots",
                 "parameters": [
                     {
                         "type": "string",
@@ -6761,7 +6761,7 @@ const docTemplate = `{
                     ]
                 },
                 "test_case_id": {
-                    "description": "Nullable if test case is deleted",
+                    "description": "Nullable if test case is deleted; covered by idx_run_results_case_time",
                     "type": "string"
                 },
                 "test_name_snapshot": {
@@ -6907,7 +6907,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "status": {
-                    "description": "PENDING, RUNNING, PASSED, FAILED, etc.",
+                    "description": "PENDING, RUNNING, PASS, FAIL, SKIP, ERROR",
                     "allOf": [
                         {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.ExecutionStatus"

@@ -47,7 +47,7 @@ func copyFileInto(srcPath, dstPath string) error {
 
 // handleUploadScreenshots handles POST /runs/{id}/results/{result_id}/screenshots
 //
-// @Summary      Upload screenshots
+// @Summary      Append screenshots
 // @Description  Append one or more screenshot files to a run result. Accepts multipart/form-data with files under "screenshots". Max 10 MB per file, 50 per result.
 // @Tags         runs
 // @Accept       multipart/form-data
@@ -131,7 +131,9 @@ func (h *Handler) UploadScreenshots(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if existingFileCount+len(files) > maxScreenshots {
+	// Bound the whole gallery (existing entries, including any external URLs,
+	// plus this upload), not just the on-disk files.
+	if len(existingURLs)+len(files) > maxScreenshots {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "too many screenshots (max 50 per result)"})
 		return
 	}
