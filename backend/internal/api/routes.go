@@ -67,7 +67,7 @@ func mountAPIRoutes(s *Server, api *routegroup.Bundle) {
 	apitokens.Mount(api, apitokens.NewHandler(s.store), s.requireAdmin)
 	apiwebhooks.Mount(api, apiwebhooks.NewHandler(s.store), s.requireAuth)
 	apibackups.Mount(api, s.backups, s.requireAdmin)
-	apiusers.Mount(api, apiusers.NewHandler(s.store, s.Hub, userFromContext, authHandler.LogAuthEvent), s.requireAdmin)
+	apiusers.Mount(api, apiusers.NewHandler(s.store, s.Hub, userFromContext, authHandler.LogAuthEvent), s.requireAdmin, s.requireAuth)
 	apianalytics.Mount(api, apianalytics.NewHandler(s.store), s.requireAuth)
 	apidefects.Mount(api, apidefects.NewHandler(s.store), s.requireAuth)
 

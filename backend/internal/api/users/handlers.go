@@ -55,6 +55,26 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ListAssignable processes GET /api/users/assignable (any authenticated user).
+//
+// @Summary      List assignable users
+// @Description  Returns active, non-deleted users (minimal fields) for assignee pickers. Any authenticated user.
+// @Tags         users
+// @Produce      json
+// @Success      200  {object}  object{users=array}
+// @Router       /users/assignable [get]
+func (h *Handler) ListAssignable(w http.ResponseWriter, r *http.Request) {
+	list, err := h.store.ListAssignableUsers()
+	if err != nil {
+		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": "could not list users"})
+		return
+	}
+	if list == nil {
+		list = []store.AssignableUser{}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"users": list})
+}
+
 // handleCreateUser processes POST /api/users (admin only).
 //
 // @Summary      Create user

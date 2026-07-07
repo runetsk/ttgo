@@ -6,8 +6,9 @@ import (
 	"github.com/go-pkgz/routegroup"
 )
 
-func Mount(api *routegroup.Bundle, h *Handler, requireAdmin routing.AdminMiddleware) {
+func Mount(api *routegroup.Bundle, h *Handler, requireAdmin routing.AdminMiddleware, requireAuth routing.AuthMiddleware) {
 	api.HandleFunc("GET /users", requireAdmin(h.List))
+	api.HandleFunc("GET /users/assignable", requireAuth("read", h.ListAssignable))
 	api.HandleFunc("POST /users", requireAdmin(h.Create))
 	api.HandleFunc("PATCH /users/{id}", requireAdmin(h.Update))
 	api.HandleFunc("DELETE /users/{id}", requireAdmin(h.Delete))

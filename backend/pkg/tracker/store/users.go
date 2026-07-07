@@ -51,6 +51,24 @@ func (s *Store) GetUser(id string) (*models.User, error) {
 	return &u, nil
 }
 
+// AssignableUser is the minimal projection returned by the non-admin
+// assignable-users endpoint (no password/role/active/deleted/timestamps).
+type AssignableUser struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+}
+
+// ListAssignableUsers returns active, non-deleted users for the assignee picker.
+func (s *Store) ListAssignableUsers() ([]AssignableUser, error) {
+	var users []AssignableUser
+	err := s.db.Model(&models.User{}).
+		Where("active = ? AND deleted = ?", true, false).
+		Order("display_name ASC, email ASC").
+		Find(&users).Error
+	return users, err
+}
+
 // ListUsers returns users ordered by created_at asc.
 // If includeDeleted is false, users with Deleted=true are excluded.
 func (s *Store) ListUsers(includeDeleted bool) ([]*models.User, error) {
