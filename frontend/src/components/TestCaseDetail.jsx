@@ -4,6 +4,7 @@ import StepsEditor from './StepsEditor';
 import RichTextField from './RichTextField';
 import HistorySidebar from './HistorySidebar';
 import RequirementLinkPanel from './RequirementLinkPanel';
+import LinkedBugsPanel from './LinkedBugsPanel';
 import { updateTest, getCustomFields, getTest, getCategories, getFolderTree, listTestExecutions, versions as versionsApi, requirements as requirementsApi, testCaseDefects } from '../api';
 import { useAbortController } from '../hooks/useAbortController';
 
@@ -399,6 +400,9 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
 
                 {/* ── Linked Requirements panel (007-req-traceability) ── */}
                 {test?.id && <RequirementLinkPanel testCaseId={test.id} />}
+
+                {/* ── Active linked bugs ── */}
+                {test?.id && <LinkedBugsPanel testCaseId={test.id} />}
 
                 {/* ── Latest Executions ── */}
                 <div style={{ marginTop: 20 }}>
