@@ -34,7 +34,8 @@ export default function Sidebar({ onSelectFolders, selectedFolderIds }) {
     const [lastSelectedId, setLastSelectedId] = useState(null);
     const [selectedTestIds, setSelectedTestIds] = useState([]);
     const [lastSelectedTestId, setLastSelectedTestId] = useState(null);
-    const [showTests, setShowTests] = useState(() => localStorage.getItem('sidebarShowTests') === 'true');
+    // Default ON: show tests in the tree unless the user has explicitly turned it off.
+    const [showTests, setShowTests] = useState(() => localStorage.getItem('sidebarShowTests') !== 'false');
     const [search, setSearch] = useState('');
 
     const refresh = useCallback(() => {

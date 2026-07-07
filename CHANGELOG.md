@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Assign a test run to a user from the run detail header, and filter the runs list by assignee — including "assigned to me" and "unassigned".
 
 ### Changed
+- Library sidebar shows test cases in the folder tree by default (the "Show tests in tree" toggle now defaults on); anyone who explicitly turned it off keeps that choice.
 - Linked-requirements picker on the test case page now shows richer options — an identifier pill, the title with search-match highlighting, a source badge (Jira/Confluence), and a one-line description preview — plus keyboard navigation (↑/↓ to move, Enter to link, Esc to close).
 - New Test Run modal is now a larger folder/test tree picker (tri-state folder checkboxes), and newly created runs appear in the run sidebar live.
 - Run detail's Execute button now runs only the checked results — showing the count (e.g. "Execute (3)") and scoping the execution queue to that subset. It is disabled until at least one result is checked (use the header select-all checkbox to run the whole run).
