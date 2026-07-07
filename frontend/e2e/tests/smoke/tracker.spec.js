@@ -82,7 +82,8 @@ test.describe('Test Tracking System E2E', () => {
         });
 
         await test.step('Create a category in the Category Manager', async () => {
-            // Navigate to Category Manager (Suites was renamed to Categories)
+            // Category Manager lives under the Quality section (top nav → Quality → Categories sidebar).
+            await page.getByRole('button', { name: 'Quality' }).click();
             await page.getByRole('button', { name: 'Categories' }).click();
             await page.waitForURL(/\/categories/);
 
