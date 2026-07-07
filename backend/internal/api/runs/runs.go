@@ -257,6 +257,19 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	if req.AppVersion != nil {
 		updateMap["app_version"] = *req.AppVersion
 	}
+	if req.Steps != nil {
+		raw := *req.Steps
+		if len(raw) > 32*1024 {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "steps too large (max 32 KB)"})
+			return
+		}
+		s := strings.TrimSpace(string(raw))
+		if !json.Valid(raw) || s == "" || s[0] != '[' {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "steps must be a JSON array"})
+			return
+		}
+		updateMap["steps"] = json.RawMessage(raw)
+	}
 	updateMap["updated_at"] = time.Now()
 
 	if err := h.store.UpdateRunResult(runID, resultID, updateMap); err != nil {

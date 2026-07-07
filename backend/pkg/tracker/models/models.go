@@ -346,20 +346,21 @@ type CreateCustomFieldRequest struct {
 // UpdateRunResultRequest is the request body for updating a single run result.
 // Pointer fields distinguish "not sent" (nil) from "explicitly set to zero/empty" (non-nil).
 type UpdateRunResultRequest struct {
-	Status       *string `json:"status,omitempty"`
-	DefectType   *string `json:"defect_type,omitempty"`
-	ErrorMessage *string `json:"error_message,omitempty"`
-	StackTrace   *string `json:"stack_trace,omitempty"`
-	FailureType  *string `json:"failure_type,omitempty"`
-	DurationMs   *int64  `json:"duration_ms,omitempty"`
-	Screenshots  *string `json:"screenshots,omitempty"`
-	Video        *string `json:"video,omitempty"`
-	TraceURL     *string `json:"trace_url,omitempty"`
-	LogText      *string `json:"log_text,omitempty"`
-	Browser      *string `json:"browser,omitempty"`
-	OS           *string `json:"os,omitempty"`
-	Environment  *string `json:"environment,omitempty"`
-	AppVersion   *string `json:"app_version,omitempty"`
+	Status       *string          `json:"status,omitempty"`
+	DefectType   *string          `json:"defect_type,omitempty"`
+	ErrorMessage *string          `json:"error_message,omitempty"`
+	StackTrace   *string          `json:"stack_trace,omitempty"`
+	FailureType  *string          `json:"failure_type,omitempty"`
+	DurationMs   *int64           `json:"duration_ms,omitempty"`
+	Screenshots  *string          `json:"screenshots,omitempty"`
+	Video        *string          `json:"video,omitempty"`
+	TraceURL     *string          `json:"trace_url,omitempty"`
+	LogText      *string          `json:"log_text,omitempty"`
+	Browser      *string          `json:"browser,omitempty"`
+	OS           *string          `json:"os,omitempty"`
+	Environment  *string          `json:"environment,omitempty"`
+	AppVersion   *string          `json:"app_version,omitempty"`
+	Steps        *json.RawMessage `json:"steps,omitempty"`
 }
 
 // TestCaseExecution is the flat row returned by "latest executions for a test case".
