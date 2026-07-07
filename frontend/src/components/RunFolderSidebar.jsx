@@ -18,22 +18,12 @@ import { ChevronSvg, FolderSvg, AllRunsSvg } from './FolderIcons';
 import { toast } from '../toast';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { STATUS_COLORS } from '../utils/statusColors';
 
 const STORAGE_KEY = 'runFolderSidebarCollapsed';
 const STORAGE_WIDTH_KEY = 'runFolderSidebarWidth';
 const STORAGE_EXPANDED_KEY = 'runFolderSidebarExpandedIds';
 const STORAGE_UNCAT_KEY = 'runFolderSidebarUncatExpanded';
-
-const STATUS_COLORS = {
-    PENDING: '#f59e0b',
-    RUNNING: '#3b82f6',
-    PASS: '#10b981',
-    PASSED: '#10b981',
-    FAIL: '#ef4444',
-    FAILED: '#ef4444',
-    SKIP: '#9ca3af',
-    ERROR: '#ef4444',
-};
 
 // ── Context menu ──────────────────────────────────────────────────────────────
 function ContextMenu({ x, y, items, onClose }) {

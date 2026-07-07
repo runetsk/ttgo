@@ -2,8 +2,7 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Cell } from 'recharts';
 import { formatDuration, relativeTime } from './utils';
-
-const STATUS_COLORS = { PASS: '#22c55e', FAIL: '#ef4444', ERROR: '#ef4444', SKIP: '#9ca3af' };
+import { STATUS_COLORS } from '../../utils/statusColors';
 
 export default function TimeConsumingList({ data }) {
     const [viewMode, setViewMode] = useState('table');

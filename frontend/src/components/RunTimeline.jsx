@@ -3,15 +3,7 @@ import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis,
     CartesianGrid, Tooltip, Cell,
 } from 'recharts';
-
-const STATUS_COLORS = {
-    PASS: '#22c55e',
-    FAIL: '#ef4444',
-    ERROR: '#ef4444',
-    SKIP: '#9ca3af',
-    PENDING: '#f59e0b',
-    RUNNING: '#6366f1',
-};
+import { STATUS_COLORS } from '../utils/statusColors';
 
 const STATUS_ORDER = ['PASS', 'FAIL', 'ERROR', 'SKIP', 'PENDING', 'RUNNING'];
 

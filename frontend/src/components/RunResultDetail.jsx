@@ -5,11 +5,7 @@ import ScreenshotGallery from './ScreenshotGallery';
 import AIVerdictBadge from './AIVerdictBadge';
 import { analyzeRunResult, listRunResultAnalyses } from '../api';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
-
-const STATUS_DOT_COLORS = {
-    PASS: '#10b981', FAIL: '#ef4444', ERROR: '#ef4444',
-    PENDING: '#f59e0b', SKIP: '#94a3b8', RUNNING: '#3b82f6',
-};
+import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
 
 const RunResultDetail = ({ result, attempts }) => {
     const [showLogs, setShowLogs] = useState(false);

@@ -4,11 +4,7 @@ import { getTestRun, getTest, updateRunResult, completeTestRun } from '../api';
 import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
 import { toast } from '../toast';
-
-const STATUS_COLORS = {
-    PASS: 'var(--accent-green)', FAIL: 'var(--accent-red)', ERROR: 'var(--accent-red)',
-    PENDING: 'var(--warning-color)', SKIP: '#94a3b8', RUNNING: '#3b82f6',
-};
+import { STATUS_COLORS } from '../utils/statusColors';
 
 export default function RunExecutePage() {
     const { runId } = useParams();
