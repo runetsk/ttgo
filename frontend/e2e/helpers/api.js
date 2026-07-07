@@ -191,6 +191,31 @@ async function listResultDefectsAPI(request, runId, resultId) {
     return res.json();
 }
 
+// Links an existing defect directly to a test case. Returns the DefectLink.
+async function linkTestCaseDefectAPI(request, testId, defectId) {
+    const res = await request.post(`${API_URL}/tests/${testId}/defect-links`, {
+        data: { defect_id: defectId },
+    });
+    await ensureOk(res);
+    return res.json();
+}
+
+// Patches a defect (e.g. { status: 'closed' }). Returns the updated Defect.
+async function updateDefectAPI(request, id, data) {
+    const res = await request.patch(`${API_URL}/defects/${id}`, { data });
+    await ensureOk(res);
+    return res.json();
+}
+
+// Links an existing requirement to a test case. Returns the link.
+async function linkRequirementToTestCaseAPI(request, reqId, testCaseId) {
+    const res = await request.post(`${API_URL}/requirements/${reqId}/links`, {
+        data: { test_case_id: testCaseId },
+    });
+    await ensureOk(res);
+    return res.json();
+}
+
 export {
     API_URL,
     MOCK_URL,
@@ -216,4 +241,7 @@ export {
     linkResultDefectAPI,
     unlinkResultDefectAPI,
     listResultDefectsAPI,
+    linkTestCaseDefectAPI,
+    updateDefectAPI,
+    linkRequirementToTestCaseAPI,
 };
