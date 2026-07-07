@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { requirements as reqApi } from '../api';
 
 /**
@@ -133,8 +134,14 @@ export default function RequirementLinkPanel({ testCaseId }) {
                         style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.35)' }}
                         title={req.title}
                     >
-                        <span style={{ fontWeight: 600, marginRight: 4 }}>{req.identifier}</span>
-                        <span style={{ color: 'var(--text-secondary)', fontSize: '0.85em' }}>{req.title}</span>
+                        <Link
+                            to={`/requirements/${req.id}`}
+                            data-testid={`linked-req-link-${req.id}`}
+                            style={{ display: 'inline-flex', alignItems: 'baseline', gap: 4, textDecoration: 'none', color: 'inherit' }}
+                        >
+                            <span style={{ fontWeight: 600 }}>{req.identifier}</span>
+                            <span style={{ color: 'var(--text-secondary)', fontSize: '0.85em' }}>{req.title}</span>
+                        </Link>
                         <button
                             className="meta-chip-remove"
                             onClick={() => handleRemoveLink(req.id)}
