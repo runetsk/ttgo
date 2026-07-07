@@ -144,7 +144,7 @@ func (s *Server) rateLimitMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
 			switch {
-			case r.URL.Path == "/api/auth/login":
+			case r.URL.Path == "/api/auth/login" || r.URL.Path == "/api/auth/setup":
 				if !s.loginLimiter.Allow("ip:" + ratelimit.ClientIP(r)) {
 					w.Header().Set("Retry-After", "5")
 					httpx.JSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many login attempts, slow down"})

@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -350,9 +351,12 @@ func (s *Store) ReopenDB(dsn string) error {
 	return nil
 }
 
-// SeedAdminIfNeeded creates an initial admin user if none exists.
-// adminEmail and adminPassword must both be non-empty; returns an error
-// if the server would start without any admin user.
+// SeedAdminIfNeeded creates an initial admin user if none exists and the
+// ADMIN_* credentials are provided. With no credentials it logs a notice and
+// returns nil — a fresh instance is bootstrapped via the first-run setup
+// screen instead (POST /api/auth/setup), and an instance that has users but
+// no active admin (only reachable by editing the DB directly) is recovered
+// by setting the env vars.
 func (s *Store) SeedAdminIfNeeded(adminEmail, adminPassword string) error {
 	var count int64
 	s.db.Model(&models.User{}).Where("role = ? AND active = ?", "admin", true).Count(&count)
@@ -361,7 +365,8 @@ func (s *Store) SeedAdminIfNeeded(adminEmail, adminPassword string) error {
 	}
 
 	if strings.TrimSpace(adminEmail) == "" || strings.TrimSpace(adminPassword) == "" {
-		return fmt.Errorf("no admin user exists: set ADMIN_EMAIL and ADMIN_PASSWORD environment variables to seed the first admin account")
+		log.Println("No admin user exists yet: complete first-run setup in the browser, or set ADMIN_EMAIL and ADMIN_PASSWORD to seed one at startup")
+		return nil
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(adminPassword), 12)

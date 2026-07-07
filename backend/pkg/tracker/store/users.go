@@ -1,12 +1,17 @@
 package store
 
 import (
+	"errors"
 	"strings"
 	"ttgo/pkg/tracker/models"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
+
+// ErrSetupComplete is returned by CreateFirstAdmin when the instance already
+// has at least one user, meaning first-run setup has already happened.
+var ErrSetupComplete = errors.New("setup already completed")
 
 // CreateUser creates a new user with the given fields.
 // Email is normalised to lowercase; a new UUID is assigned to ID.
@@ -20,6 +25,44 @@ func (s *Store) CreateUser(email, displayName, hashedPw, role string) (*models.U
 		Active:         true,
 	}
 	if err := s.db.Create(u).Error; err != nil {
+		return nil, err
+	}
+	return u, nil
+}
+
+// CountUsers returns the total number of user rows, including inactive and
+// soft-deleted users. First-run setup is available only while this is zero.
+func (s *Store) CountUsers() (int64, error) {
+	var count int64
+	if err := s.db.Model(&models.User{}).Count(&count).Error; err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// CreateFirstAdmin creates the initial admin account during first-run setup.
+// The count check and insert run in one transaction so concurrent setup
+// attempts cannot both succeed; the loser gets ErrSetupComplete.
+func (s *Store) CreateFirstAdmin(email, hashedPw string) (*models.User, error) {
+	u := &models.User{
+		ID:             uuid.New().String(),
+		Email:          strings.ToLower(strings.TrimSpace(email)),
+		DisplayName:    "Admin",
+		HashedPassword: hashedPw,
+		Role:           "admin",
+		Active:         true,
+	}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var count int64
+		if err := tx.Model(&models.User{}).Count(&count).Error; err != nil {
+			return err
+		}
+		if count > 0 {
+			return ErrSetupComplete
+		}
+		return tx.Create(u).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	return u, nil

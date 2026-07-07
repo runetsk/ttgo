@@ -293,3 +293,102 @@ func mustJSON(v interface{}) []byte {
 	}
 	return b
 }
+
+// TestSetup_FirstRun covers the full first-run bootstrap: needs-setup reports
+// true on an empty instance, setup creates the admin + session, needs-setup
+// flips to false, and the created credentials work for a normal login.
+func TestSetup_FirstRun(t *testing.T) {
+	st, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := api.NewServer(st)
+
+	// 1. Fresh instance reports needs_setup=true.
+	req := httptest.NewRequest("GET", "/api/auth/needs-setup", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"needs_setup":true`)
+
+	// 2. Setup creates the admin and signs the caller in.
+	req = httptest.NewRequest("POST", "/api/auth/setup", loginBody("Boss@Example.com", "supersecret123"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusCreated, w.Code)
+
+	cookie := findSessionCookie(w)
+	require.NotNil(t, cookie, "setup should set a session cookie")
+	assert.True(t, cookie.HttpOnly)
+
+	user, err := st.FindUserByEmail("boss@example.com")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	assert.Equal(t, "admin", user.Role)
+	assert.True(t, user.Active)
+
+	// 3. needs_setup flips to false.
+	req = httptest.NewRequest("GET", "/api/auth/needs-setup", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Contains(t, w.Body.String(), `"needs_setup":false`)
+
+	// 4. The created credentials work for a normal login.
+	req = httptest.NewRequest("POST", "/api/auth/login", loginBody("boss@example.com", "supersecret123"))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+// TestSetup_AlreadyConfigured asserts setup permanently refuses (403, no
+// cookie, no row) once any user exists.
+func TestSetup_AlreadyConfigured(t *testing.T) {
+	st, err := newTestStore(t)
+	require.NoError(t, err)
+	require.NoError(t, st.SeedAdminIfNeeded("test@test.com", "testpassword1234"))
+	srv := api.NewServer(st)
+
+	req := httptest.NewRequest("POST", "/api/auth/setup", loginBody("intruder@evil.com", "supersecret123"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+	assert.Contains(t, w.Body.String(), "setup already completed")
+	assert.Nil(t, findSessionCookie(w))
+
+	user, err := st.FindUserByEmail("intruder@evil.com")
+	require.NoError(t, err)
+	assert.Nil(t, user, "no user must be created once setup is closed")
+}
+
+// TestSetup_Validation asserts the pinned 400s, mirroring POST /api/users rules.
+func TestSetup_Validation(t *testing.T) {
+	st, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := api.NewServer(st)
+
+	cases := []struct {
+		name, email, password, wantErr string
+	}{
+		{"missing email", "", "supersecret123", "email is required"},
+		{"invalid email", "not-an-email", "supersecret123", "email is not a valid address"},
+		{"short password", "boss@example.com", "short12", "password must be 8-72 characters"},
+		{"long password", "boss@example.com", strings.Repeat("x", 73), "password must be 8-72 characters"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/auth/setup", loginBody(tc.email, tc.password))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), tc.wantErr)
+
+			count, err := st.CountUsers()
+			require.NoError(t, err)
+			assert.EqualValues(t, 0, count, "validation failures must not create users")
+		})
+	}
+}

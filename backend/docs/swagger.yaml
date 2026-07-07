@@ -954,6 +954,68 @@ paths:
       summary: Current user
       tags:
       - auth
+  /auth/needs-setup:
+    get:
+      description: Reports whether the instance has no users yet and needs first-run
+        admin setup.
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              needs_setup:
+                type: boolean
+            type: object
+      summary: First-run setup status
+      tags:
+      - auth
+  /auth/setup:
+    post:
+      consumes:
+      - application/json
+      description: Creates the initial admin account while the instance has no users,
+        then signs the caller in. Permanently refuses once any user exists.
+      parameters:
+      - description: Admin credentials
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            email:
+              type: string
+            password:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            properties:
+              user:
+                type: object
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      summary: First-run admin setup
+      tags:
+      - auth
   /backup-schedule:
     get:
       description: Return the current automatic backup schedule configuration.

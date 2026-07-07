@@ -26,7 +26,12 @@ export function AuthProvider({ children }) {
         }
     }, []);
 
-    const openLoginModal = useCallback(() => setLoginModalOpen(true), []);
+    const openLoginModal = useCallback(() => {
+        // The login page is already the sign-in surface — a "session expired"
+        // modal on top of it (or of the first-run setup form) is just noise.
+        if (window.location.pathname === '/login') return;
+        setLoginModalOpen(true);
+    }, []);
     const closeLoginModal = useCallback(() => setLoginModalOpen(false), []);
 
     useEffect(() => {

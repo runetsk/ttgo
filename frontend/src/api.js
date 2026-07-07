@@ -239,6 +239,10 @@ export const auth = {
             current_password: currentPw,
             new_password: newPw,
         }).then(res => res.data),
+    needsSetup: () =>
+        api.get('/auth/needs-setup', { _silent: true }).then(res => res.data),
+    setup: (email, password) =>
+        api.post('/auth/setup', { email, password }, { _silent: true }).then(res => res.data),
 };
 
 // ── Demo data seeding (admin only) ──

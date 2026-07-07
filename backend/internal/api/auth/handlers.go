@@ -2,7 +2,10 @@ package auth
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/mail"
+	"strings"
 	"time"
 	"ttgo/internal/api/httpx"
 	"ttgo/pkg/tracker/models"
@@ -108,6 +111,94 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	h.logAuthEvent(user.ID, "auth.login", "")
 
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"user": user})
+}
+
+// NeedsSetup processes GET /api/auth/needs-setup.
+//
+// @Summary      First-run setup status
+// @Description  Reports whether the instance has no users yet and needs first-run admin setup.
+// @Tags         auth
+// @Produce      json
+// @Success      200  {object}  object{needs_setup=bool}
+// @Router       /auth/needs-setup [get]
+func (h *Handler) NeedsSetup(w http.ResponseWriter, r *http.Request) {
+	count, err := h.store.CountUsers()
+	if err != nil {
+		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]bool{"needs_setup": count == 0})
+}
+
+// Setup processes POST /api/auth/setup.
+//
+// @Summary      First-run admin setup
+// @Description  Creates the initial admin account while the instance has no users, then signs the caller in. Permanently refuses once any user exists.
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object{email=string,password=string}  true  "Admin credentials"
+// @Success      201  {object}  object{user=object}
+// @Failure      400  {object}  object{error=string}
+// @Failure      403  {object}  object{error=string}
+// @Router       /auth/setup [post]
+func (h *Handler) Setup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	// Validation mirrors POST /api/users (users.Create).
+	if strings.TrimSpace(req.Email) == "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "email is required"})
+		return
+	}
+	if _, err := mail.ParseAddress(strings.TrimSpace(req.Email)); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "email is not a valid address"})
+		return
+	}
+	if len(req.Password) < 8 || len(req.Password) > 72 {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "password must be 8-72 characters"})
+		return
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), 12)
+	if err != nil {
+		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+
+	user, err := h.store.CreateFirstAdmin(req.Email, string(hash))
+	if errors.Is(err, store.ErrSetupComplete) {
+		httpx.JSON(w, http.StatusForbidden, map[string]string{"error": "setup already completed"})
+		return
+	}
+	if err != nil {
+		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create admin user"})
+		return
+	}
+
+	session, err := h.store.CreateSession(user.ID)
+	if err != nil {
+		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create session"})
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    session.ID,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	h.logAuthEvent(user.ID, "auth.setup", "")
+
+	httpx.JSON(w, http.StatusCreated, map[string]interface{}{"user": user})
 }
 
 // handleLogout processes POST /api/auth/logout.

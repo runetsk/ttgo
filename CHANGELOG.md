@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- First-run setup: a fresh instance (no users) shows a "Create admin account" screen at login and bootstraps the admin from the browser (`GET /api/auth/needs-setup`, `POST /api/auth/setup`). `ADMIN_EMAIL`/`ADMIN_PASSWORD` are now optional — still supported for automated seeding — and the server no longer refuses to start without them.
 - Test case page shows linked active (open) bugs, each navigable to its tracker (external) or the Defects register (native); linked requirement chips now open the requirement detail page.
 - Create-run modal can build a run from hand-picked tests (searchable multi-select) instead of a whole category.
 - Complete Run / Reopen buttons on the run detail header (derive PASS/FAIL from results).

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth } from '../api';
 import { useAuth } from '../contexts/AuthContext';
@@ -9,9 +9,21 @@ export default function LoginPage() {
 
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [confirm, setConfirm] = useState('');
     const [error, setError] = useState('');
     const [lockedUntil, setLockedUntil] = useState(null);
     const [submitting, setSubmitting] = useState(false);
+    // null = probe in flight; render nothing until we know which form to show
+    // so a fresh instance doesn't flash "Sign In" before switching to setup.
+    const [needsSetup, setNeedsSetup] = useState(null);
+
+    useEffect(() => {
+        let cancelled = false;
+        auth.needsSetup()
+            .then(res => { if (!cancelled) setNeedsSetup(Boolean(res?.needs_setup)); })
+            .catch(() => { if (!cancelled) setNeedsSetup(false); });
+        return () => { cancelled = true; };
+    }, []);
 
     // If already logged in, redirect away
     if (!loading && user) {
@@ -19,17 +31,52 @@ export default function LoginPage() {
         return null;
     }
 
+    if (needsSetup === null) return null;
+
+    const navigateAfterAuth = () => {
+        const redirect = sessionStorage.getItem('redirectAfterLogin') || '/library';
+        sessionStorage.removeItem('redirectAfterLogin');
+        navigate(redirect, { replace: true });
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
         setLockedUntil(null);
+
+        if (needsSetup) {
+            if (password.length < 8) {
+                setError('Password must be at least 8 characters.');
+                return;
+            }
+            if (password !== confirm) {
+                setError('Passwords do not match.');
+                return;
+            }
+            setSubmitting(true);
+            try {
+                await auth.setup(email, password);
+                await refetchUser();
+                navigateAfterAuth();
+            } catch (err) {
+                if (err?.response?.status === 403) {
+                    // Someone else completed setup first — fall back to sign-in.
+                    setNeedsSetup(false);
+                    setError('Setup already completed — sign in instead.');
+                } else {
+                    setError(err?.response?.data?.error || 'Could not create the admin account.');
+                }
+            } finally {
+                setSubmitting(false);
+            }
+            return;
+        }
+
         setSubmitting(true);
         try {
             await auth.login(email, password);
             await refetchUser();
-            const redirect = sessionStorage.getItem('redirectAfterLogin') || '/library';
-            sessionStorage.removeItem('redirectAfterLogin');
-            navigate(redirect, { replace: true });
+            navigateAfterAuth();
         } catch (err) {
             const status = err?.response?.status;
             if (status === 423) {
@@ -47,6 +94,8 @@ export default function LoginPage() {
         }
     };
 
+    const labelStyle = { display: 'block', marginBottom: 6, fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-primary)' };
+
     return (
         <div style={{
             display: 'flex',
@@ -56,16 +105,18 @@ export default function LoginPage() {
             background: 'var(--bg-primary, #0f1117)',
         }}>
             <div className="glass-panel" style={{ width: 380, padding: 40 }}>
-                <h2 style={{ marginTop: 0, marginBottom: 8, textAlign: 'center' }}>Sign In</h2>
+                <h2 style={{ marginTop: 0, marginBottom: 8, textAlign: 'center' }}>
+                    {needsSetup ? 'Create admin account' : 'Sign In'}
+                </h2>
                 <p style={{ textAlign: 'center', color: 'var(--text-secondary)', marginBottom: 32, fontSize: '0.9rem' }}>
-                    TestTracker
+                    {needsSetup
+                        ? 'First run — create the administrator account for this TestTracker instance.'
+                        : 'TestTracker'}
                 </p>
 
                 <form onSubmit={handleSubmit}>
                     <div style={{ marginBottom: 16 }}>
-                        <label style={{ display: 'block', marginBottom: 6, fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-primary)' }}>
-                            Email
-                        </label>
+                        <label style={labelStyle}>Email</label>
                         <input
                             className="modern-input"
                             type="email"
@@ -78,10 +129,8 @@ export default function LoginPage() {
                         />
                     </div>
 
-                    <div style={{ marginBottom: 24 }}>
-                        <label style={{ display: 'block', marginBottom: 6, fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-primary)' }}>
-                            Password
-                        </label>
+                    <div style={{ marginBottom: needsSetup ? 16 : 24 }}>
+                        <label style={labelStyle}>Password</label>
                         <input
                             className="modern-input"
                             type="password"
@@ -92,6 +141,21 @@ export default function LoginPage() {
                             style={{ width: '100%' }}
                         />
                     </div>
+
+                    {needsSetup && (
+                        <div style={{ marginBottom: 24 }}>
+                            <label style={labelStyle}>Confirm password</label>
+                            <input
+                                className="modern-input"
+                                type="password"
+                                value={confirm}
+                                onChange={e => setConfirm(e.target.value)}
+                                placeholder="••••••••"
+                                required
+                                style={{ width: '100%' }}
+                            />
+                        </div>
+                    )}
 
                     {error && (
                         <div style={{
@@ -125,7 +189,9 @@ export default function LoginPage() {
                         disabled={submitting}
                         style={{ width: '100%', padding: '10px 0' }}
                     >
-                        {submitting ? 'Signing in…' : 'Sign In'}
+                        {needsSetup
+                            ? (submitting ? 'Creating…' : 'Create account')
+                            : (submitting ? 'Signing in…' : 'Sign In')}
                     </button>
                 </form>
             </div>
