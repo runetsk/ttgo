@@ -120,9 +120,10 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
         setPage(1);
     }, [filterCategoryIds, filterStatus, sortBy, sortOrder, selectedFolderId, filterCreated, filterUpdated, filterAssignee]);
 
-    const handleCreateSuccess = (run) => {
+    const handleCreateSuccess = (run, mode) => {
         setShowModal(false);
-        if (run?.id) navigate(`/runs/run/${run.id}`);
+        if (!run?.id) return;
+        navigate(mode === 'execute' ? `/runs/run/${run.id}/execute` : `/runs/run/${run.id}`);
     };
 
     const handleBulkDelete = () => {
@@ -670,7 +671,6 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
 
             {showModal && (
                 <CreateRunModal
-                    categories={categories}
                     onClose={() => setShowModal(false)}
                     onSuccess={handleCreateSuccess}
                     defaultFolderId={selectedFolderId && selectedFolderId !== 'uncategorised' ? selectedFolderId : null}
