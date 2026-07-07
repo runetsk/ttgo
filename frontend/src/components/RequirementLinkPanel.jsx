@@ -19,14 +19,18 @@ function highlightMatch(text, query) {
 }
 
 // Small badge for imported requirements; manually-created ones get none.
+// #2563eb reads on both the dark and light dropdown surfaces.
 const SOURCE_BADGE = {
-    jira: { label: 'Jira', color: '#4b9fff' },
-    confluence: { label: 'Confluence', color: '#4b9fff' },
+    jira: { label: 'Jira', color: '#2563eb' },
+    confluence: { label: 'Confluence', color: '#2563eb' },
 };
 
+// --aig-tone-purple-fg is a theme-aware colored-text token (readable on both
+// the light and dark dropdown backgrounds); the tints stay low-alpha so they
+// work over either surface.
 const ID_PILL = {
-    fontWeight: 700, fontSize: '0.72rem', color: 'var(--accent-purple, #a78bfa)',
-    background: 'rgba(167,139,250,0.14)', border: '1px solid rgba(167,139,250,0.3)',
+    fontWeight: 700, fontSize: '0.72rem', color: 'var(--aig-tone-purple-fg, #a78bfa)',
+    background: 'rgba(139,92,246,0.14)', border: '1px solid rgba(139,92,246,0.3)',
     padding: '1px 7px', borderRadius: 5, flexShrink: 0, letterSpacing: '0.02em', whiteSpace: 'nowrap',
 };
 
@@ -238,8 +242,8 @@ export default function RequirementLinkPanel({ testCaseId }) {
                             data-testid="req-options"
                             style={{
                                 position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
-                                background: 'var(--surface-bg, #1e1e2e)', border: '1px solid var(--border-color)',
-                                borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', marginTop: 4, maxHeight: 320, overflowY: 'auto',
+                                background: 'var(--bg-secondary)', border: '1px solid var(--border-color)',
+                                borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.18)', marginTop: 4, maxHeight: 320, overflowY: 'auto',
                             }}
                         >
                             {filteredReqs.map((req, i) => {
@@ -256,7 +260,7 @@ export default function RequirementLinkPanel({ testCaseId }) {
                                             padding: '7px 12px', cursor: 'pointer',
                                             display: 'flex', flexDirection: 'column', gap: 2,
                                             background: active ? 'rgba(99,102,241,0.16)' : 'transparent',
-                                            borderLeft: `2px solid ${active ? 'var(--accent-purple, #a78bfa)' : 'transparent'}`,
+                                            borderLeft: `2px solid ${active ? 'var(--accent-indigo)' : 'transparent'}`,
                                         }}
                                     >
                                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -289,7 +293,7 @@ export default function RequirementLinkPanel({ testCaseId }) {
                                     onMouseDown={startCreate}
                                     onMouseEnter={() => setActiveIndex(filteredReqs.length)}
                                     style={{
-                                        padding: '8px 12px', cursor: 'pointer', fontSize: '0.83rem', color: 'var(--accent-green, #34d399)',
+                                        padding: '8px 12px', cursor: 'pointer', fontSize: '0.83rem', color: 'var(--aig-tone-green-fg, #34d399)',
                                         borderTop: filteredReqs.length > 0 ? '1px solid var(--border-color)' : 'none',
                                         background: activeIdx === filteredReqs.length ? 'rgba(52,211,153,0.12)' : 'transparent',
                                     }}
