@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Assign a test run to a user from the run detail header, and filter the runs list by assignee — including "assigned to me" and "unassigned".
 
 ### Changed
+- New Test Run modal is now a larger folder/test tree picker (tri-state folder checkboxes); a "Manual execute" action (enabled once ≥1 test is picked) creates the run and jumps straight to step-by-step execution, and newly created runs appear in the run sidebar live.
 - Creating a test run now opens its detail page immediately.
 - WebSocket result-level events (`result_updated`, `result_bulk_updated`,
   `result_retried`, `result_deleted`) now carry a delta payload

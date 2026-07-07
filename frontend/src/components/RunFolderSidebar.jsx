@@ -331,6 +331,13 @@ export default function RunFolderSidebar({
             .catch(() => setFolderTree([]));
     }, []);
 
+    const loadUncatRuns = useCallback(() => {
+        setUncatRuns({ runs: [], loading: true });
+        getTestRuns(null, null, 'created_at', 'DESC', 1, 100, 'uncategorised')
+            .then(data => setUncatRuns({ runs: data.runs || [], loading: false }))
+            .catch(() => setUncatRuns({ runs: [], loading: false }));
+    }, []);
+
     useEffect(() => { loadFolderTree(); }, [loadFolderTree]);
 
     // 018-websocket-realtime: subscribe to folder and run updates
@@ -341,19 +348,13 @@ export default function RunFolderSidebar({
     // Refresh sidebar when run status changes so status dots stay current
     useSubscription('runs:*', useCallback(() => {
         loadFolderTree();
-    }, [loadFolderTree]), { debounceMs: 500 });
+        loadUncatRuns();
+    }, [loadFolderTree, loadUncatRuns]), { debounceMs: 500 });
 
     useEffect(() => {
         registerRefresh('folderTree', loadFolderTree);
         return () => unregisterRefresh('folderTree');
     }, [loadFolderTree, registerRefresh, unregisterRefresh]);
-
-    const loadUncatRuns = useCallback(() => {
-        setUncatRuns({ runs: [], loading: true });
-        getTestRuns(null, null, 'created_at', 'DESC', 1, 100, 'uncategorised')
-            .then(data => setUncatRuns({ runs: data.runs || [], loading: false }))
-            .catch(() => setUncatRuns({ runs: [], loading: false }));
-    }, []);
 
     const handleToggleExpand = useCallback((folderId) => {
         setExpandedFolderIds(prev => {

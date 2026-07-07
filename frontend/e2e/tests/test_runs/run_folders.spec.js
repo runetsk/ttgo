@@ -180,12 +180,10 @@ test.describe('US2 — Assign Runs to Folders', () => {
     });
 
     test('run created with folder appears under that folder in the API', async ({ page, request }) => {
-        let suite;
         let folder;
         const runName = `US2-Run-${Date.now()}`;
 
-        await test.step('Seed a category and a run folder via API', async () => {
-            suite = await setupCategory(request, `US2Create-${Date.now()}`);
+        await test.step('Seed a run folder via API', async () => {
             folder = await createRunFolderAPI(request, `AssignFolder-${Date.now()}`);
         });
 
@@ -193,7 +191,6 @@ test.describe('US2 — Assign Runs to Folders', () => {
             await page.goto('/runs');
             await page.getByTestId('create-test-run-button').click();
 
-            await page.getByTestId('create-run-category-select').selectOption(suite.id);
             await page.getByTestId('create-run-name-input').fill(runName);
             await page.getByTestId('create-run-folder-select').selectOption(folder.id);
             await page.getByTestId('create-run-submit').click();
@@ -344,12 +341,10 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
     });
 
     test('new run defaults into selected folder when created without modal folder choice', async ({ page, request }) => {
-        let suite;
         let folder;
         const runName = `DefaultRun-${Date.now()}`;
 
-        await test.step('Seed a category and a run folder via API', async () => {
-            suite = await setupCategory(request, `US3Default-${Date.now()}`);
+        await test.step('Seed a run folder via API', async () => {
             folder = await createRunFolderAPI(request, `DefaultFolder-${Date.now()}`);
         });
 
@@ -363,7 +358,6 @@ test.describe('US3 — Filter and Navigate by Folder', () => {
         await test.step('Create a run without changing the pre-selected folder', async () => {
             // Open create modal — folder should be pre-selected
             await page.getByTestId('create-test-run-button').click();
-            await page.getByTestId('create-run-category-select').selectOption(suite.id);
             await page.getByTestId('create-run-name-input').fill(runName);
             // Do NOT change the folder dropdown — it should already have folder.id selected
             await page.getByTestId('create-run-submit').click();
