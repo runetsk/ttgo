@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"ttgo/internal/api/authctx"
 	"ttgo/internal/api/httpx"
 	apiws "ttgo/internal/api/websocket"
 	"ttgo/pkg/tracker/models"
@@ -104,6 +105,14 @@ func (h *Handler) GetTestRuns(w http.ResponseWriter, r *http.Request) {
 	sortDir := q.Get("order")
 	folderID := q.Get("run_folder_id")
 
+	assigneeID := q.Get("assignee_id")
+	if assigneeID == "me" {
+		if u := authctx.UserFromRequest(r); u != nil {
+			assigneeID = u.ID
+		}
+		// Token-authed requests have no session user: "me" stays literal and matches no run.
+	}
+
 	var categoryIDs []string
 	if v := q.Get("category_ids"); v != "" {
 		categoryIDs = strings.Split(v, ",")
@@ -132,6 +141,7 @@ func (h *Handler) GetTestRuns(w http.ResponseWriter, r *http.Request) {
 		Limit:       limit,
 		Offset:      offset,
 		FolderID:    folderID,
+		AssigneeID:  assigneeID,
 	})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "failed to get test runs", "error", err)
@@ -585,6 +595,42 @@ func (h *Handler) ReopenRun(w http.ResponseWriter, r *http.Request) {
 		"status":     run.Status,
 		"updated_at": run.UpdatedAt,
 	})
+}
+
+func (h *Handler) AssignRun(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	var req struct {
+		AssigneeID *string `json:"assignee_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.AssigneeID != nil && *req.AssigneeID == "" {
+		req.AssigneeID = nil // empty string clears
+	}
+	if req.AssigneeID != nil {
+		u, err := h.store.GetUser(*req.AssigneeID)
+		if err != nil || u == nil || !u.Active || u.Deleted {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "assignee_id must reference an active user"})
+			return
+		}
+	}
+	changed, err := h.store.AssignRun(runID, req.AssigneeID)
+	if err != nil {
+		slog.ErrorContext(r.Context(), "failed to assign run", "run_id", runID, "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !changed {
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "test run not found"})
+		return
+	}
+	if fullRun, err := h.store.GetTestRun(runID); err == nil && fullRun != nil && h.hub != nil {
+		h.hub.Broadcast(apiws.NewEvent(apiws.EventRunUpdated, "run:"+runID, fullRun))
+		h.hub.Broadcast(apiws.NewEvent(apiws.EventRunUpdated, "runs:*", fullRun))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]string{"status": "assigned"})
 }
 
 func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {

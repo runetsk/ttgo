@@ -199,6 +199,7 @@ type TestRun struct {
 	Name        string          `json:"name"`
 	CategoryID  *string         `json:"category_id"      gorm:"index"` // nullable — empty runs have no category
 	RunFolderID *string         `json:"run_folder_id" gorm:"index"`    // nullable FK to RunFolder
+	AssigneeID  *string         `json:"assignee_id" gorm:"index"`      // nullable, app-validated ref to users.id
 	Status      ExecutionStatus `json:"status"`                        // PENDING, RUNNING, PASS, FAIL, SKIP, ERROR
 	CreatedAt   time.Time       `json:"created_at"`
 	UpdatedAt   time.Time       `json:"updated_at"`
@@ -218,6 +219,9 @@ type TestRun struct {
 
 	// Comment count (not persisted, populated by list handler)
 	CommentCount int64 `json:"comment_count" gorm:"-"`
+
+	// Assignee display name (not persisted, populated by GetTestRuns/GetTestRun/GetTestRunSummary)
+	AssigneeName string `json:"assignee_name" gorm:"-"`
 
 	// Defect link counts (not persisted, populated by list handler)
 	OpenDefectLinkCount   int `json:"open_defect_link_count" gorm:"-"`

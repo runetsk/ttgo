@@ -32,6 +32,50 @@ func (s *Store) UpdateTestRun(runID string, name *string, categoryID *string, st
 	return s.db.Model(&models.TestRun{}).Where("id = ?", runID).Updates(updates).Error
 }
 
+// AssignRun sets or clears a run's assignee. A nil assigneeID clears it.
+// Returns whether a matching run existed (false → 404 at the handler) and bumps updated_at.
+func (s *Store) AssignRun(runID string, assigneeID *string) (bool, error) {
+	res := s.db.Model(&models.TestRun{}).Where("id = ?", runID).
+		Updates(map[string]interface{}{"assignee_id": assigneeID, "updated_at": time.Now()})
+	return res.RowsAffected > 0, res.Error
+}
+
+// populateAssigneeNames fills AssigneeName on runs that carry an AssigneeID via a
+// single batch users lookup. Names resolve even for now-inactive users.
+func (s *Store) populateAssigneeNames(runs []*models.TestRun) {
+	seen := map[string]bool{}
+	var ids []string
+	for _, r := range runs {
+		if r.AssigneeID != nil && *r.AssigneeID != "" && !seen[*r.AssigneeID] {
+			seen[*r.AssigneeID] = true
+			ids = append(ids, *r.AssigneeID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	type urow struct {
+		ID          string
+		DisplayName string
+		Email       string
+	}
+	var rows []urow
+	s.db.Model(&models.User{}).Select("id, display_name, email").Where("id IN ?", ids).Scan(&rows)
+	name := make(map[string]string, len(rows))
+	for _, u := range rows {
+		if u.DisplayName != "" {
+			name[u.ID] = u.DisplayName
+		} else {
+			name[u.ID] = u.Email
+		}
+	}
+	for _, r := range runs {
+		if r.AssigneeID != nil {
+			r.AssigneeName = name[*r.AssigneeID]
+		}
+	}
+}
+
 // ErrUnknownTestCases is returned when CreateTestRunWithCases receives an ID
 // that doesn't resolve to an existing test case.
 var ErrUnknownTestCases = errors.New("one or more test_case_ids do not exist")
@@ -150,6 +194,7 @@ type RunFilter struct {
 	Limit       int
 	Offset      int
 	FolderID    string
+	AssigneeID  string // "" none; "unassigned" → IS NULL; else assignee_id = ?
 }
 
 // parseDayStart parses "YYYY-MM-DD" as midnight UTC. ok=false on empty/invalid.
@@ -193,6 +238,11 @@ func (s *Store) GetTestRuns(f RunFilter) ([]models.TestRun, int64, error) {
 		// Include runs from this folder and all descendant subfolders
 		folderIDs := s.getRunFolderDescendantIDs(s.db, f.FolderID)
 		query = query.Where("run_folder_id IN ?", folderIDs)
+	}
+	if f.AssigneeID == "unassigned" {
+		query = query.Where("assignee_id IS NULL")
+	} else if f.AssigneeID != "" {
+		query = query.Where("assignee_id = ?", f.AssigneeID)
 	}
 	if t, ok := parseDayStart(f.CreatedFrom); ok {
 		query = query.Where("created_at >= ?", t)
@@ -312,6 +362,12 @@ func (s *Store) GetTestRuns(f RunFilter) ([]models.TestRun, int64, error) {
 		}
 	}
 
+	ptrs := make([]*models.TestRun, len(runs))
+	for i := range runs {
+		ptrs[i] = &runs[i]
+	}
+	s.populateAssigneeNames(ptrs)
+
 	return runs, total, nil
 }
 
@@ -367,6 +423,7 @@ func (s *Store) GetTestRun(id string) (*models.TestRun, error) {
 	run.RetriedCount = stats.Retried
 	run.TotalAttempts = stats.Total
 
+	s.populateAssigneeNames([]*models.TestRun{&run})
 	return &run, nil
 }
 
@@ -454,6 +511,7 @@ func (s *Store) GetTestRunSummary(id string) (*models.TestRun, error) {
 	run.RetriedCount = stats.Retried
 	run.TotalAttempts = stats.Total
 
+	s.populateAssigneeNames([]*models.TestRun{&run})
 	return &run, nil
 }
 
