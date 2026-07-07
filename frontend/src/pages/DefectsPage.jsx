@@ -2,13 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { defects as defectsApi } from '../api';
 import { useSearchParams, Link } from 'react-router-dom';
 import DefectModal from '../components/DefectModal';
+import { severityChipStyle } from '../utils/bugs';
 
 const SEVERITIES = ['critical', 'major', 'minor', 'trivial'];
-const severityColor = { critical: '#ef4444', major: '#f97316', minor: '#eab308', trivial: '#6b7280' };
-const severityChip = (sev) => {
-    const c = severityColor[sev] || '#94a3b8';
-    return { background: c + '22', color: c, border: `1px solid ${c}55`, padding: '1px 9px', borderRadius: 99, fontSize: '0.74rem', fontWeight: 600, textTransform: 'capitalize' };
-};
 const statusPill = (status) => status === 'closed'
     ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }
     : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)' };
@@ -152,7 +148,7 @@ export default function DefectsPage() {
                                         {d.status}
                                     </button>
                                 </td>
-                                <td><span style={severityChip(d.severity)}>{d.severity}</span></td>
+                                <td><span style={severityChipStyle(d.severity)}>{d.severity}</span></td>
                                 <td style={{ textAlign: 'center' }}>
                                     {(d.linked_test_count ?? 0) > 0 ? (
                                         <button onClick={(e) => { e.stopPropagation(); toggleExpand(d); }}
