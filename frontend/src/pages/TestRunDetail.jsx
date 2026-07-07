@@ -64,6 +64,9 @@ export default function TestRunDetail() {
     const [defectsLoading, setDefectsLoading] = useState(false);
     const [currentAnalyses, setCurrentAnalyses] = useState({});
     const [showFilters, setShowFilters] = useState(false);
+    // Row selection is owned here (not in ResultsTab) so the header Execute
+    // button can scope a run to just the checked results.
+    const [selectedResults, setSelectedResults] = useState(new Set());
 
     // 018-websocket-realtime: subscribe to real-time run updates instead of polling
     const { registerRefresh, unregisterRefresh } = useWebSocket();
@@ -188,6 +191,15 @@ export default function TestRunDetail() {
     const skipped = latestResults.filter(r => r.status === 'SKIP').length;
     const pending = latestResults.filter(r => r.status === 'PENDING').length;
 
+    // Only checked rows still present in the run drive the Execute scope;
+    // an empty selection means "execute the whole run" (the prior behaviour).
+    const selectedInRun = latestResults.filter(r => selectedResults.has(r.id));
+    const execCount = selectedInRun.length;
+    const handleExecute = () => {
+        const qs = execCount > 0 ? `?only=${selectedInRun.map(r => r.id).join(',')}` : '';
+        navigate(`/runs/run/${runId}/execute${qs}`);
+    };
+
     const handleStatusChange = async (newStatus) => {
         if (newStatus !== run.status) {
             await updateTestRun(runId, run.name, run.category_id, newStatus);
@@ -307,12 +319,12 @@ export default function TestRunDetail() {
                     </button>
                     <button
                         className="action-btn"
-                        onClick={() => navigate(`/runs/run/${runId}/execute`)}
-                        title="Execute tests one by one"
+                        onClick={handleExecute}
+                        title={execCount > 0 ? `Execute ${execCount} selected test${execCount === 1 ? '' : 's'}` : 'Execute all tests one by one'}
                         style={{ color: 'var(--accent-indigo)', borderColor: 'rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)', padding: '5px 12px', fontSize: '0.8rem' }}
                         data-testid="execute-run-button"
                     >
-                        ▶ Execute
+                        ▶ Execute{execCount > 0 ? ` (${execCount})` : ''}
                     </button>
                     <button
                         className="action-btn"
@@ -447,6 +459,8 @@ export default function TestRunDetail() {
                     runId={runId}
                     latestResults={latestResults}
                     attemptsByTestCase={attemptsByTestCase}
+                    selectedResults={selectedResults}
+                    setSelectedResults={setSelectedResults}
                     aiFeaturesEnabled={aiFeaturesEnabled}
                     analysisBannerRefresh={analysisBannerRefresh}
                     currentAnalyses={currentAnalyses}

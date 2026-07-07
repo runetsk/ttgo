@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link, useNavigate } from 'react-router-dom';
+import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getTestRun, getTest, updateRunResult, completeTestRun, uploadScreenshots } from '../api';
 import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
@@ -10,6 +10,10 @@ import { buildStepResults, parseStepVerdicts } from '../utils/stepResults';
 export default function RunExecutePage() {
     const { runId } = useParams();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
+    // Optional subset of run_result IDs to execute (from the run detail's
+    // Execute button when specific rows are checked); absent = whole run.
+    const onlyParam = searchParams.get('only');
     const [run, setRun] = useState(null);
     const [queue, setQueue] = useState([]);
     const [currentIdx, setCurrentIdx] = useState(0);
@@ -45,14 +49,19 @@ export default function RunExecutePage() {
                 }
                 const q = latestAttempts(data.run_results || [])
                     .sort((a, b) => (a.test_name_snapshot || '').localeCompare(b.test_name_snapshot || ''));
-                const firstPending = q.findIndex(r => r.status === 'PENDING');
+                // Scope to the checked subset when the caller passed one; if none
+                // of the IDs still match (stale link), fall back to the whole run.
+                const onlyIds = onlyParam ? new Set(onlyParam.split(',').filter(Boolean)) : null;
+                const scoped = onlyIds && onlyIds.size ? q.filter(r => onlyIds.has(r.id)) : q;
+                const finalQueue = scoped.length ? scoped : q;
+                const firstPending = finalQueue.findIndex(r => r.status === 'PENDING');
                 setRun(data);
-                setQueue(q);
+                setQueue(finalQueue);
                 setCurrentIdx(firstPending === -1 ? 0 : firstPending);
                 setLoading(false);
             })
             .catch(() => setLoading(false));
-    }, [runId]);
+    }, [runId, onlyParam]);
 
     const currentTestCaseId = queue[currentIdx]?.test_case_id || null;
     useEffect(() => {

@@ -34,17 +34,16 @@ export default function CreateRunModal({ onClose, onSuccess, defaultFolderId = n
 
     const flatFolders = useMemo(() => flattenFolderTree(folderTree), [folderTree]);
 
-    const create = (mode) => {
+    const create = () => {
         setLoading(true);
         setError(null);
         const pickedIds = Array.from(selectedTestIds);
         createTestRun(null, name, runFolderId || null, pickedIds)
-            .then((run) => { setLoading(false); onSuccess(run, mode); })
+            .then((run) => { setLoading(false); onSuccess(run); })
             .catch(err => { setLoading(false); setError(err?.response?.data?.error || "Failed to create run"); });
     };
 
     const handleKeyDown = (e) => { if (e.key === 'Escape') onClose(); };
-    const noneSelected = selectedTestIds.size === 0;
 
     return (
         <div className="modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
@@ -93,11 +92,8 @@ export default function CreateRunModal({ onClose, onSuccess, defaultFolderId = n
                 {/* Footer */}
                 <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                     <button type="button" className="action-btn" onClick={onClose} disabled={loading} style={{ padding: '8px 18px', fontSize: '0.85rem', marginRight: 'auto' }} data-testid="create-run-cancel">Cancel</button>
-                    <button type="button" className="action-btn" onClick={() => create('detail')} disabled={loading} style={{ padding: '8px 20px', fontSize: '0.85rem', opacity: loading ? 0.5 : 1 }} data-testid="create-run-submit">
+                    <button type="button" className="primary-btn" onClick={create} disabled={loading} style={{ padding: '8px 20px', fontSize: '0.85rem', opacity: loading ? 0.5 : 1 }} data-testid="create-run-submit">
                         {loading ? 'Creating…' : 'Create Run'}
-                    </button>
-                    <button type="button" className="primary-btn" onClick={() => create('execute')} disabled={loading || noneSelected} title={noneSelected ? 'Select at least one test' : 'Create and start executing'} style={{ padding: '8px 20px', fontSize: '0.85rem', opacity: (loading || noneSelected) ? 0.5 : 1 }} data-testid="create-run-execute">
-                        ▶ Manual execute
                     </button>
                 </div>
             </div>

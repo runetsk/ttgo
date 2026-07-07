@@ -16,6 +16,8 @@ export default function ResultsTab({
     runId,
     latestResults,
     attemptsByTestCase,
+    selectedResults,
+    setSelectedResults,
     aiFeaturesEnabled,
     analysisBannerRefresh,
     currentAnalyses,
@@ -28,7 +30,6 @@ export default function ResultsTab({
 }) {
     const { startResize, resetColumnWidth, isResizing } = columnActions;
     const [expandedResults, setExpandedResults] = useState(new Set());
-    const [selectedResults, setSelectedResults] = useState(new Set());
     const lastClickedRef = React.useRef(null);
     const [sortConfig, setSortConfig] = useState({ key: null, direction: 'asc' });
     const [showRunComments, setShowRunComments] = useState(false);
@@ -607,7 +608,7 @@ export default function ResultsTab({
                             style={{ cursor: 'pointer', background: selectedResults.has(result.id) ? 'rgba(99,102,241,0.08)' : expandedResults.has(result.id) ? 'var(--bg-secondary)' : 'transparent', borderLeft: selectedResults.has(result.id) ? '3px solid var(--accent-indigo)' : '3px solid transparent', transition: 'background 0.1s ease' }}
                         >
                             <td style={{ textAlign: 'center', padding: '6px 0', width: 32 }} onClick={e => e.stopPropagation()}>
-                                <label style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: 18, height: 18, borderRadius: 4, border: selectedResults.has(result.id) ? '2px solid var(--accent-indigo)' : '2px solid var(--border-color)', background: selectedResults.has(result.id) ? 'var(--accent-indigo)' : 'transparent', transition: 'all 0.15s ease' }}>
+                                <label data-testid={`select-result-${result.test_case_id}`} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', width: 18, height: 18, borderRadius: 4, border: selectedResults.has(result.id) ? '2px solid var(--accent-indigo)' : '2px solid var(--border-color)', background: selectedResults.has(result.id) ? 'var(--accent-indigo)' : 'transparent', transition: 'all 0.15s ease' }}>
                                     <input
                                         type="checkbox"
                                         checked={selectedResults.has(result.id)}
