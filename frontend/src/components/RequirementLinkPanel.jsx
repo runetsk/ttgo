@@ -2,12 +2,42 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { requirements as reqApi } from '../api';
 
+// Emphasise the first case-insensitive occurrence of `query` inside `text`.
+function highlightMatch(text, query) {
+    const t = text || '';
+    const q = (query || '').trim();
+    if (!q) return t;
+    const idx = t.toLowerCase().indexOf(q.toLowerCase());
+    if (idx === -1) return t;
+    return (
+        <>
+            {t.slice(0, idx)}
+            <span style={{ background: 'rgba(167,139,250,0.4)', borderRadius: 2 }}>{t.slice(idx, idx + q.length)}</span>
+            {t.slice(idx + q.length)}
+        </>
+    );
+}
+
+// Small badge for imported requirements; manually-created ones get none.
+const SOURCE_BADGE = {
+    jira: { label: 'Jira', color: '#4b9fff' },
+    confluence: { label: 'Confluence', color: '#4b9fff' },
+};
+
+const ID_PILL = {
+    fontWeight: 700, fontSize: '0.72rem', color: 'var(--accent-purple, #a78bfa)',
+    background: 'rgba(167,139,250,0.14)', border: '1px solid rgba(167,139,250,0.3)',
+    padding: '1px 7px', borderRadius: 5, flexShrink: 0, letterSpacing: '0.02em', whiteSpace: 'nowrap',
+};
+
 /**
  * RequirementLinkPanel
  *
  * Displays requirements linked to a test case with the ability to:
  *  - Remove an existing link (× chip button)
- *  - Search all requirements and add a link from a dropdown
+ *  - Search all requirements and add a link from a dropdown (rich rows:
+ *    identifier pill + title + source badge + description preview, with
+ *    match highlighting and keyboard navigation)
  *  - Inline-create a new requirement when the search term finds no match
  *
  * Props:
@@ -19,6 +49,7 @@ export default function RequirementLinkPanel({ testCaseId }) {
     const [search, setSearch] = useState('');
     const [dropdownOpen, setDropdownOpen] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [activeIndex, setActiveIndex] = useState(0); // keyboard highlight
 
     // Inline-create form state
     const [creating, setCreating] = useState(false);
@@ -45,9 +76,9 @@ export default function RequirementLinkPanel({ testCaseId }) {
             reqApi.listByTestCase(testCaseId),
             reqApi.list(),
         ])
-            .then(([linked, all]) => {
+            .then(([linkedData, all]) => {
                 hasLoadedRef.current = true;
-                setLinked(linked || []);
+                setLinked(linkedData || []);
                 setAllReqs(all || []);
             })
             .catch(() => {})
@@ -80,6 +111,15 @@ export default function RequirementLinkPanel({ testCaseId }) {
     );
 
     const showCreate = search.trim() !== '' && filteredReqs.length === 0;
+    const itemCount = filteredReqs.length + (showCreate ? 1 : 0);
+    const activeIdx = itemCount === 0 ? -1 : Math.min(activeIndex, itemCount - 1);
+
+    // Keep the keyboard-highlighted row scrolled into view.
+    useEffect(() => {
+        if (!dropdownOpen) return;
+        const el = dropdownRef.current?.querySelector('[data-active="true"]');
+        if (el) el.scrollIntoView({ block: 'nearest' });
+    }, [activeIdx, dropdownOpen]);
 
     const handleRemoveLink = (reqId) => {
         reqApi.deleteLink(reqId, testCaseId)
@@ -92,9 +132,36 @@ export default function RequirementLinkPanel({ testCaseId }) {
             .then(() => {
                 setLinked(prev => [...prev, req]);
                 setSearch('');
+                setActiveIndex(0);
                 setDropdownOpen(false);
             })
             .catch(() => {});
+    };
+
+    const startCreate = () => {
+        setNewId(search.trim());
+        setCreating(true);
+        setDropdownOpen(false);
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Escape') { setDropdownOpen(false); return; }
+        if (!dropdownOpen && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+            setDropdownOpen(true);
+            return;
+        }
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setActiveIndex(i => Math.min(i + 1, itemCount - 1));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActiveIndex(i => Math.max(i - 1, 0));
+        } else if (e.key === 'Enter') {
+            if (activeIdx < 0) return;
+            e.preventDefault();
+            if (activeIdx < filteredReqs.length) handleAddLink(filteredReqs[activeIdx]);
+            else if (showCreate) startCreate();
+        }
     };
 
     const handleCreateAndLink = () => {
@@ -153,44 +220,78 @@ export default function RequirementLinkPanel({ testCaseId }) {
 
             {/* Search / add row */}
             {!creating && (
-                <div style={{ position: 'relative', display: 'inline-block', width: '100%', maxWidth: 380 }}>
+                <div style={{ position: 'relative', display: 'inline-block', width: '100%', maxWidth: 460 }}>
                     <input
                         ref={searchRef}
                         className="modern-input"
                         style={{ width: '100%', fontSize: '0.85rem' }}
-                        placeholder="Search or add requirement…"
+                        placeholder="Search requirements by ID or name…"
                         value={search}
-                        onChange={e => { setSearch(e.target.value); setDropdownOpen(true); }}
-                        onFocus={() => setDropdownOpen(true)}
+                        data-testid="req-search-input"
+                        onChange={e => { setSearch(e.target.value); setActiveIndex(0); setDropdownOpen(true); }}
+                        onFocus={() => { setActiveIndex(0); setDropdownOpen(true); }}
+                        onKeyDown={handleKeyDown}
                     />
                     {dropdownOpen && (filteredReqs.length > 0 || showCreate) && (
                         <div
                             ref={dropdownRef}
+                            data-testid="req-options"
                             style={{
                                 position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50,
                                 background: 'var(--surface-bg, #1e1e2e)', border: '1px solid var(--border-color)',
-                                borderRadius: 6, boxShadow: '0 4px 16px rgba(0,0,0,0.4)', marginTop: 2, maxHeight: 220, overflowY: 'auto',
+                                borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.45)', marginTop: 4, maxHeight: 320, overflowY: 'auto',
                             }}
                         >
-                            {filteredReqs.map(req => (
-                                <div
-                                    key={req.id}
-                                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '0.85rem', display: 'flex', gap: 8, alignItems: 'center' }}
-                                    onMouseDown={() => handleAddLink(req)}
-                                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-                                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                                >
-                                    <span style={{ fontWeight: 600, color: 'var(--accent-purple, #a78bfa)', minWidth: 80 }}>{req.identifier}</span>
-                                    <span style={{ color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{req.title}</span>
-                                </div>
-                            ))}
+                            {filteredReqs.map((req, i) => {
+                                const active = i === activeIdx;
+                                const badge = SOURCE_BADGE[req.source_type];
+                                return (
+                                    <div
+                                        key={req.id}
+                                        data-testid={`req-option-${req.id}`}
+                                        data-active={active ? 'true' : 'false'}
+                                        onMouseDown={() => handleAddLink(req)}
+                                        onMouseEnter={() => setActiveIndex(i)}
+                                        style={{
+                                            padding: '7px 12px', cursor: 'pointer',
+                                            display: 'flex', flexDirection: 'column', gap: 2,
+                                            background: active ? 'rgba(99,102,241,0.16)' : 'transparent',
+                                            borderLeft: `2px solid ${active ? 'var(--accent-purple, #a78bfa)' : 'transparent'}`,
+                                        }}
+                                    >
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                            <span style={ID_PILL}>{highlightMatch(req.identifier, search)}</span>
+                                            <span style={{ flex: 1, minWidth: 0, color: 'var(--text-primary)', fontWeight: 500, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                {highlightMatch(req.title, search)}
+                                            </span>
+                                            {badge && (
+                                                <span style={{
+                                                    fontSize: '0.62rem', fontWeight: 700, padding: '1px 6px', borderRadius: 4,
+                                                    textTransform: 'uppercase', letterSpacing: '0.03em', flexShrink: 0,
+                                                    color: badge.color, background: badge.color + '1c', border: `1px solid ${badge.color}55`,
+                                                }}>
+                                                    {badge.label}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {req.description && (
+                                            <div style={{ color: 'var(--text-secondary)', fontSize: '0.76rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', paddingLeft: 2 }}>
+                                                {req.description}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                             {showCreate && (
                                 <div
-                                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '0.85rem', color: 'var(--accent-green, #34d399)', borderTop: filteredReqs.length > 0 ? '1px solid var(--border-color)' : 'none' }}
-                                    onMouseDown={() => {
-                                        setNewId(search.trim());
-                                        setCreating(true);
-                                        setDropdownOpen(false);
+                                    data-testid="req-create-option"
+                                    data-active={activeIdx === filteredReqs.length ? 'true' : 'false'}
+                                    onMouseDown={startCreate}
+                                    onMouseEnter={() => setActiveIndex(filteredReqs.length)}
+                                    style={{
+                                        padding: '8px 12px', cursor: 'pointer', fontSize: '0.83rem', color: 'var(--accent-green, #34d399)',
+                                        borderTop: filteredReqs.length > 0 ? '1px solid var(--border-color)' : 'none',
+                                        background: activeIdx === filteredReqs.length ? 'rgba(52,211,153,0.12)' : 'transparent',
                                     }}
                                 >
                                     + Create new requirement "{search.trim()}"
