@@ -5,6 +5,7 @@ import {
     SectionLabel, Pill, StatusPill, ReqChip, Segmented, AIBtn, FilterTab,
     GeneratingDots, DraftSkeleton, Stepper, MiniStat,
 } from './primitives';
+import PromptPreviewPanel from './PromptPreviewPanel';
 
 // ── Middle top: Header ───────────────────────────────────────────────────────
 export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDiscardAll, onGenerate, onImport, disabled }) {
@@ -135,6 +136,8 @@ export function StudioComposer({ ai, stage, disabled }) {
                         }}>{t}</button>
                 ))}
             </div>
+
+            <PromptPreviewPanel ai={ai} />
 
             {stage === 'generating' && (
                 <div style={{ marginTop: 14 }}>

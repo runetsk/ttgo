@@ -427,6 +427,9 @@ export const aiGeneration = {
         api.put('/settings/ai-gen-parent-template', { content }).then(res => res.data),
     resetParentTemplate: () =>
         api.post('/settings/ai-gen-parent-template/reset').then(res => res.data),
+    // Prompt preview (live, read-only — no LLM call)
+    promptPreview: (data) =>
+        api.post('/ai-gen/prompt-preview', data, { _silent: true }).then(res => res.data),
     // Generation
     generateTests: (requirementId, data) =>
         api.post(`/requirements/${requirementId}/generate-tests`, data).then(res => res.data),
