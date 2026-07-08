@@ -17,6 +17,7 @@ import (
 // testEnv holds the server and auth session for tests.
 type testEnv struct {
 	srv          *api.Server
+	store        *store.Store
 	sessionToken string
 }
 
@@ -66,7 +67,7 @@ func testServer(t *testing.T) (*testEnv, func()) {
 		t.Fatal("no session_token cookie after login")
 	}
 
-	env := &testEnv{srv: srv, sessionToken: sessionToken}
+	env := &testEnv{srv: srv, store: s, sessionToken: sessionToken}
 	cleanup := func() { os.Remove(tmpFile.Name()) }
 	return env, cleanup
 }

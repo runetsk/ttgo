@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -435,16 +436,16 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch the requirement for context.
-	requirement, err := h.store.GetRequirement(requirementID)
+	// Resolve everything the prompt needs (shared with the preview endpoint).
+	plan, err := h.buildPromptPlan(requirementID, req.CoverageLevel, req.DetailLevel, req.AdditionalInstructions)
 	if err != nil {
-		httpx.Error(w, http.StatusNotFound, err)
+		if errors.Is(err, errRequirementNotFound) {
+			httpx.Error(w, http.StatusNotFound, err)
+			return
+		}
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
-
-	// Fetch children for context (if this is a parent requirement)
-	children, _ := h.store.ListChildRequirements(requirementID)
-	childrenContext := buildChildrenContext(children)
 
 	// Resolve provider.
 	var providerCfg *models.LLMProviderConfig
@@ -481,61 +482,6 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Default values.
-	coverageLevel := req.CoverageLevel
-	if coverageLevel == "" {
-		coverageLevel = "thorough"
-	}
-	coverageGuidance := coverageLevelGuidance(coverageLevel)
-	if coverageGuidance == "" {
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "coverage_level must be one of: essential, thorough, comprehensive"})
-		return
-	}
-
-	// Scale coverage guidance when children are present but standard template is used
-	// (parent template already has its own children-aware instructions)
-	if len(children) > 0 {
-		coverageGuidance += fmt.Sprintf(
-			"\n\nIMPORTANT: This requirement has %d child issues/sub-tickets. "+
-				"Generate at least one test case per child issue to ensure full coverage.",
-			len(children))
-	}
-
-	detailLevel := req.DetailLevel
-	if detailLevel == "" {
-		detailLevel = "Standard"
-	}
-
-	// Load coverage config for max_tokens.
-	coverageCfg, _ := h.store.GetOrCreateCoverageConfig()
-	maxTokens := coverageMaxTokens(coverageLevel, coverageCfg)
-
-	// Load template — use parent template when children are present.
-	templateWarning := ""
-	tmpl, err := h.store.GetOrCreateDefaultTemplate()
-	var promptTemplate string
-	templateType := "standard"
-	if err != nil {
-		templateWarning = "Using built-in default template (custom template unavailable)"
-		if len(children) > 0 {
-			promptTemplate = buildBuiltinParentTemplate()
-			templateType = "parent"
-		} else {
-			promptTemplate = buildBuiltinTemplate()
-		}
-	} else if len(children) > 0 && strings.TrimSpace(tmpl.ParentContent) != "" {
-		promptTemplate = tmpl.ParentContent
-		templateType = "parent"
-	} else if strings.TrimSpace(tmpl.Content) != "" {
-		promptTemplate = tmpl.Content
-	} else {
-		templateWarning = "Using built-in default template (custom template unavailable)"
-		promptTemplate = buildBuiltinTemplate()
-	}
-
-	// Assemble prompt.
-	prompt := assemblePrompt(promptTemplate, requirement, childrenContext, coverageGuidance, detailLevel, req.AdditionalInstructions)
-
 	// Call LLM.
 	provider, err := llm.NewProvider(providerCfg)
 	if err != nil {
@@ -555,19 +501,14 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 	// and return JSON directly. This dramatically reduces wasted tokens for
 	// chain-of-thought models (DeepSeek-R1, QwQ, etc.) that otherwise spend
 	// their entire budget on reasoning and never emit the actual answer.
-	systemMsg := "You are a JSON API that generates software test cases. " +
-		"Respond with ONLY a valid JSON array. " +
-		"Do NOT include <think> tags, markdown fences, or any text outside the JSON. " +
-		"Start your response with the [ character."
-
 	chatReq := llm.ChatRequest{
 		Model: providerCfg.ModelName,
 		Messages: []llm.ChatMessage{
-			{Role: "system", Content: systemMsg},
-			{Role: "user", Content: prompt},
+			{Role: "system", Content: generationSystemMessage},
+			{Role: "user", Content: plan.Prompt},
 		},
 		Temperature: 0.7,
-		MaxTokens:   maxTokens,
+		MaxTokens:   plan.MaxTokens,
 	}
 
 	start := time.Now()
@@ -590,7 +531,7 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		ID:         uuid.New().String(),
 		TestCaseID: "",
 		Action: fmt.Sprintf("ai_generation:requirement:%s:provider:%s:status:%s:coverage:%s:duration_ms:%d",
-			requirementID, providerCfg.ID, auditStatus, coverageLevel, time.Since(start).Milliseconds()),
+			requirementID, providerCfg.ID, auditStatus, plan.CoverageLevel, time.Since(start).Milliseconds()),
 		UserID:    userID,
 		Timestamp: time.Now(),
 	})
@@ -625,10 +566,10 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 				{Role: "system", Content: "CRITICAL: Output ONLY a raw JSON array. " +
 					"No reasoning, no <think> tags, no markdown, no commentary. " +
 					"Your entire response must start with [ and end with ]."},
-				{Role: "user", Content: prompt},
+				{Role: "user", Content: plan.Prompt},
 			},
 			Temperature: 0.3,
-			MaxTokens:   maxTokens,
+			MaxTokens:   plan.MaxTokens,
 		}
 
 		retryResp, retryErr := provider.Chat(ctx, retryReq)
@@ -669,12 +610,12 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		"duration_ms":       time.Since(start).Milliseconds(),
 		"model":             chatResp.Model,
 		"finish_reason":     chatResp.FinishReason,
-		"max_tokens_budget": maxTokens,
+		"max_tokens_budget": plan.MaxTokens,
 		"retried":           retried,
 		"provider_label":    providerCfg.Label,
 		"provider_type":     providerCfg.ProviderType,
-		"request_context":   prompt,
-		"template_type":     templateType,
+		"request_context":   plan.Prompt,
+		"template_type":     plan.TemplateType,
 	}
 	if chatResp.Usage != nil {
 		debug["usage"] = chatResp.Usage
@@ -685,8 +626,8 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		"provider": providerCfg.MaskedConfig(),
 		"debug":    debug,
 	}
-	if templateWarning != "" {
-		out["template_warning"] = templateWarning
+	if plan.TemplateWarning != "" {
+		out["template_warning"] = plan.TemplateWarning
 	}
 	httpx.JSON(w, http.StatusOK, out)
 }

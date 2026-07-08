@@ -22,6 +22,7 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("POST /settings/ai-gen-template/reset", requireAdmin(h.ResetTemplate))
 	api.HandleFunc("PUT /settings/ai-gen-parent-template", requireAdmin(h.UpdateParentTemplate))
 	api.HandleFunc("POST /settings/ai-gen-parent-template/reset", requireAdmin(h.ResetParentTemplate))
+	api.HandleFunc("POST /ai-gen/prompt-preview", requireAuth("read", h.PreviewGenerationPrompt))
 	api.HandleFunc("POST /requirements/{id}/generate-tests", requireAuth("write", h.GenerateTests))
 	api.HandleFunc("POST /requirements/{id}/accept-generated-tests", requireAuth("write", h.AcceptGeneratedTests))
 	api.HandleFunc("POST /import/parse", requireAuth("write", h.ParseImport))
