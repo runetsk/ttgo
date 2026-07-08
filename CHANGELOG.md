@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Attach screenshots to a run result as manual evidence — from the execution-mode fail panel and the expandable result detail. Uploads now append to a result's gallery instead of replacing it.
 - Per-step Pass/Fail/Skip verdicts with optional notes during manual execution; marking a step fail derives the result to FAIL, and the result detail shows the captured step checklist.
 - Assign a test run to a user from the run detail header, and filter the runs list by assignee — including "assigned to me" and "unassigned".
+- AI Generate page: live prompt preview showing the exact prompt Generate will send — color-coded by source (requirement, children, coverage, detail, instructions), updates as options change, and flags when no requirement is linked.
 
 ### Changed
 - Library sidebar shows test cases in the folder tree by default (the "Show tests in tree" toggle now defaults on); anyone who explicitly turned it off keeps that choice.
