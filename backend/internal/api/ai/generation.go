@@ -3,7 +3,6 @@ package ai
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -439,11 +438,7 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 	// Resolve everything the prompt needs (shared with the preview endpoint).
 	plan, err := h.buildPromptPlan(requirementID, req.CoverageLevel, req.DetailLevel, req.AdditionalInstructions)
 	if err != nil {
-		if errors.Is(err, errRequirementNotFound) {
-			httpx.Error(w, http.StatusNotFound, err)
-			return
-		}
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writePromptPlanError(w, err)
 		return
 	}
 

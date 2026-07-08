@@ -134,6 +134,21 @@ var (
 	errRequirementNotFound  = errors.New("requirement not found")
 )
 
+// writePromptPlanError maps buildPromptPlan errors onto HTTP responses for
+// both GenerateTests and PreviewGenerationPrompt. buildPromptPlan only returns
+// the two sentinels today; anything else would be an internal failure, not a
+// client error.
+func writePromptPlanError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errRequirementNotFound):
+		httpx.Error(w, http.StatusNotFound, err)
+	case errors.Is(err, errUnknownCoverageLevel):
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	default:
+		httpx.Error(w, http.StatusInternalServerError, err)
+	}
+}
+
 // promptPlan is everything needed to issue (or preview) a generation request.
 type promptPlan struct {
 	Segments        []PromptSegment
@@ -236,11 +251,7 @@ func (h *Handler) PreviewGenerationPrompt(w http.ResponseWriter, r *http.Request
 	}
 	plan, err := h.buildPromptPlan(req.RequirementID, req.CoverageLevel, req.DetailLevel, req.AdditionalInstructions)
 	if err != nil {
-		if errors.Is(err, errRequirementNotFound) {
-			httpx.Error(w, http.StatusNotFound, err)
-			return
-		}
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		writePromptPlanError(w, err)
 		return
 	}
 	out := map[string]interface{}{
