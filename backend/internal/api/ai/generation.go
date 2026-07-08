@@ -769,27 +769,6 @@ func stripHTMLTags(s string) string {
 	return strings.TrimSpace(result.String())
 }
 
-// assemblePrompt builds the final LLM prompt by substituting template variables.
-func assemblePrompt(template string, req *models.Requirement, childrenContext, coverageGuidance, detailLevel, additionalInstructions string) string {
-	additionalInstr := ""
-	if strings.TrimSpace(additionalInstructions) != "" {
-		additionalInstr = "Additional Instructions: " + additionalInstructions
-	}
-	prompt := template
-	prompt = strings.ReplaceAll(prompt, "{{COVERAGE}}", coverageGuidance)
-	prompt = strings.ReplaceAll(prompt, "{{TITLE}}", req.Title)
-	// If the template contains {{CHILDREN}}, substitute it; otherwise append children after description
-	if strings.Contains(prompt, "{{CHILDREN}}") {
-		prompt = strings.ReplaceAll(prompt, "{{CHILDREN}}", childrenContext)
-		prompt = strings.ReplaceAll(prompt, "{{DESCRIPTION}}", req.Description)
-	} else {
-		prompt = strings.ReplaceAll(prompt, "{{DESCRIPTION}}", req.Description+childrenContext)
-	}
-	prompt = strings.ReplaceAll(prompt, "{{DETAIL_LEVEL}}", detailLevel)
-	prompt = strings.ReplaceAll(prompt, "{{ADDITIONAL_INSTRUCTIONS}}", additionalInstr)
-	return prompt
-}
-
 // llmDraftShape is the JSON shape the LLM is expected to output per test case.
 // Defined at package level so both parseLLMResponse and collectJSONObjects share it.
 type llmDraftShape struct {
