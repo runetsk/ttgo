@@ -89,12 +89,6 @@ export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDi
 
 // ── Middle: Composer ────────────────────────────────────────────────────────
 export function StudioComposer({ ai, stage, disabled }) {
-    const tagPresets = ['Happy paths', 'Edge cases', 'Negative', 'Accessibility', 'Performance', 'Security'];
-    const addTag = (t) => {
-        const cur = (ai.additionalInstructions || '').trim();
-        if (cur.toLowerCase().includes(t.toLowerCase())) return;
-        ai.setAdditionalInstructions(cur ? `${cur}, ${t.toLowerCase()}` : `Include ${t.toLowerCase()}`);
-    };
     return (
         <div style={{ padding: '14px 20px', borderBottom: `1px solid ${AIC.border}`, position: 'relative' }}>
             <div style={{
@@ -116,7 +110,7 @@ export function StudioComposer({ ai, stage, disabled }) {
                 onChange={e => ai.setAdditionalInstructions(e.target.value)}
                 rows={4}
                 disabled={disabled}
-                placeholder="Describe the tests you want the AI to draft — focus areas, scenarios, constraints…"
+                placeholder="Add additional instructions (optional) — they are appended to the prompt below…"
                 style={{
                     width: '100%', background: AIC.bg2, border: `1px solid ${AIC.border}`,
                     color: AIC.text, padding: '9px 12px', fontSize: 13.5, lineHeight: 1.55,
@@ -124,18 +118,6 @@ export function StudioComposer({ ai, stage, disabled }) {
                     outline: 'none',
                 }}
             />
-            <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                {tagPresets.map(t => (
-                    <button key={t} onClick={() => addTag(t)} disabled={disabled}
-                        style={{
-                            display: 'inline-flex', alignItems: 'center', gap: 5,
-                            padding: '4px 9px', borderRadius: 6,
-                            fontSize: 11.5, color: AIC.text,
-                            background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.25)',
-                            cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
-                        }}>{t}</button>
-                ))}
-            </div>
 
             <PromptPreviewPanel ai={ai} />
 

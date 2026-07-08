@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - AI Generate page: live prompt preview showing the exact prompt Generate will send — color-coded by source (requirement, children, coverage, detail, instructions), updates as options change, and flags when no requirement is linked.
 
 ### Changed
+- AI Generate composer simplified: the category preset buttons (Happy paths, Edge cases, Negative, …) are gone — the live prompt preview already shows what the options inject — and the instructions box is now clearly labeled as optional additional instructions appended to the prompt.
+- Default AI generation prompt fixed and aligned: the Detail Level definitions now use the exact values the UI sends ("Simplified" / "Standard" / "Detailed" — previously two of three never matched), and the coverage bullet uses the "Functional" category name from the enum. Existing installs that never customized the template are upgraded automatically on startup; customized templates are untouched (Reset to Default picks up the new text).
 - Library sidebar shows test cases in the folder tree by default (the "Show tests in tree" toggle now defaults on); anyone who explicitly turned it off keeps that choice.
 - Linked-requirements picker on the test case page now shows richer options — an identifier pill, the title with search-match highlighting, a source badge (Jira/Confluence), and a one-line description preview — plus keyboard navigation (↑/↓ to move, Enter to link, Esc to close).
 - New Test Run modal is now a larger folder/test tree picker (tri-state folder checkboxes), and newly created runs appear in the run sidebar live.

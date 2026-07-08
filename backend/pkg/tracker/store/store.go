@@ -205,7 +205,13 @@ func (s *Store) bootstrapDB() error {
 		return fmt.Errorf("failed to seed AI generation template: %w", err)
 	}
 	if tmpl.DefaultContent != defaultPromptTemplate {
-		db.Model(tmpl).Update("default_content", defaultPromptTemplate)
+		updates := map[string]interface{}{"default_content": defaultPromptTemplate}
+		// If content was never customized (still matches the previous default),
+		// carry it along to the new built-in — same rule as the parent template.
+		if tmpl.Content == tmpl.DefaultContent {
+			updates["content"] = defaultPromptTemplate
+		}
+		db.Model(tmpl).Updates(updates)
 	}
 	if tmpl.DefaultParentContent != defaultParentPromptTemplate {
 		updates := map[string]interface{}{"default_parent_content": defaultParentPromptTemplate}

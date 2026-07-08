@@ -153,15 +153,15 @@ Coverage: {{COVERAGE}}
 
 ## Coverage Guidelines
 Distribute tests across these categories as applicable:
-- Positive/Happy path: core functionality works as designed
+- Functional/Happy path: core functionality works as designed
 - Negative: invalid inputs, missing data, unauthorized access
 - Boundary: min/max values, empty fields, character limits
 - Edge case: special characters, concurrency, unusual workflows
 
 ## Detail Level
+- "Simplified": 1–3 high-level steps summarizing the test intent
 - "Standard": 3–6 clear steps per test case
-- "More Detailed": 6–12 granular steps including setup, verification and teardown
-- "More Simplified": 1–3 high-level steps summarizing the test intent
+- "Detailed": 6–12 granular steps including setup, verification and teardown
 
 ## Output Format
 Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text.
@@ -243,9 +243,9 @@ Coverage: {{COVERAGE}}
 - Include cross-cutting tests (e.g. interactions between children) when applicable
 
 ## Detail Level
+- "Simplified": 1–3 high-level steps summarizing the test intent
 - "Standard": 3–6 clear steps per test case
-- "More Detailed": 6–12 granular steps including setup, verification and teardown
-- "More Simplified": 1–3 high-level steps summarizing the test intent
+- "Detailed": 6–12 granular steps including setup, verification and teardown
 
 ## Output Format
 Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text.
