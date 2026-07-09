@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   throttled the probe to ~5 results/s of the configured 20).
 - A PENDING run switches to RUNNING automatically when its first result is updated manually.
 - Execution-status colors (dots, bars, chart cells) now come from a single shared palette, so PASS/RUNNING/SKIP render consistently across the run pages, timeline, folder sidebar, and analytics.
+- Add tests to an open run using the same folder tree-picker as run creation (multi-select, whole-folder select), replacing the single-select dropdown; tests already in the run appear locked (checked + disabled). Backed by a new `POST /runs/{id}/results/bulk` endpoint.
 
 ### Fixed
 - "Erase All Data" (Settings → Demo Data) did nothing after typing `ERASE`: the confirm request omitted the body the backend requires, so `DELETE /api/admin/reset` was rejected with 400 and nothing was erased. The frontend now sends `{"confirm":"CONFIRM RESET"}`; added a backend test pinning the reset confirmation contract.
