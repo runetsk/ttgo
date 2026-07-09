@@ -36,7 +36,7 @@ test.describe('Add tests to an open run — tree picker', () => {
 
         await test.step('The run now holds both tests', async () => {
             await expect(page.getByTestId('test-tree-picker')).not.toBeVisible(); // modal closed
-            await expect(page.getByRole('row', { name: names[1] })).toBeVisible();
+            await expect(page.getByTestId(`select-result-${tc[names[1]].id}`)).toBeVisible();
             await expect(page.getByTestId('stats-passed')).toContainText('/ 2');
         });
     });
