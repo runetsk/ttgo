@@ -266,6 +266,17 @@ function TestRunsSection() {
                 ]} />
             </Card>
 
+            <SectionHeader>Adding Tests to a Run</SectionHeader>
+            <Card>
+                <P>You can add more tests to a run at any time — not just when creating it. Open the run and use the tree picker to pull in additional tests from the library.</P>
+                <Steps items={[
+                    { title: 'Open the run', desc: 'Go to its detail page from the Runs list' },
+                    { title: 'Click "+ Add Test"', desc: 'Opens the same folder tree picker used when creating a run' },
+                    { title: 'Pick tests', desc: 'Tick individual tests or whole folders; tests already in the run appear checked and locked so you can\'t add them twice' },
+                    { title: 'Add', desc: 'The selected tests are appended to the run as Not Run, ready to execute' },
+                ]} />
+            </Card>
+
             <SectionHeader>Executing Tests</SectionHeader>
             <Card>
                 <P>Open a run to see its test cases. For each one, expand the steps, execute, and set the status.</P>
