@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { getFolderTree } from '../api';
 import { collectTestIds, folderCheckState, toggleFolderSelection } from '../utils/treeSelection';
 
-export default function TestTreePicker({ selectedIds, onChange }) {
+const EMPTY_SET = new Set();
+
+export default function TestTreePicker({ selectedIds, onChange, lockedIds = EMPTY_SET }) {
     const [tree, setTree] = useState(null); // null = loading
     const [expanded, setExpanded] = useState(() => new Set());
     const [search, setSearch] = useState('');
@@ -30,6 +32,7 @@ export default function TestTreePicker({ selectedIds, onChange }) {
     });
 
     const toggleTest = (id) => {
+        if (lockedIds.has(id)) return; // locked tests (already in the run) can't be toggled
         const next = new Set(selectedIds);
         if (next.has(id)) next.delete(id); else next.add(id);
         onChange(next);
@@ -53,10 +56,34 @@ export default function TestTreePicker({ selectedIds, onChange }) {
 
     const rowBase = { display: 'flex', alignItems: 'center', gap: 8, padding: '4px 6px', borderRadius: 6, fontSize: '0.82rem' };
 
+    // Test checkbox shared by the tree and search-result renders: locked tests
+    // (already in the run) show checked + disabled and can't be toggled.
+    const testCheckbox = (t) => {
+        const locked = lockedIds.has(t.id);
+        return (
+            <input
+                type="checkbox"
+                data-testid={`test-tree-test-${t.id}`}
+                checked={selectedIds.has(t.id) || locked}
+                disabled={locked}
+                onChange={() => toggleTest(t.id)}
+            />
+        );
+    };
+    const testRowStyle = (t, extra) => ({
+        ...rowBase,
+        ...extra,
+        cursor: lockedIds.has(t.id) ? 'default' : 'pointer',
+        opacity: lockedIds.has(t.id) ? 0.6 : 1,
+        background: (selectedIds.has(t.id) || lockedIds.has(t.id)) ? 'rgba(99,102,241,0.08)' : 'transparent',
+    });
+
     const renderFolder = (node, depth) => {
-        const state = folderCheckState(node, selectedIds);
+        const state = folderCheckState(node, selectedIds, lockedIds);
         const isOpen = expanded.has(node.id);
         const hasChildren = (node.sub_folders || []).length > 0 || (node.test_cases || []).length > 0;
+        const testIds = collectTestIds(node);
+        const allLocked = testIds.length > 0 && testIds.every(id => lockedIds.has(id));
         return (
             <div key={node.id}>
                 <div style={{ ...rowBase, paddingLeft: depth * 16 + 6 }}>
@@ -69,16 +96,16 @@ export default function TestTreePicker({ selectedIds, onChange }) {
                         data-testid={`test-tree-folder-${node.id}`}
                         checked={state === 'checked'}
                         ref={el => { if (el) el.indeterminate = state === 'partial'; }}
-                        onChange={() => onChange(toggleFolderSelection(node, selectedIds))}
-                        disabled={collectTestIds(node).length === 0}
+                        onChange={() => onChange(toggleFolderSelection(node, selectedIds, lockedIds))}
+                        disabled={testIds.length === 0 || allLocked}
                     />
                     <span style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{node.name}</span>
                 </div>
                 {isOpen && (
                     <>
                         {(node.test_cases || []).map(t => (
-                            <label key={t.id} style={{ ...rowBase, paddingLeft: (depth + 1) * 16 + 24, cursor: 'pointer', background: selectedIds.has(t.id) ? 'rgba(99,102,241,0.08)' : 'transparent' }}>
-                                <input type="checkbox" data-testid={`test-tree-test-${t.id}`} checked={selectedIds.has(t.id)} onChange={() => toggleTest(t.id)} />
+                            <label key={t.id} style={testRowStyle(t, { paddingLeft: (depth + 1) * 16 + 24 })}>
+                                {testCheckbox(t)}
                                 <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.name}</span>
                             </label>
                         ))}
@@ -107,8 +134,8 @@ export default function TestTreePicker({ selectedIds, onChange }) {
                     matches.length === 0 ? (
                         <p style={{ padding: 10, fontSize: '0.82rem', color: 'var(--text-secondary)' }}>No tests match.</p>
                     ) : matches.map(({ test, path }) => (
-                        <label key={test.id} style={{ ...rowBase, cursor: 'pointer', background: selectedIds.has(test.id) ? 'rgba(99,102,241,0.08)' : 'transparent' }}>
-                            <input type="checkbox" data-testid={`test-tree-test-${test.id}`} checked={selectedIds.has(test.id)} onChange={() => toggleTest(test.id)} />
+                        <label key={test.id} style={testRowStyle(test)}>
+                            {testCheckbox(test)}
                             <span style={{ overflow: 'hidden', minWidth: 0 }}>
                                 <span style={{ color: 'var(--text-secondary)', fontSize: '0.72rem' }}>{path.slice(0, -1).join(' / ')}{path.length > 1 ? ' / ' : ''}</span>
                                 {test.name}
