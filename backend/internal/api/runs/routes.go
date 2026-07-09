@@ -19,6 +19,7 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("POST /runs/{id}/copy", requireAuth("write", h.CopyTestRun))
 	api.HandleFunc("PATCH /runs/{id}/folder", requireAuth("write", h.AssignRunToFolder))
 	api.HandleFunc("POST /runs/{id}/results", requireAuth("write", h.AddRunResult))
+	api.HandleFunc("POST /runs/{id}/results/bulk", requireAuth("write", h.AddRunResultsBulk))
 	api.HandleFunc("POST /runs/{id}/results/bulk-update", requireAuth("write", h.BulkUpdateRunResults))
 	api.HandleFunc("PUT /runs/{id}/results/{result_id}", requireAuth("write", h.UpdateRunResult))
 	api.HandleFunc("DELETE /runs/{id}/results/{result_id}", requireAuth("write", h.DeleteRunResult))

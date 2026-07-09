@@ -181,6 +181,93 @@ func (s *Store) CreateTestRunWithCases(run *models.TestRun, testCaseIDs []string
 	})
 }
 
+// AddTestCasesToRun snapshots the given test cases into an existing run as new
+// attempt-1 PENDING results, skipping any test case already present in the run
+// (so re-adding is a no-op rather than a new attempt). It validates the run and
+// every test case exist, dedups the input, bumps the run's updated_at, and
+// returns the created results. Empty or all-already-present input returns no
+// rows and no error.
+func (s *Store) AddTestCasesToRun(runID string, testCaseIDs []string) ([]models.RunResult, error) {
+	var created []models.RunResult
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var runCount int64
+		if err := tx.Model(&models.TestRun{}).Where("id = ?", runID).Count(&runCount).Error; err != nil {
+			return err
+		}
+		if runCount == 0 {
+			return gorm.ErrRecordNotFound
+		}
+
+		// Dedup input, preserving order, dropping empties.
+		seen := make(map[string]bool, len(testCaseIDs))
+		ids := make([]string, 0, len(testCaseIDs))
+		for _, id := range testCaseIDs {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) == 0 {
+			return nil
+		}
+
+		// Every referenced test case must exist.
+		var found []models.TestCase
+		if err := tx.Where("id IN ?", ids).Find(&found).Error; err != nil {
+			return err
+		}
+		if len(found) != len(ids) {
+			return ErrUnknownTestCases
+		}
+		byID := make(map[string]models.TestCase, len(found))
+		for _, tc := range found {
+			byID[tc.ID] = tc
+		}
+
+		// Skip test cases already in this run (any attempt).
+		var presentIDs []string
+		if err := tx.Model(&models.RunResult{}).
+			Where("test_run_id = ? AND test_case_id IN ?", runID, ids).
+			Distinct().Pluck("test_case_id", &presentIDs).Error; err != nil {
+			return err
+		}
+		present := make(map[string]bool, len(presentIDs))
+		for _, id := range presentIDs {
+			present[id] = true
+		}
+
+		now := time.Now()
+		for _, id := range ids {
+			if present[id] {
+				continue
+			}
+			tc := byID[id]
+			testID := tc.ID
+			created = append(created, models.RunResult{
+				ID:               uuid.New().String(),
+				TestRunID:        runID,
+				TestCaseID:       &testID,
+				AttemptNumber:    1,
+				TestNameSnapshot: tc.Name,
+				Status:           models.StatusPending,
+				CreatedAt:        now,
+				UpdatedAt:        now,
+			})
+		}
+		if len(created) == 0 {
+			return nil
+		}
+		if err := tx.Create(&created).Error; err != nil {
+			return err
+		}
+		return tx.Model(&models.TestRun{}).Where("id = ?", runID).Update("updated_at", now).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return created, nil
+}
+
 // RunFilter holds optional filters for GetTestRuns. Zero values mean "no filter".
 type RunFilter struct {
 	CategoryIDs []string // category_id IN (...); empty → no category filter

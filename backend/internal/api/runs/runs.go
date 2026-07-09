@@ -416,6 +416,56 @@ func (h *Handler) AddRunResult(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, result)
 }
 
+// AddRunResultsBulk adds several test cases to an existing run in one shot,
+// snapshotting each as a new attempt-1 PENDING result and skipping any already
+// present. Mirrors the create path's test_case_ids handling.
+func (h *Handler) AddRunResultsBulk(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	var req struct {
+		TestCaseIDs []string `json:"test_case_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	if len(req.TestCaseIDs) == 0 {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "test_case_ids is required"})
+		return
+	}
+	if len(req.TestCaseIDs) > httpx.MaxBulkIDs {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "too many test_case_ids (max 500 per request)"})
+		return
+	}
+
+	created, err := h.store.AddTestCasesToRun(runID, req.TestCaseIDs)
+	if err != nil {
+		if errors.Is(err, store.ErrUnknownTestCases) {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "one or more test_case_ids do not exist"})
+			return
+		}
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "test run not found"})
+			return
+		}
+		slog.ErrorContext(r.Context(), "failed to bulk-add results to run", "run_id", runID, "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	if created == nil {
+		created = []models.RunResult{}
+	}
+	if len(created) > 0 {
+		ids := make([]string, len(created))
+		for i := range created {
+			ids[i] = created[i].ID
+		}
+		h.broadcastResultDelta(apiws.EventResultUpdated, runID, ids, nil, nil)
+	}
+
+	httpx.JSON(w, http.StatusCreated, created)
+}
+
 func (h *Handler) DeleteRunResult(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	resultID := r.PathValue("result_id")
