@@ -3,21 +3,102 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TTGO — Self-hosted, source-available test management</title>
-  <meta name="description" content="TTGO is a modern, self-hosted, source-available test management platform — rich test cases, run execution, analytics, AI test generation and a first-class CLI, all from a single Go binary and one SQLite file." />
+  <title>TTGO — Free self-hosted test management &amp; TestRail alternative</title>
+  <meta name="description" content="TTGO is a free, self-hosted, source-available test management platform — a modern alternative to TestRail, Xray and qTest. Rich test cases, run execution, analytics with flaky-test detection, requirements traceability, AI test generation and a first-class CLI, all from a single Go binary and one SQLite file." />
   <meta name="theme-color" content="#0b0b12" />
+  <link rel="canonical" href="https://runetsk.github.io/ttgo/" />
 
   <!-- Open Graph -->
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="TTGO — Self-hosted test management" />
-  <meta property="og:description" content="Own your data, automate everything. A modern self-hosted alternative to TestRail, Xray and qTest." />
-  <meta property="og:image" content="images/01-test-library.png" />
+  <meta property="og:url" content="https://runetsk.github.io/ttgo/" />
+  <meta property="og:site_name" content="TTGO" />
+  <meta property="og:title" content="TTGO — Free self-hosted test management &amp; TestRail alternative" />
+  <meta property="og:description" content="Own your data, automate everything. A modern, free, self-hosted alternative to TestRail, Xray and qTest." />
+  <meta property="og:image" content="https://runetsk.github.io/ttgo/images/01-test-library.png" />
+  <meta property="og:image:alt" content="TTGO test library — hierarchical folder tree, a filterable test grid and categories" />
+
+  <!-- Twitter -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="TTGO — Free self-hosted test management &amp; TestRail alternative" />
+  <meta name="twitter:description" content="Own your data, automate everything. A modern, free, self-hosted alternative to TestRail, Xray and qTest." />
+  <meta name="twitter:image" content="https://runetsk.github.io/ttgo/images/01-test-library.png" />
 
   <link rel="icon" type="image/svg+xml" href="ttgo-icon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Structured data: software + FAQ -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "TTGO",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Linux, macOS, Windows, Docker",
+    "url": "https://runetsk.github.io/ttgo/",
+    "downloadUrl": "https://github.com/runetsk/ttgo",
+    "description": "TTGO is a free, self-hosted, source-available test management platform — a modern alternative to TestRail, Xray and qTest. Rich test cases with version history, run execution with defect tracking, analytics with flaky-test detection, requirements traceability, AI test generation and a first-class CLI, all from a single Go binary and one SQLite file.",
+    "license": "https://polyformproject.org/licenses/shield/1.0.0",
+    "screenshot": "https://runetsk.github.io/ttgo/images/01-test-library.png",
+    "softwareHelp": "https://github.com/runetsk/ttgo#readme",
+    "featureList": [
+      "Test case management with rich text and full version history",
+      "Test run execution with pass/fail and native defect tracking",
+      "Analytics with flaky-test detection and run comparison",
+      "Requirements traceability matrix",
+      "AI test generation with your own LLM provider",
+      "First-class CLI and documented REST API",
+      "Real-time collaboration over WebSocket"
+    ],
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Is TTGO free?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. TTGO is source-available under the PolyForm Shield license and free to self-host — no per-seat fees and no time limits. You only pay for the infrastructure you run it on."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is TTGO a free alternative to TestRail, Xray or qTest?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. TTGO offers the core capabilities QA teams expect from TestRail, Xray and qTest — test cases with version history, run execution, analytics with flaky-test detection, requirements traceability and a REST API — self-hosted and free, with no per-seat license."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I self-host TTGO?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. TTGO runs entirely on your own infrastructure as a single Go binary against one SQLite file, or via Docker Compose. Nothing leaves your network."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does TTGO support AI test generation?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. TTGO can draft test cases from your requirements using your own LLM provider (bring your own key), with a review-and-approve flow so nothing is saved until you accept it."
+        }
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <!-- ───────────────────────── Nav ───────────────────────── -->
@@ -49,8 +130,8 @@
     <section class="hero">
       <div class="hero__glow" aria-hidden="true"></div>
       <div class="container hero__inner">
-        <p class="eyebrow reveal">Self-hosted · Source-available</p>
-        <h1 class="hero__title reveal">Test management that's<br /><span class="grad">actually yours.</span></h1>
+        <p class="eyebrow reveal">Free · Self-hosted · Source-available</p>
+        <h1 class="hero__title reveal">Self-hosted test management<br />that's <span class="grad">actually yours.</span></h1>
         <p class="hero__sub reveal">
           TTGO is a modern, self-hosted test management platform — rich test cases, run
           execution, analytics, AI test generation and a first-class CLI, all running as a
@@ -186,8 +267,8 @@
     <section class="section section--alt" id="compare">
       <div class="container">
         <header class="section__head reveal">
-          <h2>How TTGO compares</h2>
-          <p>Against popular commercial and self-hosted test management tools.</p>
+          <h2>TTGO vs TestRail, Xray &amp; qTest</h2>
+          <p>How TTGO compares to popular commercial and self-hosted test management tools — TestRail, Xray, qTest, Kiwi&nbsp;TCMS and Qase.</p>
         </header>
         <div class="table-wrap reveal">
           <table class="compare">
