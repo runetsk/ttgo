@@ -12,6 +12,17 @@ import (
 	"ttgo/pkg/tracker/models"
 )
 
+// ListRunComments godoc
+//
+// @Summary      List comments on a run
+// @Description  Returns all comments posted on the given test run.
+// @Tags         runs
+// @Produce      json
+// @Param        id  path  string  true  "Test run ID"
+// @Security     BearerAuth
+// @Success      200  {array}   object{id=string,target_type=string,target_id=string,user_id=string,user_display_name=string,content=string,created_at=string,updated_at=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/comments [get]
 func (h *Handler) ListRunComments(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	comments, err := h.store.ListComments("run", runID)
@@ -22,6 +33,21 @@ func (h *Handler) ListRunComments(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, enrichComments(comments))
 }
 
+// AddRunComment godoc
+//
+// @Summary      Add a comment to a run
+// @Description  Posts a new comment (1-2000 characters) on the given test run.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                 true  "Test run ID"
+// @Param        body  body  object{content=string}  true  "Comment text"
+// @Security     BearerAuth
+// @Success      201  {object}  object{id=string,target_type=string,target_id=string,user_id=string,user_display_name=string,content=string,created_at=string,updated_at=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/comments [post]
 func (h *Handler) AddRunComment(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 
@@ -69,6 +95,18 @@ func (h *Handler) AddRunComment(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, enrichComment(*comment))
 }
 
+// ListResultComments godoc
+//
+// @Summary      List comments on a run result
+// @Description  Returns all comments posted on the given run result.
+// @Tags         runs
+// @Produce      json
+// @Param        id         path  string  true  "Test run ID"
+// @Param        result_id  path  string  true  "Run result ID"
+// @Security     BearerAuth
+// @Success      200  {array}   object{id=string,target_type=string,target_id=string,user_id=string,user_display_name=string,content=string,created_at=string,updated_at=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results/{result_id}/comments [get]
 func (h *Handler) ListResultComments(w http.ResponseWriter, r *http.Request) {
 	resultID := r.PathValue("result_id")
 
@@ -80,6 +118,22 @@ func (h *Handler) ListResultComments(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, enrichComments(comments))
 }
 
+// AddResultComment godoc
+//
+// @Summary      Add a comment to a run result
+// @Description  Posts a new comment (1-2000 characters) on the given run result.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id         path  string                  true  "Test run ID"
+// @Param        result_id  path  string                  true  "Run result ID"
+// @Param        body       body  object{content=string}  true  "Comment text"
+// @Security     BearerAuth
+// @Success      201  {object}  object{id=string,target_type=string,target_id=string,user_id=string,user_display_name=string,content=string,created_at=string,updated_at=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results/{result_id}/comments [post]
 func (h *Handler) AddResultComment(w http.ResponseWriter, r *http.Request) {
 	resultID := r.PathValue("result_id")
 	if !h.store.RunResultExists(resultID) {
@@ -117,6 +171,22 @@ func (h *Handler) AddResultComment(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, enrichComment(*comment))
 }
 
+// UpdateComment godoc
+//
+// @Summary      Update a comment
+// @Description  Edits the text of an existing comment (1-2000 characters). Only the comment's author or an admin may update it.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        comment_id  path  string                  true  "Comment ID"
+// @Param        body        body  object{content=string}  true  "New comment text"
+// @Security     BearerAuth
+// @Success      200  {object}  object{id=string,target_type=string,target_id=string,user_id=string,user_display_name=string,content=string,created_at=string,updated_at=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      403  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /comments/{comment_id} [put]
 func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	commentID := r.PathValue("comment_id")
 	user := authctx.UserFromRequest(r)
@@ -152,6 +222,19 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, enrichComment(*updated))
 }
 
+// DeleteComment godoc
+//
+// @Summary      Delete a comment
+// @Description  Deletes an existing comment. Only the comment's author or an admin may delete it.
+// @Tags         runs
+// @Produce      json
+// @Param        comment_id  path  string  true  "Comment ID"
+// @Security     BearerAuth
+// @Success      200  {object}  object{status=string}
+// @Failure      403  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /comments/{comment_id} [delete]
 func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 	commentID := r.PathValue("comment_id")
 	user := authctx.UserFromRequest(r)

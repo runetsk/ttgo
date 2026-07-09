@@ -125,6 +125,55 @@ definitions:
       title:
         type: string
     type: object
+  ttgo_pkg_tracker_models.CreateRunResultRequest:
+    properties:
+      app_version:
+        type: string
+      attempt_number:
+        type: integer
+      browser:
+        type: string
+      defect_type:
+        type: string
+      duration_ms:
+        type: integer
+      end_time:
+        type: string
+      environment:
+        type: string
+      error_message:
+        type: string
+      failure_type:
+        type: string
+      log_text:
+        type: string
+      metadata:
+        items:
+          type: integer
+        type: array
+      os:
+        type: string
+      screenshots:
+        type: string
+      stack_trace:
+        type: string
+      start_time:
+        type: string
+      status:
+        $ref: '#/definitions/ttgo_pkg_tracker_models.ExecutionStatus'
+      steps:
+        items:
+          type: integer
+        type: array
+      test_case_id:
+        type: string
+      test_name_snapshot:
+        type: string
+      trace_url:
+        type: string
+      video:
+        type: string
+    type: object
   ttgo_pkg_tracker_models.CustomFieldDefinition:
     properties:
       created_at:
@@ -702,6 +751,41 @@ definitions:
       status:
         type: string
       title:
+        type: string
+    type: object
+  ttgo_pkg_tracker_models.UpdateRunResultRequest:
+    properties:
+      app_version:
+        type: string
+      browser:
+        type: string
+      defect_type:
+        type: string
+      duration_ms:
+        type: integer
+      environment:
+        type: string
+      error_message:
+        type: string
+      failure_type:
+        type: string
+      log_text:
+        type: string
+      os:
+        type: string
+      screenshots:
+        type: string
+      stack_trace:
+        type: string
+      status:
+        type: string
+      steps:
+        items:
+          type: integer
+        type: array
+      trace_url:
+        type: string
+      video:
         type: string
     type: object
   ttgo_pkg_tracker_store.AffectedTestCase:
@@ -1459,6 +1543,129 @@ paths:
       summary: Bulk delete test categories
       tags:
       - categories
+  /comments/{comment_id}:
+    delete:
+      description: Deletes an existing comment. Only the comment's author or an admin
+        may delete it.
+      parameters:
+      - description: Comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              status:
+                type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a comment
+      tags:
+      - runs
+    put:
+      consumes:
+      - application/json
+      description: Edits the text of an existing comment (1-2000 characters). Only
+        the comment's author or an admin may update it.
+      parameters:
+      - description: Comment ID
+        in: path
+        name: comment_id
+        required: true
+        type: string
+      - description: New comment text
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            content:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              content:
+                type: string
+              created_at:
+                type: string
+              id:
+                type: string
+              target_id:
+                type: string
+              target_type:
+                type: string
+              updated_at:
+                type: string
+              user_display_name:
+                type: string
+              user_id:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update a comment
+      tags:
+      - runs
   /confluence/pages:
     get:
       description: Fetch pages in a Confluence space with optional title filter and
@@ -3155,6 +3362,425 @@ paths:
       summary: List test runs
       tags:
       - runs
+    post:
+      consumes:
+      - application/json
+      description: Creates a new test run, either empty, seeded from a category snapshot,
+        or seeded from an explicit list of test case IDs (category_id and test_case_ids
+        are mutually exclusive).
+      parameters:
+      - description: Run to create
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            category_id:
+              type: string
+            name:
+              type: string
+            run_folder_id:
+              type: string
+            test_case_ids:
+              items:
+                type: string
+              type: array
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.TestRun'
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create a test run
+      tags:
+      - runs
+  /runs/{id}:
+    delete:
+      description: Permanently deletes a test run and its results.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a test run
+      tags:
+      - runs
+    get:
+      description: Returns a single test run by ID.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.TestRun'
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get a test run
+      tags:
+      - runs
+    put:
+      consumes:
+      - application/json
+      description: Updates a test run's name, category, and/or status.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            category_id:
+              type: string
+            name:
+              type: string
+            status:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              status:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update a test run
+      tags:
+      - runs
+  /runs/{id}/assignee:
+    put:
+      consumes:
+      - application/json
+      description: Sets or clears the assignee for a test run; assignee_id must reference
+        an active user.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Active user ID to assign, or null to unassign
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            assignee_id:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              status:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a run
+      tags:
+      - runs
+  /runs/{id}/comments:
+    get:
+      description: Returns all comments posted on the given test run.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              properties:
+                content:
+                  type: string
+                created_at:
+                  type: string
+                id:
+                  type: string
+                target_id:
+                  type: string
+                target_type:
+                  type: string
+                updated_at:
+                  type: string
+                user_display_name:
+                  type: string
+                user_id:
+                  type: string
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List comments on a run
+      tags:
+      - runs
+    post:
+      consumes:
+      - application/json
+      description: Posts a new comment (1-2000 characters) on the given test run.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Comment text
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            content:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            properties:
+              content:
+                type: string
+              created_at:
+                type: string
+              id:
+                type: string
+              target_id:
+                type: string
+              target_type:
+                type: string
+              updated_at:
+                type: string
+              user_display_name:
+                type: string
+              user_id:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Add a comment to a run
+      tags:
+      - runs
+  /runs/{id}/complete:
+    post:
+      description: Marks a test run as finished, computing its final status from its
+        results, broadcasting the update, and (if configured) enqueuing AI failure
+        analysis for its failures.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              id:
+                type: string
+              status:
+                type: string
+              updated_at:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Complete a run
+      tags:
+      - runs
+  /runs/{id}/copy:
+    post:
+      consumes:
+      - application/json
+      description: Creates a new PENDING run from an existing one, copying the latest
+        attempt of each result. If name is omitted, it defaults to "Copy of <source
+        name>".
+      parameters:
+      - description: Source test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Copy options (optional)
+        in: body
+        name: body
+        schema:
+          properties:
+            name:
+              type: string
+            run_folder_id:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.TestRun'
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Copy a test run
+      tags:
+      - runs
   /runs/{id}/defect-links:
     get:
       description: Returns all defects linked to any result within the given test
@@ -3182,6 +3808,362 @@ paths:
                 type: string
             type: object
       summary: List defects for a run
+      tags:
+      - runs
+  /runs/{id}/folder:
+    patch:
+      consumes:
+      - application/json
+      description: Moves a test run into the given run folder, or clears its folder
+        when run_folder_id is null.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Target folder ID, or null to unassign
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            run_folder_id:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              status:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Assign a run to a folder
+      tags:
+      - runs
+  /runs/{id}/reopen:
+    post:
+      description: Reverts a completed test run back to an in-progress state.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              id:
+                type: string
+              status:
+                type: string
+              updated_at:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reopen a run
+      tags:
+      - runs
+  /runs/{id}/results:
+    post:
+      consumes:
+      - application/json
+      description: Adds a single test-case result snapshot to an existing test run,
+        validating artifact URLs (video, trace_url, screenshots).
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Result to add
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.CreateRunResultRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.RunResult'
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Add a result to a run
+      tags:
+      - runs
+  /runs/{id}/results/{result_id}:
+    delete:
+      description: Removes a single result from a test run.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      responses:
+        "204":
+          description: No Content
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Delete a run result
+      tags:
+      - runs
+    put:
+      consumes:
+      - application/json
+      description: Applies a partial update to a single result within a test run (status,
+        defect classification, failure details, artifacts, environment, or steps).
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      - description: Fields to update
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.UpdateRunResultRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              status:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update a run result
+      tags:
+      - runs
+  /runs/{id}/results/{result_id}/comments:
+    get:
+      description: Returns all comments posted on the given run result.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              properties:
+                content:
+                  type: string
+                created_at:
+                  type: string
+                id:
+                  type: string
+                target_id:
+                  type: string
+                target_type:
+                  type: string
+                updated_at:
+                  type: string
+                user_display_name:
+                  type: string
+                user_id:
+                  type: string
+              type: object
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List comments on a run result
+      tags:
+      - runs
+    post:
+      consumes:
+      - application/json
+      description: Posts a new comment (1-2000 characters) on the given run result.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      - description: Comment text
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            content:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            properties:
+              content:
+                type: string
+              created_at:
+                type: string
+              id:
+                type: string
+              target_id:
+                type: string
+              target_type:
+                type: string
+              updated_at:
+                type: string
+              user_display_name:
+                type: string
+              user_id:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Add a comment to a run result
       tags:
       - runs
   /runs/{id}/results/{result_id}/defect-links:
@@ -3382,6 +4364,63 @@ paths:
       summary: Create and link a defect to a run result
       tags:
       - runs
+  /runs/{id}/results/{result_id}/retry:
+    post:
+      description: Creates a new PENDING attempt for a result, incrementing its attempt
+        number; fails if the result is orphaned (its test case was deleted).
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Run result ID
+        in: path
+        name: result_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            properties:
+              attempt_number:
+                type: integer
+              id:
+                type: string
+              status:
+                type: string
+              test_case_id:
+                type: string
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Retry a run result
+      tags:
+      - runs
   /runs/{id}/results/{result_id}/screenshots:
     post:
       consumes:
@@ -3437,6 +4476,163 @@ paths:
       security:
       - BearerAuth: []
       summary: Append screenshots
+      tags:
+      - runs
+  /runs/{id}/results/bulk:
+    post:
+      consumes:
+      - application/json
+      description: Adds several test cases to an existing run in one shot, snapshotting
+        each as a new attempt-1 PENDING result and skipping any already present. Mirrors
+        the create path's test_case_ids handling.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Test case IDs to add
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            test_case_ids:
+              items:
+                type: string
+              type: array
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            items:
+              $ref: '#/definitions/ttgo_pkg_tracker_models.RunResult'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Bulk add results to a run
+      tags:
+      - runs
+  /runs/{id}/results/bulk-update:
+    post:
+      consumes:
+      - application/json
+      description: Applies the same status (and, for FAIL, a defect_type — defaulting
+        to "to_investigate" when not given) to multiple results within a run.
+      parameters:
+      - description: Test run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Result IDs and the status/defect_type to apply
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            defect_type:
+              type: string
+            result_ids:
+              items:
+                type: string
+              type: array
+            status:
+              type: string
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              status:
+                type: string
+              updated:
+                type: integer
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Bulk update run results
+      tags:
+      - runs
+  /runs/bulk-delete:
+    post:
+      consumes:
+      - application/json
+      description: Permanently deletes multiple test runs (and their results) in one
+        request.
+      parameters:
+      - description: IDs of the test runs to delete (max 500)
+        in: body
+        name: body
+        required: true
+        schema:
+          properties:
+            ids:
+              items:
+                type: string
+              type: array
+          type: object
+      responses:
+        "204":
+          description: No Content
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Bulk delete test runs
       tags:
       - runs
   /search:

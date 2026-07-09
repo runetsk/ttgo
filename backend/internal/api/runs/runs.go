@@ -17,6 +17,19 @@ import (
 	"gorm.io/gorm"
 )
 
+// CreateTestRun godoc
+//
+// @Summary      Create a test run
+// @Description  Creates a new test run, either empty, seeded from a category snapshot, or seeded from an explicit list of test case IDs (category_id and test_case_ids are mutually exclusive).
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        body  body      object{category_id=string,name=string,run_folder_id=string,test_case_ids=[]string}  true  "Run to create"
+// @Security     BearerAuth
+// @Success      201  {object}  models.TestRun
+// @Failure      400  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs [post]
 func (h *Handler) CreateTestRun(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		CategoryID  *string  `json:"category_id"`
@@ -173,6 +186,18 @@ func (h *Handler) GetTestRuns(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// GetTestRun godoc
+//
+// @Summary      Get a test run
+// @Description  Returns a single test run by ID.
+// @Tags         runs
+// @Produce      json
+// @Param        id  path      string  true  "Test run ID"
+// @Security     BearerAuth
+// @Success      200  {object}  models.TestRun
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id} [get]
 func (h *Handler) GetTestRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	run, err := h.store.GetTestRun(id)
@@ -189,6 +214,21 @@ func (h *Handler) GetTestRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, run)
 }
 
+// UpdateRunResult godoc
+//
+// @Summary      Update a run result
+// @Description  Applies a partial update to a single result within a test run (status, defect classification, failure details, artifacts, environment, or steps).
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id         path  string                         true  "Test run ID"
+// @Param        result_id  path  string                         true  "Run result ID"
+// @Param        body       body  models.UpdateRunResultRequest  true  "Fields to update"
+// @Security     BearerAuth
+// @Success      200  {object}  object{status=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results/{result_id} [put]
 func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	resultID := r.PathValue("result_id")
@@ -301,6 +341,16 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+// DeleteTestRun godoc
+//
+// @Summary      Delete a test run
+// @Description  Permanently deletes a test run and its results.
+// @Tags         runs
+// @Param        id  path  string  true  "Test run ID"
+// @Security     BearerAuth
+// @Success      204  "No Content"
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id} [delete]
 func (h *Handler) DeleteTestRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := h.store.DeleteTestRun(id); err != nil {
@@ -316,6 +366,18 @@ func (h *Handler) DeleteTestRun(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// BulkDeleteTestRuns godoc
+//
+// @Summary      Bulk delete test runs
+// @Description  Permanently deletes multiple test runs (and their results) in one request.
+// @Tags         runs
+// @Accept       json
+// @Param        body  body  object{ids=[]string}  true  "IDs of the test runs to delete (max 500)"
+// @Security     BearerAuth
+// @Success      204  "No Content"
+// @Failure      400  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/bulk-delete [post]
 func (h *Handler) BulkDeleteTestRuns(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		IDs []string `json:"ids"`
@@ -340,6 +402,20 @@ func (h *Handler) BulkDeleteTestRuns(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// UpdateTestRun godoc
+//
+// @Summary      Update a test run
+// @Description  Updates a test run's name, category, and/or status.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                                                true  "Test run ID"
+// @Param        body  body  object{name=string,category_id=string,status=string}  true  "Fields to update"
+// @Security     BearerAuth
+// @Success      200  {object}  object{status=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id} [put]
 func (h *Handler) UpdateTestRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
@@ -369,6 +445,21 @@ func (h *Handler) UpdateTestRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+// AddRunResult godoc
+//
+// @Summary      Add a result to a run
+// @Description  Adds a single test-case result snapshot to an existing test run, validating artifact URLs (video, trace_url, screenshots).
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                         true  "Test run ID"
+// @Param        body  body  models.CreateRunResultRequest  true  "Result to add"
+// @Security     BearerAuth
+// @Success      201  {object}  models.RunResult
+// @Failure      400  {object}  object{error=string}
+// @Failure      409  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results [post]
 func (h *Handler) AddRunResult(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var req models.CreateRunResultRequest
@@ -416,9 +507,21 @@ func (h *Handler) AddRunResult(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, result)
 }
 
-// AddRunResultsBulk adds several test cases to an existing run in one shot,
-// snapshotting each as a new attempt-1 PENDING result and skipping any already
-// present. Mirrors the create path's test_case_ids handling.
+// AddRunResultsBulk godoc
+//
+// @Summary      Bulk add results to a run
+// @Description  Adds several test cases to an existing run in one shot, snapshotting each as a new attempt-1 PENDING result and skipping any already present. Mirrors the create path's test_case_ids handling.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                          true  "Test run ID"
+// @Param        body  body  object{test_case_ids=[]string}  true  "Test case IDs to add"
+// @Security     BearerAuth
+// @Success      201  {array}   models.RunResult
+// @Failure      400  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results/bulk [post]
 func (h *Handler) AddRunResultsBulk(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var req struct {
@@ -472,6 +575,17 @@ func (h *Handler) AddRunResultsBulk(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, created)
 }
 
+// DeleteRunResult godoc
+//
+// @Summary      Delete a run result
+// @Description  Removes a single result from a test run.
+// @Tags         runs
+// @Param        id         path  string  true  "Test run ID"
+// @Param        result_id  path  string  true  "Run result ID"
+// @Security     BearerAuth
+// @Success      204  "No Content"
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results/{result_id} [delete]
 func (h *Handler) DeleteRunResult(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	resultID := r.PathValue("result_id")
@@ -487,6 +601,21 @@ func (h *Handler) DeleteRunResult(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// AssignRunToFolder godoc
+//
+// @Summary      Assign a run to a folder
+// @Description  Moves a test run into the given run folder, or clears its folder when run_folder_id is null.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                        true  "Test run ID"
+// @Param        body  body  object{run_folder_id=string}  true  "Target folder ID, or null to unassign"
+// @Security     BearerAuth
+// @Success      200  {object}  object{status=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/folder [patch]
 func (h *Handler) AssignRunToFolder(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
@@ -563,6 +692,19 @@ func screenshotsURLsSafe(s string) bool {
 	return true
 }
 
+// CopyTestRun godoc
+//
+// @Summary      Copy a test run
+// @Description  Creates a new PENDING run from an existing one, copying the latest attempt of each result. If name is omitted, it defaults to "Copy of <source name>".
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                                     true   "Source test run ID"
+// @Param        body  body  object{name=string,run_folder_id=string}  false  "Copy options (optional)"
+// @Security     BearerAuth
+// @Success      201  {object}  models.TestRun
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/copy [post]
 func (h *Handler) CopyTestRun(w http.ResponseWriter, r *http.Request) {
 	sourceID := r.PathValue("id")
 
@@ -582,6 +724,18 @@ func (h *Handler) CopyTestRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, run)
 }
 
+// CompleteRun godoc
+//
+// @Summary      Complete a run
+// @Description  Marks a test run as finished, computing its final status from its results, broadcasting the update, and (if configured) enqueuing AI failure analysis for its failures.
+// @Tags         runs
+// @Produce      json
+// @Param        id  path  string  true  "Test run ID"
+// @Security     BearerAuth
+// @Success      200  {object}  object{id=string,status=string,updated_at=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/complete [post]
 func (h *Handler) CompleteRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	run, changed, err := h.store.CompleteRun(id)
@@ -628,6 +782,18 @@ func (h *Handler) CompleteRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ReopenRun godoc
+//
+// @Summary      Reopen a run
+// @Description  Reverts a completed test run back to an in-progress state.
+// @Tags         runs
+// @Produce      json
+// @Param        id  path  string  true  "Test run ID"
+// @Security     BearerAuth
+// @Success      200  {object}  object{id=string,status=string,updated_at=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/reopen [post]
 func (h *Handler) ReopenRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	run, err := h.store.ReopenRun(id)
@@ -653,6 +819,21 @@ func (h *Handler) ReopenRun(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// AssignRun godoc
+//
+// @Summary      Assign a run
+// @Description  Sets or clears the assignee for a test run; assignee_id must reference an active user.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                      true  "Test run ID"
+// @Param        body  body  object{assignee_id=string}  true  "Active user ID to assign, or null to unassign"
+// @Security     BearerAuth
+// @Success      200  {object}  object{status=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/assignee [put]
 func (h *Handler) AssignRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var req struct {
@@ -689,6 +870,20 @@ func (h *Handler) AssignRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "assigned"})
 }
 
+// BulkUpdateRunResults godoc
+//
+// @Summary      Bulk update run results
+// @Description  Applies the same status (and, for FAIL, a defect_type — defaulting to "to_investigate" when not given) to multiple results within a run.
+// @Tags         runs
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string                                                       true  "Test run ID"
+// @Param        body  body  object{result_ids=[]string,status=string,defect_type=string}  true  "Result IDs and the status/defect_type to apply"
+// @Security     BearerAuth
+// @Success      200  {object}  object{status=string,updated=int}
+// @Failure      400  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results/bulk-update [post]
 func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 
@@ -759,6 +954,20 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, resp)
 }
 
+// RetryRunResult godoc
+//
+// @Summary      Retry a run result
+// @Description  Creates a new PENDING attempt for a result, incrementing its attempt number; fails if the result is orphaned (its test case was deleted).
+// @Tags         runs
+// @Produce      json
+// @Param        id         path  string  true  "Test run ID"
+// @Param        result_id  path  string  true  "Run result ID"
+// @Security     BearerAuth
+// @Success      201  {object}  object{id=string,test_case_id=string,attempt_number=int,status=string}
+// @Failure      400  {object}  object{error=string}
+// @Failure      404  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /runs/{id}/results/{result_id}/retry [post]
 func (h *Handler) RetryRunResult(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	resultID := r.PathValue("result_id")
