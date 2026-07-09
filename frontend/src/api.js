@@ -136,10 +136,6 @@ export const assignRun = (runId, assigneeId) =>
 export const deleteTestRun = (id) => api.delete(`/runs/${id}`);
 export const deleteTestRuns = (ids) => api.post('/runs/bulk-delete', { ids });
 
-export const addRunResult = (runId, data) => {
-    const payload = typeof data === 'string' ? { test_case_id: data } : data;
-    return api.post(`/runs/${runId}/results`, payload).then(res => res.data);
-};
 export const addRunResultsBulk = (runId, testCaseIds) =>
     api.post(`/runs/${runId}/results/bulk`, { test_case_ids: testCaseIds }).then(res => res.data);
 export const deleteRunResult = (runId, resultId) => api.delete(`/runs/${runId}/results/${resultId}`);

@@ -172,6 +172,7 @@ test.describe('Test Runs Management', () => {
         const renamedRunName = 'Renamed Run ' + Date.now();
         let row;
         let rowTest1;
+        let test1Id;
 
         await test.step('Seed a category with two tests and a run via API', async () => {
             const suite = await createCategoryAPI(request, 'CRUD Suite ' + Date.now());
@@ -180,6 +181,7 @@ test.describe('Test Runs Management', () => {
             const folder = await createFolderAPI(request, 'CRUD Folder ' + Date.now());
             const test1 = await createTestAPI(request, 'Test 1', folder.id);
             const test2 = await createTestAPI(request, 'Test 2', folder.id);
+            test1Id = test1.id;
             await linkTestToCategoryAPI(request, test1.id, suite.id);
             await linkTestToCategoryAPI(request, test2.id, suite.id);
 
@@ -228,8 +230,7 @@ test.describe('Test Runs Management', () => {
             // 4. Add "Test 1" back via the tree-picker modal
             await page.getByTestId('add-test-to-run-button').click();
             await expect(page.getByTestId('test-tree-picker')).toBeVisible();
-            await page.getByTestId('test-tree-search').fill('Test 1');
-            await page.locator('label', { hasText: 'Test 1' }).getByRole('checkbox').check();
+            await page.getByTestId(`test-tree-test-${test1Id}`).check();
             await page.getByTestId('add-tests-submit').click();
 
             // Verify "Test 1" is back
