@@ -428,7 +428,13 @@ func (h *Handler) AddRunResultsBulk(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
-	if len(req.TestCaseIDs) == 0 {
+	nonEmpty := 0
+	for _, id := range req.TestCaseIDs {
+		if id != "" {
+			nonEmpty++
+		}
+	}
+	if nonEmpty == 0 {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "test_case_ids is required"})
 		return
 	}
