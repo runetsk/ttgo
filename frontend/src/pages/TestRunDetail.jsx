@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { getTestRun, deleteTestRun, updateTestRun, addRunResult, getTests, listRunDefects, analyzeRunFailures, completeTestRun, reopenTestRun } from '../api';
+import { getTestRun, deleteTestRun, updateTestRun, listRunDefects, analyzeRunFailures, completeTestRun, reopenTestRun } from '../api';
 import { activeColumns } from '../utils/columnFeatures';
 import { toast } from '../toast';
 
@@ -16,6 +16,7 @@ import DefectsTab from './testRunDetail/DefectsTab';
 import TimelineTab from './testRunDetail/TimelineTab';
 import CompareTab from './testRunDetail/CompareTab';
 import ResultsTab from './testRunDetail/ResultsTab';
+import AddTestsToRunModal from '../components/AddTestsToRunModal';
 
 const RESULT_COLUMN_DEFS = [
     { key: 'test_case',    label: 'Test Case',    mandatory: true,  defaultVisible: true,  defaultWidth: 200 },
@@ -54,9 +55,7 @@ export default function TestRunDetail() {
     const isVisible = (key) => visibleKeys.has(key) && featureColumnDefs.some(c => c.key === key);
     const handleResetAll = useCallback(() => { resetColumns(); resetWidths(); }, [resetColumns, resetWidths]);
     const [loading, setLoading] = useState(true);
-    const [allTests, setAllTests] = useState([]); // For Add Test dropdown
-    const [isAddMode, setIsAddMode] = useState(false);
-    const [selectedTestToAdd, setSelectedTestToAdd] = useState("");
+    const [showAddModal, setShowAddModal] = useState(false);
     const [analysisBannerRefresh, setAnalysisBannerRefresh] = useState(0);
     const [searchParams] = useSearchParams();
     const [activeTab, setActiveTab] = useState(searchParams.get('compareWith') ? 'compare' : 'results');
@@ -122,7 +121,6 @@ export default function TestRunDetail() {
 
     useEffect(() => {
         loadRun();
-        loadAllTests(); // Pre-fetch for "Add Test"
         loadCurrentAnalyses();
         // Register loadRun as refresh callback for reconnection
         registerRefresh('testRunDetail', loadRun);
@@ -140,12 +138,6 @@ export default function TestRunDetail() {
     useEffect(() => {
         if (activeTab === 'defects') loadRunDefectLinks();
     }, [activeTab, loadRunDefectLinks]);
-
-    const loadAllTests = () => {
-        getTests([], undefined, { view: 'list' })
-            .then(data => setAllTests(Array.isArray(data) ? data : []))
-            .catch(() => { });
-    };
 
     // Derive latest-attempt-only view and group attempts by test case
     const { latestResults, attemptsByTestCase } = React.useMemo(() => {
@@ -236,13 +228,6 @@ export default function TestRunDetail() {
         }
     };
 
-    const handleAddTest = async () => {
-        if (!selectedTestToAdd) return;
-        await addRunResult(runId, selectedTestToAdd);
-        setIsAddMode(false);
-        setSelectedTestToAdd("");
-    };
-
     // Progress bar segment widths
     const progressSegments = total > 0 ? {
         pass: `${(passedFirstTry / total) * 100}%`,
@@ -329,7 +314,7 @@ export default function TestRunDetail() {
                     </button>
                     <button
                         className="action-btn"
-                        onClick={() => setIsAddMode(!isAddMode)}
+                        onClick={() => setShowAddModal(true)}
                         style={{ color: 'var(--accent-indigo)', borderColor: 'rgba(99,102,241,0.3)', background: 'rgba(99,102,241,0.05)', padding: '5px 12px', fontSize: '0.8rem' }}
                         data-testid="add-test-to-run-button"
                     >
@@ -370,26 +355,6 @@ export default function TestRunDetail() {
                     </button>
                 </div>
             </div>
-
-            {/* Add Test inline form */}
-            {isAddMode && (
-                <div style={{ marginBottom: 12, display: 'flex', gap: 8, padding: 12, background: 'var(--bg-secondary)', borderRadius: 'var(--radius-md)' }}>
-                    <select
-                        className="modern-select"
-                        value={selectedTestToAdd}
-                        onChange={e => setSelectedTestToAdd(e.target.value)}
-                        style={{ flex: 1 }}
-                        data-testid="add-test-select"
-                    >
-                        <option value="">Select Test Case to Add...</option>
-                        {allTests.filter(t => !run.run_results.find(r => r.test_case_id === t.id)).map(t => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                        ))}
-                    </select>
-                    <button className="primary-btn" onClick={handleAddTest} disabled={!selectedTestToAdd} data-testid="confirm-add-test-button">Add</button>
-                    <button className="text-btn" onClick={() => setIsAddMode(false)} data-testid="cancel-add-test-button">Cancel</button>
-                </div>
-            )}
 
             {/* Row 2 — Compact stats bar */}
             <div style={{
@@ -497,6 +462,15 @@ export default function TestRunDetail() {
             )}
             {activeTab === 'compare' && (
                 <CompareTab run={run} />
+            )}
+
+            {showAddModal && (
+                <AddTestsToRunModal
+                    runId={runId}
+                    existingTestCaseIds={new Set((run.run_results || []).map(r => r.test_case_id).filter(Boolean))}
+                    onClose={() => setShowAddModal(false)}
+                    onAdded={() => { setShowAddModal(false); loadRun(); }}
+                />
             )}
         </div>
     );

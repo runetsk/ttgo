@@ -225,10 +225,12 @@ test.describe('Test Runs Management', () => {
         });
 
         await test.step('Add Test 1 back to the run', async () => {
-            // 4. Add "Test 1" back
+            // 4. Add "Test 1" back via the tree-picker modal
             await page.getByTestId('add-test-to-run-button').click();
-            await page.getByTestId('add-test-select').selectOption({ label: 'Test 1' });
-            await page.getByTestId('confirm-add-test-button').click();
+            await expect(page.getByTestId('test-tree-picker')).toBeVisible();
+            await page.getByTestId('test-tree-search').fill('Test 1');
+            await page.locator('label', { hasText: 'Test 1' }).getByRole('checkbox').check();
+            await page.getByTestId('add-tests-submit').click();
 
             // Verify "Test 1" is back
             await expect(page.getByRole('row', { name: 'Test 1' })).toBeVisible();
