@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { addRunResultsBulk } from '../api';
 import TestTreePicker from './TestTreePicker';
 
@@ -12,6 +12,12 @@ export default function AddTestsToRunModal({ runId, existingTestCaseIds, onClose
 
     const count = selectedIds.size;
 
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        document.addEventListener('keydown', onKey);
+        return () => document.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
     const add = () => {
         if (count === 0) return;
         setLoading(true);
@@ -21,10 +27,8 @@ export default function AddTestsToRunModal({ runId, existingTestCaseIds, onClose
             .catch(err => { setLoading(false); setError(err?.response?.data?.error || 'Failed to add tests'); });
     };
 
-    const handleKeyDown = (e) => { if (e.key === 'Escape') onClose(); };
-
     return (
-        <div className="modal-overlay" onClick={onClose} onKeyDown={handleKeyDown}>
+        <div className="modal-overlay" onClick={onClose}>
             <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: 620, width: '92vw', padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column', maxHeight: '86vh' }}>
 
                 {/* Header */}
