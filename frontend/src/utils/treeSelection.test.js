@@ -28,3 +28,20 @@ test('toggleFolderSelection adds all when not full, clears when full', () => {
     const cleared = toggleFolderSelection(tree, new Set(['t1', 't2', 't3']));
     assert.equal(cleared.size, 0);
 });
+
+test('folderCheckState counts locked ids as selected', () => {
+    // t1 locked, nothing else selected → partial
+    assert.equal(folderCheckState(tree, new Set(), new Set(['t1'])), 'partial');
+    // all three locked → checked even with an empty selection
+    assert.equal(folderCheckState(tree, new Set(), new Set(['t1', 't2', 't3'])), 'checked');
+});
+
+test('toggleFolderSelection never adds or removes locked ids', () => {
+    // t1 locked: checking the folder adds only t2 and t3
+    const added = toggleFolderSelection(tree, new Set(), new Set(['t1']));
+    assert.deepEqual([...added].sort(), ['t2', 't3']);
+    // Folder reads checked (t1 locked + t2,t3 selected); toggling clears only the non-locked
+    const cleared = toggleFolderSelection(tree, new Set(['t2', 't3']), new Set(['t1']));
+    assert.equal(cleared.size, 0);
+    assert.equal(cleared.has('t1'), false);
+});
