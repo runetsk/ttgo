@@ -16,6 +16,11 @@ export default function LoginPage() {
     // null = probe in flight; render nothing until we know which form to show
     // so a fresh instance doesn't flash "Sign In" before switching to setup.
     const [needsSetup, setNeedsSetup] = useState(null);
+    // Where to go after auth. AuthGate stashes where the visitor was headed
+    // before bouncing them here; default to the library. Captured once, before
+    // login flips `user`, so both the already-signed-in guard and the
+    // post-submit navigation agree on the same destination.
+    const [redirectTarget] = useState(() => sessionStorage.getItem('redirectAfterLogin') || '/library');
 
     useEffect(() => {
         let cancelled = false;
@@ -28,15 +33,14 @@ export default function LoginPage() {
     // If already logged in, redirect away. Rendered declaratively — calling
     // navigate() during render triggers React's setState-in-render error.
     if (!loading && user) {
-        return <Navigate to="/library" replace />;
+        return <Navigate to={redirectTarget} replace />;
     }
 
     if (needsSetup === null) return null;
 
     const navigateAfterAuth = () => {
-        const redirect = sessionStorage.getItem('redirectAfterLogin') || '/library';
         sessionStorage.removeItem('redirectAfterLogin');
-        navigate(redirect, { replace: true });
+        navigate(redirectTarget, { replace: true });
     };
 
     const handleSubmit = async (e) => {

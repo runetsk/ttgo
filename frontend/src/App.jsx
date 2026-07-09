@@ -9,7 +9,7 @@ import AIDisabledNotice from './components/AIDisabledNotice'
 import { WebSocketProvider } from './hooks/useWebSocket'
 import ConnectionStatus from './components/ConnectionStatus'
 import Sidebar from './components/Sidebar'
-import LoginModal from './components/LoginModal'
+import AuthGate from './components/AuthGate'
 import RunFolderSidebar from './components/RunFolderSidebar'
 import AppNav from './components/AppNav'
 import './App.css'
@@ -468,8 +468,8 @@ function AppWithProviders() {
     <AuthProvider>
       <WebSocketProvider>
         <AIGenerationProvider>
+          <AuthGate />
           <App />
-          <LoginModal />
           <ConnectionStatus />
         </AIGenerationProvider>
       </WebSocketProvider>
