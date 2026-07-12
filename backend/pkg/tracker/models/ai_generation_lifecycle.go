@@ -123,7 +123,11 @@ type AIGeneratedDraft struct {
 
 // ApplyContent writes c into the draft's editable columns.
 func (d *AIGeneratedDraft) ApplyContent(c DraftContent) error {
-	stepsJSON, err := json.Marshal(c.Steps)
+	steps := c.Steps
+	if steps == nil {
+		steps = []GeneratedStep{}
+	}
+	stepsJSON, err := json.Marshal(steps)
 	if err != nil {
 		return err
 	}

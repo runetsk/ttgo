@@ -1,6 +1,7 @@
 package store
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -54,4 +55,28 @@ func TestAIGenerationRunIdempotencyKeyUnique(t *testing.T) {
 	r2 := &models.AIGenerationRun{ID: "r2", IdempotencyKey: "same", RequirementID: "req", Status: "pending"}
 	require.NoError(t, s.db.Create(r1).Error)
 	require.Error(t, s.db.Create(r2).Error, "unique index on idempotency_key must reject duplicates")
+}
+
+func TestAIGeneratedDraftNilStepsRoundTripsAsEmpty(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.AIGenerationRun{ID: "run-ns", IdempotencyKey: "ns", RequirementID: "req", Status: "pending"}
+	require.NoError(t, s.db.Create(run).Error)
+
+	d := &models.AIGeneratedDraft{ID: "draft-ns", RunID: "run-ns", Position: 0, Version: 1, Status: "pending"}
+	require.NoError(t, d.ApplyContent(models.DraftContent{Name: "N"})) // Steps + SourceRefs nil
+	assert.Equal(t, "[]", d.StepsJSON, "nil steps must marshal to [], not null")
+	require.NoError(t, s.db.Create(d).Error)
+
+	var back models.AIGeneratedDraft
+	require.NoError(t, s.db.First(&back, "id = ?", "draft-ns").Error)
+	content, err := back.Content()
+	require.NoError(t, err)
+	assert.NotNil(t, content.Steps, "steps must be non-nil empty after round-trip")
+	assert.Empty(t, content.Steps)
+
+	resp, err := back.ToResponse()
+	require.NoError(t, err)
+	raw, err := json.Marshal(resp)
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), `"steps":[]`, "must serialize steps as [], not null")
 }
