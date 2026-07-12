@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -128,7 +129,13 @@ func (c *openAICompatClient) Chat(ctx context.Context, req ChatRequest) (*ChatRe
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("LLM request failed: %w", err)
+		cat := ErrCatProvider
+		if errors.Is(err, context.DeadlineExceeded) {
+			cat = ErrCatTimeout
+		} else if errors.Is(err, context.Canceled) {
+			cat = ErrCatCancelled
+		}
+		return nil, &ProviderError{Category: cat, Message: fmt.Sprintf("LLM request failed: %v", err)}
 	}
 	defer resp.Body.Close()
 
@@ -138,15 +145,26 @@ func (c *openAICompatClient) Chat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		retryAfter := parseRetryAfter(resp.Header.Get("Retry-After"))
 		var errResp openAIResponse
 		if jsonErr := json.Unmarshal(respBody, &errResp); jsonErr == nil && errResp.Error != nil {
-			return nil, fmt.Errorf("LLM API error (HTTP %d): %s", resp.StatusCode, errResp.Error.Message)
+			return nil, &ProviderError{
+				StatusCode: resp.StatusCode,
+				Category:   classifyStatus(resp.StatusCode, errResp.Error.Message),
+				RetryAfter: retryAfter,
+				Message:    fmt.Sprintf("LLM API error (HTTP %d): %s", resp.StatusCode, errResp.Error.Message),
+			}
 		}
 		bodyStr := string(respBody)
 		if len(bodyStr) > 500 {
 			bodyStr = bodyStr[:500] + "...(truncated)"
 		}
-		return nil, fmt.Errorf("LLM API error (HTTP %d): %s", resp.StatusCode, bodyStr)
+		return nil, &ProviderError{
+			StatusCode: resp.StatusCode,
+			Category:   classifyStatus(resp.StatusCode, bodyStr),
+			RetryAfter: retryAfter,
+			Message:    fmt.Sprintf("LLM API error (HTTP %d): %s", resp.StatusCode, bodyStr),
+		}
 	}
 
 	var parsed openAIResponse
