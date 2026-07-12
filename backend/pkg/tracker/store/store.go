@@ -197,29 +197,11 @@ func (s *Store) bootstrapDB() error {
 		return fmt.Errorf("failed to backfill FTS index: %w", err)
 	}
 
-	// 010-ai-test-generation: seed default prompt template on startup if not present,
-	// and keep the "default_content" column in sync so "Reset to Default" always
-	// reflects the latest built-in template.
-	tmpl, err := s.GetOrCreateDefaultTemplate()
-	if err != nil {
+	// 010-ai-test-generation: seed the default prompt template on startup and
+	// refresh stale built-in defaults. GetOrCreateDefaultTemplate now performs
+	// the refresh (see refreshDefaultTemplate), so no extra sync is needed here.
+	if _, err := s.GetOrCreateDefaultTemplate(); err != nil {
 		return fmt.Errorf("failed to seed AI generation template: %w", err)
-	}
-	if tmpl.DefaultContent != defaultPromptTemplate {
-		updates := map[string]interface{}{"default_content": defaultPromptTemplate}
-		// If content was never customized (still matches the previous default),
-		// carry it along to the new built-in — same rule as the parent template.
-		if tmpl.Content == tmpl.DefaultContent {
-			updates["content"] = defaultPromptTemplate
-		}
-		db.Model(tmpl).Updates(updates)
-	}
-	if tmpl.DefaultParentContent != defaultParentPromptTemplate {
-		updates := map[string]interface{}{"default_parent_content": defaultParentPromptTemplate}
-		// If parent_content was never customized (empty or matches old default), also update it
-		if tmpl.ParentContent == "" || tmpl.ParentContent == tmpl.DefaultParentContent {
-			updates["parent_content"] = defaultParentPromptTemplate
-		}
-		db.Model(tmpl).Updates(updates)
 	}
 
 	// ai-failure-analysis: seed default settings on startup if not present,

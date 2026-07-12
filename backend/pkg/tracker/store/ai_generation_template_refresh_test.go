@@ -34,3 +34,23 @@ func TestGetOrCreateDefaultTemplate_RefreshesStaleDefaults(t *testing.T) {
 	assert.Equal(t, custom, tmpl.ParentContent)
 	assert.True(t, strings.Contains(tmpl.Content, `"test_cases"`))
 }
+
+// An install whose parent_content was never populated (empty) but whose stored
+// default_parent_content is a stale non-empty value must have parent_content
+// backfilled to the current default — the case the old bootstrapDB sync block
+// handled and refreshDefaultTemplate must preserve.
+func TestGetOrCreateDefaultTemplate_BackfillsEmptyParentContent(t *testing.T) {
+	s := newTestStore(t)
+
+	require.NoError(t, s.db.Model(&models.AIGenTemplate{}).
+		Where("id = ?", aiGenTemplateSingletonID).
+		Updates(map[string]interface{}{
+			"parent_content": "", "default_parent_content": "OLD PARENT DEFAULT",
+		}).Error)
+
+	tmpl, err := s.GetOrCreateDefaultTemplate()
+	require.NoError(t, err)
+
+	assert.Equal(t, defaultParentPromptTemplate, tmpl.ParentContent)
+	assert.Equal(t, defaultParentPromptTemplate, tmpl.DefaultParentContent)
+}

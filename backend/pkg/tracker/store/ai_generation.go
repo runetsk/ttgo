@@ -319,7 +319,7 @@ func (s *Store) refreshDefaultTemplate(tmpl *models.AIGenTemplate) (*models.AIGe
 		updates["default_content"] = defaultPromptTemplate
 	}
 	if tmpl.DefaultParentContent != defaultParentPromptTemplate {
-		if tmpl.ParentContent == tmpl.DefaultParentContent {
+		if tmpl.ParentContent == "" || tmpl.ParentContent == tmpl.DefaultParentContent {
 			tmpl.ParentContent = defaultParentPromptTemplate
 			updates["parent_content"] = defaultParentPromptTemplate
 		}
