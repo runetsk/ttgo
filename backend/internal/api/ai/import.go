@@ -329,8 +329,9 @@ Always produce at least 1 test case if there is any testable content.`
 			{Role: "system", Content: systemPrompt},
 			{Role: "user", Content: userPrompt},
 		},
-		Temperature: 0.3,
-		MaxTokens:   4096,
+		Temperature:    0.3,
+		MaxTokens:      4096,
+		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 	}
 
 	chatResp, err := provider.Chat(llmCtx, chatReq)

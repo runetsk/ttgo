@@ -75,10 +75,11 @@ func Analyze(ctx context.Context, provider llm.Provider, in AnalyzeContext) (*An
 	}
 
 	req := llm.ChatRequest{
-		Model:       in.ProviderModel,
-		Messages:    []llm.ChatMessage{{Role: "user", Content: prompt}},
-		Temperature: 0.2,
-		MaxTokens:   1024,
+		Model:          in.ProviderModel,
+		Messages:       []llm.ChatMessage{{Role: "user", Content: prompt}},
+		Temperature:    0.2,
+		MaxTokens:      1024,
+		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 	}
 
 	resp, err := provider.Chat(ctx, req)

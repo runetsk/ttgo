@@ -502,8 +502,9 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 			{Role: "system", Content: generationSystemMessage},
 			{Role: "user", Content: plan.Prompt},
 		},
-		Temperature: 0.7,
-		MaxTokens:   plan.MaxTokens,
+		Temperature:    0.7,
+		MaxTokens:      plan.MaxTokens,
+		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 	}
 
 	start := time.Now()
@@ -563,8 +564,9 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 					"Your entire response must start with { and end with }."},
 				{Role: "user", Content: plan.Prompt},
 			},
-			Temperature: 0.3,
-			MaxTokens:   plan.MaxTokens,
+			Temperature:    0.3,
+			MaxTokens:      plan.MaxTokens,
+			ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 		}
 
 		retryResp, retryErr := provider.Chat(ctx, retryReq)

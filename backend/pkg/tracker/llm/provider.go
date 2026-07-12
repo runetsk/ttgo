@@ -4,6 +4,7 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"ttgo/pkg/tracker/models"
 )
@@ -14,12 +15,22 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
+// ResponseFormat requests provider-native structured output.
+// Type "json_object" asks for any JSON object; "json_schema" enforces Schema.
+// Providers without native support ignore it (prompt-only output).
+type ResponseFormat struct {
+	Type       string          `json:"type"`
+	SchemaName string          `json:"schema_name,omitempty"`
+	Schema     json.RawMessage `json:"schema,omitempty"`
+}
+
 // ChatRequest is the unified input for a chat completion.
 type ChatRequest struct {
-	Model       string        `json:"model"`
-	Messages    []ChatMessage `json:"messages"`
-	Temperature float64       `json:"temperature"`
-	MaxTokens   int           `json:"max_tokens"`
+	Model          string          `json:"model"`
+	Messages       []ChatMessage   `json:"messages"`
+	Temperature    float64         `json:"temperature"`
+	MaxTokens      int             `json:"max_tokens"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
 // ChatUsage holds token counts returned by the provider.

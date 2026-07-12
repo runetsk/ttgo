@@ -63,7 +63,14 @@ type openAIMessage struct {
 }
 
 type responseFormat struct {
-	Type string `json:"type"`
+	Type       string          `json:"type"`
+	JSONSchema *jsonSchemaSpec `json:"json_schema,omitempty"`
+}
+
+type jsonSchemaSpec struct {
+	Name   string          `json:"name"`
+	Strict bool            `json:"strict"`
+	Schema json.RawMessage `json:"schema"`
 }
 
 type openAIUsage struct {
@@ -101,16 +108,28 @@ func (c *openAICompatClient) Chat(ctx context.Context, req ChatRequest) (*ChatRe
 	}
 
 	body := openAIRequest{
-		Model:          req.Model,
-		Messages:       msgs,
-		Temperature:    req.Temperature,
-		MaxTokens:      req.MaxTokens,
-		ResponseFormat: &responseFormat{Type: "json_object"},
+		Model:       req.Model,
+		Messages:    msgs,
+		Temperature: req.Temperature,
+		MaxTokens:   req.MaxTokens,
 	}
 
-	// Local/Ollama doesn't always support json_object response_format — only set for cloud providers.
-	if c.cfg.ProviderType == "local" {
-		body.ResponseFormat = nil
+	// Structured output is caller-controlled. Local/Ollama providers are
+	// prompt-only (they often reject response_format), per the generation spec.
+	if req.ResponseFormat != nil && c.cfg.ProviderType != "local" {
+		switch req.ResponseFormat.Type {
+		case "json_schema":
+			body.ResponseFormat = &responseFormat{
+				Type: "json_schema",
+				JSONSchema: &jsonSchemaSpec{
+					Name:   req.ResponseFormat.SchemaName,
+					Strict: true,
+					Schema: req.ResponseFormat.Schema,
+				},
+			}
+		case "json_object":
+			body.ResponseFormat = &responseFormat{Type: "json_object"}
+		}
 	}
 
 	payload, err := json.Marshal(body)

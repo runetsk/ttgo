@@ -77,10 +77,11 @@ func TestOpenAICompat_Chat_Success(t *testing.T) {
 	c.httpClient = srv.Client()
 
 	resp, err := c.Chat(context.Background(), ChatRequest{
-		Model:       "gpt-test",
-		Messages:    []ChatMessage{{Role: "user", Content: "hi"}},
-		Temperature: 0.5,
-		MaxTokens:   100,
+		Model:          "gpt-test",
+		Messages:       []ChatMessage{{Role: "user", Content: "hi"}},
+		Temperature:    0.5,
+		MaxTokens:      100,
+		ResponseFormat: &ResponseFormat{Type: "json_object"},
 	})
 
 	require.NoError(t, err)
@@ -107,9 +108,67 @@ func TestOpenAICompat_Chat_LocalOmitsResponseFormat(t *testing.T) {
 
 	c := newOpenAICompatClient(&models.LLMProviderConfig{ProviderType: "local", EndpointURL: srv.URL})
 	c.httpClient = srv.Client()
-	_, err := c.Chat(context.Background(), ChatRequest{Model: "m", Messages: []ChatMessage{{Role: "user", Content: "hi"}}})
+	_, err := c.Chat(context.Background(), ChatRequest{
+		Model:          "m",
+		Messages:       []ChatMessage{{Role: "user", Content: "hi"}},
+		ResponseFormat: &ResponseFormat{Type: "json_object"},
+	})
 	require.NoError(t, err)
 	assert.Nil(t, capturedBody.ResponseFormat)
+}
+
+func TestOpenAICompat_Chat_JSONSchemaFormat(t *testing.T) {
+	var capturedBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &capturedBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"model":"m","choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := &models.LLMProviderConfig{ProviderType: "openai", EndpointURL: srv.URL}
+	c := newOpenAICompatClient(cfg)
+	c.httpClient = srv.Client()
+
+	schema := json.RawMessage(`{"type":"object"}`)
+	_, err := c.Chat(context.Background(), ChatRequest{
+		Model:    "m",
+		Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+		ResponseFormat: &ResponseFormat{
+			Type: "json_schema", SchemaName: "ttgo_test_cases", Schema: schema,
+		},
+	})
+	require.NoError(t, err)
+
+	rf := capturedBody["response_format"].(map[string]interface{})
+	assert.Equal(t, "json_schema", rf["type"])
+	js := rf["json_schema"].(map[string]interface{})
+	assert.Equal(t, "ttgo_test_cases", js["name"])
+	assert.Equal(t, true, js["strict"])
+	assert.Equal(t, map[string]interface{}{"type": "object"}, js["schema"])
+}
+
+func TestOpenAICompat_Chat_NoFormatWhenNil(t *testing.T) {
+	var rawBody map[string]interface{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &rawBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"model":"m","choices":[{"finish_reason":"stop","message":{"content":"ok"}}]}`))
+	}))
+	defer srv.Close()
+
+	cfg := &models.LLMProviderConfig{ProviderType: "openai", EndpointURL: srv.URL}
+	c := newOpenAICompatClient(cfg)
+	c.httpClient = srv.Client()
+
+	_, err := c.Chat(context.Background(), ChatRequest{
+		Model: "m", Messages: []ChatMessage{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	_, present := rawBody["response_format"]
+	assert.False(t, present, "nil ResponseFormat must omit the field entirely")
 }
 
 func TestOpenAICompat_Chat_DefaultEndpointUsed(t *testing.T) {
