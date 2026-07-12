@@ -404,13 +404,30 @@ func TestAcceptGenerationDrafts_RollsBackOnLinkInsertFailure(t *testing.T) {
 		BEGIN SELECT RAISE(ABORT, 'injected link failure'); END`).Error)
 	t.Cleanup(func() { s.db.Exec(`DROP TRIGGER IF EXISTS fail_link`) })
 
+	baseFolders := countRows(t, s, &models.Folder{})
 	_, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID}, folder.ID, true, nil)
 	require.Error(t, err)
 
 	// Release gate: "Every accepted test is linked to its requirement or the transaction fails."
 	assert.Equal(t, int64(0), countRows(t, s, &models.TestCase{}))
 	assert.Equal(t, int64(0), countRows(t, s, &models.TestStep{}))
+	assert.Equal(t, baseFolders, countRows(t, s, &models.Folder{}), "subfolder rolled back")
 	var back models.AIGeneratedDraft
 	require.NoError(t, s.db.First(&back, "id = ?", drafts[0].ID).Error)
 	assert.Equal(t, models.AIDraftStatusPending, back.Status)
+	assert.Nil(t, back.AcceptedTestCaseID)
+}
+
+func TestAcceptGenerationDrafts_UnparseableFindingsBlockBatch(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 2)
+	// Corrupt one draft's stored findings so they can't be parsed.
+	require.NoError(t, s.db.Model(&models.AIGeneratedDraft{}).Where("id = ?", drafts[1].ID).
+		Update("validation_json", "{ this is not valid json").Error)
+
+	_, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID, drafts[1].ID}, folder.ID, true, nil)
+	assert.ErrorIs(t, err, ErrDraftInvalid)
+
+	// Fail-closed happens in the pre-write validation loop → nothing materialized.
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestCase{}))
 }

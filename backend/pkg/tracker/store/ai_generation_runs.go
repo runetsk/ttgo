@@ -302,7 +302,10 @@ func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID
 			}
 			if d.ValidationJSON != "" {
 				var findings []aigen.Finding
-				if err := json.Unmarshal([]byte(d.ValidationJSON), &findings); err == nil && aigen.HasErrors(findings) {
+				if err := json.Unmarshal([]byte(d.ValidationJSON), &findings); err != nil {
+					return fmt.Errorf("%w: draft %q has unreadable validation findings", ErrDraftInvalid, d.Name)
+				}
+				if aigen.HasErrors(findings) {
 					return fmt.Errorf("%w: draft %q", ErrDraftInvalid, d.Name)
 				}
 			}
