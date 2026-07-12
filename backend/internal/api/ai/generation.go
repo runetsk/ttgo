@@ -443,38 +443,22 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve provider.
-	var providerCfg *models.LLMProviderConfig
-	if req.ProviderID != "" {
-		providerCfg, err = h.store.GetProviderConfigByID(req.ProviderID)
-		if err != nil {
-			httpx.Error(w, http.StatusBadRequest, fmt.Errorf("provider not found: %s", req.ProviderID))
-			return
-		}
-	} else {
-		// Use default enabled provider.
-		cfgs, err := h.store.GetAllProviderConfigs()
-		if err != nil {
+	providerCfg, err := h.resolveProviderConfig(req.ProviderID)
+	if err != nil {
+		// resolveProviderConfig conflates two failure modes behind one error:
+		// an explicit provider_id that doesn't exist (client error), or the
+		// provider listing failing while resolving the default (server error).
+		// req.ProviderID tells us which one happened.
+		if req.ProviderID != "" {
+			httpx.Error(w, http.StatusBadRequest, err)
+		} else {
 			httpx.Error(w, http.StatusInternalServerError, err)
-			return
 		}
-		for _, c := range cfgs {
-			if c.IsDefault && c.Enabled {
-				providerCfg = c
-				break
-			}
-		}
-		if providerCfg == nil {
-			for _, c := range cfgs {
-				if c.Enabled {
-					providerCfg = c
-					break
-				}
-			}
-		}
-		if providerCfg == nil {
-			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "no enabled LLM provider configured"})
-			return
-		}
+		return
+	}
+	if providerCfg == nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "no enabled LLM provider configured"})
+		return
 	}
 
 	// Call LLM.
@@ -627,6 +611,33 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		out["template_warning"] = plan.TemplateWarning
 	}
 	httpx.JSON(w, http.StatusOK, out)
+}
+
+// resolveProviderConfig returns the requested provider, or the default enabled
+// one, or the first enabled one. A nil return with nil error means none configured.
+func (h *Handler) resolveProviderConfig(providerID string) (*models.LLMProviderConfig, error) {
+	if providerID != "" {
+		cfg, err := h.store.GetProviderConfigByID(providerID)
+		if err != nil {
+			return nil, fmt.Errorf("provider not found: %s", providerID)
+		}
+		return cfg, nil
+	}
+	cfgs, err := h.store.GetAllProviderConfigs()
+	if err != nil {
+		return nil, err
+	}
+	for _, c := range cfgs {
+		if c.IsDefault && c.Enabled {
+			return c, nil
+		}
+	}
+	for _, c := range cfgs {
+		if c.Enabled {
+			return c, nil
+		}
+	}
+	return nil, nil
 }
 
 // coverageLevelGuidance returns the prompt guidance for a given coverage level.

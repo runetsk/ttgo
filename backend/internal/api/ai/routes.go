@@ -25,6 +25,10 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("POST /ai-gen/prompt-preview", requireAuth("read", h.PreviewGenerationPrompt))
 	api.HandleFunc("POST /requirements/{id}/generate-tests", requireAuth("write", h.GenerateTests))
 	api.HandleFunc("POST /requirements/{id}/accept-generated-tests", requireAuth("write", h.AcceptGeneratedTests))
+
+	// ai-generation lifecycle endpoints (ai-generation-improvements)
+	api.HandleFunc("POST /ai-generations", requireAuth("write", h.CreateGeneration))
+
 	api.HandleFunc("POST /import/parse", requireAuth("write", h.ParseImport))
 	api.HandleFunc("POST /import/accept", requireAuth("write", h.AcceptImport))
 
