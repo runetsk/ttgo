@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"ttgo/pkg/tracker/aigen"
 	"ttgo/pkg/tracker/models"
 
 	"github.com/google/uuid"
@@ -227,4 +228,152 @@ func (s *Store) ListGenerationEvents(runID string) ([]*models.AIGenerationEvent,
 	var events []*models.AIGenerationEvent
 	err := s.db.Where("run_id = ?", runID).Order("created_at asc, rowid asc").Find(&events).Error
 	return events, err
+}
+
+// AcceptGenerationResult reports what an acceptance materialized.
+type AcceptGenerationResult struct {
+	CreatedTestCaseIDs []string `json:"created_ids"`
+	SubfoldersCreated  int      `json:"subfolders_created"`
+	AlreadyAccepted    bool     `json:"already_accepted"`
+}
+
+// AcceptGenerationDrafts atomically materializes the selected drafts of a run
+// as test cases: category subfolders, test cases with steps (and version
+// snapshots), requirement links, draft status updates, and accepted events all
+// commit or roll back together. Replaying a fully-accepted selection returns
+// the stored test-case IDs without writing (idempotent acceptance).
+func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID string, groupByCategory bool, actorID *string) (*AcceptGenerationResult, error) {
+	res := &AcceptGenerationResult{CreatedTestCaseIDs: []string{}}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		var run models.AIGenerationRun
+		if err := tx.First(&run, "id = ?", runID).Error; err != nil {
+			return err
+		}
+
+		// Dedup selection, load drafts, verify they all belong to the run.
+		seen := map[string]bool{}
+		ids := make([]string, 0, len(draftIDs))
+		for _, id := range draftIDs {
+			if id != "" && !seen[id] {
+				seen[id] = true
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) == 0 {
+			return fmt.Errorf("%w: no drafts selected", ErrUnknownDrafts)
+		}
+		var drafts []*models.AIGeneratedDraft
+		if err := tx.Where("run_id = ? AND id IN ?", runID, ids).Order("position asc").Find(&drafts).Error; err != nil {
+			return err
+		}
+		if len(drafts) != len(ids) {
+			return ErrUnknownDrafts
+		}
+
+		// Idempotent replay: the whole selection was already accepted.
+		allAccepted := true
+		for _, d := range drafts {
+			if d.Status != models.AIDraftStatusAccepted {
+				allAccepted = false
+				break
+			}
+		}
+		if allAccepted {
+			for _, d := range drafts {
+				if d.AcceptedTestCaseID != nil {
+					res.CreatedTestCaseIDs = append(res.CreatedTestCaseIDs, *d.AcceptedTestCaseID)
+				}
+			}
+			res.AlreadyAccepted = true
+			return nil
+		}
+
+		// ── Validate everything BEFORE the first write ──
+		if err := tx.First(&models.Folder{}, "id = ?", folderID).Error; err != nil {
+			return fmt.Errorf("target folder: %w", err)
+		}
+		if err := tx.First(&models.Requirement{}, "id = ?", run.RequirementID).Error; err != nil {
+			return fmt.Errorf("linked requirement: %w", err)
+		}
+		contents := make([]models.DraftContent, len(drafts))
+		for i, d := range drafts {
+			if d.Status != models.AIDraftStatusPending {
+				return fmt.Errorf("%w: draft %q is %s", ErrDraftNotPending, d.Name, d.Status)
+			}
+			if d.ValidationJSON != "" {
+				var findings []aigen.Finding
+				if err := json.Unmarshal([]byte(d.ValidationJSON), &findings); err == nil && aigen.HasErrors(findings) {
+					return fmt.Errorf("%w: draft %q", ErrDraftInvalid, d.Name)
+				}
+			}
+			c, err := d.Content()
+			if err != nil {
+				return fmt.Errorf("draft %q content: %w", d.Name, err)
+			}
+			contents[i] = c
+		}
+
+		// ── Materialize ──
+		subfolderCache := map[string]string{}
+		now := time.Now()
+		for i, d := range drafts {
+			c := contents[i]
+			targetFolderID := folderID
+			if groupByCategory && c.Category != "" {
+				if cached, ok := subfolderCache[c.Category]; ok {
+					targetFolderID = cached
+				} else {
+					sub, created, err := s.findOrCreateSubfolderTx(tx, folderID, c.Category)
+					if err != nil {
+						return fmt.Errorf("subfolder %q: %w", c.Category, err)
+					}
+					if created {
+						res.SubfoldersCreated++
+					}
+					subfolderCache[c.Category] = sub.ID
+					targetFolderID = sub.ID
+				}
+			}
+
+			steps := make([]*models.TestStep, len(c.Steps))
+			for j, st := range c.Steps {
+				steps[j] = &models.TestStep{Action: st.Action, ExpectedResult: st.ExpectedResult, OrderIndex: j}
+			}
+			tc := &models.TestCase{
+				FolderID:    targetFolderID,
+				Name:        c.Name,
+				Description: c.Description,
+				Steps:       steps,
+			}
+			if err := s.createTestCaseTx(tx, tc); err != nil {
+				return fmt.Errorf("test case %q: %w", c.Name, err)
+			}
+			if err := tx.Create(&models.RequirementTestCaseLink{
+				ID: uuid.New().String(), RequirementID: run.RequirementID,
+				TestCaseID: tc.ID, CreatedAt: now,
+			}).Error; err != nil {
+				return fmt.Errorf("link for %q: %w", c.Name, err)
+			}
+			if err := tx.Model(&models.AIGeneratedDraft{}).Where("id = ?", d.ID).
+				Updates(map[string]interface{}{
+					"status":                models.AIDraftStatusAccepted,
+					"accepted_test_case_id": tc.ID,
+				}).Error; err != nil {
+				return err
+			}
+			meta, _ := json.Marshal(map[string]string{"test_case_id": tc.ID})
+			if err := createGenerationEventTx(tx, &models.AIGenerationEvent{
+				RunID: runID, DraftID: &d.ID, EventType: models.AIGenEventAccepted,
+				ActorID: actorID, MetadataJSON: string(meta),
+			}); err != nil {
+				return err
+			}
+			res.CreatedTestCaseIDs = append(res.CreatedTestCaseIDs, tc.ID)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
 }

@@ -28,19 +28,24 @@ func (s *Store) createFolderTx(tx *gorm.DB, name string, parentID *string) (*mod
 // FindOrCreateSubfolder returns an existing child folder with the given name
 // under parentID, or creates a new one if it doesn't exist.
 func (s *Store) FindOrCreateSubfolder(parentID, name string) (*models.Folder, error) {
-	return s.findOrCreateSubfolderTx(s.db, parentID, name)
+	f, _, err := s.findOrCreateSubfolderTx(s.db, parentID, name)
+	return f, err
 }
 
-func (s *Store) findOrCreateSubfolderTx(tx *gorm.DB, parentID, name string) (*models.Folder, error) {
+// findOrCreateSubfolderTx returns an existing child folder or creates one,
+// reporting via the bool whether a new folder row was inserted (created==true)
+// so callers can count subfolder creations (e.g. AcceptGenerationDrafts).
+func (s *Store) findOrCreateSubfolderTx(tx *gorm.DB, parentID, name string) (*models.Folder, bool, error) {
 	var existing models.Folder
 	err := tx.Where("parent_id = ? AND name = ?", parentID, name).First(&existing).Error
 	if err == nil {
-		return &existing, nil
+		return &existing, false, nil
 	}
 	if err != gorm.ErrRecordNotFound {
-		return nil, err
+		return nil, false, err
 	}
-	return s.createFolderTx(tx, name, &parentID)
+	f, err := s.createFolderTx(tx, name, &parentID)
+	return f, err == nil, err
 }
 
 // GetFolder returns a folder by ID.

@@ -2,11 +2,14 @@ package store
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"ttgo/pkg/tracker/aigen"
 	"ttgo/pkg/tracker/models"
 )
 
@@ -237,4 +240,177 @@ func TestRejectGenerationDraft(t *testing.T) {
 	assert.Equal(t, models.AIGenEventRejected, last.EventType)
 	assert.Equal(t, "too_vague", last.Reason)
 	assert.Equal(t, "steps lack data", last.Note)
+}
+
+// seedAcceptFixture creates a real requirement + folder + run with n pending drafts.
+func seedAcceptFixture(t *testing.T, s *Store, n int) (*models.Requirement, *models.Folder, *models.AIGenerationRun, []*models.AIGeneratedDraft) {
+	t.Helper()
+	req := &models.Requirement{Identifier: "REQ-ACC-" + uuid.New().String()[:8], Title: "Login"}
+	require.NoError(t, s.CreateRequirement(req))
+	folder, err := s.CreateFolder("AI Generated", nil)
+	require.NoError(t, err)
+	run, _, err := s.CreateGenerationRun(&models.AIGenerationRun{RequirementID: req.ID})
+	require.NoError(t, err)
+
+	drafts := make([]*models.AIGeneratedDraft, n)
+	for i := range drafts {
+		d := &models.AIGeneratedDraft{}
+		require.NoError(t, d.ApplyContent(models.DraftContent{
+			Name:        fmt.Sprintf("Draft %d", i),
+			Category:    "Functional",
+			Description: "desc",
+			Steps: []models.GeneratedStep{
+				{Action: "do", ExpectedResult: "done"},
+				{Action: "check", ExpectedResult: "ok"},
+			},
+		}))
+		drafts[i] = d
+	}
+	require.NoError(t, s.CreateGenerationDrafts(run.ID, nil, drafts, 0))
+	return req, folder, run, drafts
+}
+
+func TestAcceptGenerationDrafts_Success(t *testing.T) {
+	s := newTestStore(t)
+	req, folder, run, drafts := seedAcceptFixture(t, s, 2)
+
+	res, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID, drafts[1].ID}, folder.ID, true, nil)
+	require.NoError(t, err)
+	require.Len(t, res.CreatedTestCaseIDs, 2)
+	assert.Equal(t, 1, res.SubfoldersCreated, "both drafts share the Functional subfolder")
+	assert.False(t, res.AlreadyAccepted)
+
+	// Test cases exist with steps, in the category subfolder, linked to the requirement.
+	for _, id := range res.CreatedTestCaseIDs {
+		tc, err := s.GetTestCase(id)
+		require.NoError(t, err)
+		assert.Len(t, tc.Steps, 2)
+		var sub models.Folder
+		require.NoError(t, s.db.First(&sub, "id = ?", tc.FolderID).Error)
+		assert.Equal(t, "Functional", sub.Name)
+		var link models.RequirementTestCaseLink
+		require.NoError(t, s.db.First(&link, "requirement_id = ? AND test_case_id = ?", req.ID, id).Error)
+	}
+
+	// Drafts flipped to accepted and reference their test case.
+	for _, d := range drafts {
+		var back models.AIGeneratedDraft
+		require.NoError(t, s.db.First(&back, "id = ?", d.ID).Error)
+		assert.Equal(t, models.AIDraftStatusAccepted, back.Status)
+		require.NotNil(t, back.AcceptedTestCaseID)
+	}
+
+	// Accepted events recorded per draft.
+	events, err := s.ListGenerationEvents(run.ID)
+	require.NoError(t, err)
+	accepted := 0
+	for _, e := range events {
+		if e.EventType == models.AIGenEventAccepted {
+			accepted++
+		}
+	}
+	assert.Equal(t, 2, accepted)
+}
+
+func TestAcceptGenerationDrafts_ReplayIsIdempotent(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 1)
+	ids := []string{drafts[0].ID}
+
+	first, err := s.AcceptGenerationDrafts(run.ID, ids, folder.ID, true, nil)
+	require.NoError(t, err)
+	replay, err := s.AcceptGenerationDrafts(run.ID, ids, folder.ID, true, nil)
+	require.NoError(t, err)
+	assert.True(t, replay.AlreadyAccepted)
+	assert.Equal(t, first.CreatedTestCaseIDs, replay.CreatedTestCaseIDs)
+
+	var count int64
+	require.NoError(t, s.db.Model(&models.TestCase{}).Count(&count).Error)
+	assert.Equal(t, int64(1), count, "replay must not create duplicate test cases")
+}
+
+func TestAcceptGenerationDrafts_MixedStateFails(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 2)
+	_, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID}, folder.ID, true, nil)
+	require.NoError(t, err)
+
+	_, err = s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID, drafts[1].ID}, folder.ID, true, nil)
+	assert.ErrorIs(t, err, ErrDraftNotPending)
+}
+
+func TestAcceptGenerationDrafts_InvalidDraftBlocksBatch(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 2)
+	findings, _ := json.Marshal([]aigen.Finding{{
+		Field: "steps", Code: "no_steps", Message: "a test case needs at least one step",
+		Severity: aigen.SeverityError,
+	}})
+	require.NoError(t, s.db.Model(&models.AIGeneratedDraft{}).Where("id = ?", drafts[1].ID).
+		Update("validation_json", string(findings)).Error)
+
+	_, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID, drafts[1].ID}, folder.ID, true, nil)
+	assert.ErrorIs(t, err, ErrDraftInvalid)
+
+	var count int64
+	require.NoError(t, s.db.Model(&models.TestCase{}).Count(&count).Error)
+	assert.Equal(t, int64(0), count, "validation happens before any write")
+}
+
+func TestAcceptGenerationDrafts_UnknownDraftFails(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 1)
+	_, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID, "not-a-draft"}, folder.ID, true, nil)
+	assert.ErrorIs(t, err, ErrUnknownDrafts)
+}
+
+// countRows is a rollback-assertion helper.
+func countRows(t *testing.T, s *Store, model interface{}) int64 {
+	t.Helper()
+	var n int64
+	require.NoError(t, s.db.Model(model).Count(&n).Error)
+	return n
+}
+
+func TestAcceptGenerationDrafts_RollsBackOnTestCaseInsertFailure(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 2)
+	// Make the SECOND draft's insert blow up mid-transaction.
+	require.NoError(t, s.db.Model(&models.AIGeneratedDraft{}).Where("id = ?", drafts[1].ID).
+		Update("name", "BOOM").Error)
+	require.NoError(t, s.db.Exec(`CREATE TRIGGER fail_tc BEFORE INSERT ON test_cases
+		WHEN new.name = 'BOOM' BEGIN SELECT RAISE(ABORT, 'injected failure'); END`).Error)
+	t.Cleanup(func() { s.db.Exec(`DROP TRIGGER IF EXISTS fail_tc`) })
+
+	baseFolders := countRows(t, s, &models.Folder{})
+	_, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID, drafts[1].ID}, folder.ID, true, nil)
+	require.Error(t, err)
+
+	// EVERYTHING rolled back: no test cases, steps, links, subfolders, or status flips.
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestCase{}))
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestStep{}))
+	assert.Equal(t, int64(0), countRows(t, s, &models.RequirementTestCaseLink{}))
+	assert.Equal(t, baseFolders, countRows(t, s, &models.Folder{}), "injected failure must roll back the Functional subfolder")
+	var back models.AIGeneratedDraft
+	require.NoError(t, s.db.First(&back, "id = ?", drafts[0].ID).Error)
+	assert.Equal(t, models.AIDraftStatusPending, back.Status)
+	assert.Nil(t, back.AcceptedTestCaseID)
+}
+
+func TestAcceptGenerationDrafts_RollsBackOnLinkInsertFailure(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 1)
+	require.NoError(t, s.db.Exec(`CREATE TRIGGER fail_link BEFORE INSERT ON requirement_test_case_links
+		BEGIN SELECT RAISE(ABORT, 'injected link failure'); END`).Error)
+	t.Cleanup(func() { s.db.Exec(`DROP TRIGGER IF EXISTS fail_link`) })
+
+	_, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID}, folder.ID, true, nil)
+	require.Error(t, err)
+
+	// Release gate: "Every accepted test is linked to its requirement or the transaction fails."
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestCase{}))
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestStep{}))
+	var back models.AIGeneratedDraft
+	require.NoError(t, s.db.First(&back, "id = ?", drafts[0].ID).Error)
+	assert.Equal(t, models.AIDraftStatusPending, back.Status)
 }
