@@ -164,21 +164,24 @@ Distribute tests across these categories as applicable:
 - "Detailed": 6–12 granular steps including setup, verification and teardown
 
 ## Output Format
-Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text.
+Return ONLY a valid JSON object — no markdown fences, no explanation, no extra text.
 
-[
-  {
-    "name": "Descriptive unique test title",
-    "category": "Category name",
-    "description": "One sentence: what this test validates and why it matters",
-    "steps": [
-      {
-        "action": "Specific tester action with concrete test data where applicable",
-        "expected_result": "Observable, verifiable outcome"
-      }
-    ]
-  }
-]
+{
+  "test_cases": [
+    {
+      "name": "Descriptive unique test title",
+      "category": "Category name",
+      "description": "One sentence: what this test validates and why it matters",
+      "source_refs": [],
+      "steps": [
+        {
+          "action": "Specific tester action with concrete test data where applicable",
+          "expected_result": "Observable, verifiable outcome"
+        }
+      ]
+    }
+  ]
+}
 
 ## Quality Rules
 
@@ -248,21 +251,24 @@ Coverage: {{COVERAGE}}
 - "Detailed": 6–12 granular steps including setup, verification and teardown
 
 ## Output Format
-Return ONLY a valid JSON array — no markdown fences, no explanation, no extra text.
+Return ONLY a valid JSON object — no markdown fences, no explanation, no extra text.
 
-[
-  {
-    "name": "Descriptive unique test title",
-    "category": "Category name",
-    "description": "One sentence: what this test validates and which child issue(s) it covers",
-    "steps": [
-      {
-        "action": "Specific tester action with concrete test data",
-        "expected_result": "Observable, verifiable outcome"
-      }
-    ]
-  }
-]
+{
+  "test_cases": [
+    {
+      "name": "Descriptive unique test title",
+      "category": "Category name",
+      "description": "One sentence: what this test validates and which child issue(s) it covers",
+      "source_refs": [],
+      "steps": [
+        {
+          "action": "Specific tester action with concrete test data",
+          "expected_result": "Observable, verifiable outcome"
+        }
+      ]
+    }
+  ]
+}
 
 ## Rules
 - Category must be one of: Functional, Negative, Boundary, Edge Case, Security, Performance, API, Mobile/Responsive, Accessibility (or a brief custom category)
@@ -277,7 +283,7 @@ func (s *Store) GetOrCreateDefaultTemplate() (*models.AIGenTemplate, error) {
 	var tmpl models.AIGenTemplate
 	err := s.db.First(&tmpl, "id = ?", aiGenTemplateSingletonID).Error
 	if err == nil {
-		return &tmpl, nil
+		return s.refreshDefaultTemplate(&tmpl)
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, err
@@ -297,6 +303,37 @@ func (s *Store) GetOrCreateDefaultTemplate() (*models.AIGenTemplate, error) {
 		return nil, fmt.Errorf("failed to create default template: %w", err)
 	}
 	return &tmpl, nil
+}
+
+// refreshDefaultTemplate updates the stored defaults when the built-in template
+// constants change between releases. Content the user never customized (it still
+// equals the stored default) follows the new default; customized content is kept.
+func (s *Store) refreshDefaultTemplate(tmpl *models.AIGenTemplate) (*models.AIGenTemplate, error) {
+	updates := map[string]interface{}{}
+	if tmpl.DefaultContent != defaultPromptTemplate {
+		if tmpl.Content == tmpl.DefaultContent {
+			tmpl.Content = defaultPromptTemplate
+			updates["content"] = defaultPromptTemplate
+		}
+		tmpl.DefaultContent = defaultPromptTemplate
+		updates["default_content"] = defaultPromptTemplate
+	}
+	if tmpl.DefaultParentContent != defaultParentPromptTemplate {
+		if tmpl.ParentContent == tmpl.DefaultParentContent {
+			tmpl.ParentContent = defaultParentPromptTemplate
+			updates["parent_content"] = defaultParentPromptTemplate
+		}
+		tmpl.DefaultParentContent = defaultParentPromptTemplate
+		updates["default_parent_content"] = defaultParentPromptTemplate
+	}
+	if len(updates) == 0 {
+		return tmpl, nil
+	}
+	if err := s.db.Model(&models.AIGenTemplate{}).
+		Where("id = ?", aiGenTemplateSingletonID).Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	return tmpl, nil
 }
 
 // UpdateTemplateContent updates the editable content of the singleton template.

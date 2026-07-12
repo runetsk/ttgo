@@ -210,6 +210,7 @@ type GeneratedTestCase struct {
 	Name        string          `json:"name"`
 	Category    string          `json:"category"`
 	Description string          `json:"description"`
+	SourceRefs  []string        `json:"source_refs,omitempty"`
 	Steps       []GeneratedStep `json:"steps"`
 }
 

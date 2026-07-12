@@ -558,9 +558,9 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		retryReq := llm.ChatRequest{
 			Model: providerCfg.ModelName,
 			Messages: []llm.ChatMessage{
-				{Role: "system", Content: "CRITICAL: Output ONLY a raw JSON array. " +
-					"No reasoning, no <think> tags, no markdown, no commentary. " +
-					"Your entire response must start with [ and end with ]."},
+				{Role: "system", Content: "CRITICAL: Output ONLY a raw JSON object of the form " +
+					"{\"test_cases\": [...]}. No reasoning, no <think> tags, no markdown, no commentary. " +
+					"Your entire response must start with { and end with }."},
 				{Role: "user", Content: plan.Prompt},
 			},
 			Temperature: 0.3,
@@ -708,9 +708,10 @@ func stripHTMLTags(s string) string {
 // llmDraftShape is the JSON shape the LLM is expected to output per test case.
 // Defined at package level so both parseLLMResponse and collectJSONObjects share it.
 type llmDraftShape struct {
-	Name        string `json:"name"`
-	Category    string `json:"category"`
-	Description string `json:"description"`
+	Name        string   `json:"name"`
+	Category    string   `json:"category"`
+	Description string   `json:"description"`
+	SourceRefs  []string `json:"source_refs"`
 	Steps       []struct {
 		Action         string `json:"action"`
 		ExpectedResult string `json:"expected_result"`
@@ -755,8 +756,20 @@ func parseLLMResponse(raw string) ([]models.GeneratedTestCase, error) {
 
 	// ── 3. Attempt structured parse strategies in order ──
 
+	// Strategy 0: strict canonical envelope {"test_cases":[...]} — the shape
+	// providers are asked (and schema-forced) to return. Tried first so the
+	// canonical path never depends on the tolerant fallbacks below.
+	if strings.HasPrefix(raw, "{") {
+		var envelope struct {
+			TestCases []llmDraftShape `json:"test_cases"`
+		}
+		if err := json.Unmarshal([]byte(raw), &envelope); err == nil && len(envelope.TestCases) > 0 {
+			drafts = envelope.TestCases
+		}
+	}
+
 	// Strategy A: bare JSON array.
-	if strings.HasPrefix(raw, "[") {
+	if len(drafts) == 0 && strings.HasPrefix(raw, "[") {
 		_ = json.Unmarshal([]byte(raw), &drafts)
 	}
 
@@ -817,6 +830,7 @@ func parseLLMResponse(raw string) ([]models.GeneratedTestCase, error) {
 			Name:        d.Name,
 			Category:    normalizeCategory(d.Category, d.Name),
 			Description: d.Description,
+			SourceRefs:  d.SourceRefs,
 			Steps:       steps,
 		}
 	}

@@ -125,9 +125,9 @@ func assemblePrompt(template string, req *models.Requirement, childrenContext, c
 // blocks and return JSON directly (critical for CoT models like DeepSeek-R1).
 // Shared by GenerateTests and the prompt preview.
 const generationSystemMessage = "You are a JSON API that generates software test cases. " +
-	"Respond with ONLY a valid JSON array. " +
+	"Respond with ONLY a single valid JSON object of the form {\"test_cases\": [...]}. " +
 	"Do NOT include <think> tags, markdown fences, or any text outside the JSON. " +
-	"Start your response with the [ character."
+	"Start your response with the { character."
 
 var (
 	errUnknownCoverageLevel = errors.New("coverage_level must be one of: essential, thorough, comprehensive")
