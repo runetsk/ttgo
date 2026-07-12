@@ -1,7 +1,9 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 	"ttgo/pkg/tracker/models"
 
@@ -108,4 +110,121 @@ func (s *Store) MarkGenerationRunRunning(id string) error {
 // UpdateGenerationRun persists all fields of run (single-writer synchronous flow).
 func (s *Store) UpdateGenerationRun(run *models.AIGenerationRun) error {
 	return s.db.Save(run).Error
+}
+
+// createGenerationEventTx appends one lifecycle event inside tx.
+func createGenerationEventTx(tx *gorm.DB, ev *models.AIGenerationEvent) error {
+	if ev.ID == "" {
+		ev.ID = uuid.New().String()
+	}
+	if ev.CreatedAt.IsZero() {
+		ev.CreatedAt = time.Now()
+	}
+	return tx.Create(ev).Error
+}
+
+// CreateGenerationDrafts persists a run's drafts and appends the generated +
+// validated events atomically. Draft IDs and pending status are assigned here.
+func (s *Store) CreateGenerationDrafts(runID string, actorID *string, drafts []*models.AIGeneratedDraft, invalidCount int) error {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		for i, d := range drafts {
+			if d.ID == "" {
+				d.ID = uuid.New().String()
+			}
+			d.RunID = runID
+			d.Position = i
+			if d.Version == 0 {
+				d.Version = 1
+			}
+			if d.Status == "" {
+				d.Status = models.AIDraftStatusPending
+			}
+			if err := tx.Create(d).Error; err != nil {
+				return err
+			}
+		}
+		genMeta, _ := json.Marshal(map[string]int{"draft_count": len(drafts)})
+		if err := createGenerationEventTx(tx, &models.AIGenerationEvent{
+			RunID: runID, EventType: models.AIGenEventGenerated,
+			ActorID: actorID, MetadataJSON: string(genMeta),
+		}); err != nil {
+			return err
+		}
+		valMeta, _ := json.Marshal(map[string]int{"invalid_drafts": invalidCount})
+		return createGenerationEventTx(tx, &models.AIGenerationEvent{
+			RunID: runID, EventType: models.AIGenEventValidated,
+			ActorID: actorID, MetadataJSON: string(valMeta),
+		})
+	})
+}
+
+// getPendingDraftTx loads a draft and enforces pending status.
+func getPendingDraftTx(tx *gorm.DB, draftID string) (*models.AIGeneratedDraft, error) {
+	var d models.AIGeneratedDraft
+	if err := tx.First(&d, "id = ?", draftID).Error; err != nil {
+		return nil, err
+	}
+	if d.Status != models.AIDraftStatusPending {
+		return nil, fmt.Errorf("%w: draft %s is %s", ErrDraftNotPending, d.ID, d.Status)
+	}
+	return &d, nil
+}
+
+// SaveDraftEdit overwrites a pending draft's editable content, bumps its
+// version, marks it edited, stores fresh validation findings, and appends an
+// edited event — all in one transaction.
+func (s *Store) SaveDraftEdit(draftID string, content models.DraftContent, validationJSON string, actorID *string) (*models.AIGeneratedDraft, error) {
+	var out *models.AIGeneratedDraft
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		d, err := getPendingDraftTx(tx, draftID)
+		if err != nil {
+			return err
+		}
+		if err := d.ApplyContent(content); err != nil {
+			return err
+		}
+		d.ValidationJSON = validationJSON
+		d.Edited = true
+		d.Version++
+		if err := tx.Save(d).Error; err != nil {
+			return err
+		}
+		out = d
+		return createGenerationEventTx(tx, &models.AIGenerationEvent{
+			RunID: d.RunID, DraftID: &d.ID, EventType: models.AIGenEventEdited, ActorID: actorID,
+		})
+	})
+	return out, err
+}
+
+// RejectGenerationDraft transitions a pending draft to rejected and records the
+// structured reason on the event trail.
+func (s *Store) RejectGenerationDraft(draftID, reason, note string, actorID *string) (*models.AIGeneratedDraft, error) {
+	var out *models.AIGeneratedDraft
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		d, err := getPendingDraftTx(tx, draftID)
+		if err != nil {
+			return err
+		}
+		d.Status = models.AIDraftStatusRejected
+		if err := tx.Save(d).Error; err != nil {
+			return err
+		}
+		out = d
+		return createGenerationEventTx(tx, &models.AIGenerationEvent{
+			RunID: d.RunID, DraftID: &d.ID, EventType: models.AIGenEventRejected,
+			ActorID: actorID, Reason: reason, Note: note,
+		})
+	})
+	return out, err
+}
+
+// ListGenerationEvents returns a run's events oldest-first. Ties on created_at
+// (common: sub-millisecond clock resolution means same-transaction events can
+// share a timestamp) break on SQLite's implicit rowid, which strictly reflects
+// insertion order — unlike the event's random UUID id, which does not.
+func (s *Store) ListGenerationEvents(runID string) ([]*models.AIGenerationEvent, error) {
+	var events []*models.AIGenerationEvent
+	err := s.db.Where("run_id = ?", runID).Order("created_at asc, rowid asc").Find(&events).Error
+	return events, err
 }

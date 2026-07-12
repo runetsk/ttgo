@@ -156,3 +156,85 @@ func TestListGenerationRunsNewestFirst(t *testing.T) {
 	assert.Equal(t, b.ID, runs[0].ID)
 	assert.Equal(t, a.ID, runs[1].ID)
 }
+
+func seedRunWithDraft(t *testing.T, s *Store) (*models.AIGenerationRun, *models.AIGeneratedDraft) {
+	t.Helper()
+	run, _, err := s.CreateGenerationRun(&models.AIGenerationRun{RequirementID: "req-1"})
+	require.NoError(t, err)
+	draft := &models.AIGeneratedDraft{RunID: run.ID, Position: 0}
+	require.NoError(t, draft.ApplyContent(models.DraftContent{
+		Name: "Original name", Category: "Functional", Description: "d",
+		Steps: []models.GeneratedStep{{Action: "a", ExpectedResult: "e"}},
+	}))
+	draft.OriginalJSON = draft.StepsJSON // placeholder; real callers store full content
+	require.NoError(t, s.CreateGenerationDrafts(run.ID, nil, []*models.AIGeneratedDraft{draft}, 0))
+	return run, draft
+}
+
+func TestCreateGenerationDraftsEmitsEvents(t *testing.T) {
+	s := newTestStore(t)
+	run, draft := seedRunWithDraft(t, s)
+	assert.NotEmpty(t, draft.ID)
+	assert.Equal(t, models.AIDraftStatusPending, draft.Status)
+	assert.Equal(t, 1, draft.Version)
+
+	events, err := s.ListGenerationEvents(run.ID)
+	require.NoError(t, err)
+	types := []string{}
+	for _, e := range events {
+		types = append(types, e.EventType)
+	}
+	assert.Contains(t, types, models.AIGenEventGenerated)
+	assert.Contains(t, types, models.AIGenEventValidated)
+}
+
+func TestSaveDraftEdit(t *testing.T) {
+	s := newTestStore(t)
+	run, draft := seedRunWithDraft(t, s)
+
+	actor := "user-1"
+	updated, err := s.SaveDraftEdit(draft.ID, models.DraftContent{
+		Name: "Edited name", Category: "Negative", Description: "d2",
+		Steps: []models.GeneratedStep{{Action: "a2", ExpectedResult: "e2"}},
+	}, "[]", &actor)
+	require.NoError(t, err)
+	assert.Equal(t, "Edited name", updated.Name)
+	assert.True(t, updated.Edited)
+	assert.Equal(t, 2, updated.Version)
+
+	events, err := s.ListGenerationEvents(run.ID)
+	require.NoError(t, err)
+	last := events[len(events)-1]
+	assert.Equal(t, models.AIGenEventEdited, last.EventType)
+	require.NotNil(t, last.DraftID)
+	assert.Equal(t, draft.ID, *last.DraftID)
+}
+
+func TestSaveDraftEditRefusesNonPending(t *testing.T) {
+	s := newTestStore(t)
+	_, draft := seedRunWithDraft(t, s)
+	require.NoError(t, s.db.Model(&models.AIGeneratedDraft{}).Where("id = ?", draft.ID).
+		Update("status", models.AIDraftStatusAccepted).Error)
+
+	_, err := s.SaveDraftEdit(draft.ID, models.DraftContent{Name: "x"}, "[]", nil)
+	assert.ErrorIs(t, err, ErrDraftNotPending)
+}
+
+func TestRejectGenerationDraft(t *testing.T) {
+	s := newTestStore(t)
+	run, draft := seedRunWithDraft(t, s)
+
+	rejected, err := s.RejectGenerationDraft(draft.ID, "too_vague", "steps lack data", nil)
+	require.NoError(t, err)
+	assert.Equal(t, models.AIDraftStatusRejected, rejected.Status)
+
+	_, err = s.RejectGenerationDraft(draft.ID, "duplicate", "", nil)
+	assert.ErrorIs(t, err, ErrDraftNotPending, "double reject must fail")
+
+	events, err := s.ListGenerationEvents(run.ID)
+	require.NoError(t, err)
+	last := events[len(events)-1]
+	assert.Equal(t, models.AIGenEventRejected, last.EventType)
+	assert.Equal(t, "too_vague", last.Reason)
+	assert.Equal(t, "steps lack data", last.Note)
+}
