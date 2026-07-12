@@ -107,3 +107,28 @@ func TestChatWithRetry_StopsOnContextCancel(t *testing.T) {
 	require.Error(t, err)
 	assert.Equal(t, 1, p.calls, "no retry after the request context is cancelled")
 }
+
+func TestChatWithRetry_CapsDelayAtMaxDelay(t *testing.T) {
+	var slept []time.Duration
+	p := &scriptedProvider{results: []func() (*ChatResponse, error){
+		fail(&ProviderError{Category: ErrCatProvider, StatusCode: 500, Message: "500"}),
+		ok(),
+	}}
+	opts := RetryOptions{
+		MaxAttempts: 2,
+		BaseDelay:   2 * time.Second, // 2s << 0 = 2s, exceeds the cap below
+		MaxDelay:    1500 * time.Millisecond,
+		sleep: func(ctx context.Context, d time.Duration) error {
+			slept = append(slept, d)
+			return nil
+		},
+		jitter: func() float64 { return 0 },
+	}
+	_, retries, err := ChatWithRetry(context.Background(), p, ChatRequest{}, opts)
+	require.NoError(t, err)
+	assert.Equal(t, 1, retries)
+	require.Len(t, slept, 1)
+	// 2s is capped to MaxDelay 1500ms, then halved (jitter=0) → 750ms.
+	// If the cap branch were absent, this would be 2s/2 = 1s — so 750ms proves the cap fired.
+	assert.Equal(t, 750*time.Millisecond, slept[0])
+}
