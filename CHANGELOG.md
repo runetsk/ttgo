@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-step Pass/Fail/Skip verdicts with optional notes during manual execution; marking a step fail derives the result to FAIL, and the result detail shows the captured step checklist.
 - Assign a test run to a user from the run detail header, and filter the runs list by assignee — including "assigned to me" and "unassigned".
 - AI Generate page: live prompt preview showing the exact prompt Generate will send — color-coded by source (requirement, children, coverage, detail, instructions), updates as options change, and flags when no requirement is linked.
+- LLM provider settings now group by type — **OpenAI-compatible** (OpenAI, Google Gemini, **OpenRouter**, or any **Custom** OpenAI-compatible host), **Claude**, and **Local / Ollama** — with presets that prefill the endpoint and model. OpenRouter ships the correct base URL, and provider cards show the recognized preset. Existing providers are unaffected.
 
 ### Changed
 - AI Generate composer simplified: the category preset buttons (Happy paths, Edge cases, Negative, …) are gone — the live prompt preview already shows what the options inject — and the instructions box is now clearly labeled as optional additional instructions appended to the prompt.
