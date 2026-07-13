@@ -102,15 +102,15 @@ export default function AIGenerateStudio() {
         : drafts.length > 0 ? 'review' : 'compose';
     const disabled = ai.generating || ai.accepting;
 
-    const statusOf = useCallback((d) => ai.acceptedIds.has(d.temp_id)
+    const statusOf = useCallback((d) => ai.acceptedIds.has(d.id)
         ? 'accepted'
-        : ai.discardedIds.has(d.temp_id)
+        : ai.discardedIds.has(d.id)
             ? 'rejected'
             : 'pending', [ai.acceptedIds, ai.discardedIds]);
 
     const statuses = useMemo(() => {
         const o = {};
-        drafts.forEach(d => { o[d.temp_id] = statusOf(d); });
+        drafts.forEach(d => { o[d.id] = statusOf(d); });
         return o;
     }, [drafts, statusOf]);
 
@@ -121,26 +121,26 @@ export default function AIGenerateStudio() {
     }, [statuses]);
 
     const filtered = useMemo(() => drafts.filter(d => {
-        const s = statuses[d.temp_id];
+        const s = statuses[d.id];
         if (filter === 'all') return true;
         return s === filter;
     }), [drafts, statuses, filter]);
 
     useEffect(() => {
-        if (selectedDraftId && drafts.find(d => d.temp_id === selectedDraftId)) return;
-        const pending = drafts.find(d => statuses[d.temp_id] === 'pending');
+        if (selectedDraftId && drafts.find(d => d.id === selectedDraftId)) return;
+        const pending = drafts.find(d => statuses[d.id] === 'pending');
         // eslint-disable-next-line react-hooks/set-state-in-effect -- repairs the selection when it becomes stale/unset as drafts change; selectedDraftId remains independently user-selectable afterward via onSelect
-        setSelectedDraftId(pending?.temp_id || drafts[0]?.temp_id || null);
+        setSelectedDraftId(pending?.id || drafts[0]?.id || null);
     }, [drafts, selectedDraftId, statuses]);
 
-    const selectedDraft = drafts.find(d => d.temp_id === selectedDraftId) || null;
+    const selectedDraft = drafts.find(d => d.id === selectedDraftId) || null;
 
     const handleGenerate = () => {
         if (ai.hasUnsaved && !window.confirm('This will replace un-accepted drafts. Continue?')) return;
         ai.startGeneration();
     };
     const handleAccept = (d) => ai.acceptDraft(d);
-    const handleReject = (tempId) => ai.discardDraft(tempId);
+    const handleReject = (id) => ai.discardDraft(id);
     const handleAcceptAll = () => ai.acceptAllPending();
     const handleDiscardAll = () => {
         if (!window.confirm('Discard all pending drafts?')) return;
@@ -246,9 +246,9 @@ export default function AIGenerateStudio() {
                 ) : (
                     <StudioDraftDetail
                         draft={selectedDraft}
-                        status={selectedDraft ? statuses[selectedDraft.temp_id] : null}
+                        status={selectedDraft ? statuses[selectedDraft.id] : null}
                         onAccept={() => selectedDraft && handleAccept(selectedDraft)}
-                        onReject={() => selectedDraft && handleReject(selectedDraft.temp_id)}
+                        onReject={() => selectedDraft && handleReject(selectedDraft.id)}
                         onCollapse={() => setRightCollapsed(true)}
                         stage={stage}
                         linkedReqId={ai.activeRequirement?.identifier}

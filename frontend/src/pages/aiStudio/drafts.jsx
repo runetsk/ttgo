@@ -288,7 +288,7 @@ export function StudioDraftsList({
 
             <div style={{ flex: 1, overflowY: 'auto' }}>
                 {groups.map(grp => {
-                    const pendingIds = grp.items.filter(d => statuses[d.temp_id] === 'pending').map(d => d.temp_id);
+                    const pendingIds = grp.items.filter(d => statuses[d.id] === 'pending').map(d => d.id);
                     const tone = groupBy === 'category'
                         ? categoryTone(grp.label)
                         : { bg: 'var(--aig-surface-tint)', bd: AIC.border, fg: AIC.dim };
@@ -332,7 +332,7 @@ export function StudioDraftsList({
                                     {pendingIds.length > 0 && (
                                         <AIBtn variant="ghost"
                                             style={{ padding: '3px 8px', fontSize: 11, color: tone.fg }}
-                                            onClick={e => { e.stopPropagation(); onAcceptGroup(grp.items.filter(d => statuses[d.temp_id] === 'pending')); }}
+                                            onClick={e => { e.stopPropagation(); onAcceptGroup(grp.items.filter(d => statuses[d.id] === 'pending')); }}
                                             disabled={disabled}>
                                             {Icon.check(11)} Accept {pendingIds.length}
                                         </AIBtn>
@@ -340,13 +340,13 @@ export function StudioDraftsList({
                                 </div>
                             )}
                             {!collapsed && grp.items.map(d => (
-                                <DraftRow key={d.temp_id}
+                                <DraftRow key={d.id}
                                     draft={d}
-                                    status={statuses[d.temp_id]}
-                                    selected={selectedId === d.temp_id}
-                                    onSelect={() => onSelect(d.temp_id)}
+                                    status={statuses[d.id]}
+                                    selected={selectedId === d.id}
+                                    onSelect={() => onSelect(d.id)}
                                     onAccept={() => onAccept(d)}
-                                    onReject={() => onReject(d.temp_id)}
+                                    onReject={() => onReject(d.id)}
                                     disabled={disabled}
                                 />
                             ))}

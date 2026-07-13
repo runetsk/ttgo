@@ -3,6 +3,7 @@ import { createContext, useContext, useState, useCallback, useRef, useEffect } f
 import { aiGeneration, aiImport, getFolderTree, requirements as requirementsApi } from '../api';
 import { toast } from '../toast';
 import { useAuth } from './AuthContext';
+import { runToDebug } from '../utils/aiRunDebug';
 
 // ── Constants (re-exported for AIGeneratePage) ──────────────────────
 export const DETAIL_LEVELS = [
@@ -67,6 +68,7 @@ export function AIGenerationProvider({ children }) {
 
     // Draft lifecycle
     const [drafts, setDrafts] = useState([]);
+    const [runId, setRunId] = useState(null);
     const [acceptedIds, setAcceptedIds] = useState(new Set());
     const [discardedIds, setDiscardedIds] = useState(new Set());
     const [accepting, setAccepting] = useState(false);
@@ -200,7 +202,7 @@ export function AIGenerationProvider({ children }) {
 
     // ── Derived values ──────────────────────────────────────────────
     const pendingDrafts = drafts.filter(
-        d => !discardedIds.has(d.temp_id) && !acceptedIds.has(d.temp_id)
+        d => !discardedIds.has(d.id) && !acceptedIds.has(d.id)
     );
     const pendingCount = pendingDrafts.length;
     const hasUnsaved = drafts.length > 0 && pendingCount > 0;
@@ -221,6 +223,7 @@ export function AIGenerationProvider({ children }) {
         setHasGenerated(false);
         setLastDebug(null);
         setDrafts([]);
+        setRunId(null);
         setAcceptedIds(new Set());
         setDiscardedIds(new Set());
         setCoverageLevel('thorough');
@@ -262,42 +265,46 @@ export function AIGenerationProvider({ children }) {
         setTemplateWarning('');
 
         try {
-            const result = await aiGeneration.generateTests(activeRequirement.id, {
+            const result = await aiGeneration.createGeneration({
+                requirement_id: activeRequirement.id,
                 provider_id: selectedProviderId,
                 coverage_level: coverageLevel,
                 detail_level: detailLevel,
                 additional_instructions: additionalInstructions,
+                idempotency_key: crypto.randomUUID(),
+                parent_run_id: runId || undefined,
             });
             const newDrafts = result.drafts || [];
+            setRunId(result.run?.id || null);
             setDrafts(prev => {
-                const kept = prev.filter(d => acceptedIds.has(d.temp_id));
+                const kept = prev.filter(d => acceptedIds.has(d.id));
                 return [...kept, ...newDrafts];
             });
             setDiscardedIds(new Set());
             setHasGenerated(true);
             if (result.template_warning) setTemplateWarning(result.template_warning);
-            if (result.debug) setLastDebug(result.debug);
+            if (result.run) setLastDebug(runToDebug(result.run));
         } catch (err) {
             setGenerationError(err?.response?.data?.error || err.message || 'Generation failed');
         } finally {
             setGenerating(false);
         }
-    }, [activeRequirement, selectedProviderId, coverageLevel, detailLevel, additionalInstructions, acceptedIds]);
+    }, [activeRequirement, selectedProviderId, coverageLevel, detailLevel, additionalInstructions, acceptedIds, runId]);
 
     const acceptDraft = useCallback(async (draft) => {
-        if (!activeRequirement) return;
+        if (!activeRequirement || !runId) return;
         if (!selectedFolderId) {
             toast.error('Select a folder first');
             return;
         }
         setAccepting(true);
         try {
-            await aiGeneration.acceptGeneratedTests(activeRequirement.id, {
+            await aiGeneration.acceptGeneration(runId, {
                 folder_id: selectedFolderId,
-                tests: [draft],
+                draft_ids: [draft.id],
                 group_by_category: groupByCategory,
             });
-            setAcceptedIds(prev => new Set([...prev, draft.temp_id]));
+            setAcceptedIds(prev => new Set([...prev, draft.id]));
             toast.success(`"${draft.name}" accepted`);
             onAcceptedRef.current?.();
         } catch (err) {
@@ -305,12 +312,12 @@ export function AIGenerationProvider({ children }) {
         } finally {
             setAccepting(false);
         }
-    }, [activeRequirement, selectedFolderId, groupByCategory]);
+    }, [activeRequirement, runId, selectedFolderId, groupByCategory]);
 
     const acceptAllPending = useCallback(async () => {
-        if (!activeRequirement) return;
+        if (!activeRequirement || !runId) return;
         const pending = drafts.filter(
-            d => !discardedIds.has(d.temp_id) && !acceptedIds.has(d.temp_id)
+            d => !discardedIds.has(d.id) && !acceptedIds.has(d.id)
         );
         if (pending.length === 0 || !selectedFolderId) {
             toast.error('Select a folder first');
@@ -318,12 +325,12 @@ export function AIGenerationProvider({ children }) {
         }
         setAccepting(true);
         try {
-            await aiGeneration.acceptGeneratedTests(activeRequirement.id, {
+            await aiGeneration.acceptGeneration(runId, {
                 folder_id: selectedFolderId,
-                tests: pending,
+                draft_ids: pending.map(d => d.id),
                 group_by_category: groupByCategory,
             });
-            setAcceptedIds(new Set([...acceptedIds, ...pending.map(d => d.temp_id)]));
+            setAcceptedIds(new Set([...acceptedIds, ...pending.map(d => d.id)]));
             toast.success(`${pending.length} test case${pending.length !== 1 ? 's' : ''} accepted`);
             onAcceptedRef.current?.();
         } catch (err) {
@@ -331,27 +338,27 @@ export function AIGenerationProvider({ children }) {
         } finally {
             setAccepting(false);
         }
-    }, [activeRequirement, drafts, discardedIds, acceptedIds, selectedFolderId, groupByCategory]);
+    }, [activeRequirement, runId, drafts, discardedIds, acceptedIds, selectedFolderId, groupByCategory]);
 
-    const discardDraft = useCallback((tempId) => {
-        setDiscardedIds(prev => new Set([...prev, tempId]));
+    const discardDraft = useCallback((id) => {
+        setDiscardedIds(prev => new Set([...prev, id]));
     }, []);
 
     const discardAllPending = useCallback(() => {
-        const pending = drafts.filter(d => !acceptedIds.has(d.temp_id)).map(d => d.temp_id);
+        const pending = drafts.filter(d => !acceptedIds.has(d.id)).map(d => d.id);
         setDiscardedIds(prev => new Set([...prev, ...pending]));
     }, [drafts, acceptedIds]);
 
     const acceptDrafts = useCallback(async (draftsToAccept) => {
-        if (!activeRequirement || !selectedFolderId || draftsToAccept.length === 0) return;
+        if (!activeRequirement || !runId || !selectedFolderId || draftsToAccept.length === 0) return;
         setAccepting(true);
         try {
-            await aiGeneration.acceptGeneratedTests(activeRequirement.id, {
+            await aiGeneration.acceptGeneration(runId, {
                 folder_id: selectedFolderId,
-                tests: draftsToAccept,
+                draft_ids: draftsToAccept.map(d => d.id),
                 group_by_category: groupByCategory,
             });
-            setAcceptedIds(prev => new Set([...prev, ...draftsToAccept.map(d => d.temp_id)]));
+            setAcceptedIds(prev => new Set([...prev, ...draftsToAccept.map(d => d.id)]));
             toast.success(`${draftsToAccept.length} test case${draftsToAccept.length !== 1 ? 's' : ''} accepted`);
             onAcceptedRef.current?.();
         } catch (err) {
@@ -359,14 +366,14 @@ export function AIGenerationProvider({ children }) {
         } finally {
             setAccepting(false);
         }
-    }, [activeRequirement, selectedFolderId, groupByCategory]);
+    }, [activeRequirement, runId, selectedFolderId, groupByCategory]);
 
-    const discardDrafts = useCallback((tempIds) => {
-        setDiscardedIds(prev => new Set([...prev, ...tempIds]));
+    const discardDrafts = useCallback((ids) => {
+        setDiscardedIds(prev => new Set([...prev, ...ids]));
     }, []);
 
-    const editDraft = useCallback((tempId, changes) => {
-        setDrafts(prev => prev.map(d => d.temp_id === tempId ? { ...d, ...changes } : d));
+    const editDraft = useCallback((id, changes) => {
+        setDrafts(prev => prev.map(d => d.id === id ? { ...d, ...changes } : d));
     }, []);
 
     // Switch to a different requirement without resetting provider/folder/generation params
@@ -377,6 +384,7 @@ export function AIGenerationProvider({ children }) {
         setHasGenerated(false);
         setLastDebug(null);
         setDrafts([]);
+        setRunId(null);
         setAcceptedIds(new Set());
         setDiscardedIds(new Set());
     }, []);
@@ -485,6 +493,7 @@ export function AIGenerationProvider({ children }) {
         setHasGenerated(false);
         setLastDebug(null);
         setDrafts([]);
+        setRunId(null);
         setAcceptedIds(new Set());
         setDiscardedIds(new Set());
         setAccepting(false);
@@ -522,6 +531,7 @@ export function AIGenerationProvider({ children }) {
         lastDebug,
         // Drafts
         drafts,
+        runId,
         acceptedIds,
         discardedIds,
         accepting,
