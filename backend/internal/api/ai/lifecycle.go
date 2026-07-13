@@ -160,7 +160,15 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	providerCfg, err := h.resolveProviderConfig(req.ProviderID)
 	if err != nil {
-		httpx.Error(w, http.StatusBadRequest, err)
+		// Mirror GenerateTests: an explicit-but-missing provider_id is a client
+		// error (400); a store-list failure while resolving the default is a
+		// server fault (500). resolveProviderConfig conflates both, so branch
+		// on whether the caller named a provider.
+		if req.ProviderID != "" {
+			httpx.Error(w, http.StatusBadRequest, err)
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, err)
+		}
 		return
 	}
 	if providerCfg == nil {
@@ -303,6 +311,16 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	for i, d := range drafts {
 		d.Name = html.UnescapeString(h.sanitizer.Sanitize(d.Name))
 		d.Description = httpx.NormalizeEmptyHTML(h.sanitizer, d.Description)
+		// Category and step text are attacker-influenceable too (a requirement
+		// description can prompt-inject the LLM into echoing HTML/JS). Sanitize
+		// them in place — mirroring the /import/accept path — BEFORE validation,
+		// so a payload that sanitizes to "" (e.g. a pure-<script> action) is
+		// seen as empty by ValidateDraft and rejected rather than persisted.
+		d.Category = html.UnescapeString(h.sanitizer.Sanitize(d.Category))
+		for j := range d.Steps {
+			d.Steps[j].Action = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[j].Action)
+			d.Steps[j].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[j].ExpectedResult)
+		}
 		findings := aigen.ValidateDraft(d)
 		if aigen.HasErrors(findings) {
 			invalid++

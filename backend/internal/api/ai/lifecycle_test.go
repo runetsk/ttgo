@@ -215,3 +215,25 @@ func TestCreateGeneration_ProviderAuthFailureMarksRunFailed(t *testing.T) {
 	assert.Equal(t, "authentication", run.ErrorCategory)
 	assert.NotNil(t, run.StartedAt, "started_at must survive the full-row Save on run failure")
 }
+
+func TestCreateGeneration_SanitizesStepText(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	dirty := `{"test_cases":[{"name":"N","category":"Functional","description":"d","source_refs":[],` +
+		`"steps":[{"action":"Click <script>alert(1)</script> Save","expected_result":"OK <b>bold</b>"}]}]}`
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, dirty)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-SAN-1", "T", "D")
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": "san-1",
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	_, drafts := decodeRunResponse(t, rr)
+	require.Len(t, drafts, 1)
+	steps := drafts[0]["steps"].([]interface{})
+	action := steps[0].(map[string]interface{})["action"].(string)
+	assert.NotContains(t, action, "<script>", "step action must be sanitized")
+}
