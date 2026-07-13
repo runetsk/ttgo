@@ -66,11 +66,12 @@ func httpStatusForCategory(category llm.ErrorCategory) int {
 		return http.StatusGatewayTimeout
 	case llm.ErrCatRateLimit:
 		return http.StatusTooManyRequests
-	case llm.ErrCatParse, llm.ErrCatValidation, llm.ErrCatSchema:
+	case llm.ErrCatParse, llm.ErrCatValidation:
 		return http.StatusUnprocessableEntity
 	case llm.ErrCatInternal:
 		return http.StatusInternalServerError
-	default: // provider, authentication, authorization
+	default: // provider, authentication, authorization, schema (provider rejected
+		// our structured-output request — a gateway/capability fault, not client input)
 		return http.StatusBadGateway
 	}
 }
@@ -365,7 +366,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 			d.Steps[j].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[j].ExpectedResult)
 		}
 		for k := range d.SourceRefs {
-			d.SourceRefs[k] = html.UnescapeString(h.sanitizer.Sanitize(d.SourceRefs[k]))
+			d.SourceRefs[k] = httpx.NormalizeEmptyHTML(h.sanitizer, d.SourceRefs[k])
 		}
 		findings := aigen.ValidateDraft(d)
 		if aigen.HasErrors(findings) {
@@ -606,7 +607,7 @@ func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) 
 	if req.SourceRefs != nil {
 		refs := *req.SourceRefs
 		for k := range refs {
-			refs[k] = html.UnescapeString(h.sanitizer.Sanitize(refs[k]))
+			refs[k] = httpx.NormalizeEmptyHTML(h.sanitizer, refs[k])
 		}
 		content.SourceRefs = refs
 	}

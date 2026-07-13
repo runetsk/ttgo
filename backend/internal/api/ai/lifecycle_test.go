@@ -477,8 +477,11 @@ func TestAcceptGenerationEndpoint_Validation(t *testing.T) {
 func TestCreateGeneration_SanitizesSourceRefs(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
+	// Entity-encoded markup is the case that catches a sanitize-then-unescape
+	// bypass (Bluemonday strips literal tags either way, but leaves &lt;script&gt;
+	// as inert text that a later html.UnescapeString would revive).
 	dirty := `{"test_cases":[{"name":"N","category":"Functional","description":"d",` +
-		`"source_refs":["AC-<script>alert(1)</script>1"],` +
+		`"source_refs":["AC-&lt;script&gt;alert(1)&lt;/script&gt;1"],` +
 		`"steps":[{"action":"a","expected_result":"e"}]}]}`
 	var captured fakeLLMCapture
 	fake := newFakeLLMServer(t, &captured, dirty)
@@ -508,7 +511,7 @@ func TestUpdateGenerationDraft_SanitizesSourceRefs(t *testing.T) {
 	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
 
 	rr := doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0], map[string]interface{}{
-		"source_refs": []string{"AC-<script>alert(1)</script>2"},
+		"source_refs": []string{"AC-&lt;script&gt;alert(1)&lt;/script&gt;2"},
 	})
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 	var body struct {
