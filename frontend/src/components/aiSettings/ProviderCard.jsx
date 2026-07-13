@@ -1,10 +1,10 @@
 import React from 'react';
-import { providerMeta } from './constants';
+import { presetFromConfig } from './constants';
 import { s } from './styles';
 
 /* ── Provider Card ─────────────────────────────────── */
 export default function ProviderCard({ provider, isAdmin, testingId, testResult, onTest, onSetDefault, onEdit, onDelete }) {
-    const meta = providerMeta(provider.provider_type);
+    const meta = presetFromConfig(provider);
     const isTesting = testingId === provider.id;
 
     return (
