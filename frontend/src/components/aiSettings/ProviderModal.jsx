@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { aiGeneration } from '../../api';
 import { toast } from '../../toast';
-import { PROVIDER_TYPES, DEFAULT_ENDPOINTS, providerMeta } from './constants';
+import { PROVIDER_GROUPS, presetMeta, presetFromConfig } from './constants';
 import { m } from './styles';
 
 /* ── Add / Edit Provider Modal ─────────────────────── */
 export default function ProviderModal({ provider, onClose, onSaved }) {
     const isEdit = !!provider;
+    // Which preset chip is selected. On edit, infer it from the saved config;
+    // on add, default to the first preset (OpenAI).
+    const initialPresetKey = isEdit ? presetFromConfig(provider).key : 'openai';
+    const [presetKey, setPresetKey]         = useState(initialPresetKey);
     const [label, setLabel]                 = useState(provider?.label || '');
-    const [providerType, setProviderType]   = useState(provider?.provider_type || 'openai');
-    const [endpointURL, setEndpointURL]     = useState(provider?.endpoint_url || DEFAULT_ENDPOINTS['openai']);
+    const [endpointURL, setEndpointURL]     = useState(provider?.endpoint_url || presetMeta(initialPresetKey).endpoint);
     const [apiKey, setApiKey]               = useState('');
     const [modelName, setModelName]         = useState(provider?.model_name || '');
     const defaultTimeout = provider?.timeout_seconds || (provider?.provider_type === 'local' ? 600 : 90);
@@ -18,9 +21,15 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
     const [enabled, setEnabled]             = useState(provider?.enabled !== false);
     const [saving, setSaving]               = useState(false);
 
+    const preset = presetMeta(presetKey);
+    const isLocal = preset.providerType === 'local';
+    const endpointRequired = isLocal || presetKey === 'custom';
+
+    // When adding, selecting a preset prefills its default endpoint. Never
+    // clobber a saved endpoint while editing.
     useEffect(() => {
-        if (!isEdit) setEndpointURL(DEFAULT_ENDPOINTS[providerType] || '');
-    }, [providerType, isEdit]);
+        if (!isEdit) setEndpointURL(presetMeta(presetKey).endpoint);
+    }, [presetKey, isEdit]);
 
     useEffect(() => {
         const onKey = (e) => { if (e.key === 'Escape') onClose(); };
@@ -33,7 +42,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
         setSaving(true);
         try {
             const data = {
-                label, provider_type: providerType, endpoint_url: endpointURL,
+                label, provider_type: preset.providerType, endpoint_url: endpointURL,
                 api_key: apiKey, model_name: modelName,
                 timeout_seconds: parseInt(timeoutSeconds, 10) || 90,
                 is_default: isDefault, enabled,
@@ -53,19 +62,17 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
         }
     };
 
-    const meta = providerMeta(providerType);
-
     return (
         <div onClick={onClose} style={m.backdrop}>
             <div onClick={e => e.stopPropagation()} style={m.modal}>
                 {/* Accent top bar */}
-                <div style={{ ...m.accentBar, background: meta.color }} />
+                <div style={{ ...m.accentBar, background: preset.color }} />
 
                 {/* Header */}
                 <div style={m.header}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ ...m.providerInitial, color: meta.color, background: meta.bg }}>
-                            {meta.initial}
+                        <div style={{ ...m.providerInitial, color: preset.color, background: preset.bg }}>
+                            {preset.initial}
                         </div>
                         <div>
                             <h3 style={m.modalTitle}>{isEdit ? 'Edit Provider' : 'Add LLM Provider'}</h3>
@@ -80,28 +87,35 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                 </div>
 
                 <form onSubmit={handleSubmit} style={m.formBody}>
-                    {/* Provider Type selector */}
+                    {/* Provider preset selector, grouped by behavior */}
                     <div style={m.field}>
-                        <label style={m.fieldLabel}>Provider Type</label>
-                        <div style={m.typeGrid}>
-                            {PROVIDER_TYPES.map(pt => (
-                                <button
-                                    key={pt.value}
-                                    type="button"
-                                    onClick={() => setProviderType(pt.value)}
-                                    style={{
-                                        ...m.typeCard,
-                                        ...(providerType === pt.value
-                                            ? { borderColor: pt.color, background: pt.bg, color: pt.color }
-                                            : { borderColor: 'var(--border-color)', background: 'rgba(255,255,255,0.02)', color: 'var(--text-secondary)' }
-                                        ),
-                                    }}
-                                >
-                                    <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>{pt.initial !== '⚙' ? pt.initial : '⚙'}</span>
-                                    <span style={{ fontSize: '0.75rem', fontWeight: 500, lineHeight: 1.2, textAlign: 'center' }}>{pt.label}</span>
-                                </button>
-                            ))}
-                        </div>
+                        <label style={m.fieldLabel}>Provider</label>
+                        {PROVIDER_GROUPS.map(group => (
+                            <div key={group.key} style={{ marginBottom: 10 }}>
+                                <div style={{ fontSize: '0.72rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-tertiary)', margin: '4px 0 6px' }}>
+                                    {group.label}
+                                </div>
+                                <div style={m.typeGrid}>
+                                    {group.presets.map(pt => (
+                                        <button
+                                            key={pt.key}
+                                            type="button"
+                                            onClick={() => setPresetKey(pt.key)}
+                                            style={{
+                                                ...m.typeCard,
+                                                ...(presetKey === pt.key
+                                                    ? { borderColor: pt.color, background: pt.bg, color: pt.color }
+                                                    : { borderColor: 'var(--border-color)', background: 'rgba(255,255,255,0.02)', color: 'var(--text-secondary)' }
+                                                ),
+                                            }}
+                                        >
+                                            <span style={{ fontWeight: 700, fontSize: '0.88rem' }}>{pt.initial}</span>
+                                            <span style={{ fontSize: '0.75rem', fontWeight: 500, lineHeight: 1.2, textAlign: 'center' }}>{pt.label}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
                     </div>
 
                     {/* Label */}
@@ -119,7 +133,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                         />
                     </div>
 
-                    {/* Model + Endpoint */}
+                    {/* Model + Timeout */}
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                         <div style={m.field}>
                             <label style={m.fieldLabel}>
@@ -128,7 +142,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                             <input
                                 className="modern-input"
                                 style={{ width: '100%' }}
-                                placeholder={providerType === 'openai' ? 'gpt-4o' : providerType === 'gemini' ? 'gemini-2.5-flash' : providerType === 'anthropic' ? 'claude-sonnet-4-5' : 'llama3'}
+                                placeholder={preset.model || 'model-name'}
                                 value={modelName}
                                 onChange={e => setModelName(e.target.value)}
                                 required
@@ -138,7 +152,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                             <label style={m.fieldLabel}>
                                 Timeout (seconds)
                                 <span style={{ fontWeight: 400, color: 'var(--text-tertiary)', marginLeft: 6 }}>
-                                    {providerType === 'local' ? '(600–1800 for local CoT models)' : '(60–300 typical)'}
+                                    {isLocal ? '(600–1800 for local CoT models)' : '(60–300 typical)'}
                                 </span>
                             </label>
                             <input
@@ -156,14 +170,15 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                     {/* Endpoint URL */}
                     <div style={m.field}>
                         <label style={m.fieldLabel}>
-                            Endpoint URL {providerType === 'local' && <span style={m.required}>*</span>}
+                            Endpoint URL {endpointRequired && <span style={m.required}>*</span>}
                         </label>
                         <input
                             className="modern-input"
                             style={{ width: '100%', fontFamily: 'monospace', fontSize: '0.82rem' }}
-                            placeholder={DEFAULT_ENDPOINTS[providerType] || 'https://…'}
+                            placeholder={preset.endpoint || 'https://…'}
                             value={endpointURL}
                             onChange={e => setEndpointURL(e.target.value)}
+                            required={endpointRequired}
                         />
                     </div>
 
@@ -171,7 +186,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                     <div style={m.field}>
                         <label style={m.fieldLabel}>
                             API Key
-                            {providerType === 'local' && <span style={{ ...m.chip, marginLeft: 6 }}>Not required</span>}
+                            {isLocal && <span style={{ ...m.chip, marginLeft: 6 }}>Not required</span>}
                         </label>
                         {isEdit && provider.api_key_masked && (
                             <div style={m.currentKeyNote}>
@@ -182,7 +197,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                             className="modern-input"
                             style={{ width: '100%' }}
                             type="password"
-                            placeholder={isEdit ? 'Leave blank to keep existing key' : (providerType === 'local' ? 'Not required for local providers' : 'sk-…')}
+                            placeholder={isEdit ? 'Leave blank to keep existing key' : (isLocal ? 'Not required for local providers' : 'sk-…')}
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                         />
