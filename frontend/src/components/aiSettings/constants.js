@@ -35,7 +35,9 @@ export const PROVIDER_GROUPS = [
 // Flat list of every preset, for key/type lookups.
 const ALL_PRESETS = PROVIDER_GROUPS.flatMap(g => g.presets);
 
-const OPENAI_DEFAULT_ENDPOINT = 'https://api.openai.com';
+// Single source of truth — derived from the openai preset so the two never drift
+// (presetMeta is a hoisted function declaration; ALL_PRESETS is defined above).
+const OPENAI_DEFAULT_ENDPOINT = presetMeta('openai').endpoint;
 
 // Look up a preset by its key. Unknown keys fall back to the first preset (OpenAI).
 export function presetMeta(key) {
