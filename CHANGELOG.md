@@ -180,6 +180,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   makes previously-encrypted integration/LLM credentials undecryptable. Tracked as a
   follow-up.
 
+### Added
+- Durable AI generation lifecycle: runs, drafts, and events persist across refreshes; new `/api/ai-generations` endpoints (create/read/list, draft edit, structured draft rejection, atomic accept).
+- Provider-native structured output: OpenAI-compatible cloud providers receive a strict JSON schema (`json_schema`) with automatic `json_object` downgrade; canonical `{"test_cases": [...]}` response envelope with `source_refs`.
+- Bounded retry with exponential backoff, jitter, and `Retry-After` support for transient LLM failures; normalized error categories in API responses.
+- Deterministic draft validation with field-level findings (blocks acceptance of invalid drafts).
+
+### Changed
+- AI Generate studio now creates idempotent generation runs and accepts drafts atomically — a failed batch acceptance no longer leaves partially created test cases.
+- The legacy `generate-tests`/`accept-generated-tests` endpoints remain as compatibility adapters and are slated for deprecation after the migration window.
+
 ## [0.2.0] - 2026-07-01
 
 ### Added
