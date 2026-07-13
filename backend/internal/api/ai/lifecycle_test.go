@@ -473,3 +473,119 @@ func TestAcceptGenerationEndpoint_Validation(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept",
 		map[string]interface{}{"folder_id": folderID, "draft_ids": draftIDs}).Code)
 }
+
+func TestCreateGeneration_SanitizesSourceRefs(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	dirty := `{"test_cases":[{"name":"N","category":"Functional","description":"d",` +
+		`"source_refs":["AC-<script>alert(1)</script>1"],` +
+		`"steps":[{"action":"a","expected_result":"e"}]}]}`
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, dirty)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-SREF-1", "T", "D")
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": "sref-1",
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	_, drafts := decodeRunResponse(t, rr)
+	require.Len(t, drafts, 1)
+	refs := drafts[0]["source_refs"].([]interface{})
+	require.Len(t, refs, 1)
+	assert.NotContains(t, refs[0].(string), "<script>", "generated source_refs must be sanitized")
+}
+
+func TestUpdateGenerationDraft_SanitizesSourceRefs(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-SREF-2", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0], map[string]interface{}{
+		"source_refs": []string{"AC-<script>alert(1)</script>2"},
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body struct {
+		Draft map[string]interface{} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	refs := body.Draft["source_refs"].([]interface{})
+	require.Len(t, refs, 1)
+	assert.NotContains(t, refs[0].(string), "<script>", "edited source_refs must be sanitized")
+}
+
+func TestRejectGenerationDraft_SanitizesNote(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-NOTE-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/reject",
+		map[string]string{"reason": "other", "note": "bad <script>alert(1)</script> draft"})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	// The note lives only on the event trail; read it back through the store.
+	events, err := env.store.ListGenerationEvents(runID)
+	require.NoError(t, err)
+	var rejectNote string
+	for _, e := range events {
+		if e.EventType == models.AIGenEventRejected {
+			rejectNote = e.Note
+		}
+	}
+	assert.NotEmpty(t, rejectNote)
+	assert.NotContains(t, rejectNote, "<script>", "reject note must be sanitized before storage")
+}
+
+func TestCreateGeneration_ReplayDifferentRequirementConflicts(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqA := createPreviewRequirement(t, env, "REQ-IDK-A", "A", "D")
+	reqB := createPreviewRequirement(t, env, "REQ-IDK-B", "B", "D")
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqA, "provider_id": providerID, "idempotency_key": "shared-key",
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+
+	// Reusing the key for a DIFFERENT requirement must conflict, not replay reqA's run.
+	rr2 := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqB, "provider_id": providerID, "idempotency_key": "shared-key",
+	})
+	assert.Equal(t, http.StatusConflict, rr2.Code, rr2.Body.String())
+}
+
+func TestCreateGeneration_ReplayFailedRunReturnsFailureStatus(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, "not json at all")
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-IDK-FAIL", "T", "D")
+
+	body := map[string]string{"requirement_id": reqID, "provider_id": providerID, "idempotency_key": "fail-key"}
+	rr := doRequest(env, "POST", "/api/ai-generations", body)
+	require.Equal(t, http.StatusUnprocessableEntity, rr.Code, "parse failure → 422")
+
+	// Replaying the failed key reproduces the 422 (with category), not a misleading 200.
+	rr2 := doRequest(env, "POST", "/api/ai-generations", body)
+	require.Equal(t, http.StatusUnprocessableEntity, rr2.Code, "replay of a failed run must reproduce its failure status")
+	var b map[string]interface{}
+	require.NoError(t, json.Unmarshal(rr2.Body.Bytes(), &b))
+	assert.Equal(t, "parse", b["category"])
+}

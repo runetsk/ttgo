@@ -57,18 +57,57 @@ func (h *Handler) runResponse(run *models.AIGenerationRun) (map[string]interface
 	return map[string]interface{}{"run": run, "drafts": draftResponses}, nil
 }
 
-// writeExistingRun answers an idempotency-key replay: finished runs return
-// their stored result (200), in-flight runs conflict (409).
-func (h *Handler) writeExistingRun(w http.ResponseWriter, run *models.AIGenerationRun) {
+// httpStatusForCategory maps a normalized LLM error category to the HTTP status
+// the original request returned, so an idempotency-key replay of a failed run
+// reproduces that status instead of a misleading 200.
+func httpStatusForCategory(category llm.ErrorCategory) int {
+	switch category {
+	case llm.ErrCatTimeout:
+		return http.StatusGatewayTimeout
+	case llm.ErrCatRateLimit:
+		return http.StatusTooManyRequests
+	case llm.ErrCatParse, llm.ErrCatValidation, llm.ErrCatSchema:
+		return http.StatusUnprocessableEntity
+	case llm.ErrCatInternal:
+		return http.StatusInternalServerError
+	default: // provider, authentication, authorization
+		return http.StatusBadGateway
+	}
+}
+
+// writeExistingRun answers an idempotency-key replay. The key is scoped to the
+// requesting requirement: reusing it for a different requirement is a conflict,
+// not a silent replay of the unrelated run. Only a completed run replays its
+// stored result (200); a failed run replays its original failure status; a
+// cancelled or still-in-flight run conflicts (409).
+func (h *Handler) writeExistingRun(w http.ResponseWriter, run *models.AIGenerationRun, expectedRequirementID string) {
+	if run.RequirementID != expectedRequirementID {
+		httpx.JSON(w, http.StatusConflict, map[string]string{
+			"error":  "this idempotency key was already used for a different requirement",
+			"run_id": run.ID,
+		})
+		return
+	}
 	switch run.Status {
-	case models.AIGenerationRunStatusCompleted, models.AIGenerationRunStatusFailed, models.AIGenerationRunStatusCancelled:
+	case models.AIGenerationRunStatusCompleted:
 		out, err := h.runResponse(run)
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, err)
 			return
 		}
 		httpx.JSON(w, http.StatusOK, out)
-	default:
+	case models.AIGenerationRunStatusFailed:
+		httpx.JSON(w, httpStatusForCategory(llm.ErrorCategory(run.ErrorCategory)), map[string]string{
+			"error":    run.ErrorMessage,
+			"category": run.ErrorCategory,
+			"run_id":   run.ID,
+		})
+	case models.AIGenerationRunStatusCancelled:
+		httpx.JSON(w, http.StatusConflict, map[string]string{
+			"error":  "this generation was cancelled; start a new one",
+			"run_id": run.ID,
+		})
+	default: // pending / running
 		httpx.JSON(w, http.StatusConflict, map[string]string{
 			"error":  "a generation with this idempotency key is already in progress",
 			"run_id": run.ID,
@@ -151,7 +190,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if existing != nil {
-			h.writeExistingRun(w, existing)
+			h.writeExistingRun(w, existing, req.RequirementID)
 			return
 		}
 	}
@@ -220,7 +259,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	if !created {
 		// Lost a same-key race between the fast-path check and the insert.
-		h.writeExistingRun(w, run)
+		h.writeExistingRun(w, run, req.RequirementID)
 		return
 	}
 	if err := h.store.MarkGenerationRunRunning(run.ID); err != nil {
@@ -324,6 +363,9 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		for j := range d.Steps {
 			d.Steps[j].Action = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[j].Action)
 			d.Steps[j].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[j].ExpectedResult)
+		}
+		for k := range d.SourceRefs {
+			d.SourceRefs[k] = html.UnescapeString(h.sanitizer.Sanitize(d.SourceRefs[k]))
 		}
 		findings := aigen.ValidateDraft(d)
 		if aigen.HasErrors(findings) {
@@ -430,19 +472,20 @@ func (h *Handler) writeGenerationFailure(w http.ResponseWriter, r *http.Request,
 	h.failRun(run, status, category, err.Error(), start, retries)
 	slog.ErrorContext(r.Context(), "ai_generation: run failed", "run_id", run.ID, "category", category, "error", err)
 
-	httpStatus := http.StatusBadGateway
+	if category == llm.ErrCatCancelled {
+		return // client is gone; nothing to write
+	}
+	// Same category→status mapping a later idempotency replay uses, so the
+	// first-time failure and its replay always agree.
+	httpStatus := httpStatusForCategory(category)
 	msg := fmt.Sprintf("LLM generation failed: %v", err)
 	switch category {
 	case llm.ErrCatTimeout:
-		httpStatus = http.StatusGatewayTimeout
 		msg = fmt.Sprintf("LLM request timed out after %d seconds", cfg.TimeoutSeconds)
 	case llm.ErrCatRateLimit:
-		httpStatus = http.StatusTooManyRequests
 		msg = "the provider rate-limited this request after retries; wait a moment and try again"
 	case llm.ErrCatAuthentication, llm.ErrCatAuthorization:
 		msg = "the provider rejected the configured API key; check the provider settings"
-	case llm.ErrCatCancelled:
-		return // client is gone; nothing to write
 	}
 	httpx.JSON(w, httpStatus, map[string]string{
 		"error": msg, "category": string(category), "run_id": run.ID,
@@ -561,7 +604,11 @@ func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) 
 		content.Description = httpx.NormalizeEmptyHTML(h.sanitizer, *req.Description)
 	}
 	if req.SourceRefs != nil {
-		content.SourceRefs = *req.SourceRefs
+		refs := *req.SourceRefs
+		for k := range refs {
+			refs[k] = html.UnescapeString(h.sanitizer.Sanitize(refs[k]))
+		}
+		content.SourceRefs = refs
 	}
 	if req.Steps != nil {
 		// Step text is attacker-influenceable (edits can come from a client
@@ -641,11 +688,14 @@ func (h *Handler) RejectGenerationDraftEndpoint(w http.ResponseWriter, r *http.R
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "note is too long"})
 		return
 	}
+	// Sanitize the free-text note before persisting it on the event trail, so a
+	// future events-feed endpoint can never surface stored HTML/JS.
+	note := httpx.NormalizeEmptyHTML(h.sanitizer, req.Note)
 	var actorID *string
 	if u := authctx.UserFromRequest(r); u != nil {
 		actorID = &u.ID
 	}
-	rejected, err := h.store.RejectGenerationDraft(draft.ID, req.Reason, req.Note, actorID)
+	rejected, err := h.store.RejectGenerationDraft(draft.ID, req.Reason, note, actorID)
 	if err != nil {
 		if errors.Is(err, store.ErrDraftNotPending) {
 			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
