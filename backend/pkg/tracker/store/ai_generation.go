@@ -278,7 +278,10 @@ Return ONLY a valid JSON object — no markdown fences, no explanation, no extra
 - Expected results must state the exact observable outcome
 - Each test must be self-contained`
 
-// GetOrCreateDefaultTemplate returns the singleton template, creating it with the default content if it doesn't exist.
+// GetOrCreateDefaultTemplate returns the singleton template, creating it with the
+// default content if it doesn't exist. On every call it also refreshes stale
+// built-in defaults (see refreshDefaultTemplate) so "Reset to default" reflects the
+// latest built-in template while preserving any user-customized content.
 func (s *Store) GetOrCreateDefaultTemplate() (*models.AIGenTemplate, error) {
 	var tmpl models.AIGenTemplate
 	err := s.db.First(&tmpl, "id = ?", aiGenTemplateSingletonID).Error

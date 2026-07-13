@@ -979,8 +979,8 @@ Actions must name exact UI elements/fields and include concrete test data (email
 Expected results must state the exact observable outcome — never "works correctly" or "error is shown".
 For negative tests, state both what should happen (error message) and what should NOT happen (data not saved).
 Each test must be self-contained with its own setup steps.
-Return ONLY a valid JSON array — no markdown, no explanation.
-[{"name":"...","category":"Functional","description":"...","steps":[{"action":"...","expected_result":"..."}]}]
+Return ONLY a valid JSON object — no markdown, no explanation.
+{"test_cases":[{"name":"...","category":"Functional","description":"...","source_refs":[],"steps":[{"action":"...","expected_result":"..."}]}]}
 The "category" field must be one of: Functional, Negative, Boundary, Edge Case, Security, Performance, API, Mobile/Responsive, Accessibility — or a brief custom category if none fit.`
 }
 
@@ -997,8 +997,8 @@ Coverage: {{COVERAGE}}
 {{ADDITIONAL_INSTRUCTIONS}}
 
 Generate at least one test per child issue. Name tests so it is clear which child issue they cover.
-Return ONLY a valid JSON array — no markdown, no explanation.
-[{"name":"...","category":"Functional","description":"...","steps":[{"action":"...","expected_result":"..."}]}]`
+Return ONLY a valid JSON object — no markdown, no explanation.
+{"test_cases":[{"name":"...","category":"Functional","description":"...","source_refs":[],"steps":[{"action":"...","expected_result":"..."}]}]}`
 }
 
 // ────────────────────────────────────────────────────────────────────────────
