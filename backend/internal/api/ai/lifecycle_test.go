@@ -10,6 +10,7 @@ import (
 
 	"ttgo/pkg/tracker/models"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -236,4 +237,161 @@ func TestCreateGeneration_SanitizesStepText(t *testing.T) {
 	steps := drafts[0]["steps"].([]interface{})
 	action := steps[0].(map[string]interface{})["action"].(string)
 	assert.NotContains(t, action, "<script>", "step action must be sanitized")
+}
+
+// createCompletedRun generates a run through the API and returns (runID, draftIDs).
+func createCompletedRun(t *testing.T, env *testEnv, reqID, providerID string) (string, []string) {
+	t.Helper()
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": uuid.NewString(),
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	run, drafts := decodeRunResponse(t, rr)
+	ids := make([]string, len(drafts))
+	for i, d := range drafts {
+		ids[i] = d["id"].(string)
+	}
+	return run["id"].(string), ids
+}
+
+func TestGetGeneration(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-GET-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "GET", "/api/ai-generations/"+runID, nil)
+	require.Equal(t, http.StatusOK, rr.Code)
+	run, drafts := decodeRunResponse(t, rr)
+	assert.Equal(t, runID, run["id"])
+	assert.Len(t, drafts, len(draftIDs))
+
+	assert.Equal(t, http.StatusNotFound, doRequest(env, "GET", "/api/ai-generations/nope", nil).Code)
+}
+
+func TestListGenerations(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-LIST-1", "T", "D")
+	createCompletedRun(t, env, reqID, providerID)
+	createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "GET", "/api/ai-generations?requirement_id="+reqID, nil)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Runs []map[string]interface{} `json:"runs"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Len(t, body.Runs, 2)
+
+	assert.Equal(t, http.StatusBadRequest, doRequest(env, "GET", "/api/ai-generations", nil).Code,
+		"requirement_id is required for history listing")
+}
+
+func TestUpdateGenerationDraft(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-EDIT-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0], map[string]interface{}{
+		"name":  "Edited title",
+		"steps": []map[string]string{{"action": "new action", "expected_result": "new result"}},
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body struct {
+		Draft map[string]interface{} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, "Edited title", body.Draft["name"])
+	assert.Equal(t, true, body.Draft["edited"])
+	assert.Equal(t, float64(2), body.Draft["version"])
+
+	// Editing into an invalid state saves AND surfaces error findings.
+	rr = doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0], map[string]interface{}{
+		"steps": []map[string]string{},
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.NotNil(t, body.Draft["findings"], "no_steps finding expected")
+
+	// Unknown draft under a valid run → 404; mismatched run → 404.
+	assert.Equal(t, http.StatusNotFound,
+		doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/nope", map[string]interface{}{"name": "x"}).Code)
+}
+
+func TestUpdateGenerationDraft_SanitizesStepText(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-EDIT-SAN-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0], map[string]interface{}{
+		"steps": []map[string]string{
+			{"action": "Click <script>alert(1)</script> Save", "expected_result": "OK <b>bold</b>"},
+		},
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body struct {
+		Draft map[string]interface{} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	steps := body.Draft["steps"].([]interface{})
+	require.Len(t, steps, 1)
+	action := steps[0].(map[string]interface{})["action"].(string)
+	assert.NotContains(t, action, "<script>", "edited step action must be sanitized")
+}
+
+func TestRejectGenerationDraftEndpoint(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-REJ-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/reject", map[string]string{
+		"reason": "too_vague", "note": "expected results not observable",
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body struct {
+		Draft map[string]interface{} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, "rejected", body.Draft["status"])
+
+	// Invalid reason → 400. Double reject → 409.
+	assert.Equal(t, http.StatusBadRequest,
+		doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[1]+"/reject",
+			map[string]string{"reason": "just because"}).Code)
+	assert.Equal(t, http.StatusConflict,
+		doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/reject",
+			map[string]string{"reason": "duplicate"}).Code)
+}
+
+func TestLifecycleEndpointsRequireAuth(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	req := httptest.NewRequest("GET", "/api/ai-generations?requirement_id=x", nil)
+	rr := httptest.NewRecorder()
+	env.srv.ServeHTTP(rr, req) // no session cookie
+	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }

@@ -5,10 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"time"
 
 	"ttgo/internal/api/authctx"
@@ -16,8 +18,10 @@ import (
 	"ttgo/pkg/tracker/aigen"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/store"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 const maxLifecycleBodyBytes = 1 << 20 // bound request payloads (spec: Privacy and Security)
@@ -443,4 +447,217 @@ func (h *Handler) writeGenerationFailure(w http.ResponseWriter, r *http.Request,
 	httpx.JSON(w, httpStatus, map[string]string{
 		"error": msg, "category": string(category), "run_id": run.ID,
 	})
+}
+
+// GetGeneration returns one run with its drafts and findings.
+//
+// @Summary      Get an AI generation run
+// @Tags         ai-generations
+// @Produce      json
+// @Param        id  path  string  true  "Run ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      404  {object}  map[string]string
+// @Router       /ai-generations/{id} [get]
+// @Security     BearerAuth
+func (h *Handler) GetGeneration(w http.ResponseWriter, r *http.Request) {
+	run, err := h.store.GetGenerationRunWithDrafts(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "generation run not found"})
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	out, err := h.runResponse(run)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, out)
+}
+
+// ListGenerations returns a requirement's generation history, newest first.
+//
+// @Summary      List AI generation runs for a requirement
+// @Tags         ai-generations
+// @Produce      json
+// @Param        requirement_id  query  string  true   "Requirement ID"
+// @Param        limit           query  int     false  "Max runs (default 50)"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Router       /ai-generations [get]
+// @Security     BearerAuth
+func (h *Handler) ListGenerations(w http.ResponseWriter, r *http.Request) {
+	requirementID := r.URL.Query().Get("requirement_id")
+	if requirementID == "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "requirement_id query parameter is required"})
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	runs, err := h.store.ListGenerationRuns(requirementID, limit)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"runs": runs})
+}
+
+// getRunDraft loads a draft and verifies it belongs to the run in the path.
+func (h *Handler) getRunDraft(runID, draftID string) (*models.AIGeneratedDraft, error) {
+	var d models.AIGeneratedDraft
+	if err := h.store.DB().First(&d, "id = ? AND run_id = ?", draftID, runID).Error; err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+type updateDraftRequest struct {
+	Name        *string                 `json:"name"`
+	Category    *string                 `json:"category"`
+	Description *string                 `json:"description"`
+	SourceRefs  *[]string               `json:"source_refs"`
+	Steps       *[]models.GeneratedStep `json:"steps"`
+}
+
+// UpdateGenerationDraft saves a partial edit to a pending draft, re-validates,
+// and returns the updated draft with fresh findings.
+//
+// @Summary      Edit a generated draft
+// @Tags         ai-generations
+// @Accept       json
+// @Produce      json
+// @Param        id        path  string  true  "Run ID"
+// @Param        draft_id  path  string  true  "Draft ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Router       /ai-generations/{id}/drafts/{draft_id} [patch]
+// @Security     BearerAuth
+func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxLifecycleBodyBytes)
+	draft, err := h.getRunDraft(r.PathValue("id"), r.PathValue("draft_id"))
+	if err != nil {
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "draft not found"})
+		return
+	}
+	var req updateDraftRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	content, err := draft.Content()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if req.Name != nil {
+		content.Name = html.UnescapeString(h.sanitizer.Sanitize(*req.Name))
+	}
+	if req.Category != nil {
+		content.Category = html.UnescapeString(h.sanitizer.Sanitize(*req.Category))
+	}
+	if req.Description != nil {
+		content.Description = httpx.NormalizeEmptyHTML(h.sanitizer, *req.Description)
+	}
+	if req.SourceRefs != nil {
+		content.SourceRefs = *req.SourceRefs
+	}
+	if req.Steps != nil {
+		// Step text is attacker-influenceable (edits can come from a client
+		// echoing LLM output) — sanitize Action/ExpectedResult in place before
+		// validation, mirroring CreateGeneration's draft-generation path.
+		steps := *req.Steps
+		for j := range steps {
+			steps[j].Action = httpx.NormalizeEmptyHTML(h.sanitizer, steps[j].Action)
+			steps[j].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, steps[j].ExpectedResult)
+		}
+		content.Steps = steps
+	}
+
+	findings := aigen.ValidateDraft(models.GeneratedTestCase{
+		Name: content.Name, Category: content.Category, Description: content.Description,
+		SourceRefs: content.SourceRefs, Steps: content.Steps,
+	})
+	findingsJSON, _ := json.Marshal(findings)
+
+	var actorID *string
+	if u := authctx.UserFromRequest(r); u != nil {
+		actorID = &u.ID
+	}
+	updated, err := h.store.SaveDraftEdit(draft.ID, content, string(findingsJSON), actorID)
+	if err != nil {
+		if errors.Is(err, store.ErrDraftNotPending) {
+			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	resp, err := updated.ToResponse()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp})
+}
+
+// RejectGenerationDraftEndpoint records a structured rejection reason.
+//
+// @Summary      Reject a generated draft
+// @Tags         ai-generations
+// @Accept       json
+// @Produce      json
+// @Param        id        path  string  true  "Run ID"
+// @Param        draft_id  path  string  true  "Draft ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Router       /ai-generations/{id}/drafts/{draft_id}/reject [post]
+// @Security     BearerAuth
+func (h *Handler) RejectGenerationDraftEndpoint(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxLifecycleBodyBytes)
+	draft, err := h.getRunDraft(r.PathValue("id"), r.PathValue("draft_id"))
+	if err != nil {
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "draft not found"})
+		return
+	}
+	var req struct {
+		Reason string `json:"reason"`
+		Note   string `json:"note"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	if !models.AIRejectionReasons[req.Reason] {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{
+			"error": "reason must be one of: duplicate, irrelevant, incorrect, too_vague, incomplete_coverage, poor_steps, other",
+		})
+		return
+	}
+	if len(req.Note) > 2000 {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "note is too long"})
+		return
+	}
+	var actorID *string
+	if u := authctx.UserFromRequest(r); u != nil {
+		actorID = &u.ID
+	}
+	rejected, err := h.store.RejectGenerationDraft(draft.ID, req.Reason, req.Note, actorID)
+	if err != nil {
+		if errors.Is(err, store.ErrDraftNotPending) {
+			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	resp, err := rejected.ToResponse()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp})
 }
