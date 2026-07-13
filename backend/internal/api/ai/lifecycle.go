@@ -661,3 +661,77 @@ func (h *Handler) RejectGenerationDraftEndpoint(w http.ResponseWriter, r *http.R
 	}
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp})
 }
+
+// AcceptGeneration atomically materializes selected drafts into test cases.
+//
+// @Summary      Accept generated drafts
+// @Description  Creates category subfolders, test cases with steps, and requirement links for the selected drafts in ONE transaction; any failure rolls back the whole batch. Replaying a fully-accepted selection returns the stored test-case IDs.
+// @Tags         ai-generations
+// @Accept       json
+// @Produce      json
+// @Param        id  path  string  true  "Run ID"
+// @Param        body  body  object  true  "folder_id, draft_ids, group_by_category, idempotency_key"
+// @Success      201  {object}  map[string]interface{}
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
+// @Router       /ai-generations/{id}/accept [post]
+// @Security     BearerAuth
+func (h *Handler) AcceptGeneration(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxLifecycleBodyBytes)
+	runID := r.PathValue("id")
+	var req struct {
+		FolderID        string   `json:"folder_id"`
+		DraftIDs        []string `json:"draft_ids"`
+		GroupByCategory bool     `json:"group_by_category"`
+		IdempotencyKey  string   `json:"idempotency_key"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.FolderID == "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "folder_id is required"})
+		return
+	}
+	if len(req.DraftIDs) == 0 {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "draft_ids must not be empty"})
+		return
+	}
+	if _, err := h.store.GetGenerationRun(runID); err != nil {
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "generation run not found"})
+		return
+	}
+	var actorID *string
+	if u := authctx.UserFromRequest(r); u != nil {
+		actorID = &u.ID
+	}
+	res, err := h.store.AcceptGenerationDrafts(runID, req.DraftIDs, req.FolderID, req.GroupByCategory, actorID)
+	if err != nil {
+		switch {
+		case errors.Is(err, store.ErrDraftNotPending):
+			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, store.ErrDraftInvalid):
+			httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+		case errors.Is(err, store.ErrUnknownDrafts):
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		case errors.Is(err, gorm.ErrRecordNotFound):
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		default:
+			httpx.Error(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	status := http.StatusCreated
+	if res.AlreadyAccepted {
+		status = http.StatusOK
+	}
+	httpx.JSON(w, status, map[string]interface{}{
+		"created_ids":        res.CreatedTestCaseIDs,
+		"count":              len(res.CreatedTestCaseIDs),
+		"subfolders_created": res.SubfoldersCreated,
+		"already_accepted":   res.AlreadyAccepted,
+	})
+}

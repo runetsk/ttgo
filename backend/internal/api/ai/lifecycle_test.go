@@ -395,3 +395,81 @@ func TestLifecycleEndpointsRequireAuth(t *testing.T) {
 	env.srv.ServeHTTP(rr, req) // no session cookie
 	assert.Equal(t, http.StatusUnauthorized, rr.Code)
 }
+
+func TestAcceptGenerationEndpoint(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-ACCEPT-1", "T", "D")
+	folderID := createTestFolder(t, env, "AI Output")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept", map[string]interface{}{
+		"folder_id": folderID, "draft_ids": draftIDs, "group_by_category": true,
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var body struct {
+		CreatedIDs        []string `json:"created_ids"`
+		Count             int      `json:"count"`
+		SubfoldersCreated int      `json:"subfolders_created"`
+		AlreadyAccepted   bool     `json:"already_accepted"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Len(t, body.CreatedIDs, 2)
+	assert.Equal(t, 2, body.Count)
+	assert.Equal(t, 2, body.SubfoldersCreated, "Functional + Negative subfolders")
+	assert.False(t, body.AlreadyAccepted)
+
+	// Replay: same IDs back, no duplicates, 200.
+	rr2 := doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept", map[string]interface{}{
+		"folder_id": folderID, "draft_ids": draftIDs, "group_by_category": true,
+	})
+	require.Equal(t, http.StatusOK, rr2.Code, rr2.Body.String())
+	var replay struct {
+		CreatedIDs      []string `json:"created_ids"`
+		AlreadyAccepted bool     `json:"already_accepted"`
+	}
+	require.NoError(t, json.Unmarshal(rr2.Body.Bytes(), &replay))
+	assert.True(t, replay.AlreadyAccepted)
+	assert.ElementsMatch(t, body.CreatedIDs, replay.CreatedIDs)
+
+	// Drafts show accepted + linked test case on subsequent GET.
+	rr3 := doRequest(env, "GET", "/api/ai-generations/"+runID, nil)
+	require.Equal(t, http.StatusOK, rr3.Code)
+	_, drafts := decodeRunResponse(t, rr3)
+	for _, d := range drafts {
+		assert.Equal(t, "accepted", d["status"])
+		assert.NotEmpty(t, d["accepted_test_case_id"])
+	}
+}
+
+func TestAcceptGenerationEndpoint_Validation(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-ACCEPT-2", "T", "D")
+	folderID := createTestFolder(t, env, "AI Output 2")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	// Missing folder / empty selection → 400.
+	assert.Equal(t, http.StatusBadRequest, doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept",
+		map[string]interface{}{"draft_ids": draftIDs}).Code)
+	assert.Equal(t, http.StatusBadRequest, doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept",
+		map[string]interface{}{"folder_id": folderID, "draft_ids": []string{}}).Code)
+	// Unknown run → 404.
+	assert.Equal(t, http.StatusNotFound, doRequest(env, "POST", "/api/ai-generations/nope/accept",
+		map[string]interface{}{"folder_id": folderID, "draft_ids": draftIDs}).Code)
+
+	// Reject one draft, then accepting it → 409 (mixed/non-pending).
+	require.Equal(t, http.StatusOK, doRequest(env, "POST",
+		"/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/reject",
+		map[string]string{"reason": "duplicate"}).Code)
+	assert.Equal(t, http.StatusConflict, doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept",
+		map[string]interface{}{"folder_id": folderID, "draft_ids": draftIDs}).Code)
+}

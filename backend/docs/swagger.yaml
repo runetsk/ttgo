@@ -317,6 +317,10 @@ definitions:
         type: string
       name:
         type: string
+      source_refs:
+        items:
+          type: string
+        type: array
       steps:
         items:
           $ref: '#/definitions/ttgo_pkg_tracker_models.GeneratedStep'
@@ -849,6 +853,269 @@ paths:
       summary: Reset all data
       tags:
       - admin
+  /ai-generations:
+    get:
+      parameters:
+      - description: Requirement ID
+        in: query
+        name: requirement_id
+        required: true
+        type: string
+      - description: Max runs (default 50)
+        in: query
+        name: limit
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: List AI generation runs for a requirement
+      tags:
+      - ai-generations
+    post:
+      consumes:
+      - application/json
+      description: Creates an idempotent generation run for a requirement, calls the
+        configured LLM provider with structured output, validates and persists the
+        drafts, and returns the completed run. Replaying a finished idempotency key
+        returns the stored result without calling the provider.
+      parameters:
+      - description: requirement_id (required), provider_id, coverage_level, detail_level,
+          additional_instructions, idempotency_key, parent_run_id
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create an AI generation run
+      tags:
+      - ai-generations
+  /ai-generations/{id}:
+    get:
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get an AI generation run
+      tags:
+      - ai-generations
+  /ai-generations/{id}/accept:
+    post:
+      consumes:
+      - application/json
+      description: Creates category subfolders, test cases with steps, and requirement
+        links for the selected drafts in ONE transaction; any failure rolls back the
+        whole batch. Replaying a fully-accepted selection returns the stored test-case
+        IDs.
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: folder_id, draft_ids, group_by_category, idempotency_key
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Accept generated drafts
+      tags:
+      - ai-generations
+  /ai-generations/{id}/drafts/{draft_id}:
+    patch:
+      consumes:
+      - application/json
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Draft ID
+        in: path
+        name: draft_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Edit a generated draft
+      tags:
+      - ai-generations
+  /ai-generations/{id}/drafts/{draft_id}/reject:
+    post:
+      consumes:
+      - application/json
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Draft ID
+        in: path
+        name: draft_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Reject a generated draft
+      tags:
+      - ai-generations
   /analytics/flaky:
     get:
       description: Returns tests ranked by status-switch percentage
