@@ -437,6 +437,19 @@ export const aiGeneration = {
         api.post(`/requirements/${requirementId}/generate-tests`, data).then(res => res.data),
     acceptGeneratedTests: (requirementId, data) =>
         api.post(`/requirements/${requirementId}/accept-generated-tests`, data).then(res => res.data),
+    // ── Generation lifecycle (ai-generation-improvements) ──
+    createGeneration: (data) =>
+        api.post('/ai-generations', data).then(res => res.data),
+    getGeneration: (runId) =>
+        api.get(`/ai-generations/${runId}`).then(res => res.data),
+    listGenerations: (requirementId) =>
+        api.get('/ai-generations', { params: { requirement_id: requirementId } }).then(res => res.data),
+    updateGenerationDraft: (runId, draftId, changes) =>
+        api.patch(`/ai-generations/${runId}/drafts/${draftId}`, changes).then(res => res.data),
+    rejectGenerationDraft: (runId, draftId, data) =>
+        api.post(`/ai-generations/${runId}/drafts/${draftId}/reject`, data).then(res => res.data),
+    acceptGeneration: (runId, data) =>
+        api.post(`/ai-generations/${runId}/accept`, data).then(res => res.data),
 };
 
 // ── AI Test Import (014-ai-test-import) ──
