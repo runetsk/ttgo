@@ -5,24 +5,14 @@ import (
 	"ttgo/pkg/tracker/models"
 
 	"github.com/stretchr/testify/assert"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 )
 
-// setupTestStore creates a store with an in-memory SQLite DB for testing
-func setupTestStore(t *testing.T) *Store {
-	db, err := gorm.Open(sqlite.Open("file::memory:?cache=shared"), &gorm.Config{})
-	assert.NoError(t, err)
-
-	// Migrate schema
-	err = db.AutoMigrate(&models.Folder{}, &models.TestCase{}, &models.Category{}, &models.CategoryTestCase{})
-	assert.NoError(t, err)
-
-	return &Store{db: db}
-}
-
 func TestGetFolderTree_IncludeTestCases(t *testing.T) {
-	s := setupTestStore(t)
+	// Use the package's shared newTestStore helper (isolated private :memory: DB
+	// per test with t.Cleanup(Close)). The previous local setupTestStore opened a
+	// process-lifetime "file::memory:?cache=shared" DB that leaked rows across
+	// repeated runs in one process, colliding on the hardcoded IDs below.
+	s := newTestStore(t)
 
 	// 1. Create Folder Structure
 	root, err := s.CreateFolder("Root Folder", nil)
