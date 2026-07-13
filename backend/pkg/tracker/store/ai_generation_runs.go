@@ -187,8 +187,20 @@ func (s *Store) SaveDraftEdit(draftID string, content models.DraftContent, valid
 		d.ValidationJSON = validationJSON
 		d.Edited = true
 		d.Version++
-		if err := tx.Save(d).Error; err != nil {
-			return err
+		// Optimistic guard: overwrite only while the row is still pending (status
+		// left untouched). Between getPendingDraftTx's read and this write a
+		// concurrent reject could have landed; the WHERE status=pending then
+		// matches zero rows and the edit fails instead of resurrecting a rejected
+		// draft to pending.
+		res := tx.Model(d).
+			Where("status = ?", models.AIDraftStatusPending).
+			Select("Name", "Category", "Description", "StepsJSON", "SourceRefsJSON", "ValidationJSON", "Edited", "Version").
+			Updates(d)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("%w: draft %s", ErrDraftNotPending, d.ID)
 		}
 		out = d
 		return createGenerationEventTx(tx, &models.AIGenerationEvent{
@@ -207,10 +219,19 @@ func (s *Store) RejectGenerationDraft(draftID, reason, note string, actorID *str
 		if err != nil {
 			return err
 		}
-		d.Status = models.AIDraftStatusRejected
-		if err := tx.Save(d).Error; err != nil {
-			return err
+		// Optimistic guard: transition only while still pending, so a concurrent
+		// edit/reject that already moved the draft is not silently clobbered — the
+		// loser gets ErrDraftNotPending.
+		res := tx.Model(d).
+			Where("status = ?", models.AIDraftStatusPending).
+			Update("status", models.AIDraftStatusRejected)
+		if res.Error != nil {
+			return res.Error
 		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("%w: draft %s", ErrDraftNotPending, d.ID)
+		}
+		d.Status = models.AIDraftStatusRejected
 		out = d
 		return createGenerationEventTx(tx, &models.AIGenerationEvent{
 			RunID: d.RunID, DraftID: &d.ID, EventType: models.AIGenEventRejected,

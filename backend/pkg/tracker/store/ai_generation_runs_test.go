@@ -431,3 +431,24 @@ func TestAcceptGenerationDrafts_UnparseableFindingsBlockBatch(t *testing.T) {
 	// Fail-closed happens in the pre-write validation loop → nothing materialized.
 	assert.Equal(t, int64(0), countRows(t, s, &models.TestCase{}))
 }
+
+func TestSaveDraftEditRefusesRejectedDraft(t *testing.T) {
+	s := newTestStore(t)
+	_, draft := seedRunWithDraft(t, s)
+
+	// Reject it, then attempt to edit: the status-guarded update must refuse the
+	// edit (ErrDraftNotPending) rather than resurrect a rejected draft to pending.
+	_, err := s.RejectGenerationDraft(draft.ID, "duplicate", "", nil)
+	require.NoError(t, err)
+
+	_, err = s.SaveDraftEdit(draft.ID, models.DraftContent{
+		Name:  "resurrected",
+		Steps: []models.GeneratedStep{{Action: "a", ExpectedResult: "e"}},
+	}, "[]", nil)
+	assert.ErrorIs(t, err, ErrDraftNotPending)
+
+	var back models.AIGeneratedDraft
+	require.NoError(t, s.db.First(&back, "id = ?", draft.ID).Error)
+	assert.Equal(t, models.AIDraftStatusRejected, back.Status, "draft must stay rejected")
+	assert.NotEqual(t, "resurrected", back.Name, "edit content must not have been written")
+}
