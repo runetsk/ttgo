@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 type Store struct {
@@ -52,10 +54,27 @@ func (s *Store) decryptSecret(v string) string {
 	return v
 }
 
+// gormLogger builds the GORM logger shared by every store connection. It mirrors
+// gorm's built-in default (Warn level, 200ms slow-query threshold) but enables
+// IgnoreRecordNotFoundError so expected ErrRecordNotFound results — e.g. the
+// failure-analysis worker polling an empty job queue every few seconds — don't
+// spam the logs. Genuine SQL errors are not ErrRecordNotFound and still log.
+func gormLogger(w io.Writer) logger.Interface {
+	return logger.New(
+		log.New(w, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+			Colorful:                  true,
+		},
+	)
+}
+
 func New(dsn string) (*Store, error) {
 	// Add busy timeout, WAL mode, and foreign keys for performance and integrity
 	dsnWithParams := fmt.Sprintf("%s?_busy_timeout=5000&_journal_mode=wal&_foreign_keys=on", dsn)
-	db, err := gorm.Open(sqlite.Open(dsnWithParams), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dsnWithParams), &gorm.Config{Logger: gormLogger(os.Stdout)})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -327,7 +346,7 @@ func (s *Store) ReopenDB(dsn string) error {
 
 	// Reopen with the same parameters
 	dsnWithParams := fmt.Sprintf("%s?_busy_timeout=5000&_journal_mode=wal&_foreign_keys=on", dsn)
-	db, err := gorm.Open(sqlite.Open(dsnWithParams), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dsnWithParams), &gorm.Config{Logger: gormLogger(os.Stdout)})
 	if err != nil {
 		return fmt.Errorf("failed to reopen database: %w", err)
 	}
