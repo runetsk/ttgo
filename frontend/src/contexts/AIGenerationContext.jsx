@@ -69,6 +69,7 @@ export function AIGenerationProvider({ children }) {
     // Draft lifecycle — server `draft.status` is the source of truth.
     const [drafts, setDrafts] = useState([]);
     const [runId, setRunId] = useState(null);
+    const [parentRunId, setParentRunId] = useState(null); // lineage for the NEXT generate (set by cloneRun); not the resumable run identity
     const [coverage, setCoverage] = useState(null);
     const [history, setHistory] = useState(null);
     const acceptedIds = useMemo(
@@ -255,6 +256,7 @@ export function AIGenerationProvider({ children }) {
         setRunId(null);
         sessionStorage.removeItem('ttgo_aigen_run_id');
         setCoverage(null);
+        setHistory(null);
         setCoverageLevel('thorough');
         setDetailLevel('Standard');
         setAdditionalInstructions('');
@@ -301,10 +303,11 @@ export function AIGenerationProvider({ children }) {
                 detail_level: detailLevel,
                 additional_instructions: additionalInstructions,
                 idempotency_key: crypto.randomUUID(),
-                parent_run_id: runId || undefined,
+                parent_run_id: parentRunId || runId || undefined,
             });
             const newDrafts = result.drafts || [];
             setRunId(result.run?.id || null);
+            setParentRunId(null);
             setCoverage(result.coverage || null);
             setDrafts(prev => {
                 const kept = prev.filter(d => acceptedIds.has(d.id));
@@ -318,7 +321,7 @@ export function AIGenerationProvider({ children }) {
         } finally {
             setGenerating(false);
         }
-    }, [activeRequirement, selectedProviderId, coverageLevel, detailLevel, additionalInstructions, acceptedIds, runId]);
+    }, [activeRequirement, selectedProviderId, coverageLevel, detailLevel, additionalInstructions, acceptedIds, runId, parentRunId]);
 
     // Merge one server draft object into local state.
     const mergeDraft = useCallback((serverDraft) => {
@@ -385,7 +388,14 @@ export function AIGenerationProvider({ children }) {
         setDetailLevel(run.detail_level || 'Standard');
         setAdditionalInstructions(run.additional_instructions || '');
         if (run.provider_id) setSelectedProviderId(run.provider_id);
-        setRunId(run.id); // next startGeneration sends parent_run_id: run.id
+        // Lineage for the NEXT generate — do NOT adopt the old run as the current
+        // (resumable/persisted) run, or a reload would resurrect its drafts.
+        setParentRunId(run.id);
+        setRunId(null);
+        setDrafts([]);
+        setCoverage(null);
+        setHasGenerated(false);
+        try { sessionStorage.removeItem('ttgo_aigen_run_id'); } catch { /* storage unavailable */ }
         toast.success('Run settings cloned — press Generate');
     }, []);
 
@@ -475,6 +485,7 @@ export function AIGenerationProvider({ children }) {
         setLastDebug(null);
         setDrafts([]);
         setRunId(null);
+        setParentRunId(null);
         setCoverage(null);
         setHistory(null);
         sessionStorage.removeItem('ttgo_aigen_run_id');
@@ -585,6 +596,7 @@ export function AIGenerationProvider({ children }) {
         setLastDebug(null);
         setDrafts([]);
         setRunId(null);
+        setParentRunId(null);
         setCoverage(null);
         setHistory(null);
         setAccepting(false);
