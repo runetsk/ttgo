@@ -113,6 +113,9 @@ export function LlmFeedbackPanel({ debug }) {
                         ) : (
                             <DebugRow label="Token usage" value="Not reported by provider" />
                         )}
+                        {debug.estimated_cost != null && (
+                            <DebugRow label="Estimated cost" value={`$${debug.estimated_cost.toFixed(4)}`} strong />
+                        )}
                     </div>
 
                     {debug.request_context && (

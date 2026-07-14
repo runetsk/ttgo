@@ -237,6 +237,8 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 		run.PromptTokens += chatResp.Usage.PromptTokens
 		run.CompletionTokens += chatResp.Usage.CompletionTokens
 		run.TotalTokens += chatResp.Usage.TotalTokens
+		run.EstimatedCost = llm.EstimateCostUSD(run.PromptTokens, run.CompletionTokens,
+			providerCfg.PromptPricePerMTok, providerCfg.CompletionPricePerMTok)
 		if err := h.store.UpdateGenerationRun(run); err != nil {
 			slog.Warn("regenerate: token fold failed", "run_id", run.ID, "error", err)
 		}

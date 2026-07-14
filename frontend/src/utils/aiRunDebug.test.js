@@ -41,3 +41,9 @@ test('runToDebug omits usage when the provider reported no tokens', () => {
 test('runToDebug returns null for missing run', () => {
     assert.equal(runToDebug(null), null);
 });
+
+test('runToDebug passes estimated_cost through when present', () => {
+    const debug = runToDebug({ id: 'r1', estimated_cost: 0.0123 });
+    assert.equal(debug.estimated_cost, 0.0123);
+    assert.equal(runToDebug({ id: 'r2' }).estimated_cost, undefined);
+});

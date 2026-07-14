@@ -1144,3 +1144,32 @@ func TestCancelGeneration_StatesAndInFlight(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, models.AIGenerationRunStatusCancelled, got.Status)
 }
+
+func TestCreateGeneration_PopulatesEstimatedCost(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON) // usage: 10/20/30
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	// Price the provider: $1 per 1M prompt, $2 per 1M completion.
+	rr := doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local", "endpoint_url": fake.URL,
+		"model_name": "fake-model", "prompt_price_per_mtok": 1.0, "completion_price_per_mtok": 2.0,
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+	reqID := createPreviewRequirement(t, env, "REQ-COST-1", "T", "D")
+
+	rr = doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": uuid.NewString(),
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var body struct {
+		Run struct {
+			EstimatedCost *float64 `json:"estimated_cost"`
+		} `json:"run"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.NotNil(t, body.Run.EstimatedCost)
+	assert.InDelta(t, (10.0*1+20.0*2)/1e6, *body.Run.EstimatedCost, 1e-12)
+}

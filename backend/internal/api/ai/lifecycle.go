@@ -484,6 +484,8 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		run.PromptTokens = chatResp.Usage.PromptTokens
 		run.CompletionTokens = chatResp.Usage.CompletionTokens
 		run.TotalTokens = chatResp.Usage.TotalTokens
+		run.EstimatedCost = llm.EstimateCostUSD(run.PromptTokens, run.CompletionTokens,
+			providerCfg.PromptPricePerMTok, providerCfg.CompletionPricePerMTok)
 	}
 	report := aigen.BuildCoverageReport(targets, parsed)
 	report.BatchFindings = append(report.BatchFindings, aigen.EvaluateBatchQuality(parsed)...)

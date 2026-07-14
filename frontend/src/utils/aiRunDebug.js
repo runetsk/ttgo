@@ -21,5 +21,8 @@ export function runToDebug(run) {
             total_tokens: run.total_tokens,
         };
     }
+    if (run.estimated_cost != null) {
+        debug.estimated_cost = run.estimated_cost;
+    }
     return debug;
 }
