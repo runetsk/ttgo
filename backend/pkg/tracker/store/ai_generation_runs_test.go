@@ -199,7 +199,7 @@ func TestSaveDraftEdit(t *testing.T) {
 	updated, err := s.SaveDraftEdit(draft.ID, models.DraftContent{
 		Name: "Edited name", Category: "Negative", Description: "d2",
 		Steps: []models.GeneratedStep{{Action: "a2", ExpectedResult: "e2"}},
-	}, "[]", &actor)
+	}, "[]", "", "", &actor)
 	require.NoError(t, err)
 	assert.Equal(t, "Edited name", updated.Name)
 	assert.True(t, updated.Edited)
@@ -219,7 +219,7 @@ func TestSaveDraftEditRefusesNonPending(t *testing.T) {
 	require.NoError(t, s.db.Model(&models.AIGeneratedDraft{}).Where("id = ?", draft.ID).
 		Update("status", models.AIDraftStatusAccepted).Error)
 
-	_, err := s.SaveDraftEdit(draft.ID, models.DraftContent{Name: "x"}, "[]", nil)
+	_, err := s.SaveDraftEdit(draft.ID, models.DraftContent{Name: "x"}, "[]", "", "", nil)
 	assert.ErrorIs(t, err, ErrDraftNotPending)
 }
 
@@ -444,11 +444,41 @@ func TestSaveDraftEditRefusesRejectedDraft(t *testing.T) {
 	_, err = s.SaveDraftEdit(draft.ID, models.DraftContent{
 		Name:  "resurrected",
 		Steps: []models.GeneratedStep{{Action: "a", ExpectedResult: "e"}},
-	}, "[]", nil)
+	}, "[]", "", "", nil)
 	assert.ErrorIs(t, err, ErrDraftNotPending)
 
 	var back models.AIGeneratedDraft
 	require.NoError(t, s.db.First(&back, "id = ?", draft.ID).Error)
 	assert.Equal(t, models.AIDraftStatusRejected, back.Status, "draft must stay rejected")
 	assert.NotEqual(t, "resurrected", back.Name, "edit content must not have been written")
+}
+
+func TestDraftQualityAndDuplicatesRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	run, draft := seedRunWithDraft(t, s)
+
+	updated, err := s.SaveDraftEdit(draft.ID, models.DraftContent{
+		Name: "Edited name", Category: "Functional", Description: "d",
+		Steps: []models.GeneratedStep{{Action: "do the thing", ExpectedResult: "the thing is done"}},
+	}, `[]`, `[{"key":"specificity","label":"Test-data specificity","findings":[]}]`, `[{"kind":"batch","name":"x","similarity":1,"reason":"r"}]`, nil)
+	require.NoError(t, err)
+	assert.Contains(t, updated.QualityJSON, `"specificity"`)
+	assert.Contains(t, updated.DuplicatesJSON, `"batch"`)
+
+	resp, err := updated.ToResponse()
+	require.NoError(t, err)
+	assert.NotNil(t, resp.Quality)
+	assert.NotNil(t, resp.Duplicates)
+
+	// Empty payloads are omitted from the response.
+	updated, err = s.SaveDraftEdit(draft.ID, models.DraftContent{
+		Name: "Edited again", Category: "Functional", Description: "d",
+		Steps: []models.GeneratedStep{{Action: "do", ExpectedResult: "done"}},
+	}, `[]`, `[]`, `[]`, nil)
+	require.NoError(t, err)
+	resp, err = updated.ToResponse()
+	require.NoError(t, err)
+	assert.Nil(t, resp.Quality)
+	assert.Nil(t, resp.Duplicates)
+	_ = run
 }

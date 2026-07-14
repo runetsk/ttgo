@@ -171,10 +171,11 @@ func getPendingDraftTx(tx *gorm.DB, draftID string) (*models.AIGeneratedDraft, e
 	return &d, nil
 }
 
-// SaveDraftEdit overwrites a pending draft's editable content, bumps its
-// version, marks it edited, stores fresh validation findings, and appends an
-// edited event — all in one transaction.
-func (s *Store) SaveDraftEdit(draftID string, content models.DraftContent, validationJSON string, actorID *string) (*models.AIGeneratedDraft, error) {
+// SaveDraftEdit updates a pending draft's editable content, refreshes its
+// validation/quality/duplicate findings, bumps Version, and appends an
+// `edited` event — all in one transaction. Non-pending drafts return
+// ErrDraftNotPending (status-guarded update, see the concurrency note below).
+func (s *Store) SaveDraftEdit(draftID string, content models.DraftContent, validationJSON, qualityJSON, duplicatesJSON string, actorID *string) (*models.AIGeneratedDraft, error) {
 	var out *models.AIGeneratedDraft
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		d, err := getPendingDraftTx(tx, draftID)
@@ -185,6 +186,8 @@ func (s *Store) SaveDraftEdit(draftID string, content models.DraftContent, valid
 			return err
 		}
 		d.ValidationJSON = validationJSON
+		d.QualityJSON = qualityJSON
+		d.DuplicatesJSON = duplicatesJSON
 		d.Edited = true
 		d.Version++
 		// Optimistic guard: overwrite only while the row is still pending (status
@@ -194,7 +197,7 @@ func (s *Store) SaveDraftEdit(draftID string, content models.DraftContent, valid
 		// draft to pending.
 		res := tx.Model(d).
 			Where("status = ?", models.AIDraftStatusPending).
-			Select("Name", "Category", "Description", "StepsJSON", "SourceRefsJSON", "ValidationJSON", "Edited", "Version").
+			Select("Name", "Category", "Description", "StepsJSON", "SourceRefsJSON", "ValidationJSON", "QualityJSON", "DuplicatesJSON", "Edited", "Version").
 			Updates(d)
 		if res.Error != nil {
 			return res.Error

@@ -79,6 +79,8 @@ type AIGenerationRun struct {
 
 	ParentRunID *string `json:"parent_run_id,omitempty" gorm:"index"`
 
+	CoverageJSON string `json:"-" gorm:"type:text"` // json.Marshal-ed aigen.CoverageReport
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
@@ -113,6 +115,8 @@ type AIGeneratedDraft struct {
 
 	Status         string `json:"status" gorm:"index;not null;default:'pending'"`
 	ValidationJSON string `json:"-" gorm:"type:text"` // json.Marshal-ed []aigen.Finding
+	QualityJSON    string `json:"-" gorm:"type:text"` // json.Marshal-ed []aigen.QualityDimension
+	DuplicatesJSON string `json:"-" gorm:"type:text"` // json.Marshal-ed []aigen.DuplicateCandidate
 	Edited         bool   `json:"edited" gorm:"default:false"`
 
 	AcceptedTestCaseID *string `json:"accepted_test_case_id,omitempty"`
@@ -179,6 +183,8 @@ type AIGeneratedDraftResponse struct {
 	Steps              []GeneratedStep `json:"steps"`
 	Status             string          `json:"status"`
 	Findings           json.RawMessage `json:"findings,omitempty"`
+	Quality            json.RawMessage `json:"quality,omitempty"`
+	Duplicates         json.RawMessage `json:"duplicates,omitempty"`
 	Edited             bool            `json:"edited"`
 	AcceptedTestCaseID *string         `json:"accepted_test_case_id,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
@@ -200,6 +206,12 @@ func (d *AIGeneratedDraft) ToResponse() (*AIGeneratedDraftResponse, error) {
 	}
 	if d.ValidationJSON != "" && d.ValidationJSON != "null" && d.ValidationJSON != "[]" {
 		resp.Findings = json.RawMessage(d.ValidationJSON)
+	}
+	if d.QualityJSON != "" && d.QualityJSON != "null" && d.QualityJSON != "[]" {
+		resp.Quality = json.RawMessage(d.QualityJSON)
+	}
+	if d.DuplicatesJSON != "" && d.DuplicatesJSON != "null" && d.DuplicatesJSON != "[]" {
+		resp.Duplicates = json.RawMessage(d.DuplicatesJSON)
 	}
 	return resp, nil
 }

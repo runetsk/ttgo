@@ -633,7 +633,7 @@ func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) 
 	if u := authctx.UserFromRequest(r); u != nil {
 		actorID = &u.ID
 	}
-	updated, err := h.store.SaveDraftEdit(draft.ID, content, string(findingsJSON), actorID)
+	updated, err := h.store.SaveDraftEdit(draft.ID, content, string(findingsJSON), "", "", actorID)
 	if err != nil {
 		if errors.Is(err, store.ErrDraftNotPending) {
 			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})

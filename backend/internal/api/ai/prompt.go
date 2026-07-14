@@ -158,6 +158,8 @@ type promptPlan struct {
 	TemplateWarning string
 	CoverageLevel   string // resolved (post-default) — used by the audit log
 	MaxTokens       int
+	Requirement     *models.Requirement   // loaded requirement (nil in previews without one)
+	Children        []*models.Requirement // child requirements (coverage targets)
 }
 
 // buildPromptPlan resolves defaults, requirement + children context, coverage
@@ -233,6 +235,8 @@ func (h *Handler) buildPromptPlan(requirementID, coverageLevel, detailLevel, add
 		TemplateWarning: templateWarning,
 		CoverageLevel:   coverageLevel,
 		MaxTokens:       maxTokens,
+		Requirement:     requirement,
+		Children:        children,
 	}, nil
 }
 
