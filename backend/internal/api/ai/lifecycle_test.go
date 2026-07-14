@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 
 	"ttgo/pkg/tracker/models"
 
@@ -1016,4 +1017,84 @@ func TestCreateGeneration_CriticOffByDefault(t *testing.T) {
 			assert.NotEqual(t, "critic", dim.Key)
 		}
 	}
+}
+
+func TestCancelGeneration_StatesAndInFlight(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	// 404 unknown.
+	rr := doRequest(env, "POST", "/api/ai-generations/nope/cancel", nil)
+	require.Equal(t, http.StatusNotFound, rr.Code)
+
+	// Terminal -> 409.
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-CANCEL-1", "T", "D")
+	runID, _ := createCompletedRun(t, env, reqID, providerID)
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/cancel", nil)
+	require.Equal(t, http.StatusConflict, rr.Code)
+
+	// Stale running row -> stamped cancelled (200).
+	stale, _, err := env.store.CreateGenerationRun(&models.AIGenerationRun{RequirementID: reqID})
+	require.NoError(t, err)
+	require.NoError(t, env.store.MarkGenerationRunRunning(stale.ID))
+	rr = doRequest(env, "POST", "/api/ai-generations/"+stale.ID+"/cancel", nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	got, err := env.store.GetGenerationRun(stale.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.AIGenerationRunStatusCancelled, got.Status)
+
+	// In-flight: a slow provider held open until cancel fires.
+	release := make(chan struct{})
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"model":"m","choices":[{"finish_reason":"stop","message":{"content":"{}"}}]}`))
+	}))
+	defer slow.Close()
+	defer close(release)
+	// Point the existing provider at the slow server rather than creating a
+	// second one — provider labels are unique, and createFakeProvider always
+	// uses the same fixed label (see TestRegenerateDraftEndpoint for the same
+	// update-endpoint_url-in-place pattern).
+	rr = doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local",
+		"endpoint_url": slow.URL, "model_name": "fake-model",
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	key := uuid.NewString()
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- doRequest(env, "POST", "/api/ai-generations", map[string]string{
+			"requirement_id": reqID, "provider_id": providerID, "idempotency_key": key,
+		})
+	}()
+
+	// Wait for the run row to exist, then cancel it mid-flight.
+	var inflightRunID string
+	require.Eventually(t, func() bool {
+		run, err := env.store.GetGenerationRunByKey(key)
+		if err != nil || run == nil {
+			return false
+		}
+		inflightRunID = run.ID
+		return run.Status == models.AIGenerationRunStatusRunning
+	}, 5*time.Second, 25*time.Millisecond)
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+inflightRunID+"/cancel", nil)
+	require.Equal(t, http.StatusAccepted, rr.Code, rr.Body.String())
+
+	create := <-done
+	require.Equal(t, http.StatusConflict, create.Code, create.Body.String())
+	assert.Contains(t, create.Body.String(), `"cancellation"`)
+	got, err = env.store.GetGenerationRun(inflightRunID)
+	require.NoError(t, err)
+	assert.Equal(t, models.AIGenerationRunStatusCancelled, got.Status)
 }

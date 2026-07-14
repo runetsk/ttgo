@@ -1030,6 +1030,48 @@ paths:
       summary: Accept generated drafts
       tags:
       - ai-generations
+  /ai-generations/{id}/cancel:
+    post:
+      description: Fires the in-flight run's cancellation (202). A stale `running`
+        run (e.g. after a server restart) is stamped cancelled (200). Terminal runs
+        conflict (409).
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "202":
+          description: Accepted
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Cancel an AI generation run
+      tags:
+      - ai-generations
   /ai-generations/{id}/drafts/{draft_id}:
     patch:
       consumes:

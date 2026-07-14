@@ -349,6 +349,68 @@ const docTemplate = `{
                 }
             }
         },
+        "/ai-generations/{id}/cancel": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Fires the in-flight run's cancellation (202). A stale ` + "`" + `running` + "`" + ` run (e.g. after a server restart) is stamped cancelled (200). Terminal runs conflict (409).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-generations"
+                ],
+                "summary": "Cancel an AI generation run",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "202": {
+                        "description": "Accepted",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/ai-generations/{id}/drafts/{draft_id}": {
             "patch": {
                 "security": [

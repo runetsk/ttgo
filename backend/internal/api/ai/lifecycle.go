@@ -350,6 +350,8 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
+	h.inflight.register(run.ID, cancel)
+	defer h.inflight.unregister(run.ID)
 
 	start := time.Now()
 	responseFormat := resolveResponseFormat(providerCfg)
@@ -559,7 +561,13 @@ func (h *Handler) writeGenerationFailure(w http.ResponseWriter, r *http.Request,
 	slog.ErrorContext(r.Context(), "ai_generation: run failed", "run_id", run.ID, "category", category, "error", err)
 
 	if category == llm.ErrCatCancelled {
-		return // client is gone; nothing to write
+		// The canceller may be another session (cancel endpoint) — the
+		// original requester might still be connected. Writing to a gone
+		// client is a harmless no-op.
+		httpx.JSON(w, http.StatusConflict, map[string]string{
+			"error": "generation cancelled", "category": string(llm.ErrCatCancelled), "run_id": run.ID,
+		})
+		return
 	}
 	// Same category→status mapping a later idempotency replay uses, so the
 	// first-time failure and its replay always agree.
@@ -957,4 +965,54 @@ func (h *Handler) AcceptGeneration(w http.ResponseWriter, r *http.Request) {
 		"subfolders_created": res.SubfoldersCreated,
 		"already_accepted":   res.AlreadyAccepted,
 	})
+}
+
+// CancelGeneration cancels a running generation when possible.
+//
+// @Summary      Cancel an AI generation run
+// @Description  Fires the in-flight run's cancellation (202). A stale `running` run (e.g. after a server restart) is stamped cancelled (200). Terminal runs conflict (409).
+// @Tags         ai-generations
+// @Produce      json
+// @Param        id  path  string  true  "Run ID"
+// @Success      200  {object}  map[string]interface{}
+// @Success      202  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Router       /ai-generations/{id}/cancel [post]
+// @Security     BearerAuth
+func (h *Handler) CancelGeneration(w http.ResponseWriter, r *http.Request) {
+	runID := r.PathValue("id")
+	run, err := h.store.GetGenerationRun(runID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, fmt.Errorf("run not found"))
+		return
+	}
+	if h.inflight.cancel(runID) {
+		httpx.JSON(w, http.StatusAccepted, map[string]string{"status": "cancelling", "run_id": runID})
+		return
+	}
+	switch run.Status {
+	case models.AIGenerationRunStatusPending, models.AIGenerationRunStatusRunning:
+		// Not in flight in THIS process — stale after a crash/restart. Stamp it.
+		now := time.Now()
+		run.Status = models.AIGenerationRunStatusCancelled
+		run.ErrorCategory = string(llm.ErrCatCancelled)
+		run.ErrorMessage = "cancelled while stale (no in-flight request)"
+		run.CompletedAt = &now
+		if err := h.store.UpdateGenerationRun(run); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		if err := h.store.AppendGenerationEvent(&models.AIGenerationEvent{
+			RunID: runID, EventType: models.AIGenEventValidated,
+			MetadataJSON: `{"cancelled_stale":true}`,
+		}); err != nil {
+			slog.Warn("ai_generation: cancel event failed", "error", err)
+		}
+		httpx.JSON(w, http.StatusOK, map[string]interface{}{"run": run})
+	default:
+		httpx.JSON(w, http.StatusConflict, map[string]string{
+			"error": fmt.Sprintf("run is already %s", run.Status),
+		})
+	}
 }

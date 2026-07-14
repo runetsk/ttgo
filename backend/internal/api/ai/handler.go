@@ -19,10 +19,14 @@ type Handler struct {
 	// ai-failure-analysis dependencies (optional — nil when no LLM provider configured).
 	currentProvider func() (llm.Provider, string, error)
 	broadcaster     *websocket.RunAnalysisBroadcaster
+
+	// inflight tracks in-process generation runs so they can be cancelled
+	// from another session (POST /ai-generations/{id}/cancel).
+	inflight *inflightRegistry
 }
 
 func NewHandler(s *store.Store, sanitizer *bluemonday.Policy) *Handler {
-	return &Handler{store: s, sanitizer: sanitizer}
+	return &Handler{store: s, sanitizer: sanitizer, inflight: newInflightRegistry()}
 }
 
 // SetFailureAnalysisDeps wires in the provider resolver and broadcaster.
