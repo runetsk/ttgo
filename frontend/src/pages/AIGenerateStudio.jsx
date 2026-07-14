@@ -5,7 +5,8 @@ import AIGenReviewPanel from '../components/AIGenReviewPanel';
 import AIImportPanel from '../components/AIImportPanel';
 import AIImportReview from '../components/AIImportReview';
 import { requirements as requirementsApi } from '../api';
-import { filterDrafts } from '../utils/draftReview';
+import { filterDrafts, isDraftClean, draftFlags } from '../utils/draftReview';
+import useStudioShortcuts from '../hooks/useStudioShortcuts';
 import {
     AIC, Icon,
     LEFT_MIN, LEFT_MAX, LEFT_DEFAULT, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT,
@@ -17,6 +18,7 @@ import {
     StudioHeader, StudioComposer, StudioDraftsList, StudioDraftDetail,
 } from './aiStudio/drafts';
 import { RejectPopover } from './aiStudio/rejectPopover';
+import { CommitSummaryModal } from './aiStudio/commitSummary';
 import { LlmFeedbackPanel } from './aiStudio/LlmFeedbackPanel';
 import { CoverageMatrixPanel } from './aiStudio/coverageMatrix';
 import { ImportModal, StudioBanner, StudioStyles, PageShellStyles } from './aiStudio/shell';
@@ -31,6 +33,9 @@ export default function AIGenerateStudio() {
     const [selectedDraftId, setSelectedDraftId] = useState(null);
     // Reject popover target: a draft id, the '__all__' sentinel (reject all pending), or null (closed).
     const [rejectTarget, setRejectTarget] = useState(null);
+    // Accept-all-clean commit flow: {clean, excludedInvalid, excludedDuplicates, overriddenWarnings} | null
+    const [acceptPlan, setAcceptPlan] = useState(null);
+    const [acceptResult, setAcceptResult] = useState(null);
 
     // Requirements-catalog + import-modal state (folded in from the former AIGeneratePage shell)
     const [importOpen, setImportOpen] = useState(() => {
@@ -142,7 +147,6 @@ export default function AIGenerateStudio() {
     };
     const handleAccept = (d) => ai.acceptDraft(d);
     const handleReject = (id) => setRejectTarget(id);
-    const handleAcceptAll = () => ai.acceptAllPending();
     const handleDiscardAll = () => setRejectTarget('__all__');
     const handleAcceptGroup = (group) => ai.acceptDrafts(group);
 
@@ -155,6 +159,39 @@ export default function AIGenerateStudio() {
             ai.rejectDraft(rejectTarget, reason, note);
         }
     };
+
+    // Opens the confirm phase: clean pending drafts vs. what gets excluded/overridden.
+    const handleAcceptAllClean = () => {
+        const pending = drafts.filter(d => statusOf(d) === 'pending');
+        const clean = pending.filter(isDraftClean);
+        setAcceptResult(null);
+        setAcceptPlan({
+            clean,
+            excludedInvalid: pending.filter(d => draftFlags(d).invalid).length,
+            excludedDuplicates: pending.filter(d => !draftFlags(d).invalid && draftFlags(d).highConfidenceDuplicate).length,
+            overriddenWarnings: clean.filter(d => draftFlags(d).warnings || draftFlags(d).possibleDuplicate).length,
+        });
+    };
+    const confirmAcceptAllClean = async () => {
+        const res = await ai.acceptDrafts(acceptPlan.clean);
+        if (res) setAcceptResult(res);
+        else setAcceptPlan(null); // toast already shown by context on failure
+    };
+
+    const selectByOffset = useCallback((dir) => {
+        if (!filtered.length) return;
+        const idx = filtered.findIndex(d => d.id === selectedDraftId);
+        const next = filtered[Math.min(filtered.length - 1, Math.max(0, idx + dir))] || filtered[0];
+        setSelectedDraftId(next.id);
+    }, [filtered, selectedDraftId]);
+
+    useStudioShortcuts({
+        enabled: stage === 'review' && !rejectTarget && !acceptPlan,
+        onNext: () => selectByOffset(1),
+        onPrev: () => selectByOffset(-1),
+        onAccept: () => { const d = filtered.find(x => x.id === selectedDraftId); if (d && statusOf(d) === 'pending') handleAccept(d); },
+        onReject: () => { const d = filtered.find(x => x.id === selectedDraftId); if (d && statusOf(d) === 'pending') handleReject(d.id); },
+    });
 
     const studioGridNode = (
         <>
@@ -217,7 +254,7 @@ export default function AIGenerateStudio() {
                         counts={counts}
                         totalDrafts={drafts.length}
                         stage={stage}
-                        onAcceptAll={handleAcceptAll}
+                        onAcceptAll={handleAcceptAllClean}
                         onDiscardAll={handleDiscardAll}
                         onGenerate={handleGenerate}
                         onImport={() => setImportOpen(true)}
@@ -337,6 +374,13 @@ export default function AIGenerateStudio() {
                     onSubmit={handleRejectSubmit}
                 />
             )}
+
+            <CommitSummaryModal
+                plan={acceptPlan}
+                result={acceptResult}
+                onConfirm={confirmAcceptAllClean}
+                onClose={() => { setAcceptPlan(null); setAcceptResult(null); }}
+            />
         </>
     );
 }

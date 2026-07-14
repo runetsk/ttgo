@@ -58,7 +58,7 @@ export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDi
                                 {Icon.x(13)} Discard all
                             </AIBtn>
                             <AIBtn variant="success" onClick={onAcceptAll} disabled={disabled}>
-                                {Icon.check(13)} Accept all ({counts.pending})
+                                {Icon.check(13)} Accept all clean ({counts.pending})
                             </AIBtn>
                         </>
                     )}
