@@ -56,18 +56,24 @@ export function DraftEditor({ draft, onSave, disabled }) {
     const [form, setForm] = useState(() => contentOf(draft));
     const [saveState, setSaveState] = useState('saved'); // saved | dirty | saving | error
     const timerRef = useRef(null);
+    const pendingRef = useRef(null); // latest UNSAVED snapshot; null when clean/saved
+    const seqRef = useRef(0);        // increments per scheduled save; only the latest may write the badge
 
-    useEffect(() => () => clearTimeout(timerRef.current), []);
+    useEffect(() => () => {
+        clearTimeout(timerRef.current);
+        if (pendingRef.current) onSave(draft.id, pendingRef.current); // don't drop unsaved edits on navigate
+    }, [draft.id, onSave]);
 
     const byField = useMemo(() => findingsByField(draft), [draft]);
 
-    const flush = async (snapshot) => {
+    const flush = async (snapshot, seq) => {
         setSaveState('saving');
         try {
             await onSave(draft.id, snapshot);
-            setSaveState('saved');
+            if (pendingRef.current === snapshot) pendingRef.current = null; // no newer edit queued -> clean
+            if (seq === seqRef.current) setSaveState('saved');              // stale save must not clobber a newer 'dirty'
         } catch {
-            setSaveState('error');
+            if (seq === seqRef.current) setSaveState('error');
         }
     };
 
@@ -75,9 +81,11 @@ export function DraftEditor({ draft, onSave, disabled }) {
         if (disabled) return;
         const next = { ...form, ...changes };
         setForm(next);
+        pendingRef.current = next;
         setSaveState('dirty');
         clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => flush(next), AUTOSAVE_MS);
+        const seq = ++seqRef.current;
+        timerRef.current = setTimeout(() => flush(next, seq), AUTOSAVE_MS);
     };
 
     const updateStep = (i, field, value) => {
@@ -95,6 +103,7 @@ export function DraftEditor({ draft, onSave, disabled }) {
 
     const undoLocal = () => {
         clearTimeout(timerRef.current);
+        pendingRef.current = null;
         setForm(contentOf(draft));
         setSaveState('saved');
     };
@@ -107,9 +116,11 @@ export function DraftEditor({ draft, onSave, disabled }) {
             steps: draft.original.steps || [],
         };
         setForm(orig);
+        pendingRef.current = orig;
         setSaveState('dirty');
         clearTimeout(timerRef.current);
-        timerRef.current = setTimeout(() => flush(orig), 100);
+        const seq = ++seqRef.current;
+        timerRef.current = setTimeout(() => flush(orig, seq), 100);
     };
 
     const saveLabel = { saved: 'Saved', dirty: 'Unsaved…', saving: 'Saving…', error: 'Save failed' }[saveState];
