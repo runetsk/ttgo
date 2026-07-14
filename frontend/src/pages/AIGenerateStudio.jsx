@@ -326,11 +326,14 @@ export default function AIGenerateStudio() {
                 </ImportModal>
             )}
 
-            <RejectPopover
-                open={!!rejectTarget}
-                onClose={() => setRejectTarget(null)}
-                onSubmit={handleRejectSubmit}
-            />
+            {rejectTarget && (
+                <RejectPopover
+                    key={rejectTarget}
+                    open
+                    onClose={() => setRejectTarget(null)}
+                    onSubmit={handleRejectSubmit}
+                />
+            )}
         </>
     );
 }
