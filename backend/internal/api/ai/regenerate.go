@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -228,20 +229,21 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fold the attempt's usage into the run totals (kept cumulative; Stage 6
-	// adds per-attempt rows) and refresh the coverage snapshot.
+	// adds per-attempt rows) and refresh the coverage snapshot. The alternative
+	// is already durably persisted above, so these are best-effort: a failure
+	// here must not 500 (that would make clients retry and create duplicate
+	// alternatives).
 	if chatResp.Usage != nil {
 		run.PromptTokens += chatResp.Usage.PromptTokens
 		run.CompletionTokens += chatResp.Usage.CompletionTokens
 		run.TotalTokens += chatResp.Usage.TotalTokens
 		if err := h.store.UpdateGenerationRun(run); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, err)
-			return
+			slog.Warn("regenerate: token fold failed", "run_id", run.ID, "error", err)
 		}
 	}
 	if coverageJSON != "" {
 		if err := h.store.UpdateGenerationRunCoverage(run.ID, coverageJSON); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, err)
-			return
+			slog.Warn("regenerate: coverage refresh failed", "run_id", run.ID, "error", err)
 		}
 	}
 
@@ -327,12 +329,24 @@ func (h *Handler) analyzeRevision(run *models.AIGenerationRun, original *models.
 	best[original.Position] = revised
 
 	var batch []aigen.BatchDraft
-	var flat []models.GeneratedTestCase
 	nameCounts := map[string]int{}
 	for pos, d := range best {
 		batch = append(batch, aigen.BatchDraft{Position: pos, Draft: d})
-		flat = append(flat, d)
 		nameCounts[aigen.NormalizeTestText(d.Name)]++
+	}
+
+	// flat must be indexed BY POSITION (not append order): BuildCoverageReport
+	// treats each draft's slice index as its Position (map iteration order is
+	// randomized, so appending in range order would scramble draft_positions).
+	maxPos := 0
+	for pos := range best {
+		if pos > maxPos {
+			maxPos = pos
+		}
+	}
+	flat := make([]models.GeneratedTestCase, maxPos+1)
+	for pos, d := range best {
+		flat[pos] = d
 	}
 
 	dims := aigen.EvaluateDraftQuality(revised, nameCounts, targets)

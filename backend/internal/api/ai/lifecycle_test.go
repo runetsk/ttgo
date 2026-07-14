@@ -825,10 +825,24 @@ func TestRegenerateDraftEndpoint(t *testing.T) {
 		Drafts []struct {
 			ID string `json:"id"`
 		} `json:"drafts"`
+		Coverage struct {
+			Targets []struct {
+				ID             string `json:"id"`
+				DraftPositions []int  `json:"draft_positions"`
+			} `json:"targets"`
+		} `json:"coverage"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &runBody))
 	assert.Greater(t, runBody.Run.TotalTokens, 30, "regen usage accumulated onto the run")
 	assert.Len(t, runBody.Drafts, 3, "original 2 + 1 alternative")
+
+	// The revised draft keeps its original position (0) and still carries
+	// source_refs ["AC-1"]; the coverage report must attribute AC-1 to that
+	// real position deterministically, not to a map-iteration-order artifact.
+	require.Len(t, runBody.Coverage.Targets, 1)
+	assert.Equal(t, "AC-1", runBody.Coverage.Targets[0].ID)
+	assert.Equal(t, []int{0}, runBody.Coverage.Targets[0].DraftPositions,
+		"AC-1 must be attributed to the revised draft's real position, not scrambled by map iteration")
 }
 
 func TestRegenerateDraftEndpoint_Validation(t *testing.T) {
