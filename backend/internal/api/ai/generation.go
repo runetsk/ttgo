@@ -1064,6 +1064,8 @@ func (h *Handler) writeLegacyAcceptError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrDraftNotPending):
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, store.ErrAmbiguousDraftVersion):
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 	case errors.Is(err, store.ErrDraftInvalid):
 		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 	case errors.Is(err, store.ErrUnknownDrafts), errors.Is(err, gorm.ErrRecordNotFound):
