@@ -1173,3 +1173,27 @@ func TestCreateGeneration_PopulatesEstimatedCost(t *testing.T) {
 	require.NotNil(t, body.Run.EstimatedCost)
 	assert.InDelta(t, (10.0*1+20.0*2)/1e6, *body.Run.EstimatedCost, 1e-12)
 }
+
+func TestRunResponsesCarryAttempts(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-ATT-1", "T", "D")
+	runID, _ := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "GET", "/api/ai-generations/"+runID, nil)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var body struct {
+		Attempts []struct {
+			Kind        string `json:"kind"`
+			TotalTokens int    `json:"total_tokens"`
+		} `json:"attempts"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.NotEmpty(t, body.Attempts)
+	assert.Equal(t, "generation", body.Attempts[0].Kind)
+	assert.Equal(t, 30, body.Attempts[0].TotalTokens)
+}

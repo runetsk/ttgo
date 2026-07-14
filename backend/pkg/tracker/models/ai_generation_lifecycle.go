@@ -240,3 +240,29 @@ type AIGenerationEvent struct {
 	MetadataJSON string    `json:"-" gorm:"type:text"`
 	CreatedAt    time.Time `json:"created_at"`
 }
+
+// AIGenerationAttempt kinds — one row per provider round-trip.
+const (
+	AIGenAttemptGeneration  = "generation"
+	AIGenAttemptParseRepair = "parse_repair"
+	AIGenAttemptCritic      = "critic"
+	AIGenAttemptRegenerate  = "regenerate"
+)
+
+// AIGenerationAttempt records one LLM round-trip's usage and outcome
+// (spec: "Persist token usage and latency per run and attempt").
+type AIGenerationAttempt struct {
+	ID               string    `json:"id"                 gorm:"primaryKey"`
+	RunID            string    `json:"run_id"             gorm:"index;not null"`
+	DraftID          *string   `json:"draft_id,omitempty" gorm:"index"`
+	Kind             string    `json:"kind"               gorm:"not null"`
+	ModelName        string    `json:"model_name"`
+	PromptTokens     int       `json:"prompt_tokens"`
+	CompletionTokens int       `json:"completion_tokens"`
+	TotalTokens      int       `json:"total_tokens"`
+	DurationMs       int64     `json:"duration_ms"`
+	Retries          int       `json:"retries"`
+	ErrorCategory    string    `json:"error_category,omitempty"`
+	EstimatedCost    *float64  `json:"estimated_cost,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}

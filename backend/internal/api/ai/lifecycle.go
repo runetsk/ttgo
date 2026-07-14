@@ -59,6 +59,9 @@ func (h *Handler) runResponse(run *models.AIGenerationRun) (map[string]interface
 	if run.CoverageJSON != "" {
 		out["coverage"] = json.RawMessage(run.CoverageJSON)
 	}
+	if attempts, err := h.store.ListGenerationAttempts(run.ID); err == nil && len(attempts) > 0 {
+		out["attempts"] = attempts
+	}
 	return out, nil
 }
 
@@ -366,16 +369,20 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		ResponseFormat: responseFormat,
 	}
 	totalRetries := 0
+	attemptStart := time.Now()
 	chatResp, retries, err := llm.ChatWithRetry(ctx, provider, chatReq, llm.RetryOptions{})
 	totalRetries += retries
+	h.recordAttempt(run.ID, nil, models.AIGenAttemptGeneration, providerCfg, chatResp, err, attemptStart, retries)
 	if err != nil && llm.Classify(err) == llm.ErrCatSchema && responseFormat != nil && responseFormat.Type == "json_schema" {
 		// The endpoint rejected json_schema — downgrade once to json_object.
 		slog.WarnContext(r.Context(), "ai_generation: provider rejected json_schema, downgrading to json_object", "error", err)
 		chatReq.ResponseFormat = &llm.ResponseFormat{Type: "json_object"}
 		totalRetries++
+		downgradeStart := time.Now()
 		var r2 int
 		chatResp, r2, err = llm.ChatWithRetry(ctx, provider, chatReq, llm.RetryOptions{})
 		totalRetries += r2
+		h.recordAttempt(run.ID, nil, models.AIGenAttemptGeneration, providerCfg, chatResp, err, downgradeStart, r2)
 	}
 	h.auditGeneration(r, run, providerCfg, plan.CoverageLevel, start, err, ctx)
 	if err != nil {
@@ -396,7 +403,9 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 				"Your entire response must start with { and end with }."},
 			{Role: "user", Content: plan.Prompt},
 		}
-		repairResp, _, repairErr := llm.ChatWithRetry(ctx, provider, repairReq, llm.RetryOptions{})
+		repairStart := time.Now()
+		repairResp, repairRetries, repairErr := llm.ChatWithRetry(ctx, provider, repairReq, llm.RetryOptions{})
+		h.recordAttempt(run.ID, nil, models.AIGenAttemptParseRepair, providerCfg, repairResp, repairErr, repairStart, repairRetries)
 		if repairErr == nil {
 			if repairDrafts, e2 := parseLLMResponse(repairResp.Content); e2 == nil {
 				drafts, parseErr = repairDrafts, nil
@@ -464,9 +473,11 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 
 	criticWarning := ""
 	if req.RunCritic && (plan.CoverageLevel == "thorough" || plan.CoverageLevel == "comprehensive") && len(rows) > 0 {
+		criticStart := time.Now()
 		criticResp, warn := h.runCriticPass(ctx, provider, providerCfg, plan.Requirement.Title, parsed, rows)
 		criticWarning = warn
 		if criticResp != nil {
+			h.recordAttempt(run.ID, nil, models.AIGenAttemptCritic, providerCfg, criticResp, nil, criticStart, 0)
 			accumulateUsage(chatResp, criticResp)
 		}
 	}
@@ -510,6 +521,35 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		out["critic_warning"] = criticWarning
 	}
 	httpx.JSON(w, http.StatusCreated, out)
+}
+
+// recordAttempt persists one provider round-trip, best-effort. It must never
+// fail a run — store errors are logged and swallowed (spec: "Persist token
+// usage and latency per run and attempt" is additive telemetry, not a
+// correctness dependency for the generation/regeneration flow it observes).
+func (h *Handler) recordAttempt(runID string, draftID *string, kind string, cfg *models.LLMProviderConfig, resp *llm.ChatResponse, callErr error, start time.Time, retries int) {
+	a := &models.AIGenerationAttempt{
+		RunID: runID, DraftID: draftID, Kind: kind,
+		ModelName: cfg.ModelName, DurationMs: time.Since(start).Milliseconds(), Retries: retries,
+	}
+	if resp != nil {
+		if resp.Model != "" {
+			a.ModelName = resp.Model
+		}
+		if resp.Usage != nil {
+			a.PromptTokens = resp.Usage.PromptTokens
+			a.CompletionTokens = resp.Usage.CompletionTokens
+			a.TotalTokens = resp.Usage.TotalTokens
+			a.EstimatedCost = llm.EstimateCostUSD(a.PromptTokens, a.CompletionTokens,
+				cfg.PromptPricePerMTok, cfg.CompletionPricePerMTok)
+		}
+	}
+	if callErr != nil {
+		a.ErrorCategory = string(llm.Classify(callErr))
+	}
+	if err := h.store.CreateGenerationAttempt(a); err != nil {
+		slog.Warn("ai_generation: attempt persist failed", "run_id", runID, "error", err)
+	}
 }
 
 // accumulateUsage folds a repair attempt's usage/finish reason into the first response.

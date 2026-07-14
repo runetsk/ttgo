@@ -20,7 +20,7 @@ function DebugRow({ label, value, mono, strong, highlight }) {
     );
 }
 
-export function LlmFeedbackPanel({ debug }) {
+export function LlmFeedbackPanel({ debug, attempts = [] }) {
     const [expanded, setExpanded] = useState(false);
     const [ctxExpanded, setCtxExpanded] = useState(false);
     const [showRaw, setShowRaw] = useState(false);
@@ -117,6 +117,39 @@ export function LlmFeedbackPanel({ debug }) {
                             <DebugRow label="Estimated cost" value={`$${debug.estimated_cost.toFixed(4)}`} strong />
                         )}
                     </div>
+
+                    {attempts.length > 1 && (
+                        <div style={{ marginTop: 10, borderTop: `1px solid ${AIC.border2}`, paddingTop: 8 }}>
+                            <table style={{ width: '100%', fontSize: 10.5, color: AIC.dim, borderCollapse: 'collapse' }}>
+                                <thead>
+                                    <tr style={{ textAlign: 'left', color: AIC.muted }}>
+                                        <th style={{ fontWeight: 600, padding: '2px 8px 4px 0' }}>Attempt</th>
+                                        <th style={{ fontWeight: 600, padding: '2px 8px 4px 0' }}>Tokens (p/c)</th>
+                                        <th style={{ fontWeight: 600, padding: '2px 8px 4px 0' }}>ms</th>
+                                        <th style={{ fontWeight: 600, padding: '2px 8px 4px 0' }}>Cost</th>
+                                        <th style={{ fontWeight: 600, padding: '2px 0 4px' }}>Error</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {attempts.map(a => (
+                                        <tr key={a.id} style={{ borderTop: `1px dashed ${AIC.border2}` }}>
+                                            <td style={{ padding: '4px 8px 4px 0', fontFamily: MONO }}>
+                                                {a.kind}{a.retries > 0 ? ` (+${a.retries} retries)` : ''}
+                                            </td>
+                                            <td style={{ padding: '4px 8px 4px 0', fontFamily: MONO }}>{a.prompt_tokens}/{a.completion_tokens}</td>
+                                            <td style={{ padding: '4px 8px 4px 0', fontFamily: MONO }}>{a.duration_ms}</td>
+                                            <td style={{ padding: '4px 8px 4px 0', fontFamily: MONO }}>
+                                                {a.estimated_cost != null ? `$${a.estimated_cost.toFixed(4)}` : '–'}
+                                            </td>
+                                            <td style={{ padding: '4px 0', color: a.error_category ? AIC.red : AIC.dim }}>
+                                                {a.error_category || ''}
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    )}
 
                     {debug.request_context && (
                         <div style={{ marginTop: 10, borderTop: `1px solid ${AIC.border2}`, paddingTop: 8 }}>

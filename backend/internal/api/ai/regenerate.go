@@ -177,6 +177,7 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 		chatReq.ResponseFormat = &llm.ResponseFormat{Type: "json_object"}
 		chatResp, retries, callErr = llm.ChatWithRetry(ctx, provider, chatReq, llm.RetryOptions{})
 	}
+	h.recordAttempt(run.ID, &draft.ID, models.AIGenAttemptRegenerate, providerCfg, chatResp, callErr, start, retries)
 	if callErr != nil {
 		category := llm.Classify(callErr)
 		httpx.JSON(w, httpStatusForCategory(category), map[string]string{
@@ -184,7 +185,6 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	_ = retries
 
 	parsed, parseErr := parseLLMResponse(chatResp.Content)
 	if parseErr != nil || len(parsed) == 0 {

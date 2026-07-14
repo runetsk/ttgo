@@ -66,6 +66,7 @@ export function AIGenerationProvider({ children }) {
     const [templateWarning, setTemplateWarning] = useState('');
     const [hasGenerated, setHasGenerated] = useState(false);
     const [lastDebug, setLastDebug] = useState(null); // debug info from last successful generation
+    const [attempts, setAttempts] = useState([]); // per-attempt token/cost breakdown for the current run
     // AbortController for the in-flight createGeneration request (cancel from THIS session).
     const generationAbortRef = useRef(null);
 
@@ -168,6 +169,7 @@ export function AIGenerationProvider({ children }) {
                             setDrafts(result.drafts || []);
                             setCoverage(result.coverage || null);
                             if (result.run) setLastDebug(runToDebug(result.run));
+                            setAttempts(result.attempts || []);
                             setHasGenerated(true);
                         })
                         .catch(() => sessionStorage.removeItem('ttgo_aigen_run_id'));
@@ -255,6 +257,7 @@ export function AIGenerationProvider({ children }) {
         setTemplateWarning('');
         setHasGenerated(false);
         setLastDebug(null);
+        setAttempts([]);
         setDrafts([]);
         setRunId(null);
         sessionStorage.removeItem('ttgo_aigen_run_id');
@@ -324,6 +327,7 @@ export function AIGenerationProvider({ children }) {
             if (result.template_warning) setTemplateWarning(result.template_warning);
             if (result.critic_warning) setTemplateWarning(result.critic_warning);
             if (result.run) setLastDebug(runToDebug(result.run));
+            setAttempts(result.attempts || []);
         } catch (err) {
             if (err?.code === 'ERR_CANCELED') {
                 setGenerationError('Generation cancelled');
@@ -421,6 +425,7 @@ export function AIGenerationProvider({ children }) {
         setDrafts(result.drafts || []);
         setCoverage(result.coverage || null);
         if (result.run) setLastDebug(runToDebug(result.run));
+        setAttempts(result.attempts || []);
         setHasGenerated(true);
         return result;
     }, []);
@@ -541,6 +546,7 @@ export function AIGenerationProvider({ children }) {
         setTemplateWarning('');
         setHasGenerated(false);
         setLastDebug(null);
+        setAttempts([]);
         setDrafts([]);
         setRunId(null);
         setParentRunId(null);
@@ -653,6 +659,7 @@ export function AIGenerationProvider({ children }) {
         setTemplateWarning('');
         setHasGenerated(false);
         setLastDebug(null);
+        setAttempts([]);
         setDrafts([]);
         setRunId(null);
         setParentRunId(null);
@@ -694,6 +701,7 @@ export function AIGenerationProvider({ children }) {
         templateWarning,
         hasGenerated,
         lastDebug,
+        attempts,
         // Drafts
         drafts,
         runId,

@@ -156,6 +156,7 @@ func (s *Store) bootstrapDB() error {
 		&models.AIGenerationRun{},           // ai-generation-improvements: durable runs
 		&models.AIGeneratedDraft{},          // ai-generation-improvements: persisted drafts
 		&models.AIGenerationEvent{},         // ai-generation-improvements: lifecycle events
+		&models.AIGenerationAttempt{},       // ai-generation stage 6: per-attempt usage
 	); err != nil {
 		return fmt.Errorf("failed to migrate schema: %w", err)
 	}

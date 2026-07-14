@@ -300,7 +300,7 @@ export default function AIGenerateStudio() {
                         disabled={disabled}
                     />
                     <StudioComposer ai={ai} stage={stage} disabled={disabled} />
-                    {ai.lastDebug && <LlmFeedbackPanel debug={ai.lastDebug} />}
+                    {ai.lastDebug && <LlmFeedbackPanel debug={ai.lastDebug} attempts={ai.attempts} />}
                     <CoverageMatrixPanel
                         coverage={ai.coverage}
                         drafts={drafts}
