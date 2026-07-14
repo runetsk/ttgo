@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { s } from './aiSettings/styles';
 import ProviderManager from './aiSettings/ProviderManager';
 import GenerationDefaults from './aiSettings/GenerationDefaults';
+import BudgetSettings from './aiSettings/BudgetSettings';
 import TemplateEditor from './aiSettings/TemplateEditor';
 
 /* ── Main Component ────────────────────────────────── */
@@ -36,6 +37,9 @@ export default function AIGenSettings() {
 
             {/* ── Coverage Token Limits Section ── */}
             <GenerationDefaults isAdmin={isAdmin} />
+
+            {/* ── Soft Cost Budgets Section ── */}
+            <BudgetSettings isAdmin={isAdmin} />
 
             <style>{`
                 @keyframes spin { to { transform: rotate(360deg); } }

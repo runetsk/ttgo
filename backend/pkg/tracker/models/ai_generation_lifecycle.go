@@ -266,3 +266,14 @@ type AIGenerationAttempt struct {
 	EstimatedCost    *float64  `json:"estimated_cost,omitempty"`
 	CreatedAt        time.Time `json:"created_at"`
 }
+
+// AIBudgetSettings holds the soft cost budgets (singleton row "singleton").
+// Zero means "no budget". Budgets WARN (409 + acknowledge_budget) — they never
+// silently degrade a request (spec: "Usage and cost").
+type AIBudgetSettings struct {
+	ID            string    `json:"id"              gorm:"primaryKey"` // always "singleton"
+	PerRequestUSD float64   `json:"per_request_usd" gorm:"default:0"`
+	MonthlyUSD    float64   `json:"monthly_usd"     gorm:"default:0"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}

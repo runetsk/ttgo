@@ -6695,6 +6695,66 @@
                 }
             }
         },
+        "/settings/ai-budgets": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-settings"
+                ],
+                "summary": "Get AI budget settings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-settings"
+                ],
+                "summary": "Update AI budget settings",
+                "parameters": [
+                    {
+                        "description": "per_request_usd, monthly_usd (0 = off)",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings"
+                        }
+                    }
+                }
+            }
+        },
         "/settings/confluence": {
             "get": {
                 "security": [
@@ -8500,6 +8560,27 @@
         }
     },
     "definitions": {
+        "ttgo_pkg_tracker_models.AIBudgetSettings": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "id": {
+                    "description": "always \"singleton\"",
+                    "type": "string"
+                },
+                "monthly_usd": {
+                    "type": "number"
+                },
+                "per_request_usd": {
+                    "type": "number"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "ttgo_pkg_tracker_models.AcceptImportRequest": {
             "type": "object",
             "properties": {

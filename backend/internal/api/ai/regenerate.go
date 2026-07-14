@@ -99,9 +99,10 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Instruction  string   `json:"instruction"`
-		Action       string   `json:"action"`
-		FindingCodes []string `json:"finding_codes"`
+		Instruction       string   `json:"instruction"`
+		Action            string   `json:"action"`
+		FindingCodes      []string `json:"finding_codes"`
+		AcknowledgeBudget bool     `json:"acknowledge_budget"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxLifecycleBodyBytes)
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -148,6 +149,11 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	findings := selectedFindings(draft, req.FindingCodes, req.Action)
 	prompt := buildRegenerationPrompt(requirement, original, req.Instruction, req.Action, findings)
+
+	if warn := h.checkBudget(providerCfg, len(prompt), 2048, req.AcknowledgeBudget); warn != nil {
+		httpx.JSON(w, http.StatusConflict, warn)
+		return
+	}
 
 	provider, err := llm.NewProvider(providerCfg)
 	if err != nil {

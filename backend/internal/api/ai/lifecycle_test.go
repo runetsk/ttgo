@@ -1197,3 +1197,34 @@ func TestRunResponsesCarryAttempts(t *testing.T) {
 	assert.Equal(t, "generation", body.Attempts[0].Kind)
 	assert.Equal(t, 30, body.Attempts[0].TotalTokens)
 }
+
+func TestCreateGeneration_BudgetWarningIsAcknowledgeable(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	// Absurd pricing so any prompt exceeds a tiny budget.
+	rr := doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local", "endpoint_url": fake.URL,
+		"model_name": "fake-model", "prompt_price_per_mtok": 1000000.0, "completion_price_per_mtok": 1000000.0,
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+	rr = doRequest(env, "PUT", "/api/settings/ai-budgets", map[string]float64{"per_request_usd": 0.0001})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	reqID := createPreviewRequirement(t, env, "REQ-BUDGET-1", "T", "D")
+
+	body := map[string]interface{}{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": uuid.NewString(),
+	}
+	rr = doRequest(env, "POST", "/api/ai-generations", body)
+	require.Equal(t, http.StatusConflict, rr.Code, rr.Body.String())
+	assert.Contains(t, rr.Body.String(), `"category":"budget"`)
+	assert.Contains(t, rr.Body.String(), `"scope":"request"`)
+
+	// Acknowledged -> proceeds normally.
+	body["acknowledge_budget"] = true
+	rr = doRequest(env, "POST", "/api/ai-generations", body)
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+}

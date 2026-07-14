@@ -64,6 +64,9 @@ export function AIGenerationProvider({ children }) {
     const [generating, setGenerating] = useState(false);
     const [generationError, setGenerationError] = useState('');
     const [templateWarning, setTemplateWarning] = useState('');
+    // Soft budget pre-flight warning (409 {category:"budget"}) — non-null shows
+    // the confirm modal; startGeneration({ acknowledgeBudget: true }) resends.
+    const [budgetWarning, setBudgetWarning] = useState(null);
     const [hasGenerated, setHasGenerated] = useState(false);
     const [lastDebug, setLastDebug] = useState(null); // debug info from last successful generation
     const [attempts, setAttempts] = useState([]); // per-attempt token/cost breakdown for the current run
@@ -291,7 +294,7 @@ export function AIGenerationProvider({ children }) {
             .catch(() => {});
     }, []);
 
-    const startGeneration = useCallback(async () => {
+    const startGeneration = useCallback(async (opts = {}) => {
         if (!activeRequirement) return;
         if (!selectedProviderId) {
             toast.error('Select an LLM provider first');
@@ -314,6 +317,7 @@ export function AIGenerationProvider({ children }) {
                 run_critic: runCritic,
                 idempotency_key: crypto.randomUUID(),
                 parent_run_id: parentRunId || runId || undefined,
+                acknowledge_budget: !!opts.acknowledgeBudget,
             }, { signal: controller.signal });
             const newDrafts = result.drafts || [];
             setRunId(result.run?.id || null);
@@ -329,6 +333,10 @@ export function AIGenerationProvider({ children }) {
             if (result.run) setLastDebug(runToDebug(result.run));
             setAttempts(result.attempts || []);
         } catch (err) {
+            if (err?.response?.status === 409 && err.response.data?.category === 'budget') {
+                setBudgetWarning(err.response.data);
+                return;
+            }
             if (err?.code === 'ERR_CANCELED') {
                 setGenerationError('Generation cancelled');
             } else {
@@ -657,6 +665,7 @@ export function AIGenerationProvider({ children }) {
         setGenerating(false);
         setGenerationError('');
         setTemplateWarning('');
+        setBudgetWarning(null);
         setHasGenerated(false);
         setLastDebug(null);
         setAttempts([]);
@@ -699,6 +708,8 @@ export function AIGenerationProvider({ children }) {
         generating,
         generationError,
         templateWarning,
+        budgetWarning,
+        setBudgetWarning,
         hasGenerated,
         lastDebug,
         attempts,

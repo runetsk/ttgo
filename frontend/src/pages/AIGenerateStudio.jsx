@@ -18,6 +18,7 @@ import {
     StudioHeader, StudioComposer, StudioDraftsList, StudioDraftDetail,
 } from './aiStudio/drafts';
 import { DraftCompareModal } from './aiStudio/draftCompare';
+import { BudgetConfirmModal } from './aiStudio/budgetConfirm';
 import { RejectPopover } from './aiStudio/rejectPopover';
 import { CommitSummaryModal } from './aiStudio/commitSummary';
 import { LlmFeedbackPanel } from './aiStudio/LlmFeedbackPanel';
@@ -425,6 +426,12 @@ export default function AIGenerateStudio() {
                     onClose={() => setCompare(null)}
                 />
             )}
+
+            <BudgetConfirmModal
+                warning={ai.budgetWarning}
+                onConfirm={() => { ai.setBudgetWarning(null); ai.startGeneration({ acknowledgeBudget: true }); }}
+                onClose={() => ai.setBudgetWarning(null)}
+            />
 
             <CommitSummaryModal
                 plan={acceptPlan}

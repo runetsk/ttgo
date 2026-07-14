@@ -1,5 +1,19 @@
 basePath: /api
 definitions:
+  ttgo_pkg_tracker_models.AIBudgetSettings:
+    properties:
+      created_at:
+        type: string
+      id:
+        description: always "singleton"
+        type: string
+      monthly_usd:
+        type: number
+      per_request_usd:
+        type: number
+      updated_at:
+        type: string
+    type: object
   ttgo_pkg_tracker_models.AcceptImportRequest:
     properties:
       folder_id:
@@ -5193,6 +5207,42 @@ paths:
       summary: Seed demo data
       tags:
       - seed
+  /settings/ai-budgets:
+    get:
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings'
+      security:
+      - BearerAuth: []
+      summary: Get AI budget settings
+      tags:
+      - ai-settings
+    put:
+      consumes:
+      - application/json
+      parameters:
+      - description: per_request_usd, monthly_usd (0 = off)
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings'
+      security:
+      - BearerAuth: []
+      summary: Update AI budget settings
+      tags:
+      - ai-settings
   /settings/confluence:
     get:
       description: Return the current Confluence integration configuration.

@@ -36,6 +36,7 @@ type createGenerationRequest struct {
 	IdempotencyKey         string `json:"idempotency_key"`
 	ParentRunID            string `json:"parent_run_id"`
 	RunCritic              bool   `json:"run_critic"`
+	AcknowledgeBudget      bool   `json:"acknowledge_budget"`
 }
 
 // runResponse builds the canonical {run, drafts} payload for a run.
@@ -317,6 +318,10 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ParentRunID != "" {
 		run.ParentRunID = &req.ParentRunID
+	}
+	if warn := h.checkBudget(providerCfg, len(plan.Prompt), plan.MaxTokens, req.AcknowledgeBudget); warn != nil {
+		httpx.JSON(w, http.StatusConflict, warn)
+		return
 	}
 	run, created, err := h.store.CreateGenerationRun(run)
 	if err != nil {
