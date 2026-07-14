@@ -21,6 +21,10 @@ func TestAIBudgetSettingsAndMonthlySum(t *testing.T) {
 	assert.Equal(t, 0.5, cfg.PerRequestUSD)
 	assert.Equal(t, 20.0, cfg.MonthlyUSD)
 
+	cfg, err = s.UpdateAIBudgetSettings(map[string]interface{}{"per_request_usd": 0.0})
+	require.NoError(t, err)
+	assert.Zero(t, cfg.PerRequestUSD, "explicit zero must persist (map write, not struct update)")
+
 	cost := 1.25
 	run := &models.AIGenerationRun{RequirementID: "r", EstimatedCost: &cost}
 	_, _, err = s.CreateGenerationRun(run)
