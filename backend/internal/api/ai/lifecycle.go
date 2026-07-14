@@ -54,7 +54,47 @@ func (h *Handler) runResponse(run *models.AIGenerationRun) (map[string]interface
 		}
 		draftResponses = append(draftResponses, dr)
 	}
-	return map[string]interface{}{"run": run, "drafts": draftResponses}, nil
+	out := map[string]interface{}{"run": run, "drafts": draftResponses}
+	if run.CoverageJSON != "" {
+		out["coverage"] = json.RawMessage(run.CoverageJSON)
+	}
+	return out, nil
+}
+
+// analyzeDraftQuality computes rubric dimensions and duplicate candidates for
+// every draft. Index i in the returned slices corresponds to drafts[i]
+// (create-time position). FTS lookup failures degrade to batch-only
+// candidates — quality analysis must never fail a run.
+func (h *Handler) analyzeDraftQuality(drafts []models.GeneratedTestCase, targets []aigen.CoverageTarget, requirementID string) (qualityJSONs, duplicatesJSONs []string) {
+	nameCounts := map[string]int{}
+	batch := make([]aigen.BatchDraft, len(drafts))
+	for i, d := range drafts {
+		nameCounts[aigen.NormalizeTestText(d.Name)]++
+		batch[i] = aigen.BatchDraft{Position: i, Draft: d}
+	}
+	batchDupes := aigen.FindBatchDuplicates(batch)
+
+	qualityJSONs = make([]string, len(drafts))
+	duplicatesJSONs = make([]string, len(drafts))
+	for i, d := range drafts {
+		dims := aigen.EvaluateDraftQuality(d, nameCounts, targets)
+		qb, _ := json.Marshal(dims)
+		qualityJSONs[i] = string(qb)
+
+		cands := batchDupes[i]
+		existing, err := h.store.SearchDuplicateCandidates(d.Name, requirementID, aigen.MaxDuplicateCandidates)
+		if err != nil {
+			slog.Warn("ai_generation: duplicate candidate search failed", "error", err)
+		} else {
+			cands = append(cands, existing...)
+		}
+		if len(cands) > aigen.MaxDuplicateCandidates {
+			cands = cands[:aigen.MaxDuplicateCandidates]
+		}
+		db, _ := json.Marshal(cands)
+		duplicatesJSONs[i] = string(db)
+	}
+	return qualityJSONs, duplicatesJSONs
 }
 
 // httpStatusForCategory maps a normalized LLM error category to the HTTP status
@@ -352,6 +392,10 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	// Sanitize + validate + persist drafts.
 	invalid := 0
 	rows := make([]*models.AIGeneratedDraft, len(drafts))
+	// parsed retains the fully sanitized test cases (the per-iteration `d`
+	// below is a value copy — its Name/Category/Description edits do not
+	// write back into `drafts[i]`) for the quality/coverage analysis below.
+	parsed := make([]models.GeneratedTestCase, len(drafts))
 	for i, d := range drafts {
 		d.Name = html.UnescapeString(h.sanitizer.Sanitize(d.Name))
 		d.Description = httpx.NormalizeEmptyHTML(h.sanitizer, d.Description)
@@ -368,6 +412,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		for k := range d.SourceRefs {
 			d.SourceRefs[k] = httpx.NormalizeEmptyHTML(h.sanitizer, d.SourceRefs[k])
 		}
+		parsed[i] = d
 		findings := aigen.ValidateDraft(d)
 		if aigen.HasErrors(findings) {
 			invalid++
@@ -385,6 +430,21 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		}
 		rows[i] = row
 	}
+
+	// Coverage targets are derived from the requirement description + child
+	// requirements (plan.Requirement is always non-nil on this path — unknown
+	// requirements 404 in buildPromptPlan — but the guard keeps an
+	// empty/blank requirement_id from panicking if validation ever changes).
+	var targets []aigen.CoverageTarget
+	if plan.Requirement != nil {
+		targets = aigen.ExtractCoverageTargets(plan.Requirement.Description, plan.Children)
+	}
+	qualityJSONs, duplicatesJSONs := h.analyzeDraftQuality(parsed, targets, run.RequirementID)
+	for i := range rows {
+		rows[i].QualityJSON = qualityJSONs[i]
+		rows[i].DuplicatesJSON = duplicatesJSONs[i]
+	}
+
 	actor := userID
 	if err := h.store.CreateGenerationDrafts(run.ID, actor, rows, invalid); err != nil {
 		h.failRun(run, models.AIGenerationRunStatusFailed, llm.ErrCatInternal, err.Error(), start, totalRetries)
@@ -405,6 +465,11 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		run.PromptTokens = chatResp.Usage.PromptTokens
 		run.CompletionTokens = chatResp.Usage.CompletionTokens
 		run.TotalTokens = chatResp.Usage.TotalTokens
+	}
+	report := aigen.BuildCoverageReport(targets, parsed)
+	report.BatchFindings = append(report.BatchFindings, aigen.EvaluateBatchQuality(parsed)...)
+	if covJSON, err := json.Marshal(report); err == nil {
+		run.CoverageJSON = string(covJSON)
 	}
 	if err := h.store.UpdateGenerationRun(run); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
@@ -633,7 +698,46 @@ func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) 
 	if u := authctx.UserFromRequest(r); u != nil {
 		actorID = &u.ID
 	}
-	updated, err := h.store.SaveDraftEdit(draft.ID, content, string(findingsJSON), "", "", actorID)
+
+	// Recompute quality, duplicates, and run coverage against the edited
+	// content. Only pending drafts can be edited, but accepted/rejected
+	// drafts still participate in the batch (they occupy positions and their
+	// names count for uniqueness/duplicates) — matches create-time behavior.
+	runID := r.PathValue("id")
+	runWithDrafts, err := h.store.GetGenerationRunWithDrafts(runID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	var targets []aigen.CoverageTarget
+	if runWithDrafts.CoverageJSON != "" {
+		var stored aigen.CoverageReport
+		if err := json.Unmarshal([]byte(runWithDrafts.CoverageJSON), &stored); err == nil {
+			for _, tc := range stored.Targets {
+				targets = append(targets, tc.CoverageTarget)
+			}
+		}
+	}
+	// Rebuild the batch with the edit applied at this draft's position.
+	all := make([]models.GeneratedTestCase, 0, len(runWithDrafts.Drafts))
+	editedPos := 0
+	for _, d := range runWithDrafts.Drafts {
+		c, cerr := d.Content()
+		if cerr != nil {
+			httpx.Error(w, http.StatusInternalServerError, cerr)
+			return
+		}
+		gc := models.GeneratedTestCase{Name: c.Name, Category: c.Category, Description: c.Description, SourceRefs: c.SourceRefs, Steps: c.Steps}
+		if d.ID == draft.ID {
+			editedPos = len(all)
+			gc = models.GeneratedTestCase{Name: content.Name, Category: content.Category, Description: content.Description, SourceRefs: content.SourceRefs, Steps: content.Steps}
+		}
+		all = append(all, gc)
+	}
+	qualityJSONs, duplicatesJSONs := h.analyzeDraftQuality(all, targets, runWithDrafts.RequirementID)
+	qualityJSON, duplicatesJSON := qualityJSONs[editedPos], duplicatesJSONs[editedPos]
+
+	updated, err := h.store.SaveDraftEdit(draft.ID, content, string(findingsJSON), qualityJSON, duplicatesJSON, actorID)
 	if err != nil {
 		if errors.Is(err, store.ErrDraftNotPending) {
 			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -642,12 +746,20 @@ func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) 
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
+
+	report := aigen.BuildCoverageReport(targets, all)
+	report.BatchFindings = append(report.BatchFindings, aigen.EvaluateBatchQuality(all)...)
+	covJSON, _ := json.Marshal(report)
+	if err := h.store.UpdateGenerationRunCoverage(runID, string(covJSON)); err != nil {
+		slog.Warn("ai_generation: coverage refresh failed", "run_id", runID, "error", err)
+	}
+
 	resp, err := updated.ToResponse()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp})
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp, "coverage": json.RawMessage(covJSON)})
 }
 
 // RejectGenerationDraftEndpoint records a structured rejection reason.

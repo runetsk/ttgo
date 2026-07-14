@@ -572,6 +572,128 @@ func TestCreateGeneration_ReplayDifferentRequirementConflicts(t *testing.T) {
 	assert.Equal(t, http.StatusConflict, rr2.Code, rr2.Body.String())
 }
 
+const qualityEnvelopeJSON = `{
+  "test_cases": [
+    {
+      "name": "[Functional] Sign in with valid credentials",
+      "category": "Functional",
+      "description": "Happy path.",
+      "source_refs": ["AC-1"],
+      "steps": [
+        {"action": "Enter \"user@example.com\" in the Email field", "expected_result": "The Email field contains the address"},
+        {"action": "Click the \"Sign in\" button", "expected_result": "The dashboard page is displayed"}
+      ]
+    },
+    {
+      "name": "Sign in with valid credentials",
+      "category": "Functional",
+      "description": "Same scenario, duplicate name.",
+      "source_refs": [],
+      "steps": [
+        {"action": "Submit the form", "expected_result": "It works"}
+      ]
+    }
+  ]
+}`
+
+func TestCreateGeneration_ComputesQualityCoverageDuplicates(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, qualityEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-QUAL-1", "Login",
+		`<h2>Acceptance Criteria</h2><ul><li>User can sign in</li><li>Wrong password shows an error</li></ul>`)
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": uuid.NewString(),
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+
+	var body struct {
+		Coverage struct {
+			Targets []struct {
+				ID             string `json:"id"`
+				Status         string `json:"status"`
+				DraftPositions []int  `json:"draft_positions"`
+			} `json:"targets"`
+			UncoveredCount int `json:"uncovered_count"`
+		} `json:"coverage"`
+		Drafts []struct {
+			Quality []struct {
+				Key      string `json:"key"`
+				Findings []struct {
+					Code string `json:"code"`
+				} `json:"findings"`
+			} `json:"quality"`
+			Duplicates []struct {
+				Kind       string  `json:"kind"`
+				Similarity float64 `json:"similarity"`
+			} `json:"duplicates"`
+		} `json:"drafts"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+
+	require.Len(t, body.Coverage.Targets, 2)
+	assert.Equal(t, "AC-1", body.Coverage.Targets[0].ID)
+	assert.Equal(t, "covered", body.Coverage.Targets[0].Status)
+	assert.Equal(t, []int{0}, body.Coverage.Targets[0].DraftPositions)
+	assert.Equal(t, 1, body.Coverage.UncoveredCount, "AC-2 is uncovered")
+
+	require.Len(t, body.Drafts, 2)
+	// Draft 1 is the vague duplicate: expect observability + uniqueness findings and a batch duplicate.
+	var codes []string
+	for _, dim := range body.Drafts[1].Quality {
+		for _, f := range dim.Findings {
+			codes = append(codes, dim.Key+":"+f.Code)
+		}
+	}
+	assert.Contains(t, codes, "expected_observability:vague_expected")
+	assert.Contains(t, codes, "uniqueness:duplicate_name_in_batch")
+	assert.Contains(t, codes, "traceability:no_source_refs")
+	require.NotEmpty(t, body.Drafts[1].Duplicates)
+	assert.Equal(t, "batch", body.Drafts[1].Duplicates[0].Kind)
+	// Draft 0 also carries the mirror duplicate + uniqueness warning but NO traceability finding.
+	require.NotEmpty(t, body.Drafts[0].Duplicates)
+}
+
+func TestUpdateGenerationDraft_RecomputesQualityAndCoverage(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, qualityEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-QUAL-2", "Login",
+		`<ul><li>User can sign in</li><li>Wrong password shows an error</li></ul>`)
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	// Point the second draft at AC-2 and fix its vague step.
+	rr := doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[1], map[string]interface{}{
+		"name":        "Wrong password shows an inline error",
+		"source_refs": []string{"AC-2"},
+		"steps": []map[string]string{
+			{"action": `Enter "wrong-pass-123" as the password`, "expected_result": "An inline error \"Invalid credentials\" is displayed"},
+		},
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	var body struct {
+		Draft struct {
+			Quality    json.RawMessage `json:"quality"`
+			Duplicates json.RawMessage `json:"duplicates"`
+		} `json:"draft"`
+		Coverage struct {
+			UncoveredCount int `json:"uncovered_count"`
+		} `json:"coverage"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, 0, body.Coverage.UncoveredCount, "AC-2 is now covered")
+	assert.Nil(t, body.Draft.Quality, "the edit resolved every rubric finding")
+	assert.Nil(t, body.Draft.Duplicates, "renamed draft no longer collides")
+}
+
 func TestCreateGeneration_ReplayFailedRunReturnsFailureStatus(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
