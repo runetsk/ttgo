@@ -112,6 +112,15 @@ export default function AIGenerateStudio() {
         : drafts.length > 0 ? 'review' : 'compose';
     const disabled = ai.generating || ai.accepting;
 
+    // The active requirement changed after the current run was generated —
+    // surface a banner so the reviewer knows drafts may be stale.
+    const staleRun = (() => {
+        if (!ai.runId || !ai.activeRequirement?.updated_at) return false;
+        const run = (ai.history || []).find(r => r.id === ai.runId);
+        if (!run) return false;
+        return new Date(ai.activeRequirement.updated_at) > new Date(run.created_at);
+    })();
+
     // Server `draft.status` is the source of truth (set by accept/reject calls).
     const statusOf = useCallback(
         (d) => (d.status === 'accepted' || d.status === 'rejected') ? d.status : 'pending',
@@ -199,6 +208,11 @@ export default function AIGenerateStudio() {
             {ai.templateWarning && (
                 <StudioBanner tone="amber" icon={Icon.alert(13)}>
                     {ai.templateWarning}
+                </StudioBanner>
+            )}
+            {staleRun && (
+                <StudioBanner tone="amber" icon={Icon.alert(13)}>
+                    The requirement changed after this run was generated — drafts may be out of date. Consider regenerating.
                 </StudioBanner>
             )}
             {ai.generationError && (

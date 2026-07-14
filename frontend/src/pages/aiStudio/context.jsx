@@ -5,6 +5,7 @@ import FolderTreeSelect from '../../components/FolderTreeSelect';
 import SafeHTML from '../../components/shared/SafeHTML';
 import { requirements as requirementsApi } from '../../api';
 import { AIC, MONO, Icon, pageStyles } from './constants';
+import { HistorySection } from './history';
 
 // ── Linked-requirement preview card ─────────────────────────────────────────
 export function LinkedReqCard({ req, disabled, onUnlink }) {
@@ -475,6 +476,8 @@ export function StudioContextPane({ ai, onCollapse, allReqs, allReqsLoading, onP
                     {provider?.label || 'No provider'} → <span style={{ color: AIC.dim }}>{folder?.name || '—'}</span>
                 </div>
             )}
+
+            <HistorySection ai={ai} />
         </aside>
     );
 }

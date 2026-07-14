@@ -70,6 +70,7 @@ export function AIGenerationProvider({ children }) {
     const [drafts, setDrafts] = useState([]);
     const [runId, setRunId] = useState(null);
     const [coverage, setCoverage] = useState(null);
+    const [history, setHistory] = useState(null);
     const acceptedIds = useMemo(
         () => new Set(drafts.filter(d => d.status === 'accepted').map(d => d.id)),
         [drafts]
@@ -368,6 +369,26 @@ export function AIGenerationProvider({ children }) {
         return loadRun(runId);
     }, [runId, loadRun]);
 
+    const loadHistory = useCallback(async () => {
+        if (!activeRequirement) return;
+        try {
+            const result = await aiGeneration.listGenerations(activeRequirement.id);
+            setHistory(result.runs || []);
+        } catch {
+            setHistory([]);
+        }
+    }, [activeRequirement]);
+
+    // Clone: reuse a prior run's settings; keep lineage via parent_run_id.
+    const cloneRun = useCallback((run) => {
+        setCoverageLevel(run.coverage_level || 'thorough');
+        setDetailLevel(run.detail_level || 'Standard');
+        setAdditionalInstructions(run.additional_instructions || '');
+        if (run.provider_id) setSelectedProviderId(run.provider_id);
+        setRunId(run.id); // next startGeneration sends parent_run_id: run.id
+        toast.success('Run settings cloned — press Generate');
+    }, []);
+
     const acceptDraft = useCallback(async (draft) => {
         if (!activeRequirement || !runId) return;
         if (!selectedFolderId) {
@@ -455,6 +476,7 @@ export function AIGenerationProvider({ children }) {
         setDrafts([]);
         setRunId(null);
         setCoverage(null);
+        setHistory(null);
         sessionStorage.removeItem('ttgo_aigen_run_id');
     }, []);
 
@@ -564,6 +586,7 @@ export function AIGenerationProvider({ children }) {
         setDrafts([]);
         setRunId(null);
         setCoverage(null);
+        setHistory(null);
         setAccepting(false);
         sessionStorage.removeItem('ttgo_aigen_run_id');
     }, []);
@@ -604,6 +627,8 @@ export function AIGenerationProvider({ children }) {
         acceptedIds,
         coverage,
         accepting,
+        // Run history
+        history,
         // Derived
         pendingDrafts,
         pendingCount,
@@ -621,6 +646,8 @@ export function AIGenerationProvider({ children }) {
         restoreDraft,
         refreshRun,
         loadRun,
+        loadHistory,
+        cloneRun,
         editDraft,
         clearSession,
         setOnAcceptedCallback,
