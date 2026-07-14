@@ -762,6 +762,98 @@ func TestUpdateGenerationDraft_RecomputesQualityAndCoverage(t *testing.T) {
 	assert.Nil(t, body.Draft.Duplicates, "the renamed draft no longer collides")
 }
 
+const regenEnvelopeJSON = `{
+  "test_cases": [{
+    "name": "[Functional] Sign in with valid credentials (sharpened)",
+    "category": "Functional",
+    "description": "Revised.",
+    "source_refs": ["AC-1"],
+    "steps": [{"action": "Enter \"user@example.com\" / \"Passw0rd!\" and submit", "expected_result": "The dashboard header shows the signed-in user"}]
+  }]
+}`
+
+func TestRegenerateDraftEndpoint(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-REGEN-1", "Login", "<ul><li>User can sign in</li></ul>")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	// Swap the fake's reply to the single-case revision for the regen call.
+	regenFake := newFakeLLMServer(t, &captured, regenEnvelopeJSON)
+	defer regenFake.Close()
+	// Point the provider at the regen fake (update endpoint_url).
+	rr := doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local",
+		"endpoint_url": regenFake.URL, "model_name": "fake-model",
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/regenerate",
+		map[string]interface{}{"instruction": "sharpen it", "action": "make_more_specific"})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+
+	var body struct {
+		Draft struct {
+			ID            string  `json:"id"`
+			Version       int     `json:"version"`
+			ParentDraftID *string `json:"parent_draft_id"`
+			Position      int     `json:"position"`
+			Status        string  `json:"status"`
+			Name          string  `json:"name"`
+		} `json:"draft"`
+		OriginalID string `json:"original_id"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, draftIDs[0], body.OriginalID)
+	assert.Equal(t, 2, body.Draft.Version)
+	require.NotNil(t, body.Draft.ParentDraftID)
+	assert.Equal(t, draftIDs[0], *body.Draft.ParentDraftID)
+	assert.Equal(t, "pending", body.Draft.Status)
+	assert.Contains(t, body.Draft.Name, "sharpened")
+
+	// Both versions coexist; run token totals grew.
+	rr = doRequest(env, "GET", "/api/ai-generations/"+runID, nil)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var runBody struct {
+		Run struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"run"`
+		Drafts []struct {
+			ID string `json:"id"`
+		} `json:"drafts"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &runBody))
+	assert.Greater(t, runBody.Run.TotalTokens, 30, "regen usage accumulated onto the run")
+	assert.Len(t, runBody.Drafts, 3, "original 2 + 1 alternative")
+}
+
+func TestRegenerateDraftEndpoint_Validation(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-REGEN-2", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/regenerate",
+		map[string]string{"action": "delete_everything"})
+	require.Equal(t, http.StatusBadRequest, rr.Code)
+
+	// Reject the draft, then regenerating it conflicts.
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/reject",
+		map[string]string{"reason": "duplicate"})
+	require.Equal(t, http.StatusOK, rr.Code)
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/regenerate",
+		map[string]string{"action": ""})
+	require.Equal(t, http.StatusConflict, rr.Code)
+}
+
 func TestCreateGeneration_ReplayFailedRunReturnsFailureStatus(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()

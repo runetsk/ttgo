@@ -168,6 +168,7 @@ func isLLMPath(p string) bool {
 	case strings.HasSuffix(p, "/generate-tests"),
 		strings.HasSuffix(p, "/analyze"),
 		strings.HasSuffix(p, "/analyze-failures"),
+		strings.HasSuffix(p, "/regenerate"),
 		p == "/api/import/parse",
 		p == "/api/ai-generations":
 		return true

@@ -172,6 +172,27 @@ func resolveResponseFormat(cfg *models.LLMProviderConfig) *llm.ResponseFormat {
 	}
 }
 
+// sanitizeGeneratedTestCase applies the draft sanitization rules shared by
+// generation and regeneration (XSS-hardening: bc984a5, 5b26981, 068a0de).
+// Category and step text are attacker-influenceable too (a requirement
+// description can prompt-inject the LLM into echoing HTML/JS). Sanitize them
+// in place — mirroring the /import/accept path — BEFORE validation, so a
+// payload that sanitizes to "" (e.g. a pure-<script> action) is seen as empty
+// by ValidateDraft and rejected rather than persisted.
+func (h *Handler) sanitizeGeneratedTestCase(d models.GeneratedTestCase) models.GeneratedTestCase {
+	d.Name = html.UnescapeString(h.sanitizer.Sanitize(d.Name))
+	d.Description = httpx.NormalizeEmptyHTML(h.sanitizer, d.Description)
+	d.Category = html.UnescapeString(h.sanitizer.Sanitize(d.Category))
+	for i := range d.Steps {
+		d.Steps[i].Action = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[i].Action)
+		d.Steps[i].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[i].ExpectedResult)
+	}
+	for i := range d.SourceRefs {
+		d.SourceRefs[i] = httpx.NormalizeEmptyHTML(h.sanitizer, d.SourceRefs[i])
+	}
+	return d
+}
+
 // failRun stamps a failed/cancelled terminal state onto the run.
 func (h *Handler) failRun(run *models.AIGenerationRun, status string, category llm.ErrorCategory, msg string, start time.Time, retries int) {
 	now := time.Now()
@@ -397,21 +418,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	// write back into `drafts[i]`) for the quality/coverage analysis below.
 	parsed := make([]models.GeneratedTestCase, len(drafts))
 	for i, d := range drafts {
-		d.Name = html.UnescapeString(h.sanitizer.Sanitize(d.Name))
-		d.Description = httpx.NormalizeEmptyHTML(h.sanitizer, d.Description)
-		// Category and step text are attacker-influenceable too (a requirement
-		// description can prompt-inject the LLM into echoing HTML/JS). Sanitize
-		// them in place — mirroring the /import/accept path — BEFORE validation,
-		// so a payload that sanitizes to "" (e.g. a pure-<script> action) is
-		// seen as empty by ValidateDraft and rejected rather than persisted.
-		d.Category = html.UnescapeString(h.sanitizer.Sanitize(d.Category))
-		for j := range d.Steps {
-			d.Steps[j].Action = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[j].Action)
-			d.Steps[j].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[j].ExpectedResult)
-		}
-		for k := range d.SourceRefs {
-			d.SourceRefs[k] = httpx.NormalizeEmptyHTML(h.sanitizer, d.SourceRefs[k])
-		}
+		d = h.sanitizeGeneratedTestCase(d)
 		parsed[i] = d
 		findings := aigen.ValidateDraft(d)
 		if aigen.HasErrors(findings) {

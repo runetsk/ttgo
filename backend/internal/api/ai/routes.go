@@ -33,6 +33,7 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("PATCH /ai-generations/{id}/drafts/{draft_id}", requireAuth("write", h.UpdateGenerationDraft))
 	api.HandleFunc("POST /ai-generations/{id}/drafts/{draft_id}/reject", requireAuth("write", h.RejectGenerationDraftEndpoint))
 	api.HandleFunc("POST /ai-generations/{id}/drafts/{draft_id}/restore", requireAuth("write", h.RestoreGenerationDraftEndpoint))
+	api.HandleFunc("POST /ai-generations/{id}/drafts/{draft_id}/regenerate", requireAuth("write", h.RegenerateDraft))
 	api.HandleFunc("POST /ai-generations/{id}/accept", requireAuth("write", h.AcceptGeneration))
 
 	api.HandleFunc("POST /import/parse", requireAuth("write", h.ParseImport))

@@ -1070,6 +1070,68 @@ paths:
       summary: Edit a generated draft
       tags:
       - ai-generations
+  /ai-generations/{id}/drafts/{draft_id}/regenerate:
+    post:
+      consumes:
+      - application/json
+      description: Calls the provider with a focused revision prompt and persists
+        the result as a NEW pending alternative (original untouched, versions retained).
+        Choose between them via the choose endpoint.
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Draft ID
+        in: path
+        name: draft_id
+        required: true
+        type: string
+      - description: instruction, action (make_more_specific|add_negative_case|repair_findings),
+          finding_codes
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Regenerate one AI draft
+      tags:
+      - ai-generations
   /ai-generations/{id}/drafts/{draft_id}/reject:
     post:
       consumes:
