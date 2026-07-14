@@ -5,6 +5,7 @@ import AIGenReviewPanel from '../components/AIGenReviewPanel';
 import AIImportPanel from '../components/AIImportPanel';
 import AIImportReview from '../components/AIImportReview';
 import { requirements as requirementsApi } from '../api';
+import { filterDrafts } from '../utils/draftReview';
 import {
     AIC, Icon,
     LEFT_MIN, LEFT_MAX, LEFT_DEFAULT, RIGHT_MIN, RIGHT_MAX, RIGHT_DEFAULT,
@@ -17,6 +18,7 @@ import {
 } from './aiStudio/drafts';
 import { RejectPopover } from './aiStudio/rejectPopover';
 import { LlmFeedbackPanel } from './aiStudio/LlmFeedbackPanel';
+import { CoverageMatrixPanel } from './aiStudio/coverageMatrix';
 import { ImportModal, StudioBanner, StudioStyles, PageShellStyles } from './aiStudio/shell';
 
 // ── Main container ──────────────────────────────────────────────────────────
@@ -123,11 +125,7 @@ export default function AIGenerateStudio() {
         return c;
     }, [statuses]);
 
-    const filtered = useMemo(() => drafts.filter(d => {
-        const s = statuses[d.id];
-        if (filter === 'all') return true;
-        return s === filter;
-    }), [drafts, statuses, filter]);
+    const filtered = useMemo(() => filterDrafts(drafts, filter), [drafts, filter]);
 
     useEffect(() => {
         if (selectedDraftId && drafts.find(d => d.id === selectedDraftId)) return;
@@ -227,6 +225,12 @@ export default function AIGenerateStudio() {
                     />
                     <StudioComposer ai={ai} stage={stage} disabled={disabled} />
                     {ai.lastDebug && <LlmFeedbackPanel debug={ai.lastDebug} />}
+                    <CoverageMatrixPanel
+                        coverage={ai.coverage}
+                        drafts={drafts}
+                        onSelectDraft={setSelectedDraftId}
+                        onFilterUncovered={() => setFilter('uncovered')}
+                    />
                     <StudioDraftsList
                         ai={ai}
                         drafts={filtered}
@@ -239,7 +243,6 @@ export default function AIGenerateStudio() {
                         onAccept={handleAccept}
                         onReject={handleReject}
                         onAcceptGroup={handleAcceptGroup}
-                        counts={counts}
                         stage={stage}
                         disabled={disabled}
                     />

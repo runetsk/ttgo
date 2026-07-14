@@ -7,6 +7,7 @@ import {
 } from './primitives';
 import PromptPreviewPanel from './PromptPreviewPanel';
 import { DraftEditor } from './draftEditor';
+import { REVIEW_FILTERS, filterDrafts, draftFlags } from '../../utils/draftReview';
 
 // ── Middle top: Header ───────────────────────────────────────────────────────
 export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDiscardAll, onGenerate, onImport, disabled }) {
@@ -149,6 +150,7 @@ export function StudioComposer({ ai, stage, disabled }) {
 // ── Middle: Drafts list ─────────────────────────────────────────────────────
 export function DraftRow({ draft, status, selected, onSelect, onAccept, onReject, disabled }) {
     const dimmed = status === 'rejected';
+    const flags = draftFlags(draft);
     return (
         <div onClick={onSelect}
             style={{
@@ -196,6 +198,14 @@ export function DraftRow({ draft, status, selected, onSelect, onAccept, onReject
                         alignItems: 'center', flexWrap: 'wrap',
                     }}>
                         <span>{(draft.steps || []).length} steps</span>
+                        {status === 'pending' && (
+                            <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                                {flags.invalid && <span title="Has validation errors" style={{ color: 'var(--aig-danger-fg)', fontSize: 10 }}>✕ invalid</span>}
+                                {!flags.invalid && flags.warnings && <span title="Has quality warnings" style={{ color: 'var(--aig-tone-amber-fg)', fontSize: 10 }}>⚠</span>}
+                                {flags.possibleDuplicate && <span title="Possible duplicate" style={{ color: 'var(--aig-tone-purple-fg)', fontSize: 10 }}>⧉ dup</span>}
+                                {flags.edited && <span title="Edited" style={{ color: AIC.indigoSoft, fontSize: 10 }}>✎</span>}
+                            </span>
+                        )}
                     </div>
                 </div>
                 {status === 'pending' && (
@@ -219,7 +229,7 @@ export function DraftRow({ draft, status, selected, onSelect, onAccept, onReject
 export function StudioDraftsList({
     ai, drafts, allDrafts, statuses, selectedId, onSelect,
     filter, setFilter, groupBy, setGroupBy, onAccept, onReject, onAcceptGroup,
-    counts, stage, disabled,
+    stage, disabled,
 }) {
     const [collapsedGroups, setCollapsedGroups] = useState({});
     const toggleGroup = (k) => setCollapsedGroups(s => ({ ...s, [k]: !s[k] }));
@@ -269,10 +279,13 @@ export function StudioDraftsList({
                 gap: 12, flexWrap: 'wrap',
             }}>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    <FilterTab active={filter === 'all'} onClick={() => setFilter('all')}>All <span style={{ opacity: 0.6 }}>{allDrafts.length}</span></FilterTab>
-                    <FilterTab active={filter === 'pending'} onClick={() => setFilter('pending')}>Pending <span style={{ opacity: 0.6 }}>{counts.pending}</span></FilterTab>
-                    <FilterTab active={filter === 'accepted'} onClick={() => setFilter('accepted')}>Accepted <span style={{ opacity: 0.6 }}>{counts.accepted}</span></FilterTab>
-                    <FilterTab active={filter === 'rejected'} onClick={() => setFilter('rejected')}>Rejected <span style={{ opacity: 0.6 }}>{counts.rejected}</span></FilterTab>
+                    {REVIEW_FILTERS
+                        .filter(f => ['all', 'pending'].includes(f.key) || filterDrafts(allDrafts, f.key).length > 0)
+                        .map(f => (
+                            <FilterTab key={f.key} active={filter === f.key} onClick={() => setFilter(f.key)}>
+                                {f.label} <span style={{ opacity: 0.6 }}>{filterDrafts(allDrafts, f.key).length}</span>
+                            </FilterTab>
+                        ))}
                 </div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                     <span style={{
