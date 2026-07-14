@@ -1,0 +1,34 @@
+{
+  "name": "vague duplicated batch (ambiguity fixture)",
+  "description_html": "<ul><li>Report can be exported</li></ul>",
+  "children": [],
+  "drafts": [
+    {
+      "name": "Export works",
+      "category": "Functional",
+      "description": "",
+      "source_refs": [],
+      "steps": [
+        {"action": "Do it", "expected_result": "It works"}
+      ]
+    },
+    {
+      "name": "[Functional] Export works",
+      "category": "Functional",
+      "description": "",
+      "source_refs": [],
+      "steps": [
+        {"action": "Submit the export form", "expected_result": "ok"}
+      ]
+    }
+  ],
+  "expect": {
+    "target_ids": ["AC-1"],
+    "uncovered_ids": ["AC-1"],
+    "draft_finding_codes": [
+      ["action_clarity:vague_action", "expected_observability:vague_expected", "uniqueness:duplicate_name_in_batch", "traceability:no_source_refs", "specificity:no_concrete_data"],
+      ["expected_observability:vague_expected", "uniqueness:duplicate_name_in_batch", "traceability:no_source_refs", "specificity:no_concrete_data"]
+    ],
+    "batch_duplicate_positions": {"0": [1], "1": [0]}
+  }
+}

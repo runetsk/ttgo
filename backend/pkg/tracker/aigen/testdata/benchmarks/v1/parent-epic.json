@@ -1,0 +1,25 @@
+{
+  "name": "parent epic with child requirements",
+  "description_html": "<p>Epic: account management.</p>",
+  "children": [
+    {"identifier": "PROJ-11", "title": "Password reset"},
+    {"identifier": "PROJ-12", "title": "Profile editing"}
+  ],
+  "drafts": [
+    {
+      "name": "Password reset link expires after 24h",
+      "category": "Functional",
+      "description": "Covers PROJ-11.",
+      "source_refs": ["PROJ-11"],
+      "steps": [
+        {"action": "Request a reset link for \"user@example.com\" and wait 25 hours (simulated clock)", "expected_result": "Opening the link shows the \"link expired\" page"}
+      ]
+    }
+  ],
+  "expect": {
+    "target_ids": ["PROJ-11", "PROJ-12"],
+    "uncovered_ids": ["PROJ-12"],
+    "draft_finding_codes": [[]],
+    "batch_duplicate_positions": {}
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "login-form (validation-heavy happy+negative)",
+  "description_html": "<h2>Acceptance Criteria</h2><ul><li>User can sign in with a valid email and password</li><li>Wrong password shows an inline error</li><li>Account locks after 5 failed attempts</li></ul>",
+  "children": [],
+  "drafts": [
+    {
+      "name": "[Functional] Sign in with valid credentials",
+      "category": "Functional",
+      "description": "Happy path.",
+      "source_refs": ["AC-1"],
+      "steps": [
+        {"action": "Enter \"user@example.com\" and \"Passw0rd!\" then click Sign in", "expected_result": "The dashboard page is displayed"}
+      ]
+    },
+    {
+      "name": "[Negative] Wrong password shows inline error",
+      "category": "Negative",
+      "description": "Negative path.",
+      "source_refs": ["AC-2"],
+      "steps": [
+        {"action": "Enter \"user@example.com\" and \"wrong-pass\" then click Sign in", "expected_result": "An inline error \"Invalid credentials\" is displayed"}
+      ]
+    }
+  ],
+  "expect": {
+    "target_ids": ["AC-1", "AC-2", "AC-3"],
+    "uncovered_ids": ["AC-3"],
+    "draft_finding_codes": [[], []],
+    "batch_duplicate_positions": {}
+  }
+}
