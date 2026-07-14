@@ -149,3 +149,73 @@ func ExtractCoverageTargets(description string, children []*models.Requirement) 
 	}
 	return targets
 }
+
+// Target coverage statuses.
+const (
+	TargetStatusUncovered       = "uncovered"
+	TargetStatusCovered         = "covered"
+	TargetStatusOverRepresented = "over_represented"
+)
+
+// TargetCoverage is one target with the draft positions that reference it.
+type TargetCoverage struct {
+	CoverageTarget
+	DraftPositions []int  `json:"draft_positions"`
+	Status         string `json:"status"`
+}
+
+// CoverageReport is the run-level coverage summary persisted on
+// AIGenerationRun.CoverageJSON and returned as "coverage" by the API.
+type CoverageReport struct {
+	Targets              []TargetCoverage `json:"targets"`
+	CoveredCount         int              `json:"covered_count"`
+	UncoveredCount       int              `json:"uncovered_count"`
+	OverRepresentedCount int              `json:"over_represented_count"`
+	BatchFindings        []Finding        `json:"batch_findings,omitempty"`
+}
+
+var refSepRe = regexp.MustCompile(`[\s_]+`)
+
+// NormalizeSourceRef canonicalizes a draft source_ref for target matching:
+// trimmed, uppercased, surrounding brackets stripped, "AC 1"/"AC_1" → "AC-1".
+func NormalizeSourceRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	ref = strings.TrimPrefix(ref, "[")
+	ref = strings.TrimSuffix(ref, "]")
+	ref = strings.ToUpper(strings.TrimSpace(ref))
+	ref = refSepRe.ReplaceAllString(ref, "-")
+	return ref
+}
+
+// BuildCoverageReport maps draft source_refs onto targets. The index of each
+// draft in the slice is treated as its Position (create-time ordering).
+func BuildCoverageReport(targets []CoverageTarget, drafts []models.GeneratedTestCase) CoverageReport {
+	rep := CoverageReport{Targets: make([]TargetCoverage, 0, len(targets))}
+	byID := make(map[string]*TargetCoverage, len(targets))
+	for _, t := range targets {
+		rep.Targets = append(rep.Targets, TargetCoverage{CoverageTarget: t, DraftPositions: []int{}, Status: TargetStatusUncovered})
+		byID[t.ID] = &rep.Targets[len(rep.Targets)-1]
+	}
+	for pos, d := range drafts {
+		for _, ref := range d.SourceRefs {
+			if tc, ok := byID[NormalizeSourceRef(ref)]; ok {
+				tc.DraftPositions = append(tc.DraftPositions, pos)
+			}
+		}
+	}
+	for i := range rep.Targets {
+		tc := &rep.Targets[i]
+		switch {
+		case len(tc.DraftPositions) == 0:
+			rep.UncoveredCount++
+		case len(tc.DraftPositions) >= OverRepresentedThreshold:
+			tc.Status = TargetStatusOverRepresented
+			rep.CoveredCount++
+			rep.OverRepresentedCount++
+		default:
+			tc.Status = TargetStatusCovered
+			rep.CoveredCount++
+		}
+	}
+	return rep
+}

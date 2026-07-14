@@ -82,3 +82,50 @@ func TestExtractCoverageTargets_CapAndEmpty(t *testing.T) {
 	targets := ExtractCoverageTargets("<ul>"+long+"</ul>", nil)
 	assert.Len(t, targets, MaxCoverageTargets)
 }
+
+func draftWithRefs(name string, refs ...string) models.GeneratedTestCase {
+	return models.GeneratedTestCase{
+		Name: name, Category: "Functional", Description: "d",
+		SourceRefs: refs,
+		Steps:      []models.GeneratedStep{{Action: "a", ExpectedResult: "e"}},
+	}
+}
+
+func TestNormalizeSourceRef(t *testing.T) {
+	assert.Equal(t, "AC-1", NormalizeSourceRef(" ac 1 "))
+	assert.Equal(t, "AC-2", NormalizeSourceRef("AC_2"))
+	assert.Equal(t, "PROJ-9", NormalizeSourceRef("[proj-9]"))
+	assert.Equal(t, "", NormalizeSourceRef("  "))
+}
+
+func TestBuildCoverageReport(t *testing.T) {
+	targets := []CoverageTarget{
+		{ID: "AC-1", Kind: TargetKindAcceptanceCriterion, Text: "sign in"},
+		{ID: "AC-2", Kind: TargetKindAcceptanceCriterion, Text: "error shown"},
+		{ID: "PROJ-2", Kind: TargetKindChildRequirement, Text: "reset"},
+	}
+	drafts := []models.GeneratedTestCase{
+		draftWithRefs("t0", "AC-1"),
+		draftWithRefs("t1", "ac 1"), // normalizes to AC-1
+		draftWithRefs("t2", "AC-1"),
+		draftWithRefs("t3", "AC-1", "UNKNOWN-99"), // unknown ref is ignored here (rubric flags it)
+	}
+	rep := BuildCoverageReport(targets, drafts)
+
+	require.Len(t, rep.Targets, 3)
+	ac1 := rep.Targets[0]
+	assert.Equal(t, TargetStatusOverRepresented, ac1.Status, "4 drafts >= threshold")
+	assert.Equal(t, []int{0, 1, 2, 3}, ac1.DraftPositions)
+	assert.Equal(t, TargetStatusUncovered, rep.Targets[1].Status)
+	assert.Equal(t, TargetStatusUncovered, rep.Targets[2].Status)
+	assert.Equal(t, 1, rep.CoveredCount, "over-represented still counts as covered")
+	assert.Equal(t, 2, rep.UncoveredCount)
+	assert.Equal(t, 1, rep.OverRepresentedCount)
+	assert.Empty(t, rep.BatchFindings, "BuildCoverageReport itself adds no batch findings")
+}
+
+func TestBuildCoverageReport_NoTargets(t *testing.T) {
+	rep := BuildCoverageReport(nil, []models.GeneratedTestCase{draftWithRefs("t0")})
+	assert.Empty(t, rep.Targets)
+	assert.Zero(t, rep.UncoveredCount)
+}
