@@ -53,6 +53,7 @@ export function AIGenerationProvider({ children }) {
     const [coverageLevel, setCoverageLevel] = useState('thorough');
     const [detailLevel, setDetailLevel] = useState('Standard');
     const [additionalInstructions, setAdditionalInstructions] = useState('');
+    const [runCritic, setRunCritic] = useState(false);
 
     // Folder selection
     const [folders, setFolders] = useState([]);
@@ -65,6 +66,8 @@ export function AIGenerationProvider({ children }) {
     const [templateWarning, setTemplateWarning] = useState('');
     const [hasGenerated, setHasGenerated] = useState(false);
     const [lastDebug, setLastDebug] = useState(null); // debug info from last successful generation
+    // AbortController for the in-flight createGeneration request (cancel from THIS session).
+    const generationAbortRef = useRef(null);
 
     // Draft lifecycle — server `draft.status` is the source of truth.
     const [drafts, setDrafts] = useState([]);
@@ -296,15 +299,18 @@ export function AIGenerationProvider({ children }) {
         setTemplateWarning('');
 
         try {
+            const controller = new AbortController();
+            generationAbortRef.current = controller;
             const result = await aiGeneration.createGeneration({
                 requirement_id: activeRequirement.id,
                 provider_id: selectedProviderId,
                 coverage_level: coverageLevel,
                 detail_level: detailLevel,
                 additional_instructions: additionalInstructions,
+                run_critic: runCritic,
                 idempotency_key: crypto.randomUUID(),
                 parent_run_id: parentRunId || runId || undefined,
-            });
+            }, { signal: controller.signal });
             const newDrafts = result.drafts || [];
             setRunId(result.run?.id || null);
             setParentRunId(null);
@@ -315,13 +321,35 @@ export function AIGenerationProvider({ children }) {
             });
             setHasGenerated(true);
             if (result.template_warning) setTemplateWarning(result.template_warning);
+            if (result.critic_warning) setTemplateWarning(result.critic_warning);
             if (result.run) setLastDebug(runToDebug(result.run));
         } catch (err) {
-            setGenerationError(err?.response?.data?.error || err.message || 'Generation failed');
+            if (err?.code === 'ERR_CANCELED') {
+                setGenerationError('Generation cancelled');
+            } else {
+                setGenerationError(err?.response?.data?.error || err.message || 'Generation failed');
+            }
         } finally {
+            generationAbortRef.current = null;
             setGenerating(false);
         }
-    }, [activeRequirement, selectedProviderId, coverageLevel, detailLevel, additionalInstructions, acceptedIds, runId, parentRunId]);
+    }, [activeRequirement, selectedProviderId, coverageLevel, detailLevel, additionalInstructions, runCritic, acceptedIds, runId, parentRunId]);
+
+    // Abort the in-flight generation request from THIS session. The server
+    // observes r.Context() cancellation and stamps the run cancelled.
+    const cancelActive = useCallback(() => {
+        generationAbortRef.current?.abort();
+    }, []);
+
+    // Cancel a running run from history (another session/process owns it).
+    const cancelRun = useCallback(async (id) => {
+        try {
+            await aiGeneration.cancelGeneration(id);
+            toast.success('Cancellation requested');
+        } catch (err) {
+            toast.error(err?.response?.data?.error || 'Could not cancel this run');
+        }
+    }, []);
 
     // Merge one server draft object into local state.
     const mergeDraft = useCallback((serverDraft) => {
@@ -356,6 +384,35 @@ export function AIGenerationProvider({ children }) {
             toast.error(err?.response?.data?.error || 'Failed to restore draft');
         }
     }, [runId, mergeDraft]);
+
+    // Regenerate one pending draft into a NEW alternative, inserted right after
+    // the original so the pair sits together for compare/choose (Task 7 UI).
+    const regenerateDraft = useCallback(async (draftId, opts) => {
+        if (!runId) return null;
+        const result = await aiGeneration.regenerateGenerationDraft(runId, draftId, opts || {});
+        setDrafts(prev => {
+            const idx = prev.findIndex(d => d.id === draftId);
+            if (idx < 0) return [...prev, result.draft];
+            return [...prev.slice(0, idx + 1), result.draft, ...prev.slice(idx + 1)];
+        });
+        return result;
+    }, [runId]);
+
+    // Keep one version of a draft family; the losing versions come back
+    // superseded (excluded from pending counts/accept-all).
+    const chooseDraft = useCallback(async (draftId) => {
+        if (!runId) return;
+        try {
+            const result = await aiGeneration.chooseGenerationDraft(runId, draftId);
+            setDrafts(prev => prev.map(d => {
+                if (d.id === result.draft.id) return result.draft;
+                if ((result.superseded_ids || []).includes(d.id)) return { ...d, status: 'superseded' };
+                return d;
+            }));
+        } catch (err) {
+            toast.error(err?.response?.data?.error || 'Could not choose this version');
+        }
+    }, [runId]);
 
     const loadRun = useCallback(async (id) => {
         const result = await aiGeneration.getGeneration(id);
@@ -621,6 +678,8 @@ export function AIGenerationProvider({ children }) {
         setDetailLevel,
         additionalInstructions,
         setAdditionalInstructions,
+        runCritic,
+        setRunCritic,
         // Folders
         folders,
         selectedFolderId,
@@ -650,12 +709,16 @@ export function AIGenerationProvider({ children }) {
         openSession,
         switchRequirement,
         startGeneration,
+        cancelActive,
+        cancelRun,
         acceptDraft,
         acceptDrafts,
         acceptAllPending,
         saveDraftEdit,
         rejectDraft,
         restoreDraft,
+        regenerateDraft,
+        chooseDraft,
         refreshRun,
         loadRun,
         loadHistory,

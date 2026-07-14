@@ -438,8 +438,8 @@ export const aiGeneration = {
     acceptGeneratedTests: (requirementId, data) =>
         api.post(`/requirements/${requirementId}/accept-generated-tests`, data).then(res => res.data),
     // ── Generation lifecycle (ai-generation-improvements) ──
-    createGeneration: (data) =>
-        api.post('/ai-generations', data).then(res => res.data),
+    createGeneration: (data, config) =>
+        api.post('/ai-generations', data, config).then(res => res.data),
     getGeneration: (runId) =>
         api.get(`/ai-generations/${runId}`).then(res => res.data),
     listGenerations: (requirementId) =>
@@ -452,6 +452,13 @@ export const aiGeneration = {
         api.post(`/ai-generations/${runId}/drafts/${draftId}/restore`).then(res => res.data),
     acceptGeneration: (runId, data) =>
         api.post(`/ai-generations/${runId}/accept`, data).then(res => res.data),
+    // ── Targeted regeneration (ai-generation-stage-5) ──
+    regenerateGenerationDraft: (runId, draftId, data) =>
+        api.post(`/ai-generations/${runId}/drafts/${draftId}/regenerate`, data).then(res => res.data),
+    chooseGenerationDraft: (runId, draftId) =>
+        api.post(`/ai-generations/${runId}/drafts/${draftId}/choose`).then(res => res.data),
+    cancelGeneration: (runId) =>
+        api.post(`/ai-generations/${runId}/cancel`, null, { _silent: true }).then(res => res.data),
 };
 
 // ── AI Test Import (014-ai-test-import) ──
