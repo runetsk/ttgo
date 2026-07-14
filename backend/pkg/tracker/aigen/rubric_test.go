@@ -131,3 +131,14 @@ func TestEvaluateDraftQuality_EveryFindingExplainsItself(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluateDraftQuality_ShortAction(t *testing.T) {
+	d := cleanDraft()
+	d.Steps[0].Action = "Tap Save" // short (<12 chars), not vague — exercises the short_action branch
+	dims := EvaluateDraftQuality(d, map[string]int{}, oneTarget())
+	dim := dimByKey(dims, "action_clarity")
+	require.NotNil(t, dim)
+	assert.Equal(t, "steps[0].action", dim.Findings[0].Field)
+	assert.Equal(t, "short_action", dim.Findings[0].Code)
+	assert.Equal(t, SeverityWarning, dim.Findings[0].Severity)
+}
