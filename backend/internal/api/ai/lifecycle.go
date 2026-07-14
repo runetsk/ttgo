@@ -944,6 +944,8 @@ func (h *Handler) AcceptGeneration(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, store.ErrDraftNotPending):
 			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+		case errors.Is(err, store.ErrAmbiguousDraftVersion):
+			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 		case errors.Is(err, store.ErrDraftInvalid):
 			httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
 		case errors.Is(err, store.ErrUnknownDrafts):

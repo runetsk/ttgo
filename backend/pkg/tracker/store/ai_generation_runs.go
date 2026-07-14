@@ -14,10 +14,11 @@ import (
 
 // Sentinel errors for the generation lifecycle (mapped to HTTP codes in the API layer).
 var (
-	ErrDraftNotPending  = errors.New("draft is not in pending status")
-	ErrDraftInvalid     = errors.New("draft has validation errors")
-	ErrUnknownDrafts    = errors.New("one or more drafts do not belong to this run")
-	ErrDraftNotRejected = errors.New("draft is not in rejected status")
+	ErrDraftNotPending       = errors.New("draft is not in pending status")
+	ErrDraftInvalid          = errors.New("draft has validation errors")
+	ErrUnknownDrafts         = errors.New("one or more drafts do not belong to this run")
+	ErrDraftNotRejected      = errors.New("draft is not in rejected status")
+	ErrAmbiguousDraftVersion = errors.New("multiple unchosen draft versions selected at the same position; choose one first")
 )
 
 // CreateGenerationRun inserts run, OR returns the existing run holding the same
@@ -354,6 +355,7 @@ func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID
 			return fmt.Errorf("linked requirement: %w", err)
 		}
 		contents := make([]models.DraftContent, len(drafts))
+		positionCounts := map[int]int{}
 		for i, d := range drafts {
 			if d.Status != models.AIDraftStatusPending {
 				return fmt.Errorf("%w: draft %q is %s", ErrDraftNotPending, d.Name, d.Status)
@@ -372,6 +374,23 @@ func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID
 				return fmt.Errorf("draft %q content: %w", d.Name, err)
 			}
 			contents[i] = c
+			positionCounts[d.Position]++
+		}
+		// Every draft above is now confirmed pending. Two or more pending
+		// drafts selected at the same position means an original draft and its
+		// un-chosen regeneration alternative (or a chain of them) are both in
+		// this request — accepting both would materialize duplicate test cases
+		// for one logical position. ChooseDraftVersion is how a reviewer
+		// resolves a family down to one pending draft before it can be
+		// accepted. This only guards a single request: it does not (and is not
+		// meant to) stop two SEPARATE accept calls from each taking one member
+		// of the same family. drafts is ordered by position asc (the query
+		// above), so this reports the first offending position deterministically
+		// rather than via map iteration order.
+		for _, d := range drafts {
+			if positionCounts[d.Position] > 1 {
+				return fmt.Errorf("%w: position %d", ErrAmbiguousDraftVersion, d.Position)
+			}
 		}
 
 		// ── Materialize ──

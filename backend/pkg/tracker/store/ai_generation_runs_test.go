@@ -401,6 +401,34 @@ func TestAcceptGenerationDrafts_UnknownDraftFails(t *testing.T) {
 	assert.ErrorIs(t, err, ErrUnknownDrafts)
 }
 
+func TestAcceptGenerationDrafts_AmbiguousVersionFails(t *testing.T) {
+	s := newTestStore(t)
+	_, folder, run, drafts := seedAcceptFixture(t, s, 1)
+
+	// Regenerating drafts[0] creates a second pending draft at the SAME
+	// position — both are unchosen alternatives until ChooseDraftVersion picks one.
+	alt, err := s.CreateDraftAlternative(drafts[0].ID, models.DraftContent{
+		Name: "Draft 0 alt", Category: "Functional", Description: "desc",
+		Steps: []models.GeneratedStep{{Action: "do", ExpectedResult: "done"}},
+	}, `[]`, `[]`, `[]`, RegenMeta{}, nil)
+	require.NoError(t, err)
+	assert.Equal(t, drafts[0].Position, alt.Position, "alternative shares the original's position")
+
+	// Accepting BOTH pending versions of the same position in one request is ambiguous.
+	_, err = s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID, alt.ID}, folder.ID, true, nil)
+	assert.ErrorIs(t, err, ErrAmbiguousDraftVersion)
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestCase{}), "ambiguous accept must not materialize anything")
+	var back models.AIGeneratedDraft
+	require.NoError(t, s.db.First(&back, "id = ?", drafts[0].ID).Error)
+	assert.Equal(t, models.AIDraftStatusPending, back.Status, "rejected batch must not flip any draft status")
+
+	// Accepting just ONE of the ambiguous pair still succeeds (the guard only
+	// fires when 2+ drafts of the same position are BOTH in the request).
+	res, err := s.AcceptGenerationDrafts(run.ID, []string{drafts[0].ID}, folder.ID, true, nil)
+	require.NoError(t, err)
+	require.Len(t, res.CreatedTestCaseIDs, 1)
+}
+
 // countRows is a rollback-assertion helper.
 func countRows(t *testing.T, s *Store, model interface{}) int64 {
 	t.Helper()

@@ -510,6 +510,52 @@ func TestAcceptGenerationEndpoint_Validation(t *testing.T) {
 		map[string]interface{}{"folder_id": folderID, "draft_ids": draftIDs}).Code)
 }
 
+func TestAcceptGenerationEndpoint_AmbiguousVersionConflicts(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-ACCEPT-AMBIG", "T", "D")
+	folderID := createTestFolder(t, env, "AI Output Ambig")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	// Swap the fake's reply so regenerating draftIDs[0] returns a distinct
+	// alternative at the same position (mirrors TestRegenerateDraftEndpoint).
+	regenFake := newFakeLLMServer(t, &captured, regenEnvelopeJSON)
+	defer regenFake.Close()
+	rr := doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local",
+		"endpoint_url": regenFake.URL, "model_name": "fake-model",
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/regenerate",
+		map[string]interface{}{"instruction": "sharpen it", "action": "make_more_specific"})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var regen struct {
+		Draft struct {
+			ID string `json:"id"`
+		} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &regen))
+
+	// The original draft and its un-chosen regeneration alternative are both
+	// still pending at the same position — accepting both in one request must
+	// conflict instead of materializing two test cases for one position.
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept", map[string]interface{}{
+		"folder_id": folderID, "draft_ids": []string{draftIDs[0], regen.Draft.ID},
+	})
+	assert.Equal(t, http.StatusConflict, rr.Code, rr.Body.String())
+
+	// Accepting just the original (one member of the ambiguous pair) alone still works.
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept", map[string]interface{}{
+		"folder_id": folderID, "draft_ids": []string{draftIDs[0]},
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+}
+
 func TestCreateGeneration_SanitizesSourceRefs(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
