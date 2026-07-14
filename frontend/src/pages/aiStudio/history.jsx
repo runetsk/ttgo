@@ -12,7 +12,7 @@ export function HistorySection({ ai }) {
 
     useEffect(() => {
         if (activeRequirement) loadHistory();
-    }, [activeRequirement, loadHistory]);
+    }, [activeRequirement, loadHistory, runId]);
 
     if (!history || !history.length) return null;
     return (
