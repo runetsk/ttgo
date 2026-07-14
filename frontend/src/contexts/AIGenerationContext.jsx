@@ -258,6 +258,7 @@ export function AIGenerationProvider({ children }) {
         // Reset generation state for new session
         setGenerationError('');
         setTemplateWarning('');
+        setBudgetWarning(null);
         setHasGenerated(false);
         setLastDebug(null);
         setAttempts([]);
@@ -552,6 +553,7 @@ export function AIGenerationProvider({ children }) {
         setActiveRequirement(req);
         setGenerationError('');
         setTemplateWarning('');
+        setBudgetWarning(null);
         setHasGenerated(false);
         setLastDebug(null);
         setAttempts([]);
