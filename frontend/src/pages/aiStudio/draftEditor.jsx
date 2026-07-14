@@ -61,7 +61,7 @@ export function DraftEditor({ draft, onSave, disabled }) {
 
     useEffect(() => () => {
         clearTimeout(timerRef.current);
-        if (pendingRef.current) onSave(draft.id, pendingRef.current); // don't drop unsaved edits on navigate
+        if (pendingRef.current) onSave(draft.id, pendingRef.current)?.catch?.(() => {}); // don't drop unsaved edits on navigate
     }, [draft.id, onSave]);
 
     const byField = useMemo(() => findingsByField(draft), [draft]);
@@ -104,6 +104,7 @@ export function DraftEditor({ draft, onSave, disabled }) {
     const undoLocal = () => {
         clearTimeout(timerRef.current);
         pendingRef.current = null;
+        seqRef.current++;
         setForm(contentOf(draft));
         setSaveState('saved');
     };
