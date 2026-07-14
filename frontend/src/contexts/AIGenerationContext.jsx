@@ -418,7 +418,11 @@ export function AIGenerationProvider({ children }) {
     }, [activeRequirement, runId, drafts, selectedFolderId, groupByCategory, refreshRun]);
 
     const acceptDrafts = useCallback(async (draftsToAccept) => {
-        if (!activeRequirement || !runId || !selectedFolderId || draftsToAccept.length === 0) return;
+        if (!activeRequirement || !runId || draftsToAccept.length === 0) return;
+        if (!selectedFolderId) {
+            toast.error('Select a folder first');
+            return;
+        }
         setAccepting(true);
         try {
             const result = await aiGeneration.acceptGeneration(runId, {

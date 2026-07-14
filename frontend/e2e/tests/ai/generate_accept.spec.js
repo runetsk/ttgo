@@ -164,10 +164,24 @@ test.describe('AI generation lifecycle — generate, accept, replay', () => {
             await expect(page.getByText('[Functional] E2E login works').first()).toBeVisible();
         });
 
-        await test.step('Accept all fires the atomic accept endpoint', async () => {
-            const acceptResp = page.waitForResponse(r => /\/api\/ai-generations\/.+\/accept$/.test(r.url()));
+        await test.step('Accept all clean opens the commit-summary confirm modal', async () => {
+            // Since Task 7, the header button no longer accepts immediately — it
+            // only opens CommitSummaryModal's confirm phase (no network request
+            // fires here). "Accept all clean (2)" still matches /accept all/i.
             await page.getByRole('button', { name: /accept all/i }).click();
+            await expect(page.getByTestId('commit-summary')).toBeVisible();
+        });
+
+        await test.step('Confirming in the modal fires the atomic accept endpoint', async () => {
+            const acceptResp = page.waitForResponse(r => /\/api\/ai-generations\/.+\/accept$/.test(r.url()));
+            // Confirm-phase button reads "Accept {plan.clean.length} draft(s)" —
+            // both fixture drafts validate cleanly, so clean.length is 2.
+            await page.getByTestId('commit-summary').getByRole('button', { name: /accept \d+ draft/i }).click();
             expect((await acceptResp).status()).toBe(201);
+
+            // Modal flips from the confirm phase to the summary phase on success.
+            await expect(page.getByTestId('commit-summary').getByText(/test case\(s\) created/i)).toBeVisible();
+            await page.getByTestId('commit-summary').getByRole('button', { name: 'Done' }).click();
         });
     });
 });
