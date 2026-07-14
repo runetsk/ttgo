@@ -438,3 +438,127 @@ func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID
 	}
 	return res, nil
 }
+
+// RegenMeta is the safe metadata recorded on a `regenerated` event.
+// AlternativeID is filled by the store. No prompt text belongs here.
+type RegenMeta struct {
+	Instruction      string `json:"instruction,omitempty"`
+	Action           string `json:"action,omitempty"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	DurationMs       int64  `json:"duration_ms"`
+	AlternativeID    string `json:"alternative_id"`
+}
+
+// CreateDraftAlternative persists a regenerated version of a pending draft as
+// a NEW pending row in the same position family (Version+1, ParentDraftID set)
+// and appends a `regenerated` event on the original. The original is untouched
+// — reviewers choose between them explicitly (ChooseDraftVersion).
+func (s *Store) CreateDraftAlternative(originalDraftID string, content models.DraftContent, validationJSON, qualityJSON, duplicatesJSON string, meta RegenMeta, actorID *string) (*models.AIGeneratedDraft, error) {
+	var alt *models.AIGeneratedDraft
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		original, err := getPendingDraftTx(tx, originalDraftID)
+		if err != nil {
+			return err
+		}
+		originalSnapshot, err := json.Marshal(content)
+		if err != nil {
+			return err
+		}
+		alt = &models.AIGeneratedDraft{
+			ID:             uuid.New().String(),
+			RunID:          original.RunID,
+			Position:       original.Position,
+			Version:        original.Version + 1,
+			ParentDraftID:  &original.ID,
+			Status:         models.AIDraftStatusPending,
+			ValidationJSON: validationJSON,
+			QualityJSON:    qualityJSON,
+			DuplicatesJSON: duplicatesJSON,
+			OriginalJSON:   string(originalSnapshot),
+		}
+		if err := alt.ApplyContent(content); err != nil {
+			return err
+		}
+		if err := tx.Create(alt).Error; err != nil {
+			return err
+		}
+		if len(meta.Instruction) > 500 {
+			meta.Instruction = meta.Instruction[:500]
+		}
+		meta.AlternativeID = alt.ID
+		metaJSON, err := json.Marshal(meta)
+		if err != nil {
+			return err
+		}
+		return createGenerationEventTx(tx, &models.AIGenerationEvent{
+			RunID: original.RunID, DraftID: &original.ID,
+			EventType: models.AIGenEventRegenerated, ActorID: actorID,
+			MetadataJSON: string(metaJSON),
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return alt, nil
+}
+
+// ChooseDraftVersion keeps one pending draft of a position family and marks
+// every other pending draft at the same position superseded. Chain-proof:
+// alternatives of alternatives share the position too.
+func (s *Store) ChooseDraftVersion(draftID string, actorID *string) (*models.AIGeneratedDraft, []string, error) {
+	var chosen models.AIGeneratedDraft
+	var supersededIDs []string
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&chosen, "id = ?", draftID).Error; err != nil {
+			return err
+		}
+		if chosen.Status != models.AIDraftStatusPending {
+			return fmt.Errorf("%w: draft %s is %s", ErrDraftNotPending, draftID, chosen.Status)
+		}
+		var family []*models.AIGeneratedDraft
+		if err := tx.Where("run_id = ? AND position = ? AND id <> ? AND status = ?",
+			chosen.RunID, chosen.Position, chosen.ID, models.AIDraftStatusPending).
+			Find(&family).Error; err != nil {
+			return err
+		}
+		metaJSON := fmt.Sprintf(`{"chosen_id":%q}`, chosen.ID)
+		for _, d := range family {
+			res := tx.Model(&models.AIGeneratedDraft{}).
+				Where("id = ? AND status = ?", d.ID, models.AIDraftStatusPending).
+				Update("status", models.AIDraftStatusSuperseded)
+			if res.Error != nil {
+				return res.Error
+			}
+			if res.RowsAffected == 0 {
+				continue // lost a race to accept/reject — leave it be
+			}
+			supersededIDs = append(supersededIDs, d.ID)
+			if err := createGenerationEventTx(tx, &models.AIGenerationEvent{
+				RunID: chosen.RunID, DraftID: &d.ID,
+				EventType: models.AIGenEventSuperseded, ActorID: actorID,
+				MetadataJSON: metaJSON,
+			}); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return &chosen, supersededIDs, nil
+}
+
+// UpdateDraftQuality replaces a pending draft's quality findings (critic pass).
+func (s *Store) UpdateDraftQuality(draftID, qualityJSON string) error {
+	return s.db.Model(&models.AIGeneratedDraft{}).
+		Where("id = ? AND status = ?", draftID, models.AIDraftStatusPending).
+		Update("quality_json", qualityJSON).Error
+}
+
+// AppendGenerationEvent appends one lifecycle event outside a larger
+// transaction (critic pass, cancellation stamps).
+func (s *Store) AppendGenerationEvent(ev *models.AIGenerationEvent) error {
+	return createGenerationEventTx(s.db, ev)
+}

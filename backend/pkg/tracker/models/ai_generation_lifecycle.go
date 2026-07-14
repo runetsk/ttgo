@@ -31,6 +31,7 @@ const (
 	AIGenEventRejected    = "rejected"
 	AIGenEventAccepted    = "accepted"
 	AIGenEventRestored    = "restored"
+	AIGenEventSuperseded  = "superseded"
 )
 
 // AIRejectionReasons is the structured rejection taxonomy.
@@ -120,6 +121,7 @@ type AIGeneratedDraft struct {
 	Edited         bool   `json:"edited" gorm:"default:false"`
 
 	AcceptedTestCaseID *string `json:"accepted_test_case_id,omitempty"`
+	ParentDraftID      *string `json:"parent_draft_id,omitempty" gorm:"index"`
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -186,6 +188,7 @@ type AIGeneratedDraftResponse struct {
 	Quality            json.RawMessage `json:"quality,omitempty"`
 	Duplicates         json.RawMessage `json:"duplicates,omitempty"`
 	Original           *DraftContent   `json:"original,omitempty"`
+	ParentDraftID      *string         `json:"parent_draft_id,omitempty"`
 	Edited             bool            `json:"edited"`
 	AcceptedTestCaseID *string         `json:"accepted_test_case_id,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
@@ -203,7 +206,8 @@ func (d *AIGeneratedDraft) ToResponse() (*AIGeneratedDraftResponse, error) {
 		Name: c.Name, Category: c.Category, Description: c.Description,
 		SourceRefs: c.SourceRefs, Steps: c.Steps,
 		Status: d.Status, Edited: d.Edited, AcceptedTestCaseID: d.AcceptedTestCaseID,
-		CreatedAt: d.CreatedAt, UpdatedAt: d.UpdatedAt,
+		ParentDraftID: d.ParentDraftID,
+		CreatedAt:     d.CreatedAt, UpdatedAt: d.UpdatedAt,
 	}
 	if d.ValidationJSON != "" && d.ValidationJSON != "null" && d.ValidationJSON != "[]" {
 		resp.Findings = json.RawMessage(d.ValidationJSON)

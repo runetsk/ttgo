@@ -530,3 +530,103 @@ func TestDraftQualityAndDuplicatesRoundTrip(t *testing.T) {
 	assert.Equal(t, `[]`, fresh.DuplicatesJSON)
 	_ = run
 }
+
+func TestCreateDraftAlternative(t *testing.T) {
+	s := newTestStore(t)
+	run, original := seedRunWithDraft(t, s)
+
+	alt, err := s.CreateDraftAlternative(original.ID, models.DraftContent{
+		Name: "Sharper name", Category: "Functional", Description: "d2",
+		SourceRefs: []string{"AC-1"},
+		Steps:      []models.GeneratedStep{{Action: "do precisely", ExpectedResult: "observed precisely"}},
+	}, `[]`, `[]`, `[]`, RegenMeta{
+		Instruction: "make it sharper", Action: "make_more_specific",
+		PromptTokens: 11, CompletionTokens: 22, DurationMs: 333,
+	}, nil)
+	require.NoError(t, err)
+
+	assert.Equal(t, run.ID, alt.RunID)
+	assert.Equal(t, original.Position, alt.Position)
+	assert.Equal(t, original.Version+1, alt.Version)
+	require.NotNil(t, alt.ParentDraftID)
+	assert.Equal(t, original.ID, *alt.ParentDraftID)
+	assert.Equal(t, models.AIDraftStatusPending, alt.Status)
+	assert.NotEmpty(t, alt.OriginalJSON, "alternative snapshots its own as-generated content")
+
+	// Original is untouched (still pending) — alternatives never replace.
+	orig, err := s.GetGenerationRun(run.ID)
+	require.NoError(t, err)
+	_ = orig
+	events, err := s.ListGenerationEvents(run.ID)
+	require.NoError(t, err)
+	last := events[len(events)-1]
+	assert.Equal(t, models.AIGenEventRegenerated, last.EventType)
+	require.NotNil(t, last.DraftID)
+	assert.Equal(t, original.ID, *last.DraftID)
+	assert.Contains(t, last.MetadataJSON, `"alternative_id":"`+alt.ID+`"`)
+	assert.Contains(t, last.MetadataJSON, `"prompt_tokens":11`)
+	assert.Contains(t, last.MetadataJSON, `"action":"make_more_specific"`)
+
+	// Rejected originals cannot be regenerated.
+	_, err = s.RejectGenerationDraft(alt.ID, "duplicate", "", nil)
+	require.NoError(t, err)
+	_, err = s.CreateDraftAlternative(alt.ID, models.DraftContent{Name: "n", Steps: []models.GeneratedStep{{Action: "a", ExpectedResult: "e"}}}, `[]`, `[]`, `[]`, RegenMeta{}, nil)
+	assert.ErrorIs(t, err, ErrDraftNotPending)
+}
+
+func TestChooseDraftVersion(t *testing.T) {
+	s := newTestStore(t)
+	run, original := seedRunWithDraft(t, s)
+	alt, err := s.CreateDraftAlternative(original.ID, models.DraftContent{
+		Name: "Alt", Category: "Functional", Description: "d",
+		Steps: []models.GeneratedStep{{Action: "a2", ExpectedResult: "e2"}},
+	}, `[]`, `[]`, `[]`, RegenMeta{}, nil)
+	require.NoError(t, err)
+
+	chosen, superseded, err := s.ChooseDraftVersion(alt.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, alt.ID, chosen.ID)
+	assert.Equal(t, models.AIDraftStatusPending, chosen.Status)
+	assert.Equal(t, []string{original.ID}, superseded)
+
+	run2, err := s.GetGenerationRunWithDrafts(run.ID)
+	require.NoError(t, err)
+	byID := map[string]*models.AIGeneratedDraft{}
+	for _, d := range run2.Drafts {
+		byID[d.ID] = d
+	}
+	assert.Equal(t, models.AIDraftStatusSuperseded, byID[original.ID].Status)
+
+	events, err := s.ListGenerationEvents(run.ID)
+	require.NoError(t, err)
+	last := events[len(events)-1]
+	assert.Equal(t, models.AIGenEventSuperseded, last.EventType)
+	assert.Equal(t, original.ID, *last.DraftID)
+	assert.Contains(t, last.MetadataJSON, alt.ID)
+
+	// Choosing again is a no-op (family has no other pending member).
+	_, superseded, err = s.ChooseDraftVersion(alt.ID, nil)
+	require.NoError(t, err)
+	assert.Empty(t, superseded)
+
+	// A non-pending draft cannot be chosen.
+	_, _, err = s.ChooseDraftVersion(original.ID, nil)
+	assert.ErrorIs(t, err, ErrDraftNotPending)
+}
+
+func TestUpdateDraftQualityAndAppendEvent(t *testing.T) {
+	s := newTestStore(t)
+	run, draft := seedRunWithDraft(t, s)
+
+	require.NoError(t, s.UpdateDraftQuality(draft.ID, `[{"key":"critic","label":"LLM critic","findings":[]}]`))
+	got, err := s.GetGenerationRunWithDrafts(run.ID)
+	require.NoError(t, err)
+	assert.Contains(t, got.Drafts[0].QualityJSON, `"critic"`)
+
+	require.NoError(t, s.AppendGenerationEvent(&models.AIGenerationEvent{
+		RunID: run.ID, EventType: models.AIGenEventValidated, MetadataJSON: `{"critic":true}`,
+	}))
+	events, err := s.ListGenerationEvents(run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, `{"critic":true}`, events[len(events)-1].MetadataJSON)
+}
