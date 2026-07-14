@@ -301,6 +301,7 @@ func TestProviderPricingRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
 	require.NotNil(t, created.PromptPricePerMTok)
 	assert.Equal(t, 2.5, *created.PromptPricePerMTok)
+	assert.Equal(t, 10.0, *created.CompletionPricePerMTok)
 
 	// Clearing via PUT with nulls.
 	rr = doRequest(env, "PUT", "/api/settings/llm-providers/"+created.ID, map[string]interface{}{
@@ -309,8 +310,10 @@ func TestProviderPricingRoundTrip(t *testing.T) {
 	})
 	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
 	var updated struct {
-		PromptPricePerMTok *float64 `json:"prompt_price_per_mtok"`
+		PromptPricePerMTok     *float64 `json:"prompt_price_per_mtok"`
+		CompletionPricePerMTok *float64 `json:"completion_price_per_mtok"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &updated))
 	assert.Nil(t, updated.PromptPricePerMTok)
+	assert.Nil(t, updated.CompletionPricePerMTok)
 }
