@@ -10,6 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeLLMCapture records the last OpenAI-compatible chat request the fake
@@ -279,4 +282,35 @@ func TestGenerateTests_RequirementNotFound(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status: %d %s", rr.Code, rr.Body.String())
 	}
+}
+
+func TestProviderPricingRoundTrip(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	rr := doRequest(env, "POST", "/api/settings/llm-providers", map[string]interface{}{
+		"label": "Priced", "provider_type": "openai", "model_name": "gpt-test",
+		"api_key": "sk-test", "prompt_price_per_mtok": 2.5, "completion_price_per_mtok": 10.0,
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var created struct {
+		ID                     string   `json:"id"`
+		PromptPricePerMTok     *float64 `json:"prompt_price_per_mtok"`
+		CompletionPricePerMTok *float64 `json:"completion_price_per_mtok"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
+	require.NotNil(t, created.PromptPricePerMTok)
+	assert.Equal(t, 2.5, *created.PromptPricePerMTok)
+
+	// Clearing via PUT with nulls.
+	rr = doRequest(env, "PUT", "/api/settings/llm-providers/"+created.ID, map[string]interface{}{
+		"label": "Priced", "provider_type": "openai", "model_name": "gpt-test",
+		"prompt_price_per_mtok": nil, "completion_price_per_mtok": nil,
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var updated struct {
+		PromptPricePerMTok *float64 `json:"prompt_price_per_mtok"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &updated))
+	assert.Nil(t, updated.PromptPricePerMTok)
 }

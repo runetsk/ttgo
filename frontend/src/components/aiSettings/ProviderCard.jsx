@@ -42,6 +42,12 @@ export default function ProviderCard({ provider, isAdmin, testingId, testResult,
                             )}
                         </div>
 
+                        {(provider.prompt_price_per_mtok != null || provider.completion_price_per_mtok != null) && (
+                            <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)' }}>
+                                ${provider.prompt_price_per_mtok ?? '–'} / ${provider.completion_price_per_mtok ?? '–'} per 1M tok
+                            </div>
+                        )}
+
                         {/* Test result */}
                         {testResult && (
                             <div style={{

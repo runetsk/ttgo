@@ -18,9 +18,13 @@ type LLMProviderConfig struct {
 	// Auto-failure-analysis opt-in. When false, the auto-on-completion hook will
 	// NOT send prompts to this provider even if it is the default provider.
 	// Defaults to false on existing rows for safe data-transmission behavior.
-	AllowAutoFailureAnalysis bool      `json:"allow_auto_failure_analysis" gorm:"default:false;not null"`
-	CreatedAt                time.Time `json:"created_at"`
-	UpdatedAt                time.Time `json:"updated_at"`
+	AllowAutoFailureAnalysis bool `json:"allow_auto_failure_analysis" gorm:"default:false;not null"`
+	// Optional per-million-token prices (USD) for configured-cost estimation.
+	// nil = unconfigured; cost reporting stays empty for this provider.
+	PromptPricePerMTok     *float64  `json:"prompt_price_per_mtok"     gorm:"column:prompt_price_per_mtok;default:null"`
+	CompletionPricePerMTok *float64  `json:"completion_price_per_mtok" gorm:"column:completion_price_per_mtok;default:null"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // LLMProviderConfigResponse is the safe, serialisable view of LLMProviderConfig.
@@ -36,6 +40,8 @@ type LLMProviderConfigResponse struct {
 	IsDefault                bool      `json:"is_default"`
 	Enabled                  bool      `json:"enabled"`
 	AllowAutoFailureAnalysis bool      `json:"allow_auto_failure_analysis"`
+	PromptPricePerMTok       *float64  `json:"prompt_price_per_mtok"`
+	CompletionPricePerMTok   *float64  `json:"completion_price_per_mtok"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`
 }
@@ -59,6 +65,8 @@ func (c *LLMProviderConfig) MaskedConfig() LLMProviderConfigResponse {
 		IsDefault:                c.IsDefault,
 		Enabled:                  c.Enabled,
 		AllowAutoFailureAnalysis: c.AllowAutoFailureAnalysis,
+		PromptPricePerMTok:       c.PromptPricePerMTok,
+		CompletionPricePerMTok:   c.CompletionPricePerMTok,
 		CreatedAt:                c.CreatedAt,
 		UpdatedAt:                c.UpdatedAt,
 	}

@@ -19,6 +19,8 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
     const [timeoutSeconds, setTimeoutSeconds] = useState(defaultTimeout);
     const [isDefault, setIsDefault]         = useState(provider?.is_default || false);
     const [enabled, setEnabled]             = useState(provider?.enabled !== false);
+    const [promptPrice, setPromptPrice]         = useState(provider?.prompt_price_per_mtok ?? '');
+    const [completionPrice, setCompletionPrice] = useState(provider?.completion_price_per_mtok ?? '');
     const [saving, setSaving]               = useState(false);
 
     const preset = presetMeta(presetKey);
@@ -46,6 +48,8 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                 api_key: apiKey, model_name: modelName,
                 timeout_seconds: parseInt(timeoutSeconds, 10) || 90,
                 is_default: isDefault, enabled,
+                prompt_price_per_mtok: promptPrice === '' ? null : parseFloat(promptPrice),
+                completion_price_per_mtok: completionPrice === '' ? null : parseFloat(completionPrice),
             };
             if (isEdit) {
                 await aiGeneration.updateProvider(provider.id, data);
@@ -201,6 +205,22 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                             value={apiKey}
                             onChange={e => setApiKey(e.target.value)}
                         />
+                    </div>
+
+                    {/* Pricing (optional, for cost analytics) */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        <div style={m.field}>
+                            <label style={m.fieldLabel}>Prompt $ / 1M tokens</label>
+                            <input className="modern-input" style={{ width: '100%' }} type="number"
+                                min="0" step="0.01" placeholder="unset"
+                                value={promptPrice} onChange={e => setPromptPrice(e.target.value)} />
+                        </div>
+                        <div style={m.field}>
+                            <label style={m.fieldLabel}>Completion $ / 1M tokens</label>
+                            <input className="modern-input" style={{ width: '100%' }} type="number"
+                                min="0" step="0.01" placeholder="unset"
+                                value={completionPrice} onChange={e => setCompletionPrice(e.target.value)} />
+                        </div>
                     </div>
 
                     {/* Toggles */}

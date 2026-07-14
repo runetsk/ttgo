@@ -37,14 +37,16 @@ func (h *Handler) ListProviders(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Label          string `json:"label"`
-		ProviderType   string `json:"provider_type"`
-		EndpointURL    string `json:"endpoint_url"`
-		APIKey         string `json:"api_key"`
-		ModelName      string `json:"model_name"`
-		TimeoutSeconds int    `json:"timeout_seconds"`
-		IsDefault      bool   `json:"is_default"`
-		Enabled        *bool  `json:"enabled"`
+		Label                  string   `json:"label"`
+		ProviderType           string   `json:"provider_type"`
+		EndpointURL            string   `json:"endpoint_url"`
+		APIKey                 string   `json:"api_key"`
+		ModelName              string   `json:"model_name"`
+		TimeoutSeconds         int      `json:"timeout_seconds"`
+		IsDefault              bool     `json:"is_default"`
+		Enabled                *bool    `json:"enabled"`
+		PromptPricePerMTok     *float64 `json:"prompt_price_per_mtok"`
+		CompletionPricePerMTok *float64 `json:"completion_price_per_mtok"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -70,14 +72,16 @@ func (h *Handler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 		enabled = *req.Enabled
 	}
 	cfg := &models.LLMProviderConfig{
-		Label:          req.Label,
-		ProviderType:   req.ProviderType,
-		EndpointURL:    req.EndpointURL,
-		APIKey:         req.APIKey,
-		ModelName:      req.ModelName,
-		TimeoutSeconds: timeout,
-		IsDefault:      req.IsDefault,
-		Enabled:        enabled,
+		Label:                  req.Label,
+		ProviderType:           req.ProviderType,
+		EndpointURL:            req.EndpointURL,
+		APIKey:                 req.APIKey,
+		ModelName:              req.ModelName,
+		TimeoutSeconds:         timeout,
+		IsDefault:              req.IsDefault,
+		Enabled:                enabled,
+		PromptPricePerMTok:     req.PromptPricePerMTok,
+		CompletionPricePerMTok: req.CompletionPricePerMTok,
 	}
 	if err := h.store.CreateProviderConfig(cfg); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
@@ -99,14 +103,16 @@ func (h *Handler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var req struct {
-		Label          string `json:"label"`
-		ProviderType   string `json:"provider_type"`
-		EndpointURL    string `json:"endpoint_url"`
-		APIKey         string `json:"api_key"`
-		ModelName      string `json:"model_name"`
-		TimeoutSeconds int    `json:"timeout_seconds"`
-		IsDefault      bool   `json:"is_default"`
-		Enabled        *bool  `json:"enabled"`
+		Label                  string   `json:"label"`
+		ProviderType           string   `json:"provider_type"`
+		EndpointURL            string   `json:"endpoint_url"`
+		APIKey                 string   `json:"api_key"`
+		ModelName              string   `json:"model_name"`
+		TimeoutSeconds         int      `json:"timeout_seconds"`
+		IsDefault              bool     `json:"is_default"`
+		Enabled                *bool    `json:"enabled"`
+		PromptPricePerMTok     *float64 `json:"prompt_price_per_mtok"`
+		CompletionPricePerMTok *float64 `json:"completion_price_per_mtok"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -117,11 +123,13 @@ func (h *Handler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updates := map[string]interface{}{
-		"label":         req.Label,
-		"provider_type": req.ProviderType,
-		"endpoint_url":  req.EndpointURL,
-		"model_name":    req.ModelName,
-		"is_default":    req.IsDefault,
+		"label":                     req.Label,
+		"provider_type":             req.ProviderType,
+		"endpoint_url":              req.EndpointURL,
+		"model_name":                req.ModelName,
+		"is_default":                req.IsDefault,
+		"prompt_price_per_mtok":     req.PromptPricePerMTok,
+		"completion_price_per_mtok": req.CompletionPricePerMTok,
 	}
 	if req.TimeoutSeconds > 0 {
 		updates["timeout_seconds"] = req.TimeoutSeconds
