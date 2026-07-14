@@ -121,43 +121,73 @@ func httpStatusForCategory(category llm.ErrorCategory) int {
 	}
 }
 
-// writeExistingRun answers an idempotency-key replay. The key is scoped to the
-// requesting requirement: reusing it for a different requirement is a conflict,
-// not a silent replay of the unrelated run. Only a completed run replays its
-// stored result (200); a failed run replays its original failure status; a
-// cancelled or still-in-flight run conflicts (409).
-func (h *Handler) writeExistingRun(w http.ResponseWriter, run *models.AIGenerationRun, expectedRequirementID string) {
+// generationOutcome is executeGeneration's result: an HTTP status, the exact
+// payload CreateGeneration writes today, plus typed accessors the legacy
+// GenerateTests adapter needs (Task 7: ai-generation-improvements stage 6).
+type generationOutcome struct {
+	status   int
+	payload  map[string]interface{}
+	run      *models.AIGenerationRun
+	drafts   []*models.AIGeneratedDraftResponse
+	provider *models.LLMProviderConfig
+}
+
+// errorPayload mirrors httpx.Error's status→payload mapping (httpx/response.go:20)
+// for flows that return a response instead of writing one: ≥500 is logged and
+// genericized for the client; anything else echoes the error text.
+func errorPayload(status int, err error) map[string]interface{} {
+	if status >= 500 {
+		slog.Error("server error", "status", status, "error", err)
+		return map[string]interface{}{"error": "internal server error"}
+	}
+	return map[string]interface{}{"error": err.Error()}
+}
+
+// existingRunOutcome answers an idempotency-key replay. The key is scoped to
+// the requesting requirement: reusing it for a different requirement is a
+// conflict, not a silent replay of the unrelated run. Only a completed run
+// replays its stored result (200); a failed run replays its original failure
+// status; a cancelled or still-in-flight run conflicts (409). Payload-returning
+// counterpart of the former writeExistingRun, shared by CreateGeneration (via
+// executeGeneration) and the legacy GenerateTests adapter.
+func (h *Handler) existingRunOutcome(run *models.AIGenerationRun, expectedRequirementID string) *generationOutcome {
 	if run.RequirementID != expectedRequirementID {
-		httpx.JSON(w, http.StatusConflict, map[string]string{
+		return &generationOutcome{status: http.StatusConflict, run: run, payload: map[string]interface{}{
 			"error":  "this idempotency key was already used for a different requirement",
 			"run_id": run.ID,
-		})
-		return
+		}}
 	}
 	switch run.Status {
 	case models.AIGenerationRunStatusCompleted:
 		out, err := h.runResponse(run)
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, err)
-			return
+			return &generationOutcome{status: http.StatusInternalServerError, run: run, payload: errorPayload(http.StatusInternalServerError, err)}
 		}
-		httpx.JSON(w, http.StatusOK, out)
+		outcome := &generationOutcome{status: http.StatusOK, run: run, payload: out}
+		if dr, ok := out["drafts"].([]*models.AIGeneratedDraftResponse); ok {
+			outcome.drafts = dr
+		}
+		return outcome
 	case models.AIGenerationRunStatusFailed:
-		httpx.JSON(w, httpStatusForCategory(llm.ErrorCategory(run.ErrorCategory)), map[string]string{
-			"error":    run.ErrorMessage,
-			"category": run.ErrorCategory,
-			"run_id":   run.ID,
-		})
+		return &generationOutcome{
+			status: httpStatusForCategory(llm.ErrorCategory(run.ErrorCategory)),
+			run:    run,
+			payload: map[string]interface{}{
+				"error":    run.ErrorMessage,
+				"category": run.ErrorCategory,
+				"run_id":   run.ID,
+			},
+		}
 	case models.AIGenerationRunStatusCancelled:
-		httpx.JSON(w, http.StatusConflict, map[string]string{
+		return &generationOutcome{status: http.StatusConflict, run: run, payload: map[string]interface{}{
 			"error":  "this generation was cancelled; start a new one",
 			"run_id": run.ID,
-		})
+		}}
 	default: // pending / running
-		httpx.JSON(w, http.StatusConflict, map[string]string{
+		return &generationOutcome{status: http.StatusConflict, run: run, payload: map[string]interface{}{
 			"error":  "a generation with this idempotency key is already in progress",
 			"run_id": run.ID,
-		})
+		}}
 	}
 }
 
@@ -236,13 +266,22 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, err)
 		return
 	}
+	out := h.executeGeneration(r, req)
+	httpx.JSON(w, out.status, out.payload)
+}
+
+// executeGeneration runs the entire idempotent generation flow — idempotency
+// replay, prompt-plan + provider resolution, the LLM call(s) with retry/repair,
+// sanitization/validation/persistence of drafts, and the critic pass — and
+// returns the response instead of writing it, so CreateGeneration and the
+// legacy GenerateTests adapter (Task 7: ai-generation-improvements stage 6)
+// can share one implementation.
+func (h *Handler) executeGeneration(r *http.Request, req createGenerationRequest) *generationOutcome {
 	if req.RequirementID == "" {
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "requirement_id is required"})
-		return
+		return &generationOutcome{status: http.StatusBadRequest, payload: map[string]interface{}{"error": "requirement_id is required"}}
 	}
 	if len(req.AdditionalInstructions) > maxAdditionalInstructionsLen {
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "additional_instructions is too long"})
-		return
+		return &generationOutcome{status: http.StatusBadRequest, payload: map[string]interface{}{"error": "additional_instructions is too long"}}
 	}
 
 	// Idempotent replay fast-path: a key that already finished returns its
@@ -253,20 +292,17 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	if req.IdempotencyKey != "" {
 		existing, err := h.store.GetGenerationRunByKey(req.IdempotencyKey)
 		if err != nil {
-			httpx.Error(w, http.StatusInternalServerError, err)
-			return
+			return &generationOutcome{status: http.StatusInternalServerError, payload: errorPayload(http.StatusInternalServerError, err)}
 		}
 		if existing != nil {
-			h.writeExistingRun(w, existing, req.RequirementID)
-			return
+			return h.existingRunOutcome(existing, req.RequirementID)
 		}
 	}
 
 	// Resolve prompt plan (validates requirement + coverage level too).
 	plan, err := h.buildPromptPlan(req.RequirementID, req.CoverageLevel, req.DetailLevel, req.AdditionalInstructions)
 	if err != nil {
-		writePromptPlanError(w, err)
-		return
+		return planErrorOutcome(err)
 	}
 	providerCfg, err := h.resolveProviderConfig(req.ProviderID)
 	if err != nil {
@@ -275,15 +311,12 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		// server fault (500). resolveProviderConfig conflates both, so branch
 		// on whether the caller named a provider.
 		if req.ProviderID != "" {
-			httpx.Error(w, http.StatusBadRequest, err)
-		} else {
-			httpx.Error(w, http.StatusInternalServerError, err)
+			return &generationOutcome{status: http.StatusBadRequest, payload: errorPayload(http.StatusBadRequest, err)}
 		}
-		return
+		return &generationOutcome{status: http.StatusInternalServerError, payload: errorPayload(http.StatusInternalServerError, err)}
 	}
 	if providerCfg == nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "no enabled LLM provider configured"})
-		return
+		return &generationOutcome{status: http.StatusBadRequest, payload: map[string]interface{}{"error": "no enabled LLM provider configured"}}
 	}
 
 	user := authctx.UserFromRequest(r)
@@ -320,22 +353,18 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		run.ParentRunID = &req.ParentRunID
 	}
 	if warn := h.checkBudget(providerCfg, len(plan.Prompt), plan.MaxTokens, req.AcknowledgeBudget); warn != nil {
-		httpx.JSON(w, http.StatusConflict, warn)
-		return
+		return &generationOutcome{status: http.StatusConflict, payload: warn}
 	}
 	run, created, err := h.store.CreateGenerationRun(run)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
+		return &generationOutcome{status: http.StatusInternalServerError, payload: errorPayload(http.StatusInternalServerError, err)}
 	}
 	if !created {
 		// Lost a same-key race between the fast-path check and the insert.
-		h.writeExistingRun(w, run, req.RequirementID)
-		return
+		return h.existingRunOutcome(run, req.RequirementID)
 	}
 	if err := h.store.MarkGenerationRunRunning(run.ID); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
+		return &generationOutcome{status: http.StatusInternalServerError, payload: errorPayload(http.StatusInternalServerError, err)}
 	}
 	// MarkGenerationRunRunning only touches the DB row (targeted column
 	// update); UpdateGenerationRun below does a full-row Save, so the
@@ -349,8 +378,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	provider, err := llm.NewProvider(providerCfg)
 	if err != nil {
 		h.failRun(run, models.AIGenerationRunStatusFailed, llm.ErrCatInternal, err.Error(), time.Now(), 0)
-		httpx.Error(w, http.StatusInternalServerError, fmt.Errorf("failed to initialize provider: %w", err))
-		return
+		return &generationOutcome{status: http.StatusInternalServerError, payload: errorPayload(http.StatusInternalServerError, fmt.Errorf("failed to initialize provider: %w", err))}
 	}
 	timeout := time.Duration(providerCfg.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -391,8 +419,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	h.auditGeneration(r, run, providerCfg, plan.CoverageLevel, start, err, ctx)
 	if err != nil {
-		h.writeGenerationFailure(w, r, run, err, start, totalRetries, providerCfg)
-		return
+		return h.generationFailureOutcome(r, run, err, start, totalRetries, providerCfg)
 	}
 
 	drafts, parseErr := parseLLMResponse(chatResp.Content)
@@ -421,10 +448,9 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	if parseErr != nil {
 		msg := "LLM returned an unexpected response format after retrying. Try a lower coverage level, a different model, or a longer provider timeout."
 		h.failRun(run, models.AIGenerationRunStatusFailed, llm.ErrCatParse, parseErr.Error(), start, totalRetries)
-		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{
+		return &generationOutcome{status: http.StatusUnprocessableEntity, run: run, payload: map[string]interface{}{
 			"error": msg, "category": string(llm.ErrCatParse), "run_id": run.ID,
-		})
-		return
+		}}
 	}
 
 	// Sanitize + validate + persist drafts.
@@ -449,8 +475,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		originalJSON, _ := json.Marshal(content)
 		row := &models.AIGeneratedDraft{ID: uuid.New().String(), OriginalJSON: string(originalJSON), ValidationJSON: string(findingsJSON)}
 		if err := row.ApplyContent(content); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, err)
-			return
+			return &generationOutcome{status: http.StatusInternalServerError, run: run, payload: errorPayload(http.StatusInternalServerError, err)}
 		}
 		rows[i] = row
 	}
@@ -472,8 +497,7 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	actor := userID
 	if err := h.store.CreateGenerationDrafts(run.ID, actor, rows, invalid); err != nil {
 		h.failRun(run, models.AIGenerationRunStatusFailed, llm.ErrCatInternal, err.Error(), start, totalRetries)
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
+		return &generationOutcome{status: http.StatusInternalServerError, run: run, payload: errorPayload(http.StatusInternalServerError, err)}
 	}
 
 	criticWarning := ""
@@ -509,15 +533,13 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		run.CoverageJSON = string(covJSON)
 	}
 	if err := h.store.UpdateGenerationRun(run); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
+		return &generationOutcome{status: http.StatusInternalServerError, run: run, payload: errorPayload(http.StatusInternalServerError, err)}
 	}
 	run.Drafts = rows
 
 	out, err := h.runResponse(run)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
+		return &generationOutcome{status: http.StatusInternalServerError, run: run, payload: errorPayload(http.StatusInternalServerError, err)}
 	}
 	if plan.TemplateWarning != "" {
 		out["template_warning"] = plan.TemplateWarning
@@ -525,7 +547,11 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	if criticWarning != "" {
 		out["critic_warning"] = criticWarning
 	}
-	httpx.JSON(w, http.StatusCreated, out)
+	outcome := &generationOutcome{status: http.StatusCreated, payload: out, run: run, provider: providerCfg}
+	if dr, ok := out["drafts"].([]*models.AIGeneratedDraftResponse); ok {
+		outcome.drafts = dr
+	}
+	return outcome
 }
 
 // recordAttempt persists one provider round-trip, best-effort. It must never
@@ -596,9 +622,12 @@ func (h *Handler) auditGeneration(r *http.Request, run *models.AIGenerationRun, 
 	})
 }
 
-// writeGenerationFailure finishes the run in a terminal state and maps the
-// error category to an HTTP status with an actionable message.
-func (h *Handler) writeGenerationFailure(w http.ResponseWriter, r *http.Request, run *models.AIGenerationRun, err error, start time.Time, retries int, cfg *models.LLMProviderConfig) {
+// generationFailureOutcome finishes the run in a terminal state and maps the
+// error category to an HTTP status with an actionable message. Payload-
+// returning counterpart of the former writeGenerationFailure — still performs
+// every side effect (failRun + logging) exactly as before, just returns the
+// response instead of writing it.
+func (h *Handler) generationFailureOutcome(r *http.Request, run *models.AIGenerationRun, err error, start time.Time, retries int, cfg *models.LLMProviderConfig) *generationOutcome {
 	category := llm.Classify(err)
 	status := models.AIGenerationRunStatusFailed
 	if category == llm.ErrCatCancelled {
@@ -611,10 +640,9 @@ func (h *Handler) writeGenerationFailure(w http.ResponseWriter, r *http.Request,
 		// The canceller may be another session (cancel endpoint) — the
 		// original requester might still be connected. Writing to a gone
 		// client is a harmless no-op.
-		httpx.JSON(w, http.StatusConflict, map[string]string{
+		return &generationOutcome{status: http.StatusConflict, run: run, payload: map[string]interface{}{
 			"error": "generation cancelled", "category": string(llm.ErrCatCancelled), "run_id": run.ID,
-		})
-		return
+		}}
 	}
 	// Same category→status mapping a later idempotency replay uses, so the
 	// first-time failure and its replay always agree.
@@ -628,9 +656,9 @@ func (h *Handler) writeGenerationFailure(w http.ResponseWriter, r *http.Request,
 	case llm.ErrCatAuthentication, llm.ErrCatAuthorization:
 		msg = "the provider rejected the configured API key; check the provider settings"
 	}
-	httpx.JSON(w, httpStatus, map[string]string{
+	return &generationOutcome{status: httpStatus, run: run, payload: map[string]interface{}{
 		"error": msg, "category": string(category), "run_id": run.ID,
-	})
+	}}
 }
 
 // GetGeneration returns one run with its drafts and findings.

@@ -149,6 +149,20 @@ func writePromptPlanError(w http.ResponseWriter, err error) {
 	}
 }
 
+// planErrorOutcome is writePromptPlanError's payload-returning counterpart,
+// for executeGeneration's response-returning flow (it cannot write directly
+// to a http.ResponseWriter). Same sentinels, same statuses, same payloads.
+func planErrorOutcome(err error) *generationOutcome {
+	switch {
+	case errors.Is(err, errRequirementNotFound):
+		return &generationOutcome{status: http.StatusNotFound, payload: errorPayload(http.StatusNotFound, err)}
+	case errors.Is(err, errUnknownCoverageLevel):
+		return &generationOutcome{status: http.StatusBadRequest, payload: map[string]interface{}{"error": err.Error()}}
+	default:
+		return &generationOutcome{status: http.StatusInternalServerError, payload: errorPayload(http.StatusInternalServerError, err)}
+	}
+}
+
 // promptPlan is everything needed to issue (or preview) a generation request.
 type promptPlan struct {
 	Segments        []PromptSegment
