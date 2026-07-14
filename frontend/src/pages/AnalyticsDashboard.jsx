@@ -11,9 +11,11 @@ import {
     getAnalyticsPassingRate,
     getAnalyticsUniqueBugs,
     getAnalyticsActivity,
+    getAIGenerationReport,
 } from '../api';
 import AnalyticsFilters from '../components/analytics/AnalyticsFilters';
 import CollapsibleSection from '../components/analytics/CollapsibleSection';
+import AIGenerationPanel from '../components/analytics/AIGenerationPanel';
 import SummaryCards from '../components/analytics/SummaryCards';
 import PassingRateSummary from '../components/analytics/PassingRateSummary';
 import TrendChart from '../components/analytics/TrendChart';
@@ -65,6 +67,7 @@ export default function AnalyticsDashboard() {
     const [passingRate, setPassingRate] = useState(null);
     const [uniqueBugs, setUniqueBugs] = useState(null);
     const [activity, setActivity] = useState(null);
+    const [aiGenReport, setAiGenReport] = useState(null);
 
     // Loading/error states
     const [p1Loading, setP1Loading] = useState(true);
@@ -79,6 +82,7 @@ export default function AnalyticsDashboard() {
         passingRate: false,
         uniqueBugs: false,
         activity: false,
+        aiGen: false,
     });
 
     // AbortController ref for request cancellation (T025)
@@ -149,6 +153,11 @@ export default function AnalyticsDashboard() {
             case 'activity':
                 getAnalyticsActivity(params, signal)
                     .then(setActivity)
+                    .catch(handleErr);
+                break;
+            case 'aiGen':
+                getAIGenerationReport(params, signal)
+                    .then(setAiGenReport)
                     .catch(handleErr);
                 break;
         }
@@ -396,6 +405,25 @@ export default function AnalyticsDashboard() {
                     <ActivityPanel data={activity} />
                 ) : (
                     <div className="analytics-loading">Loading activity...</div>
+                )}
+            </CollapsibleSection>
+
+            {/* P3: AI Generation (collapsed, lazy) — Stage 6 cost analytics */}
+            <CollapsibleSection
+                title="AI Generation"
+                description="Run outcomes, acceptance vs. edit rates, rejection reasons, token/cost totals, and provider/model comparisons for AI-generated test cases in the selected date range."
+                defaultExpanded={false}
+                onFirstExpand={() => handleFirstExpand('aiGen')}
+            >
+                {lazyErrors.aiGen ? (
+                    <div className="analytics-empty">
+                        <div className="analytics-empty-text">Error: {lazyErrors.aiGen}</div>
+                        <button className="action-btn" onClick={() => fetchLazySection('aiGen', filters, abortRef.current?.signal)} type="button">Retry</button>
+                    </div>
+                ) : aiGenReport ? (
+                    <AIGenerationPanel report={aiGenReport} />
+                ) : (
+                    <div className="analytics-loading">Loading AI generation data...</div>
                 )}
             </CollapsibleSection>
         </div>

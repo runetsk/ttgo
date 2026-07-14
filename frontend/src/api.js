@@ -211,6 +211,8 @@ export const getAnalyticsActivity = (filters = {}, signal) =>
     api.get('/analytics/activity', { params: filters, signal }).then(res => res.data);
 export const getAnalyticsCompareRuns = (run1, run2, signal) =>
     api.get('/analytics/compare-runs', { params: { run1, run2 }, signal }).then(res => res.data);
+export const getAIGenerationReport = (params, signal) =>
+    api.get('/ai-generations/reports/summary', { params, signal }).then(res => res.data);
 
 // Run Folders
 export const getRunFolders = () => api.get('/run-folders').then(res => res.data);
