@@ -184,8 +184,11 @@ export function AIGenerationProvider({ children }) {
 
     // ── Persist run id across reloads (refresh recovery) ─────────────
     useEffect(() => {
-        if (runId) sessionStorage.setItem('ttgo_aigen_run_id', runId);
-        else sessionStorage.removeItem('ttgo_aigen_run_id');
+        // Only persist — never remove here. Removing on the null-on-mount pass
+        // would race the rehydrate effect and wipe the key before it's read.
+        // clearSession/switchRequirement remove it explicitly.
+        if (!runId) return;
+        try { sessionStorage.setItem('ttgo_aigen_run_id', runId); } catch { /* sessionStorage quota exceeded — non-critical, skip persistence */ }
     }, [runId]);
 
     // ── Eager-load folders & providers once authenticated ────────────
@@ -377,9 +380,9 @@ export function AIGenerationProvider({ children }) {
                 draft_ids: [draft.id],
                 group_by_category: groupByCategory,
             });
-            await refreshRun();
             toast.success(`"${draft.name}" accepted`);
             onAcceptedRef.current?.();
+            try { await refreshRun(); } catch { /* accept already succeeded server-side; refresh is best-effort */ }
             return result;
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to accept test case');
@@ -402,9 +405,9 @@ export function AIGenerationProvider({ children }) {
                 draft_ids: pending.map(d => d.id),
                 group_by_category: groupByCategory,
             });
-            await refreshRun();
             toast.success(`${pending.length} test case${pending.length !== 1 ? 's' : ''} accepted`);
             onAcceptedRef.current?.();
+            try { await refreshRun(); } catch { /* accept already succeeded server-side; refresh is best-effort */ }
             return result;
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to accept test cases');
@@ -422,9 +425,9 @@ export function AIGenerationProvider({ children }) {
                 draft_ids: draftsToAccept.map(d => d.id),
                 group_by_category: groupByCategory,
             });
-            await refreshRun();
             toast.success(`${draftsToAccept.length} test case${draftsToAccept.length !== 1 ? 's' : ''} accepted`);
             onAcceptedRef.current?.();
+            try { await refreshRun(); } catch { /* accept already succeeded server-side; refresh is best-effort */ }
             return result;
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to accept test cases');
