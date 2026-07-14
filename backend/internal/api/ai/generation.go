@@ -3,19 +3,22 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 	"ttgo/internal/api/authctx"
 	"ttgo/internal/api/httpx"
 	"ttgo/internal/safehttp"
+	"ttgo/pkg/tracker/aigen"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
-
-	"log/slog"
+	"ttgo/pkg/tracker/store"
 
 	"github.com/google/uuid"
+	"gorm.io/gorm"
 )
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -429,6 +432,30 @@ func (h *Handler) ResetParentTemplate(w http.ResponseWriter, r *http.Request) {
 // US2: Generate test cases from a requirement
 // ────────────────────────────────────────────────────────────────────────────
 
+// GenerateTests generates draft test cases from a requirement via the
+// configured LLM provider.
+//
+// Deprecated: use POST /ai-generations. This endpoint now delegates to the
+// same durable, idempotent generation lifecycle — the run is persisted and
+// each returned temp_id is the ID of a real, persisted draft — but its
+// request/response shape stays byte-identical for existing clients (spec: the
+// ttgo CLI, internal/cli/client/ai.go, depends on this contract).
+//
+// @Summary      Generate test cases from a requirement (deprecated)
+// @Description  Deprecated: use POST /ai-generations. Delegates to the durable generation lifecycle so runs are persisted; the legacy request/response shape is unchanged.
+// @Tags         ai-generations
+// @Deprecated
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string  true  "Requirement ID"
+// @Param        body  body  object  true  "provider_id, coverage_level, detail_level, additional_instructions"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
+// @Router       /requirements/{id}/generate-tests [post]
+// @Security     BearerAuth
 func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 	requirementID := r.PathValue("id")
 
@@ -443,182 +470,64 @@ func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve everything the prompt needs (shared with the preview endpoint).
-	plan, err := h.buildPromptPlan(requirementID, req.CoverageLevel, req.DetailLevel, req.AdditionalInstructions)
-	if err != nil {
-		writePromptPlanError(w, err)
-		return
-	}
-
-	// Resolve provider.
-	providerCfg, err := h.resolveProviderConfig(req.ProviderID)
-	if err != nil {
-		// resolveProviderConfig conflates two failure modes behind one error:
-		// an explicit provider_id that doesn't exist (client error), or the
-		// provider listing failing while resolving the default (server error).
-		// req.ProviderID tells us which one happened.
-		if req.ProviderID != "" {
-			httpx.Error(w, http.StatusBadRequest, err)
-		} else {
-			httpx.Error(w, http.StatusInternalServerError, err)
-		}
-		return
-	}
-	if providerCfg == nil {
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "no enabled LLM provider configured"})
-		return
-	}
-
-	// Call LLM.
-	provider, err := llm.NewProvider(providerCfg)
-	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, fmt.Errorf("failed to initialize provider: %w", err))
-		return
-	}
-
-	timeout := time.Duration(providerCfg.TimeoutSeconds) * time.Second
-	if timeout <= 0 {
-		timeout = 90 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), timeout)
-	defer cancel()
-
-	// ── Build the chat request ──
-	// A system message instructs the model to skip reasoning / <think> blocks
-	// and return JSON directly. This dramatically reduces wasted tokens for
-	// chain-of-thought models (DeepSeek-R1, QwQ, etc.) that otherwise spend
-	// their entire budget on reasoning and never emit the actual answer.
-	chatReq := llm.ChatRequest{
-		Model: providerCfg.ModelName,
-		Messages: []llm.ChatMessage{
-			{Role: "system", Content: generationSystemMessage},
-			{Role: "user", Content: plan.Prompt},
-		},
-		Temperature:    0.7,
-		MaxTokens:      plan.MaxTokens,
-		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
-	}
-
-	start := time.Now()
-	chatResp, err := provider.Chat(ctx, chatReq)
-
-	// Log audit event regardless of success/failure.
-	user := authctx.UserFromRequest(r)
-	userID := ""
-	if user != nil {
-		userID = user.ID
-	}
-	auditStatus := "success"
-	if err != nil {
-		auditStatus = "failure"
-		if ctx.Err() == context.DeadlineExceeded {
-			auditStatus = "timeout"
-		}
-	}
-	_ = h.store.CreateAuditLog(&models.AuditLog{
-		ID:         uuid.New().String(),
-		TestCaseID: "",
-		Action: fmt.Sprintf("ai_generation:requirement:%s:provider:%s:status:%s:coverage:%s:duration_ms:%d",
-			requirementID, providerCfg.ID, auditStatus, plan.CoverageLevel, time.Since(start).Milliseconds()),
-		UserID:    userID,
-		Timestamp: time.Now(),
+	// Delegated to the durable lifecycle (ai-generation-improvements stage 6):
+	// runs are persisted and idempotent; the legacy response shape is preserved.
+	out := h.executeGeneration(r, createGenerationRequest{
+		RequirementID:          requirementID,
+		ProviderID:             req.ProviderID,
+		CoverageLevel:          req.CoverageLevel,
+		DetailLevel:            req.DetailLevel,
+		AdditionalInstructions: req.AdditionalInstructions,
+		IdempotencyKey:         uuid.New().String(), // legacy calls are never replays
+		AcknowledgeBudget:      false,               // budget warnings surface as 409s
 	})
-
-	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			httpx.JSON(w, http.StatusGatewayTimeout, map[string]string{
-				"error": fmt.Sprintf("LLM request timed out after %d seconds", providerCfg.TimeoutSeconds),
-			})
-			return
-		}
-		slog.ErrorContext(r.Context(), "ai_generation: LLM call failed", "error", err)
-		httpx.Error(w, http.StatusBadGateway, fmt.Errorf("LLM generation failed: %w", err))
+	if out.status >= 400 {
+		httpx.JSON(w, out.status, out.payload) // {error, category?, run_id?} — supersets the legacy {error}
 		return
 	}
 
-	// Parse the JSON response from the LLM.
-	drafts, parseErr := parseLLMResponse(chatResp.Content)
-	retried := false
-
-	// ── Automatic retry on parse failure ──
-	// If the model returned unparseable output (e.g. all tokens spent on
-	// <think> reasoning), retry once with a stronger "JSON-only" instruction
-	// and lower temperature for more deterministic output.
-	if parseErr != nil && ctx.Err() == nil {
-		slog.WarnContext(r.Context(), "ai_generation: first attempt parse failed, retrying with JSON-only prompt", "error", parseErr)
-		retried = true
-
-		retryReq := llm.ChatRequest{
-			Model: providerCfg.ModelName,
-			Messages: []llm.ChatMessage{
-				{Role: "system", Content: "CRITICAL: Output ONLY a raw JSON object of the form " +
-					"{\"test_cases\": [...]}. No reasoning, no <think> tags, no markdown, no commentary. " +
-					"Your entire response must start with { and end with }."},
-				{Role: "user", Content: plan.Prompt},
-			},
-			Temperature:    0.3,
-			MaxTokens:      plan.MaxTokens,
-			ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
-		}
-
-		retryResp, retryErr := provider.Chat(ctx, retryReq)
-		if retryErr == nil {
-			retryDrafts, retryParseErr := parseLLMResponse(retryResp.Content)
-			if retryParseErr == nil {
-				slog.InfoContext(r.Context(), "ai_generation: retry succeeded", "drafts", len(retryDrafts))
-				drafts = retryDrafts
-				parseErr = nil
-				// Accumulate token usage across both attempts.
-				if chatResp.Usage != nil && retryResp.Usage != nil {
-					chatResp.Usage.PromptTokens += retryResp.Usage.PromptTokens
-					chatResp.Usage.CompletionTokens += retryResp.Usage.CompletionTokens
-					chatResp.Usage.TotalTokens += retryResp.Usage.TotalTokens
-				} else if retryResp.Usage != nil {
-					chatResp.Usage = retryResp.Usage
-				}
-				if retryResp.FinishReason != "" {
-					chatResp.FinishReason = retryResp.FinishReason
-				}
-			} else {
-				slog.WarnContext(r.Context(), "ai_generation: retry also failed to parse", "error", retryParseErr)
-			}
-		} else {
-			slog.WarnContext(r.Context(), "ai_generation: retry LLM call failed", "error", retryErr)
+	drafts := make([]models.GeneratedTestCase, len(out.drafts))
+	for i, d := range out.drafts {
+		drafts[i] = models.GeneratedTestCase{
+			TempID: d.ID, Name: d.Name, Category: d.Category,
+			Description: d.Description, SourceRefs: d.SourceRefs, Steps: d.Steps,
 		}
 	}
-
-	if parseErr != nil {
-		slog.WarnContext(r.Context(), "ai_generation: failed to parse LLM response", "error", parseErr, "raw", chatResp.Content)
-		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{
-			"error": "LLM returned an unexpected response format after 2 attempts. Try using a lower coverage level, a different model, or increasing the provider timeout.",
-		})
-		return
-	}
-
+	run := out.run
 	debug := map[string]interface{}{
-		"duration_ms":       time.Since(start).Milliseconds(),
-		"model":             chatResp.Model,
-		"finish_reason":     chatResp.FinishReason,
-		"max_tokens_budget": plan.MaxTokens,
-		"retried":           retried,
-		"provider_label":    providerCfg.Label,
-		"provider_type":     providerCfg.ProviderType,
-		"request_context":   plan.Prompt,
-		"template_type":     plan.TemplateType,
+		"duration_ms": run.DurationMs, "model": run.ModelName,
+		"finish_reason": run.FinishReason, "max_tokens_budget": run.MaxTokens,
+		"retried": run.RetryCount > 0, "provider_label": run.ProviderLabel,
+		"provider_type": run.ProviderType, "request_context": run.RequestContext,
+		"template_type": run.TemplateType,
 	}
-	if chatResp.Usage != nil {
-		debug["usage"] = chatResp.Usage
+	if run.TotalTokens > 0 {
+		debug["usage"] = map[string]int{
+			"prompt_tokens": run.PromptTokens, "completion_tokens": run.CompletionTokens,
+			"total_tokens": run.TotalTokens,
+		}
 	}
-
-	out := map[string]interface{}{
+	// out.provider is nil only on an idempotency-replay outcome produced
+	// before provider resolution (executeGeneration's fast path) — legacy
+	// calls always mint a fresh uuid key above so that path is unreachable
+	// here, but guard rather than assume: fall back to the run's own provider.
+	var providerResp models.LLMProviderConfigResponse
+	if out.provider != nil {
+		providerResp = out.provider.MaskedConfig()
+	} else if run.ProviderID != nil {
+		if cfg, cerr := h.resolveProviderConfig(*run.ProviderID); cerr == nil && cfg != nil {
+			providerResp = cfg.MaskedConfig()
+		}
+	}
+	resp := map[string]interface{}{
 		"drafts":   drafts,
-		"provider": providerCfg.MaskedConfig(),
+		"provider": providerResp,
 		"debug":    debug,
 	}
-	if plan.TemplateWarning != "" {
-		out["template_warning"] = plan.TemplateWarning
+	if tw, ok := out.payload["template_warning"]; ok {
+		resp["template_warning"] = tw
 	}
-	httpx.JSON(w, http.StatusOK, out)
+	httpx.JSON(w, http.StatusOK, resp)
 }
 
 // resolveProviderConfig returns the requested provider, or the default enabled
@@ -1013,6 +922,34 @@ Return ONLY a valid JSON object — no markdown, no explanation.
 // US3: Accept generated test cases
 // ────────────────────────────────────────────────────────────────────────────
 
+// AcceptGeneratedTests materializes selected generated test-case drafts into
+// real test cases linked to the requirement.
+//
+// Deprecated: use POST /ai-generations/{id}/accept, which operates on durable
+// draft records with idempotent replay. When every submitted temp_id is a
+// persisted draft of one durable run linked to this requirement (i.e. the
+// client round-tripped a response from the delegated GenerateTests), this
+// endpoint completes that lifecycle — saving any client-side edits, then
+// accepting atomically — instead of materializing orphaned test cases with no
+// draft trail. Otherwise it falls back to transient materialization, which is
+// now atomic (spec: fixes the historic bug where one bad test case in a batch
+// left the earlier ones already created).
+//
+// @Summary      Accept generated test cases (deprecated)
+// @Description  Deprecated: use POST /ai-generations/{id}/accept. Completes the durable lifecycle when the temp_ids round-trip a delegated run, else atomically materializes transient drafts.
+// @Tags         ai-generations
+// @Deprecated
+// @Accept       json
+// @Produce      json
+// @Param        id    path  string  true  "Requirement ID"
+// @Param        body  body  object  true  "folder_id, tests, group_by_category"
+// @Success      201  {object}  map[string]interface{}
+// @Failure      400  {object}  map[string]string
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
+// @Router       /requirements/{id}/accept-generated-tests [post]
+// @Security     BearerAuth
 func (h *Handler) AcceptGeneratedTests(w http.ResponseWriter, r *http.Request) {
 	requirementID := r.PathValue("id")
 
@@ -1040,60 +977,98 @@ func (h *Handler) AcceptGeneratedTests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// When grouping by category, cache resolved subfolder IDs so we only
-	// create each subfolder once per request.
-	subfolderCache := map[string]string{} // category → folder ID
-
-	createdIDs := make([]string, 0, len(req.Tests))
-	for _, draft := range req.Tests {
-		targetFolderID := req.FolderID
-
-		// Resolve subfolder when grouping is enabled and the test has a category.
-		if req.GroupByCategory {
-			cat := strings.TrimSpace(draft.Category)
-			if cat != "" {
-				if cached, ok := subfolderCache[cat]; ok {
-					targetFolderID = cached
-				} else {
-					sub, err := h.store.FindOrCreateSubfolder(req.FolderID, cat)
-					if err != nil {
-						httpx.Error(w, http.StatusInternalServerError, fmt.Errorf("failed to create subfolder %q: %w", cat, err))
-						return
-					}
-					subfolderCache[cat] = sub.ID
-					targetFolderID = sub.ID
+	// Stage 6: when temp_ids identify persisted drafts of ONE run linked to
+	// this requirement (i.e. the client round-tripped a delegated generate
+	// response), complete the lifecycle: save edits, then accept atomically.
+	if runID, draftByID := h.matchLifecycleDrafts(requirementID, req.Tests); runID != "" {
+		var actorID *string
+		if u := authctx.UserFromRequest(r); u != nil {
+			actorID = &u.ID
+		}
+		ids := make([]string, 0, len(req.Tests))
+		for _, tcase := range req.Tests {
+			d := draftByID[tcase.TempID]
+			ids = append(ids, d.ID)
+			content := models.DraftContent{
+				Name: tcase.Name, Category: tcase.Category, Description: tcase.Description,
+				SourceRefs: tcase.SourceRefs, Steps: tcase.Steps,
+			}
+			if stored, err := d.Content(); err == nil && !reflect.DeepEqual(stored, content) {
+				findings := aigen.ValidateDraft(tcase)
+				vb, _ := json.Marshal(findings)
+				if _, err := h.store.SaveDraftEdit(d.ID, content, string(vb), "", "", actorID); err != nil {
+					httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+					return
 				}
 			}
 		}
-
-		steps := make([]*models.TestStep, len(draft.Steps))
-		for i, st := range draft.Steps {
-			steps[i] = &models.TestStep{
-				Action:         st.Action,
-				ExpectedResult: st.ExpectedResult,
-				OrderIndex:     i,
-			}
-		}
-		tc := &models.TestCase{
-			FolderID:    targetFolderID,
-			Name:        draft.Name,
-			Description: draft.Description,
-			Steps:       steps,
-		}
-		if err := h.store.CreateTestCase(tc); err != nil {
-			httpx.Error(w, http.StatusInternalServerError, fmt.Errorf("failed to create test case %q: %w", draft.Name, err))
+		result, err := h.store.AcceptGenerationDrafts(runID, ids, req.FolderID, req.GroupByCategory, actorID)
+		if err != nil {
+			h.writeLegacyAcceptError(w, err)
 			return
 		}
-		// Link to requirement.
-		if _, err := h.store.CreateLink(requirementID, tc.ID); err != nil {
-			slog.WarnContext(r.Context(), "ai_generation: failed to link test case to requirement", "test_case_id", tc.ID, "requirement_id", requirementID, "error", err)
-		}
-		createdIDs = append(createdIDs, tc.ID)
+		httpx.JSON(w, http.StatusCreated, map[string]interface{}{
+			"created_ids": result.CreatedTestCaseIDs, "count": len(result.CreatedTestCaseIDs),
+			"subfolders_created": result.SubfoldersCreated,
+		})
+		return
 	}
 
+	// Fallback: transient drafts from pre-delegation clients — now atomic.
+	result, err := h.store.AcceptLegacyGeneratedTests(requirementID, req.FolderID, req.Tests, req.GroupByCategory)
+	if err != nil {
+		h.writeLegacyAcceptError(w, err)
+		return
+	}
 	httpx.JSON(w, http.StatusCreated, map[string]interface{}{
-		"created_ids":        createdIDs,
-		"count":              len(createdIDs),
-		"subfolders_created": len(subfolderCache),
+		"created_ids": result.CreatedTestCaseIDs, "count": len(result.CreatedTestCaseIDs),
+		"subfolders_created": result.SubfoldersCreated,
 	})
+}
+
+// matchLifecycleDrafts returns (runID, byID) when every test's temp_id is a
+// persisted draft of one single run whose requirement matches; else ("", nil).
+func (h *Handler) matchLifecycleDrafts(requirementID string, tests []models.GeneratedTestCase) (string, map[string]*models.AIGeneratedDraft) {
+	if len(tests) == 0 {
+		return "", nil
+	}
+	ids := make([]string, 0, len(tests))
+	for _, t := range tests {
+		if t.TempID == "" {
+			return "", nil
+		}
+		ids = append(ids, t.TempID)
+	}
+	drafts, err := h.store.GetDraftsByIDs(ids)
+	if err != nil || len(drafts) != len(ids) {
+		return "", nil
+	}
+	byID := make(map[string]*models.AIGeneratedDraft, len(drafts))
+	runID := drafts[0].RunID
+	for _, d := range drafts {
+		if d.RunID != runID {
+			return "", nil
+		}
+		byID[d.ID] = d
+	}
+	run, err := h.store.GetGenerationRun(runID)
+	if err != nil || run.RequirementID != requirementID {
+		return "", nil
+	}
+	return runID, byID
+}
+
+// writeLegacyAcceptError maps store acceptance errors onto legacy-friendly
+// statuses (mirrors AcceptGeneration's mapping).
+func (h *Handler) writeLegacyAcceptError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, store.ErrDraftNotPending):
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+	case errors.Is(err, store.ErrDraftInvalid):
+		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error()})
+	case errors.Is(err, store.ErrUnknownDrafts), errors.Is(err, gorm.ErrRecordNotFound):
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+	default:
+		httpx.Error(w, http.StatusInternalServerError, err)
+	}
 }

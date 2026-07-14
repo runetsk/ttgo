@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"ttgo/pkg/tracker/models"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -206,6 +207,11 @@ func TestGenerateTests_EndToEnd(t *testing.T) {
 	}
 
 	// Audit log records the resolved coverage level and success status.
+	// GenerateTests now delegates to the durable lifecycle (Task 7:
+	// ai-generation-improvements stage 6), so the audit action is the
+	// lifecycle's own "ai_generation_run:<run_id>:requirement:..." format
+	// (h.auditGeneration in lifecycle.go) rather than the old legacy-only
+	// "ai_generation:requirement:..." string the inline call used to write.
 	activity, err := env.store.GetRecentActivity(time.Time{}, time.Time{}, 30)
 	if err != nil {
 		t.Fatalf("GetRecentActivity: %v", err)
@@ -213,7 +219,7 @@ func TestGenerateTests_EndToEnd(t *testing.T) {
 	found := false
 	for _, row := range activity {
 		action, _ := row["action"].(string)
-		if strings.HasPrefix(action, "ai_generation:requirement:"+reqID+":") {
+		if strings.HasPrefix(action, "ai_generation_run:") && strings.Contains(action, ":requirement:"+reqID+":") {
 			found = true
 			if !strings.Contains(action, ":provider:"+providerID+":") ||
 				!strings.Contains(action, ":status:success:") ||
@@ -223,7 +229,7 @@ func TestGenerateTests_EndToEnd(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("no ai_generation audit row for requirement %s", reqID)
+		t.Fatalf("no ai_generation_run audit row for requirement %s", reqID)
 	}
 }
 
@@ -282,6 +288,100 @@ func TestGenerateTests_RequirementNotFound(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("status: %d %s", rr.Code, rr.Body.String())
 	}
+}
+
+// TestLegacyGenerateDelegatesToLifecycle locks the Task 7 delegation contract:
+// the legacy endpoint's response shape stays byte-identical (200, drafts with
+// temp_id/name), but under the hood a durable run now exists and temp_id is a
+// real, persisted draft ID rather than a transient uuid.
+func TestLegacyGenerateDelegatesToLifecycle(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-LEGACY-1", "T", "D")
+
+	rr := doRequest(env, "POST", "/api/requirements/"+reqID+"/generate-tests",
+		map[string]string{"provider_id": providerID})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body struct {
+		Drafts []struct {
+			TempID string `json:"temp_id"`
+			Name   string `json:"name"`
+		} `json:"drafts"`
+		Provider map[string]interface{} `json:"provider"`
+		Debug    map[string]interface{} `json:"debug"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	require.Len(t, body.Drafts, 2)
+	assert.NotEmpty(t, body.Debug["request_context"], "legacy debug shape preserved")
+
+	// The run is now durable and the temp_id is a persisted draft id.
+	runs, err := env.store.ListGenerationRuns(reqID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	drafts, err := env.store.GetDraftsByIDs([]string{body.Drafts[0].TempID})
+	require.NoError(t, err)
+	require.Len(t, drafts, 1)
+	assert.Equal(t, runs[0].ID, drafts[0].RunID)
+}
+
+// TestLegacyAcceptCompletesLifecycleAndFallsBack covers both accept paths
+// added in Task 7: when the client round-trips temp_ids that are persisted
+// drafts of one durable run (the delegated generate response), accept
+// completes that lifecycle — including saving a client-side edit — instead of
+// creating orphaned test cases; when temp_ids are NOT recognized drafts (a
+// pre-delegation client sending transient drafts), it falls back to atomic
+// legacy materialization.
+func TestLegacyAcceptCompletesLifecycleAndFallsBack(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-LEGACY-2", "T", "D")
+	folderID := createTestFolder(t, env, "Legacy Accept")
+
+	rr := doRequest(env, "POST", "/api/requirements/"+reqID+"/generate-tests",
+		map[string]string{"provider_id": providerID})
+	require.Equal(t, http.StatusOK, rr.Code)
+	var gen struct {
+		Drafts []models.GeneratedTestCase `json:"drafts"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &gen))
+
+	// Edit one draft client-side (legacy contract), then accept.
+	gen.Drafts[0].Name = gen.Drafts[0].Name + " (edited via legacy)"
+	rr = doRequest(env, "POST", "/api/requirements/"+reqID+"/accept-generated-tests", map[string]interface{}{
+		"folder_id": folderID, "tests": gen.Drafts, "group_by_category": false,
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var acc struct {
+		CreatedIDs []string `json:"created_ids"`
+		Count      int      `json:"count"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &acc))
+	assert.Equal(t, 2, acc.Count)
+
+	// Lifecycle completed: drafts accepted, edit recorded.
+	drafts, err := env.store.GetDraftsByIDs([]string{gen.Drafts[0].TempID, gen.Drafts[1].TempID})
+	require.NoError(t, err)
+	for _, d := range drafts {
+		assert.Equal(t, models.AIDraftStatusAccepted, d.Status)
+	}
+
+	// Fallback path: transient temp_ids still work (and are atomic now).
+	rr = doRequest(env, "POST", "/api/requirements/"+reqID+"/accept-generated-tests", map[string]interface{}{
+		"folder_id": folderID, "group_by_category": false,
+		"tests": []map[string]interface{}{{
+			"temp_id": "not-a-draft", "name": "Transient legacy draft", "category": "Functional",
+			"description": "d", "steps": []map[string]string{{"action": "a", "expected_result": "e"}},
+		}},
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
 }
 
 func TestProviderPricingRoundTrip(t *testing.T) {

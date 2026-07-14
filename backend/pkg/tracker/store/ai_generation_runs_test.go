@@ -462,6 +462,46 @@ func TestAcceptGenerationDrafts_RollsBackOnTestCaseInsertFailure(t *testing.T) {
 	assert.Nil(t, back.AcceptedTestCaseID)
 }
 
+// TestAcceptLegacyGeneratedTests_RollsBackOnTestCaseInsertFailure mirrors
+// TestAcceptGenerationDrafts_RollsBackOnTestCaseInsertFailure's injected-
+// trigger technique against the legacy (transient, no draft rows) acceptance
+// path: it fixes the historic legacy partial-batch bug, so a failure on the
+// second test case must roll back the whole batch, not leave the first one
+// already created.
+func TestAcceptLegacyGeneratedTests_RollsBackOnTestCaseInsertFailure(t *testing.T) {
+	s := newTestStore(t)
+	req := &models.Requirement{Identifier: "REQ-LEGACY-ACC-" + uuid.New().String()[:8], Title: "Login"}
+	require.NoError(t, s.CreateRequirement(req))
+	folder, err := s.CreateFolder("AI Generated Legacy", nil)
+	require.NoError(t, err)
+
+	// Make the SECOND test case's insert blow up mid-transaction.
+	require.NoError(t, s.db.Exec(`CREATE TRIGGER fail_tc_legacy BEFORE INSERT ON test_cases
+		WHEN new.name = 'BOOM' BEGIN SELECT RAISE(ABORT, 'injected failure'); END`).Error)
+	t.Cleanup(func() { s.db.Exec(`DROP TRIGGER IF EXISTS fail_tc_legacy`) })
+
+	tests := []models.GeneratedTestCase{
+		{
+			Name: "Draft 0", Category: "Functional", Description: "desc",
+			Steps: []models.GeneratedStep{{Action: "do", ExpectedResult: "done"}},
+		},
+		{
+			Name: "BOOM", Category: "Functional", Description: "desc",
+			Steps: []models.GeneratedStep{{Action: "do", ExpectedResult: "done"}},
+		},
+	}
+	baseFolders := countRows(t, s, &models.Folder{})
+	_, err = s.AcceptLegacyGeneratedTests(req.ID, folder.ID, tests, true)
+	require.Error(t, err)
+
+	// EVERYTHING rolled back: no test cases, steps, links, or subfolders — the
+	// first test case must NOT survive just because it was inserted first.
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestCase{}))
+	assert.Equal(t, int64(0), countRows(t, s, &models.TestStep{}))
+	assert.Equal(t, int64(0), countRows(t, s, &models.RequirementTestCaseLink{}))
+	assert.Equal(t, baseFolders, countRows(t, s, &models.Folder{}), "injected failure must roll back the Functional subfolder")
+}
+
 func TestAcceptGenerationDrafts_RollsBackOnLinkInsertFailure(t *testing.T) {
 	s := newTestStore(t)
 	_, folder, run, drafts := seedAcceptFixture(t, s, 1)

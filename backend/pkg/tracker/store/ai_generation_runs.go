@@ -394,61 +394,28 @@ func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID
 		}
 
 		// ── Materialize ──
-		subfolderCache := map[string]string{}
-		now := time.Now()
+		createdIDs, subfolders, merr := s.materializeDraftContentsTx(tx, run.RequirementID, folderID, groupByCategory, contents)
+		if merr != nil {
+			return merr
+		}
+		res.SubfoldersCreated = subfolders
 		for i, d := range drafts {
-			c := contents[i]
-			targetFolderID := folderID
-			if groupByCategory && c.Category != "" {
-				if cached, ok := subfolderCache[c.Category]; ok {
-					targetFolderID = cached
-				} else {
-					sub, created, err := s.findOrCreateSubfolderTx(tx, folderID, c.Category)
-					if err != nil {
-						return fmt.Errorf("subfolder %q: %w", c.Category, err)
-					}
-					if created {
-						res.SubfoldersCreated++
-					}
-					subfolderCache[c.Category] = sub.ID
-					targetFolderID = sub.ID
-				}
-			}
-
-			steps := make([]*models.TestStep, len(c.Steps))
-			for j, st := range c.Steps {
-				steps[j] = &models.TestStep{Action: st.Action, ExpectedResult: st.ExpectedResult, OrderIndex: j}
-			}
-			tc := &models.TestCase{
-				FolderID:    targetFolderID,
-				Name:        c.Name,
-				Description: c.Description,
-				Steps:       steps,
-			}
-			if err := s.createTestCaseTx(tx, tc); err != nil {
-				return fmt.Errorf("test case %q: %w", c.Name, err)
-			}
-			if err := tx.Create(&models.RequirementTestCaseLink{
-				ID: uuid.New().String(), RequirementID: run.RequirementID,
-				TestCaseID: tc.ID, CreatedAt: now,
-			}).Error; err != nil {
-				return fmt.Errorf("link for %q: %w", c.Name, err)
-			}
+			tcID := createdIDs[i]
 			if err := tx.Model(&models.AIGeneratedDraft{}).Where("id = ?", d.ID).
 				Updates(map[string]interface{}{
 					"status":                models.AIDraftStatusAccepted,
-					"accepted_test_case_id": tc.ID,
+					"accepted_test_case_id": tcID,
 				}).Error; err != nil {
 				return err
 			}
-			meta, _ := json.Marshal(map[string]string{"test_case_id": tc.ID})
+			meta, _ := json.Marshal(map[string]string{"test_case_id": tcID})
 			if err := createGenerationEventTx(tx, &models.AIGenerationEvent{
 				RunID: runID, DraftID: &d.ID, EventType: models.AIGenEventAccepted,
 				ActorID: actorID, MetadataJSON: string(meta),
 			}); err != nil {
 				return err
 			}
-			res.CreatedTestCaseIDs = append(res.CreatedTestCaseIDs, tc.ID)
+			res.CreatedTestCaseIDs = append(res.CreatedTestCaseIDs, tcID)
 		}
 		return nil
 	})
@@ -456,6 +423,98 @@ func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID
 		return nil, err
 	}
 	return res, nil
+}
+
+// materializeDraftContentsTx creates test cases + steps + requirement links
+// for validated draft contents inside tx. Shared by lifecycle acceptance
+// (AcceptGenerationDrafts) and the legacy accept adapter
+// (AcceptLegacyGeneratedTests). createdIDs[i] is the test case materialized
+// from contents[i] — order is preserved so callers can zip it back against
+// their own per-draft bookkeeping.
+func (s *Store) materializeDraftContentsTx(tx *gorm.DB, requirementID, folderID string, groupByCategory bool, contents []models.DraftContent) (createdIDs []string, subfolders int, err error) {
+	subfolderCache := map[string]string{}
+	now := time.Now()
+	createdIDs = make([]string, 0, len(contents))
+	for _, c := range contents {
+		targetFolderID := folderID
+		if groupByCategory && c.Category != "" {
+			if cached, ok := subfolderCache[c.Category]; ok {
+				targetFolderID = cached
+			} else {
+				sub, created, serr := s.findOrCreateSubfolderTx(tx, folderID, c.Category)
+				if serr != nil {
+					return nil, 0, fmt.Errorf("subfolder %q: %w", c.Category, serr)
+				}
+				if created {
+					subfolders++
+				}
+				subfolderCache[c.Category] = sub.ID
+				targetFolderID = sub.ID
+			}
+		}
+
+		steps := make([]*models.TestStep, len(c.Steps))
+		for j, st := range c.Steps {
+			steps[j] = &models.TestStep{Action: st.Action, ExpectedResult: st.ExpectedResult, OrderIndex: j}
+		}
+		tc := &models.TestCase{
+			FolderID:    targetFolderID,
+			Name:        c.Name,
+			Description: c.Description,
+			Steps:       steps,
+		}
+		if err := s.createTestCaseTx(tx, tc); err != nil {
+			return nil, 0, fmt.Errorf("test case %q: %w", c.Name, err)
+		}
+		if err := tx.Create(&models.RequirementTestCaseLink{
+			ID: uuid.New().String(), RequirementID: requirementID,
+			TestCaseID: tc.ID, CreatedAt: now,
+		}).Error; err != nil {
+			return nil, 0, fmt.Errorf("link for %q: %w", c.Name, err)
+		}
+		createdIDs = append(createdIDs, tc.ID)
+	}
+	return createdIDs, subfolders, nil
+}
+
+// AcceptLegacyGeneratedTests transactionally materializes transient legacy
+// drafts (no lifecycle records). Fixes the historic partial-batch bug for
+// legacy API clients: any failure rolls back the whole batch.
+func (s *Store) AcceptLegacyGeneratedTests(requirementID, folderID string, tests []models.GeneratedTestCase, groupByCategory bool) (*AcceptGenerationResult, error) {
+	res := &AcceptGenerationResult{CreatedTestCaseIDs: []string{}}
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&models.Folder{}, "id = ?", folderID).Error; err != nil {
+			return fmt.Errorf("target folder: %w", err)
+		}
+		if err := tx.First(&models.Requirement{}, "id = ?", requirementID).Error; err != nil {
+			return fmt.Errorf("linked requirement: %w", err)
+		}
+		contents := make([]models.DraftContent, len(tests))
+		for i, t := range tests {
+			contents[i] = models.DraftContent{
+				Name: t.Name, Category: t.Category, Description: t.Description,
+				SourceRefs: t.SourceRefs, Steps: t.Steps,
+			}
+		}
+		ids, subfolders, err := s.materializeDraftContentsTx(tx, requirementID, folderID, groupByCategory, contents)
+		if err != nil {
+			return err
+		}
+		res.CreatedTestCaseIDs = ids
+		res.SubfoldersCreated = subfolders
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// GetDraftsByIDs loads drafts by ID (legacy temp_id -> lifecycle matching).
+func (s *Store) GetDraftsByIDs(ids []string) ([]*models.AIGeneratedDraft, error) {
+	var drafts []*models.AIGeneratedDraft
+	err := s.db.Where("id IN ?", ids).Find(&drafts).Error
+	return drafts, err
 }
 
 // RegenMeta is the safe metadata recorded on a `regenerated` event.

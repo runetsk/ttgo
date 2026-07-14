@@ -3185,6 +3185,120 @@ paths:
       summary: Update a requirement
       tags:
       - requirements
+  /requirements/{id}/accept-generated-tests:
+    post:
+      consumes:
+      - application/json
+      deprecated: true
+      description: 'Deprecated: use POST /ai-generations/{id}/accept. Completes the
+        durable lifecycle when the temp_ids round-trip a delegated run, else atomically
+        materializes transient drafts.'
+      parameters:
+      - description: Requirement ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: folder_id, tests, group_by_category
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Accept generated test cases (deprecated)
+      tags:
+      - ai-generations
+  /requirements/{id}/generate-tests:
+    post:
+      consumes:
+      - application/json
+      deprecated: true
+      description: 'Deprecated: use POST /ai-generations. Delegates to the durable
+        generation lifecycle so runs are persisted; the legacy request/response shape
+        is unchanged.'
+      parameters:
+      - description: Requirement ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: provider_id, coverage_level, detail_level, additional_instructions
+        in: body
+        name: body
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "422":
+          description: Unprocessable Entity
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Generate test cases from a requirement (deprecated)
+      tags:
+      - ai-generations
   /requirements/{id}/links:
     post:
       consumes:
