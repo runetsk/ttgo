@@ -433,6 +433,15 @@ export function StudioDraftDetail({
                 </div>
             )}
 
+            {status === 'rejected' && (
+                <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
+                    <span style={{ fontSize: 11.5, color: 'var(--aig-danger-fg)' }}>Rejected</span>
+                    <AIBtn onClick={() => ai.restoreDraft(draft.id)} disabled={disabled} style={{ marginLeft: 'auto' }}>
+                        Restore to pending
+                    </AIBtn>
+                </div>
+            )}
+
             {status === 'pending' ? (
                 <DraftEditor key={draft.id} draft={draft} onSave={ai.saveDraftEdit} disabled={disabled} />
             ) : (

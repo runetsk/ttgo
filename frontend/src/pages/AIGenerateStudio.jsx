@@ -15,6 +15,7 @@ import { StudioContextPane, CreateRequirementModal } from './aiStudio/context';
 import {
     StudioHeader, StudioComposer, StudioDraftsList, StudioDraftDetail,
 } from './aiStudio/drafts';
+import { RejectPopover } from './aiStudio/rejectPopover';
 import { LlmFeedbackPanel } from './aiStudio/LlmFeedbackPanel';
 import { ImportModal, StudioBanner, StudioStyles, PageShellStyles } from './aiStudio/shell';
 
@@ -26,6 +27,8 @@ export default function AIGenerateStudio() {
     const [filter, setFilter] = useState('pending');
     const [groupBy, setGroupBy] = useState('category');
     const [selectedDraftId, setSelectedDraftId] = useState(null);
+    // Reject popover target: a draft id, the '__all__' sentinel (reject all pending), or null (closed).
+    const [rejectTarget, setRejectTarget] = useState(null);
 
     // Requirements-catalog + import-modal state (folded in from the former AIGeneratePage shell)
     const [importOpen, setImportOpen] = useState(() => {
@@ -140,13 +143,20 @@ export default function AIGenerateStudio() {
         ai.startGeneration();
     };
     const handleAccept = (d) => ai.acceptDraft(d);
-    const handleReject = (id) => ai.rejectDraft(id, 'other', '');
+    const handleReject = (id) => setRejectTarget(id);
     const handleAcceptAll = () => ai.acceptAllPending();
-    const handleDiscardAll = () => {
-        if (!window.confirm('Discard all pending drafts?')) return;
-        ai.pendingDrafts.forEach(d => ai.rejectDraft(d.id, 'other', ''));
-    };
+    const handleDiscardAll = () => setRejectTarget('__all__');
     const handleAcceptGroup = (group) => ai.acceptDrafts(group);
+
+    // Single popover flow for both "reject one" and "reject all pending": the
+    // sentinel target loops the chosen reason/note over every pending draft.
+    const handleRejectSubmit = (reason, note) => {
+        if (rejectTarget === '__all__') {
+            ai.pendingDrafts.forEach(d => ai.rejectDraft(d.id, reason, note));
+        } else if (rejectTarget) {
+            ai.rejectDraft(rejectTarget, reason, note);
+        }
+    };
 
     const studioGridNode = (
         <>
@@ -315,6 +325,12 @@ export default function AIGenerateStudio() {
                     {importContent}
                 </ImportModal>
             )}
+
+            <RejectPopover
+                open={!!rejectTarget}
+                onClose={() => setRejectTarget(null)}
+                onSubmit={handleRejectSubmit}
+            />
         </>
     );
 }
