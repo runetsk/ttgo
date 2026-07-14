@@ -6,6 +6,7 @@ import {
     GeneratingDots, DraftSkeleton, Stepper, MiniStat,
 } from './primitives';
 import PromptPreviewPanel from './PromptPreviewPanel';
+import { DraftEditor } from './draftEditor';
 
 // ── Middle top: Header ───────────────────────────────────────────────────────
 export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDiscardAll, onGenerate, onImport, disabled }) {
@@ -367,7 +368,7 @@ export function StudioDraftsList({
 
 // ── Right pane: Detail ──────────────────────────────────────────────────────
 export function StudioDraftDetail({
-    draft, status, onAccept, onReject, onCollapse, stage, linkedReqId, disabled,
+    ai, draft, status, onAccept, onReject, onCollapse, stage, linkedReqId, disabled,
 }) {
     if (!draft || stage !== 'review') {
         return (
@@ -432,47 +433,53 @@ export function StudioDraftDetail({
                 </div>
             )}
 
-            {draft.description && (
-                <div style={{
-                    padding: '10px 12px', background: 'rgba(99,102,241,0.06)',
-                    border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, marginBottom: 14,
-                }}>
+            {status === 'pending' ? (
+                <DraftEditor key={draft.id} draft={draft} onSave={ai.saveDraftEdit} disabled={disabled} />
+            ) : (
+                <>
+                    {draft.description && (
+                        <div style={{
+                            padding: '10px 12px', background: 'rgba(99,102,241,0.06)',
+                            border: '1px solid rgba(99,102,241,0.2)', borderRadius: 8, marginBottom: 14,
+                        }}>
+                            <div style={{
+                                display: 'flex', gap: 6, alignItems: 'center',
+                                color: AIC.indigoSoft, fontSize: 11, fontWeight: 600, marginBottom: 5,
+                            }}>
+                                {Icon.sparkles(11)} AI description
+                            </div>
+                            <SafeHTML html={draft.description}
+                                style={{ fontSize: 12, color: AIC.dim, lineHeight: 1.55 }} />
+                        </div>
+                    )}
+
                     <div style={{
-                        display: 'flex', gap: 6, alignItems: 'center',
-                        color: AIC.indigoSoft, fontSize: 11, fontWeight: 600, marginBottom: 5,
+                        display: 'grid', gridTemplateColumns: '1fr 1fr',
+                        gap: 10, marginBottom: 14,
                     }}>
-                        {Icon.sparkles(11)} AI description
+                        <MiniStat label="Steps" value={(draft.steps || []).length} />
+                        <MiniStat label="Est. review" value={`${Math.max(1, Math.round((draft.steps || []).length * 0.5))} min`} />
                     </div>
-                    <SafeHTML html={draft.description}
-                        style={{ fontSize: 12, color: AIC.dim, lineHeight: 1.55 }} />
-                </div>
+
+                    <SectionLabel>Requirements &amp; tags</SectionLabel>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+                        {linkedReqId && <ReqChip id={linkedReqId} />}
+                        {draft.category && (() => {
+                            const t = categoryTone(draft.category);
+                            return (
+                                <span style={{
+                                    padding: '2px 8px', borderRadius: 999,
+                                    fontSize: 10.5, fontWeight: 600, letterSpacing: '0.02em',
+                                    background: t.bg, border: `1px solid ${t.bd}`, color: t.fg,
+                                }}>{draft.category}</span>
+                            );
+                        })()}
+                    </div>
+
+                    <SectionLabel>Steps</SectionLabel>
+                    <Stepper steps={draft.steps} />
+                </>
             )}
-
-            <div style={{
-                display: 'grid', gridTemplateColumns: '1fr 1fr',
-                gap: 10, marginBottom: 14,
-            }}>
-                <MiniStat label="Steps" value={(draft.steps || []).length} />
-                <MiniStat label="Est. review" value={`${Math.max(1, Math.round((draft.steps || []).length * 0.5))} min`} />
-            </div>
-
-            <SectionLabel>Requirements &amp; tags</SectionLabel>
-            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-                {linkedReqId && <ReqChip id={linkedReqId} />}
-                {draft.category && (() => {
-                    const t = categoryTone(draft.category);
-                    return (
-                        <span style={{
-                            padding: '2px 8px', borderRadius: 999,
-                            fontSize: 10.5, fontWeight: 600, letterSpacing: '0.02em',
-                            background: t.bg, border: `1px solid ${t.bd}`, color: t.fg,
-                        }}>{draft.category}</span>
-                    );
-                })()}
-            </div>
-
-            <SectionLabel>Steps</SectionLabel>
-            <Stepper steps={draft.steps} />
         </aside>
     );
 }

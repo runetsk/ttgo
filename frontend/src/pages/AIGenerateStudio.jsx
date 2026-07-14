@@ -245,6 +245,7 @@ export default function AIGenerateStudio() {
                     </aside>
                 ) : (
                     <StudioDraftDetail
+                        ai={ai}
                         draft={selectedDraft}
                         status={selectedDraft ? statuses[selectedDraft.id] : null}
                         onAccept={() => selectedDraft && handleAccept(selectedDraft)}
