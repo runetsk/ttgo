@@ -465,6 +465,12 @@ func TestDraftQualityAndDuplicatesRoundTrip(t *testing.T) {
 	assert.Contains(t, updated.QualityJSON, `"specificity"`)
 	assert.Contains(t, updated.DuplicatesJSON, `"batch"`)
 
+	// Re-fetch from DB to verify persistence, not just in-memory assignment.
+	var fresh models.AIGeneratedDraft
+	require.NoError(t, s.db.First(&fresh, "id = ?", draft.ID).Error)
+	assert.Contains(t, fresh.QualityJSON, `"specificity"`, "quality must persist to the DB, not just the returned struct")
+	assert.Contains(t, fresh.DuplicatesJSON, `"batch"`, "duplicates must persist to the DB")
+
 	resp, err := updated.ToResponse()
 	require.NoError(t, err)
 	assert.NotNil(t, resp.Quality)
@@ -480,5 +486,10 @@ func TestDraftQualityAndDuplicatesRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, resp.Quality)
 	assert.Nil(t, resp.Duplicates)
+
+	// Re-fetch from DB to verify empty values persisted.
+	require.NoError(t, s.db.First(&fresh, "id = ?", draft.ID).Error)
+	assert.Equal(t, `[]`, fresh.QualityJSON)
+	assert.Equal(t, `[]`, fresh.DuplicatesJSON)
 	_ = run
 }
