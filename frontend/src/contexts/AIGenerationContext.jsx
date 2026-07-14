@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- context/hook file intentionally co-exports its Provider and hook; splitting would ripple imports across the app with no runtime benefit */
-import { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
+import { createContext, useContext, useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { aiGeneration, aiImport, getFolderTree, requirements as requirementsApi } from '../api';
 import { toast } from '../toast';
 import { useAuth } from './AuthContext';
@@ -66,11 +66,14 @@ export function AIGenerationProvider({ children }) {
     const [hasGenerated, setHasGenerated] = useState(false);
     const [lastDebug, setLastDebug] = useState(null); // debug info from last successful generation
 
-    // Draft lifecycle
+    // Draft lifecycle — server `draft.status` is the source of truth.
     const [drafts, setDrafts] = useState([]);
     const [runId, setRunId] = useState(null);
-    const [acceptedIds, setAcceptedIds] = useState(new Set());
-    const [discardedIds, setDiscardedIds] = useState(new Set());
+    const [coverage, setCoverage] = useState(null);
+    const acceptedIds = useMemo(
+        () => new Set(drafts.filter(d => d.status === 'accepted').map(d => d.id)),
+        [drafts]
+    );
     const [accepting, setAccepting] = useState(false);
 
     // Callback ref for post-accept refresh (e.g. RequirementsPage.load)
@@ -146,7 +149,25 @@ export function AIGenerationProvider({ children }) {
         try { storedId = sessionStorage.getItem('ttgo_aigen_active_req_id'); } catch { /* sessionStorage unavailable — treat as no stored id */ }
         if (!storedId) return;
         requirementsApi.get(storedId)
-            .then(req => { if (req?.id) setActiveRequirement(req); })
+            .then(req => {
+                if (!req?.id) return;
+                setActiveRequirement(req);
+                // Refresh recovery: reattach the last generation run for this
+                // requirement, if the stored run id still matches it.
+                const storedRunId = sessionStorage.getItem('ttgo_aigen_run_id');
+                if (storedRunId) {
+                    aiGeneration.getGeneration(storedRunId)
+                        .then(result => {
+                            if (result.run?.requirement_id !== req.id) return; // stale key from another session
+                            setRunId(result.run.id);
+                            setDrafts(result.drafts || []);
+                            setCoverage(result.coverage || null);
+                            if (result.run) setLastDebug(runToDebug(result.run));
+                            setHasGenerated(true);
+                        })
+                        .catch(() => sessionStorage.removeItem('ttgo_aigen_run_id'));
+                }
+            })
             .catch(() => {
                 try { sessionStorage.removeItem('ttgo_aigen_active_req_id'); } catch { /* sessionStorage quota/unavailable — non-critical, skip cleanup */ }
             });
@@ -160,6 +181,12 @@ export function AIGenerationProvider({ children }) {
         // on mount (activeRequirement is null before fetch resolves). clearSession
         // removes the key explicitly.
     }, [activeRequirement?.id]);
+
+    // ── Persist run id across reloads (refresh recovery) ─────────────
+    useEffect(() => {
+        if (runId) sessionStorage.setItem('ttgo_aigen_run_id', runId);
+        else sessionStorage.removeItem('ttgo_aigen_run_id');
+    }, [runId]);
 
     // ── Eager-load folders & providers once authenticated ────────────
     const foldersLoadedRef = useRef(false);
@@ -201,11 +228,9 @@ export function AIGenerationProvider({ children }) {
     }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Derived values ──────────────────────────────────────────────
-    const pendingDrafts = drafts.filter(
-        d => !discardedIds.has(d.id) && !acceptedIds.has(d.id)
-    );
+    const pendingDrafts = drafts.filter(d => d.status === 'pending');
     const pendingCount = pendingDrafts.length;
-    const hasUnsaved = drafts.length > 0 && pendingCount > 0;
+    const hasUnsaved = pendingCount > 0;
     const hasSession = activeRequirement !== null;
 
     // ── Methods ─────────────────────────────────────────────────────
@@ -224,8 +249,7 @@ export function AIGenerationProvider({ children }) {
         setLastDebug(null);
         setDrafts([]);
         setRunId(null);
-        setAcceptedIds(new Set());
-        setDiscardedIds(new Set());
+        setCoverage(null);
         setCoverageLevel('thorough');
         setDetailLevel('Standard');
         setAdditionalInstructions('');
@@ -276,11 +300,11 @@ export function AIGenerationProvider({ children }) {
             });
             const newDrafts = result.drafts || [];
             setRunId(result.run?.id || null);
+            setCoverage(result.coverage || null);
             setDrafts(prev => {
                 const kept = prev.filter(d => acceptedIds.has(d.id));
                 return [...kept, ...newDrafts];
             });
-            setDiscardedIds(new Set());
             setHasGenerated(true);
             if (result.template_warning) setTemplateWarning(result.template_warning);
             if (result.run) setLastDebug(runToDebug(result.run));
@@ -291,6 +315,55 @@ export function AIGenerationProvider({ children }) {
         }
     }, [activeRequirement, selectedProviderId, coverageLevel, detailLevel, additionalInstructions, acceptedIds, runId]);
 
+    // Merge one server draft object into local state.
+    const mergeDraft = useCallback((serverDraft) => {
+        if (!serverDraft) return;
+        setDrafts(prev => prev.map(d => (d.id === serverDraft.id ? serverDraft : d)));
+    }, []);
+
+    const saveDraftEdit = useCallback(async (draftId, changes) => {
+        if (!runId) return null;
+        const result = await aiGeneration.updateGenerationDraft(runId, draftId, changes);
+        mergeDraft(result.draft);
+        if (result.coverage) setCoverage(result.coverage);
+        return result.draft;
+    }, [runId, mergeDraft]);
+
+    const rejectDraft = useCallback(async (draftId, reason, note) => {
+        if (!runId) return;
+        try {
+            const result = await aiGeneration.rejectGenerationDraft(runId, draftId, { reason, note: note || '' });
+            mergeDraft(result.draft);
+        } catch (err) {
+            toast.error(err?.response?.data?.error || 'Failed to reject draft');
+        }
+    }, [runId, mergeDraft]);
+
+    const restoreDraft = useCallback(async (draftId) => {
+        if (!runId) return;
+        try {
+            const result = await aiGeneration.restoreGenerationDraft(runId, draftId);
+            mergeDraft(result.draft);
+        } catch (err) {
+            toast.error(err?.response?.data?.error || 'Failed to restore draft');
+        }
+    }, [runId, mergeDraft]);
+
+    const loadRun = useCallback(async (id) => {
+        const result = await aiGeneration.getGeneration(id);
+        setRunId(result.run?.id || id);
+        setDrafts(result.drafts || []);
+        setCoverage(result.coverage || null);
+        if (result.run) setLastDebug(runToDebug(result.run));
+        setHasGenerated(true);
+        return result;
+    }, []);
+
+    const refreshRun = useCallback(async () => {
+        if (!runId) return null;
+        return loadRun(runId);
+    }, [runId, loadRun]);
+
     const acceptDraft = useCallback(async (draft) => {
         if (!activeRequirement || !runId) return;
         if (!selectedFolderId) {
@@ -299,78 +372,66 @@ export function AIGenerationProvider({ children }) {
         }
         setAccepting(true);
         try {
-            await aiGeneration.acceptGeneration(runId, {
+            const result = await aiGeneration.acceptGeneration(runId, {
                 folder_id: selectedFolderId,
                 draft_ids: [draft.id],
                 group_by_category: groupByCategory,
             });
-            setAcceptedIds(prev => new Set([...prev, draft.id]));
+            await refreshRun();
             toast.success(`"${draft.name}" accepted`);
             onAcceptedRef.current?.();
+            return result;
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to accept test case');
         } finally {
             setAccepting(false);
         }
-    }, [activeRequirement, runId, selectedFolderId, groupByCategory]);
+    }, [activeRequirement, runId, selectedFolderId, groupByCategory, refreshRun]);
 
     const acceptAllPending = useCallback(async () => {
         if (!activeRequirement || !runId) return;
-        const pending = drafts.filter(
-            d => !discardedIds.has(d.id) && !acceptedIds.has(d.id)
-        );
+        const pending = drafts.filter(d => d.status === 'pending');
         if (pending.length === 0 || !selectedFolderId) {
             toast.error('Select a folder first');
             return;
         }
         setAccepting(true);
         try {
-            await aiGeneration.acceptGeneration(runId, {
+            const result = await aiGeneration.acceptGeneration(runId, {
                 folder_id: selectedFolderId,
                 draft_ids: pending.map(d => d.id),
                 group_by_category: groupByCategory,
             });
-            setAcceptedIds(new Set([...acceptedIds, ...pending.map(d => d.id)]));
+            await refreshRun();
             toast.success(`${pending.length} test case${pending.length !== 1 ? 's' : ''} accepted`);
             onAcceptedRef.current?.();
+            return result;
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to accept test cases');
         } finally {
             setAccepting(false);
         }
-    }, [activeRequirement, runId, drafts, discardedIds, acceptedIds, selectedFolderId, groupByCategory]);
-
-    const discardDraft = useCallback((id) => {
-        setDiscardedIds(prev => new Set([...prev, id]));
-    }, []);
-
-    const discardAllPending = useCallback(() => {
-        const pending = drafts.filter(d => !acceptedIds.has(d.id)).map(d => d.id);
-        setDiscardedIds(prev => new Set([...prev, ...pending]));
-    }, [drafts, acceptedIds]);
+    }, [activeRequirement, runId, drafts, selectedFolderId, groupByCategory, refreshRun]);
 
     const acceptDrafts = useCallback(async (draftsToAccept) => {
         if (!activeRequirement || !runId || !selectedFolderId || draftsToAccept.length === 0) return;
         setAccepting(true);
         try {
-            await aiGeneration.acceptGeneration(runId, {
+            const result = await aiGeneration.acceptGeneration(runId, {
                 folder_id: selectedFolderId,
                 draft_ids: draftsToAccept.map(d => d.id),
                 group_by_category: groupByCategory,
             });
-            setAcceptedIds(prev => new Set([...prev, ...draftsToAccept.map(d => d.id)]));
+            await refreshRun();
             toast.success(`${draftsToAccept.length} test case${draftsToAccept.length !== 1 ? 's' : ''} accepted`);
             onAcceptedRef.current?.();
+            return result;
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to accept test cases');
         } finally {
             setAccepting(false);
         }
-    }, [activeRequirement, runId, selectedFolderId, groupByCategory]);
-
-    const discardDrafts = useCallback((ids) => {
-        setDiscardedIds(prev => new Set([...prev, ...ids]));
-    }, []);
+    }, [activeRequirement, runId, selectedFolderId, groupByCategory, refreshRun]);
 
     const editDraft = useCallback((id, changes) => {
         setDrafts(prev => prev.map(d => d.id === id ? { ...d, ...changes } : d));
@@ -385,8 +446,8 @@ export function AIGenerationProvider({ children }) {
         setLastDebug(null);
         setDrafts([]);
         setRunId(null);
-        setAcceptedIds(new Set());
-        setDiscardedIds(new Set());
+        setCoverage(null);
+        sessionStorage.removeItem('ttgo_aigen_run_id');
     }, []);
 
     // ── 014-ai-test-import: Import methods ────────────────────────
@@ -494,9 +555,9 @@ export function AIGenerationProvider({ children }) {
         setLastDebug(null);
         setDrafts([]);
         setRunId(null);
-        setAcceptedIds(new Set());
-        setDiscardedIds(new Set());
+        setCoverage(null);
         setAccepting(false);
+        sessionStorage.removeItem('ttgo_aigen_run_id');
     }, []);
 
     const value = {
@@ -533,7 +594,7 @@ export function AIGenerationProvider({ children }) {
         drafts,
         runId,
         acceptedIds,
-        discardedIds,
+        coverage,
         accepting,
         // Derived
         pendingDrafts,
@@ -547,9 +608,11 @@ export function AIGenerationProvider({ children }) {
         acceptDraft,
         acceptDrafts,
         acceptAllPending,
-        discardDraft,
-        discardDrafts,
-        discardAllPending,
+        saveDraftEdit,
+        rejectDraft,
+        restoreDraft,
+        refreshRun,
+        loadRun,
         editDraft,
         clearSession,
         setOnAcceptedCallback,

@@ -102,11 +102,11 @@ export default function AIGenerateStudio() {
         : drafts.length > 0 ? 'review' : 'compose';
     const disabled = ai.generating || ai.accepting;
 
-    const statusOf = useCallback((d) => ai.acceptedIds.has(d.id)
-        ? 'accepted'
-        : ai.discardedIds.has(d.id)
-            ? 'rejected'
-            : 'pending', [ai.acceptedIds, ai.discardedIds]);
+    // Server `draft.status` is the source of truth (set by accept/reject calls).
+    const statusOf = useCallback(
+        (d) => (d.status === 'accepted' || d.status === 'rejected') ? d.status : 'pending',
+        []
+    );
 
     const statuses = useMemo(() => {
         const o = {};
@@ -140,11 +140,11 @@ export default function AIGenerateStudio() {
         ai.startGeneration();
     };
     const handleAccept = (d) => ai.acceptDraft(d);
-    const handleReject = (id) => ai.discardDraft(id);
+    const handleReject = (id) => ai.rejectDraft(id, 'other', '');
     const handleAcceptAll = () => ai.acceptAllPending();
     const handleDiscardAll = () => {
         if (!window.confirm('Discard all pending drafts?')) return;
-        ai.discardAllPending();
+        ai.pendingDrafts.forEach(d => ai.rejectDraft(d.id, 'other', ''));
     };
     const handleAcceptGroup = (group) => ai.acceptDrafts(group);
 
