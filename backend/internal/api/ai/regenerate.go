@@ -367,3 +367,46 @@ func (h *Handler) analyzeRevision(run *models.AIGenerationRun, original *models.
 
 	return string(vb), string(qb), string(db), string(cb), nil
 }
+
+// ChooseDraftVersionEndpoint keeps one version of a draft family and
+// supersedes the other pending versions at the same position.
+//
+// @Summary      Choose a draft version
+// @Tags         ai-generations
+// @Produce      json
+// @Param        id        path  string  true  "Run ID"
+// @Param        draft_id  path  string  true  "Draft ID to keep"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Router       /ai-generations/{id}/drafts/{draft_id}/choose [post]
+// @Security     BearerAuth
+func (h *Handler) ChooseDraftVersionEndpoint(w http.ResponseWriter, r *http.Request) {
+	draft, err := h.getRunDraft(r.PathValue("id"), r.PathValue("draft_id"))
+	if err != nil {
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "draft not found"})
+		return
+	}
+	var actorID *string
+	if u := authctx.UserFromRequest(r); u != nil {
+		actorID = &u.ID
+	}
+	chosen, supersededIDs, err := h.store.ChooseDraftVersion(draft.ID, actorID)
+	if err != nil {
+		if errors.Is(err, store.ErrDraftNotPending) {
+			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	resp, err := chosen.ToResponse()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if supersededIDs == nil {
+		supersededIDs = []string{}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp, "superseded_ids": supersededIDs})
+}

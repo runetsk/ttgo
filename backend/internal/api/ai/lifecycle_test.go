@@ -888,3 +888,48 @@ func TestCreateGeneration_ReplayFailedRunReturnsFailureStatus(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rr2.Body.Bytes(), &b))
 	assert.Equal(t, "parse", b["category"])
 }
+
+func TestChooseDraftVersionEndpoint(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-CHOOSE-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	regenFake := newFakeLLMServer(t, &captured, regenEnvelopeJSON)
+	defer regenFake.Close()
+	rr := doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local",
+		"endpoint_url": regenFake.URL, "model_name": "fake-model",
+	})
+	require.Equal(t, http.StatusOK, rr.Code)
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/regenerate",
+		map[string]string{"action": "make_more_specific"})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var regen struct {
+		Draft struct {
+			ID string `json:"id"`
+		} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &regen))
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+regen.Draft.ID+"/choose", nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var chosen struct {
+		Draft struct {
+			Status string `json:"status"`
+		} `json:"draft"`
+		SupersededIDs []string `json:"superseded_ids"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &chosen))
+	assert.Equal(t, "pending", chosen.Draft.Status)
+	assert.Equal(t, []string{draftIDs[0]}, chosen.SupersededIDs)
+
+	// The superseded original cannot be chosen back.
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/choose", nil)
+	require.Equal(t, http.StatusConflict, rr.Code)
+}

@@ -1070,6 +1070,44 @@ paths:
       summary: Edit a generated draft
       tags:
       - ai-generations
+  /ai-generations/{id}/drafts/{draft_id}/choose:
+    post:
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Draft ID to keep
+        in: path
+        name: draft_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Choose a draft version
+      tags:
+      - ai-generations
   /ai-generations/{id}/drafts/{draft_id}/regenerate:
     post:
       consumes:
