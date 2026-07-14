@@ -263,6 +263,7 @@ export function AIGenerationProvider({ children }) {
         setCoverageLevel('thorough');
         setDetailLevel('Standard');
         setAdditionalInstructions('');
+        setRunCritic(false);
 
         // Fetch providers + folders
         aiGeneration.listProviders()
@@ -646,6 +647,7 @@ export function AIGenerationProvider({ children }) {
         setCoverageLevel('thorough');
         setDetailLevel('Standard');
         setAdditionalInstructions('');
+        setRunCritic(false);
         setGenerating(false);
         setGenerationError('');
         setTemplateWarning('');
