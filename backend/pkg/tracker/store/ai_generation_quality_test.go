@@ -28,22 +28,33 @@ func createNamedTestCase(t *testing.T, s *Store, folderID, name string) *models.
 
 func TestSearchDuplicateCandidates_RanksLinkedFirst(t *testing.T) {
 	s, req, folder := seedQualityFixture(t)
-	linked := createNamedTestCase(t, s, folder.ID, "Sign in with valid credentials")
+
+	// The LINKED candidate is deliberately the LOWER-similarity match (~0.67):
+	// shares {sign,in,with,valid} with the draft, adds "token".
+	linked := createNamedTestCase(t, s, folder.ID, "Sign in with valid token")
 	_, err := s.CreateLink(req.ID, linked.ID)
 	require.NoError(t, err)
+
+	// The UNLINKED candidate is a HIGHER-similarity near-duplicate (~0.71):
+	// shares all draft tokens, adds "happy","path".
 	createNamedTestCase(t, s, folder.ID, "Sign in with valid credentials happy path")
+
+	// Shares no search tokens with the draft -> never returned by FTS.
 	createNamedTestCase(t, s, folder.ID, "Export report as CSV")
 
 	cands, err := s.SearchDuplicateCandidates("[Functional] Sign in with valid credentials", req.ID, 5)
 	require.NoError(t, err)
-	require.Len(t, cands, 2, "the CSV case is below the similarity threshold")
+	require.Len(t, cands, 2, "only the two sign-in cases share search tokens with the draft")
 
-	assert.Equal(t, linked.ID, cands[0].TestCaseID, "requirement-linked candidate ranks first")
+	// The linked candidate ranks FIRST despite having LOWER similarity than the
+	// unlinked one — this is what proves linked-first tiebreak, not similarity-sort.
+	assert.Equal(t, linked.ID, cands[0].TestCaseID, "requirement-linked candidate ranks first even with lower similarity")
 	assert.Equal(t, aigen.DupKindExisting, cands[0].Kind)
 	assert.Equal(t, folder.ID, cands[0].FolderID)
-	assert.GreaterOrEqual(t, cands[0].Similarity, aigen.DupHighConfidence)
 	assert.Contains(t, cands[0].Reason, "linked to this requirement")
 	assert.Nil(t, cands[0].DraftPosition)
+	assert.Less(t, cands[0].Similarity, cands[1].Similarity,
+		"the first-ranked (linked) candidate has LOWER similarity than the second (unlinked) — linked-first, not similarity-sort")
 }
 
 func TestSearchDuplicateCandidates_EmptyAndNoMatch(t *testing.T) {
