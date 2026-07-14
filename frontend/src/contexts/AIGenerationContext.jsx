@@ -252,6 +252,7 @@ export function AIGenerationProvider({ children }) {
         setLastDebug(null);
         setDrafts([]);
         setRunId(null);
+        sessionStorage.removeItem('ttgo_aigen_run_id');
         setCoverage(null);
         setCoverageLevel('thorough');
         setDetailLevel('Standard');
