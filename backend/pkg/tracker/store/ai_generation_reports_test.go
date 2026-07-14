@@ -54,10 +54,24 @@ func TestGetAIGenerationReport(t *testing.T) {
 	mk(models.AIDraftStatusAccepted, true)
 	rejected := mk(models.AIDraftStatusRejected, false)
 	mk(models.AIDraftStatusPending, false)
-	require.NoError(t, s.AppendGenerationEvent(&models.AIGenerationEvent{
+	ev := &models.AIGenerationEvent{
 		RunID: completed.ID, DraftID: &rejected.ID,
 		EventType: models.AIGenEventRejected, Reason: "too_vague",
-	}))
+	}
+	require.NoError(t, s.AppendGenerationEvent(ev))
+
+	// Exercise the real decision-latency and coverage-recall arithmetic (not
+	// just their zero/guard paths): give the completed run a completed_at and
+	// a coverage report, and pin the reject event to a known offset after it.
+	base := time.Now().Add(-10 * time.Minute)
+	require.NoError(t, s.db.Model(&models.AIGenerationRun{}).Where("id = ?", completed.ID).
+		Updates(map[string]interface{}{
+			"created_at":    base,
+			"completed_at":  base,
+			"coverage_json": `{"uncovered_count":3}`,
+		}).Error)
+	require.NoError(t, s.db.Model(&models.AIGenerationEvent{}).Where("id = ?", ev.ID).
+		Update("created_at", base.Add(90*time.Second)).Error)
 
 	rep, err := s.GetAIGenerationReport(time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
 	require.NoError(t, err)
@@ -71,8 +85,8 @@ func TestGetAIGenerationReport(t *testing.T) {
 	assert.Equal(t, int64(1000), rep.Runs.AvgDurationMs, "avg over completed runs only")
 	assert.Equal(t, int64(1000), rep.Runs.P50DurationMs)
 	assert.Equal(t, int64(1000), rep.Runs.P95DurationMs)
-	assert.GreaterOrEqual(t, rep.Runs.AvgDecisionSeconds, 0.0, "fixture run has no completed_at -> 0")
-	assert.Zero(t, rep.Runs.AvgUncoveredTargets, "no coverage reports in fixture")
+	assert.InDelta(t, 90.0, rep.Runs.AvgDecisionSeconds, 0.5, "completed_at -> reject event is 90s")
+	assert.InDelta(t, 3.0, rep.Runs.AvgUncoveredTargets, 1e-9, "one completed run, uncovered_count=3")
 
 	assert.Equal(t, 4, rep.Drafts.Generated)
 	assert.Equal(t, 1, rep.Drafts.AcceptedUnchanged)

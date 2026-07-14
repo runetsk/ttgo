@@ -89,7 +89,7 @@ func (s *Store) GetAIGenerationReport(start, end time.Time) (*AIGenerationReport
 
 	// Nearest-rank percentiles over completed run durations (median + p95).
 	if runAgg.Completed > 0 {
-		percentile := func(p int) int64 {
+		percentile := func(p int) (int64, error) {
 			offset := (runAgg.Completed*p + 99) / 100
 			if offset > 0 {
 				offset--
@@ -98,12 +98,20 @@ func (s *Store) GetAIGenerationReport(start, end time.Time) (*AIGenerationReport
 			if err := s.db.Raw(`SELECT duration_ms FROM ai_generation_runs
 				WHERE status = 'completed' AND created_at >= ? AND created_at < ?
 				ORDER BY duration_ms LIMIT 1 OFFSET ?`, start, end, offset).Scan(&v).Error; err != nil {
-				return 0
+				return 0, err
 			}
-			return v
+			return v, nil
 		}
-		rep.Runs.P50DurationMs = percentile(50)
-		rep.Runs.P95DurationMs = percentile(95)
+		p50, err := percentile(50)
+		if err != nil {
+			return nil, err
+		}
+		rep.Runs.P50DurationMs = p50
+		p95, err := percentile(95)
+		if err != nil {
+			return nil, err
+		}
+		rep.Runs.P95DurationMs = p95
 	}
 
 	// Reviewer decision latency: completed_at -> accept/reject event (seconds).
