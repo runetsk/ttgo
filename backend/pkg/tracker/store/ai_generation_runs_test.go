@@ -553,10 +553,19 @@ func TestCreateDraftAlternative(t *testing.T) {
 	assert.Equal(t, models.AIDraftStatusPending, alt.Status)
 	assert.NotEmpty(t, alt.OriginalJSON, "alternative snapshots its own as-generated content")
 
-	// Original is untouched (still pending) — alternatives never replace.
-	orig, err := s.GetGenerationRun(run.ID)
+	// Original draft is untouched — alternatives never replace it.
+	runWithDrafts, err := s.GetGenerationRunWithDrafts(run.ID)
 	require.NoError(t, err)
-	_ = orig
+	var origDraft *models.AIGeneratedDraft
+	for _, d := range runWithDrafts.Drafts {
+		if d.ID == original.ID {
+			origDraft = d
+		}
+	}
+	require.NotNil(t, origDraft, "original draft still present")
+	assert.Equal(t, models.AIDraftStatusPending, origDraft.Status, "original stays pending")
+	assert.Equal(t, 1, origDraft.Version, "original version unchanged")
+
 	events, err := s.ListGenerationEvents(run.ID)
 	require.NoError(t, err)
 	last := events[len(events)-1]
@@ -622,6 +631,12 @@ func TestUpdateDraftQualityAndAppendEvent(t *testing.T) {
 	got, err := s.GetGenerationRunWithDrafts(run.ID)
 	require.NoError(t, err)
 	assert.Contains(t, got.Drafts[0].QualityJSON, `"critic"`)
+
+	// A non-pending draft cannot have its quality updated.
+	_, rejErr := s.RejectGenerationDraft(draft.ID, "duplicate", "", nil)
+	require.NoError(t, rejErr)
+	err = s.UpdateDraftQuality(draft.ID, `[]`)
+	assert.ErrorIs(t, err, ErrDraftNotPending)
 
 	require.NoError(t, s.AppendGenerationEvent(&models.AIGenerationEvent{
 		RunID: run.ID, EventType: models.AIGenEventValidated, MetadataJSON: `{"critic":true}`,

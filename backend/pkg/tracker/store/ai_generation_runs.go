@@ -552,9 +552,16 @@ func (s *Store) ChooseDraftVersion(draftID string, actorID *string) (*models.AIG
 
 // UpdateDraftQuality replaces a pending draft's quality findings (critic pass).
 func (s *Store) UpdateDraftQuality(draftID, qualityJSON string) error {
-	return s.db.Model(&models.AIGeneratedDraft{}).
+	res := s.db.Model(&models.AIGeneratedDraft{}).
 		Where("id = ? AND status = ?", draftID, models.AIDraftStatusPending).
-		Update("quality_json", qualityJSON).Error
+		Update("quality_json", qualityJSON)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrDraftNotPending
+	}
+	return nil
 }
 
 // AppendGenerationEvent appends one lifecycle event outside a larger
