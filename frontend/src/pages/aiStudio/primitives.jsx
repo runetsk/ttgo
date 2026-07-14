@@ -38,6 +38,7 @@ export function Pill({ tone = 'neutral', children, style }) {
 export function StatusPill({ status }) {
     if (status === 'accepted') return <Pill tone="green">{Icon.check(10)} Accepted</Pill>;
     if (status === 'rejected') return <Pill tone="red">{Icon.x(10)} Rejected</Pill>;
+    if (status === 'superseded') return <Pill tone="neutral">Superseded</Pill>;
     return <Pill tone="indigo">{Icon.sparkles(10)} AI Draft</Pill>;
 }
 

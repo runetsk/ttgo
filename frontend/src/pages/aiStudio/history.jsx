@@ -8,7 +8,7 @@ const STATUS_COLOR = {
 };
 
 export function HistorySection({ ai }) {
-    const { history, loadHistory, loadRun, cloneRun, runId, activeRequirement } = ai;
+    const { history, loadHistory, loadRun, cloneRun, cancelRun, runId, activeRequirement } = ai;
 
     useEffect(() => {
         if (activeRequirement) loadHistory();
@@ -38,6 +38,9 @@ export function HistorySection({ ai }) {
                             <span style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
                                 {run.status === 'completed' && run.id !== runId && (
                                     <button className="action-btn" onClick={() => loadRun(run.id)}>Open</button>
+                                )}
+                                {(run.status === 'running' || run.status === 'pending') && (
+                                    <button className="action-btn" onClick={() => cancelRun(run.id)}>Cancel</button>
                                 )}
                                 <button className="action-btn" onClick={() => cloneRun(run)}>Clone</button>
                             </span>

@@ -10,7 +10,7 @@ import { DraftEditor } from './draftEditor';
 import { REVIEW_FILTERS, filterDrafts, draftFlags } from '../../utils/draftReview';
 
 // ── Middle top: Header ───────────────────────────────────────────────────────
-export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDiscardAll, onGenerate, onImport, disabled }) {
+export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDiscardAll, onGenerate, onImport, onCancel, disabled }) {
     const noProviders = ai.providers.length === 0;
     const noReq = !ai.activeRequirement;
     return (
@@ -52,6 +52,11 @@ export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDi
                 </div>
 
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {stage === 'generating' && onCancel && (
+                        <AIBtn variant="danger" onClick={onCancel}>
+                            {Icon.x(13)} Cancel
+                        </AIBtn>
+                    )}
                     {stage === 'review' && counts.pending > 0 && (
                         <>
                             <AIBtn variant="danger" onClick={onDiscardAll} disabled={disabled}>
@@ -150,6 +155,7 @@ export function StudioComposer({ ai, stage, disabled }) {
 // ── Middle: Drafts list ─────────────────────────────────────────────────────
 export function DraftRow({ draft, status, selected, onSelect, onAccept, onReject, disabled }) {
     const dimmed = status === 'rejected';
+    const superseded = status === 'superseded';
     const flags = draftFlags(draft);
     return (
         <div onClick={onSelect}
@@ -157,7 +163,7 @@ export function DraftRow({ draft, status, selected, onSelect, onAccept, onReject
                 padding: '12px 20px', borderBottom: `1px solid ${AIC.border2}`, cursor: 'pointer',
                 background: selected ? 'rgba(99,102,241,0.08)' : 'transparent',
                 borderLeft: selected ? `3px solid ${AIC.indigo}` : `3px solid transparent`,
-                opacity: dimmed ? 0.55 : 1,
+                opacity: dimmed ? 0.55 : superseded ? 0.45 : 1,
                 transition: 'background .15s',
             }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
@@ -177,6 +183,13 @@ export function DraftRow({ draft, status, selected, onSelect, onAccept, onReject
                                 }}>{draft.category}</span>
                             );
                         })()}
+                        {superseded && (
+                            <span style={{
+                                padding: '2px 8px', borderRadius: 999,
+                                fontSize: 10.5, fontWeight: 600, letterSpacing: '0.02em',
+                                background: 'var(--aig-surface-tint-strong)', border: `1px solid ${AIC.border}`, color: AIC.muted,
+                            }}>superseded · v{draft.version}</span>
+                        )}
                     </div>
                     <div style={{
                         fontSize: 13.5, color: AIC.text, fontWeight: 600, marginBottom: 3,
@@ -379,9 +392,55 @@ export function StudioDraftsList({
     );
 }
 
+// ── Regenerate controls (pending-draft detail pane) ─────────────────────────
+function RegenSection({ draft, disabled, onRegenerate, onOpenCompare }) {
+    const [instruction, setInstruction] = useState('');
+    const [busy, setBusy] = useState(false);
+    const hasFindings = (draft.findings || []).length > 0 || (draft.quality || []).length > 0;
+
+    const fire = async (action) => {
+        setBusy(true);
+        try {
+            const result = await onRegenerate(draft.id, { instruction, action });
+            if (result) onOpenCompare(draft, result.draft);
+            setInstruction('');
+        } catch {
+            // ai.regenerateDraft has no internal try/catch (mirrors saveDraftEdit) —
+            // a failed regeneration (LLM error, network) rejects. The global axios
+            // interceptor already toasts the error; swallow here so `finally` still
+            // resets `busy` and the rejection doesn't escape as unhandled.
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    return (
+        <div data-testid="regen-section" style={{ marginTop: 16, borderTop: `1px solid ${AIC.border}`, paddingTop: 12 }}>
+            <SectionLabel>Regenerate</SectionLabel>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                <AIBtn disabled={disabled || busy} onClick={() => fire('make_more_specific')}>Make more specific</AIBtn>
+                <AIBtn disabled={disabled || busy} onClick={() => fire('add_negative_case')}>Add a negative case</AIBtn>
+                <AIBtn disabled={disabled || busy || !hasFindings} onClick={() => fire('repair_findings')}
+                    title={hasFindings ? 'Fix the reported findings' : 'No findings to repair'}>
+                    Repair findings
+                </AIBtn>
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+                <input className="modern-input" style={{ flex: 1, fontSize: 12 }}
+                    placeholder="Optional instruction, e.g. cover the lockout rule"
+                    value={instruction} onChange={e => setInstruction(e.target.value)} disabled={disabled || busy} />
+                <AIBtn variant="primary" disabled={disabled || busy} onClick={() => fire('')}>
+                    {busy ? 'Regenerating…' : 'Regenerate'}
+                </AIBtn>
+            </div>
+        </div>
+    );
+}
+
 // ── Right pane: Detail ──────────────────────────────────────────────────────
 export function StudioDraftDetail({
     ai, draft, status, onAccept, onReject, onCollapse, stage, linkedReqId, disabled,
+    onRegenerate, onOpenCompare,
 }) {
     if (!draft || stage !== 'review') {
         return (
@@ -459,6 +518,15 @@ export function StudioDraftDetail({
                 <DraftEditor key={draft.id} draft={draft} onSave={ai.saveDraftEdit} disabled={disabled} />
             ) : (
                 <>
+                    {status === 'superseded' && (
+                        <div style={{
+                            padding: '8px 12px', marginBottom: 14, borderRadius: 8,
+                            background: 'var(--aig-surface-tint)', border: `1px solid ${AIC.border}`,
+                            fontSize: 11.5, color: AIC.muted, lineHeight: 1.5,
+                        }}>
+                            This version was superseded.
+                        </div>
+                    )}
                     {draft.description && (
                         <div style={{
                             padding: '10px 12px', background: 'rgba(99,102,241,0.06)',
@@ -501,6 +569,11 @@ export function StudioDraftDetail({
                     <SectionLabel>Steps</SectionLabel>
                     <Stepper steps={draft.steps} />
                 </>
+            )}
+
+            {status === 'pending' && (
+                <RegenSection draft={draft} disabled={disabled}
+                    onRegenerate={onRegenerate} onOpenCompare={onOpenCompare} />
             )}
         </aside>
     );

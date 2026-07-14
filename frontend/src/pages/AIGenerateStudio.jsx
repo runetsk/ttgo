@@ -17,6 +17,7 @@ import { StudioContextPane, CreateRequirementModal } from './aiStudio/context';
 import {
     StudioHeader, StudioComposer, StudioDraftsList, StudioDraftDetail,
 } from './aiStudio/drafts';
+import { DraftCompareModal } from './aiStudio/draftCompare';
 import { RejectPopover } from './aiStudio/rejectPopover';
 import { CommitSummaryModal } from './aiStudio/commitSummary';
 import { LlmFeedbackPanel } from './aiStudio/LlmFeedbackPanel';
@@ -36,6 +37,8 @@ export default function AIGenerateStudio() {
     // Accept-all-clean commit flow: {clean, excludedInvalid, excludedDuplicates, overriddenWarnings} | null
     const [acceptPlan, setAcceptPlan] = useState(null);
     const [acceptResult, setAcceptResult] = useState(null);
+    // Regenerate → compare flow: {original, alternative} | null
+    const [compare, setCompare] = useState(null);
 
     // Requirements-catalog + import-modal state (folded in from the former AIGeneratePage shell)
     const [importOpen, setImportOpen] = useState(() => {
@@ -121,9 +124,13 @@ export default function AIGenerateStudio() {
         return new Date(ai.activeRequirement.updated_at) > new Date(run.created_at);
     })();
 
-    // Server `draft.status` is the source of truth (set by accept/reject calls).
+    // Server `draft.status` is the source of truth (set by accept/reject/choose calls).
     const statusOf = useCallback(
-        (d) => (d.status === 'accepted' || d.status === 'rejected') ? d.status : 'pending',
+        (d) => {
+            if (d.status === 'accepted' || d.status === 'rejected') return d.status;
+            if (d.status === 'superseded') return 'superseded';
+            return 'pending';
+        },
         []
     );
 
@@ -195,7 +202,7 @@ export default function AIGenerateStudio() {
     }, [filtered, selectedDraftId]);
 
     useStudioShortcuts({
-        enabled: stage === 'review' && !rejectTarget && !acceptPlan,
+        enabled: stage === 'review' && !rejectTarget && !acceptPlan && !compare,
         onNext: () => selectByOffset(1),
         onPrev: () => selectByOffset(-1),
         onAccept: () => { const d = filtered.find(x => x.id === selectedDraftId); if (d && statusOf(d) === 'pending') handleAccept(d); },
@@ -272,6 +279,7 @@ export default function AIGenerateStudio() {
                         onDiscardAll={handleDiscardAll}
                         onGenerate={handleGenerate}
                         onImport={() => setImportOpen(true)}
+                        onCancel={ai.cancelActive}
                         disabled={disabled}
                     />
                     <StudioComposer ai={ai} stage={stage} disabled={disabled} />
@@ -318,6 +326,8 @@ export default function AIGenerateStudio() {
                         stage={stage}
                         linkedReqId={ai.activeRequirement?.identifier}
                         disabled={disabled}
+                        onRegenerate={ai.regenerateDraft}
+                        onOpenCompare={(original, alternative) => setCompare({ original, alternative })}
                     />
                 )}
 
@@ -386,6 +396,15 @@ export default function AIGenerateStudio() {
                     open
                     onClose={() => setRejectTarget(null)}
                     onSubmit={handleRejectSubmit}
+                />
+            )}
+
+            {compare && (
+                <DraftCompareModal
+                    original={compare.original}
+                    alternative={compare.alternative}
+                    onChoose={async (keepId) => { await ai.chooseDraft(keepId); setCompare(null); }}
+                    onClose={() => setCompare(null)}
                 />
             )}
 

@@ -340,6 +340,13 @@ export function StudioContextPane({ ai, onCollapse, allReqs, allReqsLoading, onP
                         })}
                     </div>
 
+                    {(ai.coverageLevel === 'thorough' || ai.coverageLevel === 'comprehensive') && (
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: AIC.dim, marginTop: 6, cursor: 'pointer' }}>
+                            <input type="checkbox" checked={ai.runCritic} onChange={e => ai.setRunCritic(e.target.checked)} />
+                            Run LLM critic pass (extra call, semantic findings)
+                        </label>
+                    )}
+
                     <div style={{
                         display: 'flex', alignItems: 'baseline', gap: 6,
                         fontSize: 10.5, color: AIC.text, fontWeight: 600,
