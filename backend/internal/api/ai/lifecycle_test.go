@@ -669,8 +669,33 @@ func TestUpdateGenerationDraft_RecomputesQualityAndCoverage(t *testing.T) {
 		`<ul><li>User can sign in</li><li>Wrong password shows an error</li></ul>`)
 	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
 
-	// Point the second draft at AC-2 and fix its vague step.
-	rr := doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[1], map[string]interface{}{
+	// Baseline: at create time draft 1 (the vague, un-referenced duplicate) must
+	// already carry rubric findings and a duplicate candidate, and AC-2 must be
+	// uncovered. This proves the create-time analysis populated the very fields the
+	// PATCH recompute will clear — without it, the "cleared after edit" assertions
+	// below would be vacuously true even if nothing were wired.
+	rr := doRequest(env, "GET", "/api/ai-generations/"+runID, nil)
+	require.Equal(t, http.StatusOK, rr.Code)
+	var before struct {
+		Drafts []struct {
+			Quality    json.RawMessage `json:"quality"`
+			Duplicates json.RawMessage `json:"duplicates"`
+		} `json:"drafts"`
+		Coverage struct {
+			UncoveredCount int `json:"uncovered_count"`
+		} `json:"coverage"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &before))
+	require.Len(t, before.Drafts, 2)
+	require.NotNil(t, before.Drafts[1].Quality, "the vague draft starts with rubric findings")
+	assert.Contains(t, string(before.Drafts[1].Quality), "no_source_refs")
+	require.NotNil(t, before.Drafts[1].Duplicates, "the duplicate-named draft starts with a candidate")
+	assert.Equal(t, 1, before.Coverage.UncoveredCount, "AC-2 is uncovered before the edit")
+
+	// Point the second draft at AC-2, rename it out of the duplicate collision, and
+	// give it a concrete step. A correct recompute must clear every finding AND
+	// rebuild coverage so AC-2 becomes covered.
+	rr = doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[1], map[string]interface{}{
 		"name":        "Wrong password shows an inline error",
 		"source_refs": []string{"AC-2"},
 		"steps": []map[string]string{
@@ -685,13 +710,21 @@ func TestUpdateGenerationDraft_RecomputesQualityAndCoverage(t *testing.T) {
 			Duplicates json.RawMessage `json:"duplicates"`
 		} `json:"draft"`
 		Coverage struct {
+			Targets []struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			} `json:"targets"`
 			UncoveredCount int `json:"uncovered_count"`
 		} `json:"coverage"`
 	}
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+
+	// The PATCH response genuinely rebuilt coverage (if the wiring were absent the
+	// coverage key would be missing -> Targets len 0, failing this).
+	require.Len(t, body.Coverage.Targets, 2, "PATCH response carries the rebuilt coverage report")
 	assert.Equal(t, 0, body.Coverage.UncoveredCount, "AC-2 is now covered")
 	assert.Nil(t, body.Draft.Quality, "the edit resolved every rubric finding")
-	assert.Nil(t, body.Draft.Duplicates, "renamed draft no longer collides")
+	assert.Nil(t, body.Draft.Duplicates, "the renamed draft no longer collides")
 }
 
 func TestCreateGeneration_ReplayFailedRunReturnsFailureStatus(t *testing.T) {
