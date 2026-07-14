@@ -387,6 +387,41 @@ func TestRejectGenerationDraftEndpoint(t *testing.T) {
 			map[string]string{"reason": "duplicate"}).Code)
 }
 
+func TestRestoreGenerationDraftEndpoint(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-RESTORE-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	// Restore before reject -> 409.
+	rr := doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/restore", nil)
+	require.Equal(t, http.StatusConflict, rr.Code, rr.Body.String())
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/reject",
+		map[string]string{"reason": "duplicate"})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/restore", nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body struct {
+		Draft struct {
+			Status   string                 `json:"status"`
+			Original map[string]interface{} `json:"original"`
+		} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Equal(t, "pending", body.Draft.Status)
+	assert.NotEmpty(t, body.Draft.Original, "responses expose the as-generated original")
+
+	// Unknown draft -> 404.
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/nope/restore", nil)
+	require.Equal(t, http.StatusNotFound, rr.Code)
+}
+
 func TestLifecycleEndpointsRequireAuth(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()

@@ -185,6 +185,7 @@ type AIGeneratedDraftResponse struct {
 	Findings           json.RawMessage `json:"findings,omitempty"`
 	Quality            json.RawMessage `json:"quality,omitempty"`
 	Duplicates         json.RawMessage `json:"duplicates,omitempty"`
+	Original           *DraftContent   `json:"original,omitempty"`
 	Edited             bool            `json:"edited"`
 	AcceptedTestCaseID *string         `json:"accepted_test_case_id,omitempty"`
 	CreatedAt          time.Time       `json:"created_at"`
@@ -212,6 +213,12 @@ func (d *AIGeneratedDraft) ToResponse() (*AIGeneratedDraftResponse, error) {
 	}
 	if d.DuplicatesJSON != "" && d.DuplicatesJSON != "null" && d.DuplicatesJSON != "[]" {
 		resp.Duplicates = json.RawMessage(d.DuplicatesJSON)
+	}
+	if d.OriginalJSON != "" {
+		var orig DraftContent
+		if err := json.Unmarshal([]byte(d.OriginalJSON), &orig); err == nil {
+			resp.Original = &orig
+		}
 	}
 	return resp, nil
 }

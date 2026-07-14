@@ -169,7 +169,12 @@ func seedRunWithDraft(t *testing.T, s *Store) (*models.AIGenerationRun, *models.
 		Name: "Original name", Category: "Functional", Description: "d",
 		Steps: []models.GeneratedStep{{Action: "a", ExpectedResult: "e"}},
 	}))
-	draft.OriginalJSON = draft.StepsJSON // placeholder; real callers store full content
+	orig, err := json.Marshal(models.DraftContent{
+		Name: "Original name", Category: "Functional", Description: "d",
+		Steps: []models.GeneratedStep{{Action: "a", ExpectedResult: "e"}},
+	})
+	require.NoError(t, err)
+	draft.OriginalJSON = string(orig)
 	require.NoError(t, s.CreateGenerationDrafts(run.ID, nil, []*models.AIGeneratedDraft{draft}, 0))
 	return run, draft
 }
@@ -240,6 +245,38 @@ func TestRejectGenerationDraft(t *testing.T) {
 	assert.Equal(t, models.AIGenEventRejected, last.EventType)
 	assert.Equal(t, "too_vague", last.Reason)
 	assert.Equal(t, "steps lack data", last.Note)
+}
+
+func TestRestoreGenerationDraft(t *testing.T) {
+	s := newTestStore(t)
+	_, draft := seedRunWithDraft(t, s)
+
+	_, err := s.RejectGenerationDraft(draft.ID, "duplicate", "", nil)
+	require.NoError(t, err)
+
+	restored, err := s.RestoreGenerationDraft(draft.ID, nil)
+	require.NoError(t, err)
+	assert.Equal(t, models.AIDraftStatusPending, restored.Status)
+
+	events, err := s.ListGenerationEvents(draft.RunID)
+	require.NoError(t, err)
+	last := events[len(events)-1]
+	assert.Equal(t, models.AIGenEventRestored, last.EventType)
+	require.NotNil(t, last.DraftID)
+	assert.Equal(t, draft.ID, *last.DraftID)
+
+	// Restoring a pending draft is a state error.
+	_, err = s.RestoreGenerationDraft(draft.ID, nil)
+	assert.ErrorIs(t, err, ErrDraftNotRejected)
+}
+
+func TestDraftResponseCarriesOriginal(t *testing.T) {
+	s := newTestStore(t)
+	_, draft := seedRunWithDraft(t, s)
+	resp, err := draft.ToResponse()
+	require.NoError(t, err)
+	require.NotNil(t, resp.Original)
+	assert.Equal(t, "Original name", resp.Original.Name)
 }
 
 // seedAcceptFixture creates a real requirement + folder + run with n pending drafts.

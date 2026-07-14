@@ -1116,6 +1116,46 @@ paths:
       summary: Reject a generated draft
       tags:
       - ai-generations
+  /ai-generations/{id}/drafts/{draft_id}/restore:
+    post:
+      description: Moves a rejected draft back to pending and records a `restored`
+        lifecycle event.
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Draft ID
+        in: path
+        name: draft_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Restore a rejected AI draft
+      tags:
+      - ai-generations
   /analytics/flaky:
     get:
       description: Returns tests ranked by status-switch percentage

@@ -476,6 +476,66 @@
                 }
             }
         },
+        "/ai-generations/{id}/drafts/{draft_id}/restore": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Moves a rejected draft back to pending and records a `restored` lifecycle event.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-generations"
+                ],
+                "summary": "Restore a rejected AI draft",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Draft ID",
+                        "name": "draft_id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/analytics/flaky": {
             "get": {
                 "description": "Returns tests ranked by status-switch percentage",

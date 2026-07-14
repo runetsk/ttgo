@@ -825,6 +825,46 @@ func (h *Handler) RejectGenerationDraftEndpoint(w http.ResponseWriter, r *http.R
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp})
 }
 
+// RestoreGenerationDraftEndpoint returns a rejected draft to pending.
+//
+// @Summary      Restore a rejected AI draft
+// @Description  Moves a rejected draft back to pending and records a `restored` lifecycle event.
+// @Tags         ai-generations
+// @Produce      json
+// @Param        id        path  string  true  "Run ID"
+// @Param        draft_id  path  string  true  "Draft ID"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      404  {object}  map[string]string
+// @Failure      409  {object}  map[string]string
+// @Router       /ai-generations/{id}/drafts/{draft_id}/restore [post]
+// @Security     BearerAuth
+func (h *Handler) RestoreGenerationDraftEndpoint(w http.ResponseWriter, r *http.Request) {
+	draft, err := h.getRunDraft(r.PathValue("id"), r.PathValue("draft_id"))
+	if err != nil {
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "draft not found"})
+		return
+	}
+	var actorID *string
+	if u := authctx.UserFromRequest(r); u != nil {
+		actorID = &u.ID
+	}
+	restored, err := h.store.RestoreGenerationDraft(draft.ID, actorID)
+	if err != nil {
+		if errors.Is(err, store.ErrDraftNotRejected) {
+			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	resp, err := restored.ToResponse()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{"draft": resp})
+}
+
 // AcceptGeneration atomically materializes selected drafts into test cases.
 //
 // @Summary      Accept generated drafts

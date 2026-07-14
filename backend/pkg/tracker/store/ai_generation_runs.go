@@ -14,9 +14,10 @@ import (
 
 // Sentinel errors for the generation lifecycle (mapped to HTTP codes in the API layer).
 var (
-	ErrDraftNotPending = errors.New("draft is not in pending status")
-	ErrDraftInvalid    = errors.New("draft has validation errors")
-	ErrUnknownDrafts   = errors.New("one or more drafts do not belong to this run")
+	ErrDraftNotPending  = errors.New("draft is not in pending status")
+	ErrDraftInvalid     = errors.New("draft has validation errors")
+	ErrUnknownDrafts    = errors.New("one or more drafts do not belong to this run")
+	ErrDraftNotRejected = errors.New("draft is not in rejected status")
 )
 
 // CreateGenerationRun inserts run, OR returns the existing run holding the same
@@ -242,6 +243,39 @@ func (s *Store) RejectGenerationDraft(draftID, reason, note string, actorID *str
 		})
 	})
 	return out, err
+}
+
+// RestoreGenerationDraft returns a rejected draft to pending and appends a
+// `restored` event. The status-guarded update makes concurrent restores or
+// accepts lose cleanly (ErrDraftNotRejected).
+func (s *Store) RestoreGenerationDraft(draftID string, actorID *string) (*models.AIGeneratedDraft, error) {
+	var draft models.AIGeneratedDraft
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.First(&draft, "id = ?", draftID).Error; err != nil {
+			return err
+		}
+		if draft.Status != models.AIDraftStatusRejected {
+			return fmt.Errorf("%w: draft %s is %s", ErrDraftNotRejected, draftID, draft.Status)
+		}
+		res := tx.Model(&models.AIGeneratedDraft{}).
+			Where("id = ? AND status = ?", draftID, models.AIDraftStatusRejected).
+			Update("status", models.AIDraftStatusPending)
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return fmt.Errorf("%w: draft %s changed concurrently", ErrDraftNotRejected, draftID)
+		}
+		draft.Status = models.AIDraftStatusPending
+		return createGenerationEventTx(tx, &models.AIGenerationEvent{
+			RunID: draft.RunID, DraftID: &draft.ID,
+			EventType: models.AIGenEventRestored, ActorID: actorID,
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &draft, nil
 }
 
 // ListGenerationEvents returns a run's events oldest-first. Ties on created_at
