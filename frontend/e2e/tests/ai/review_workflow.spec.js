@@ -2,8 +2,8 @@ import { test, expect } from '@playwright/test';
 import http from 'node:http';
 import { API_URL, createRequirementAPI, createFolderAPI } from '../../helpers/api.js';
 
-// Fixed three-draft envelope for the reviewer-workflow spec: two structurally
-// valid drafts (used to exercise edit/autosave and reject/restore) plus one
+// Three-draft envelope for the reviewer-workflow spec: two structurally valid
+// drafts (used to exercise edit/autosave and reject/restore) plus one
 // deliberately INVALID draft (empty `steps`) so "Accept all clean" has a real
 // exclusion to prove. backend/pkg/tracker/aigen/validate.go ValidateDraft
 // raises an error-severity finding ("steps"/"no_steps") whenever len(Steps)==0,
@@ -11,39 +11,53 @@ import { API_URL, createRequirementAPI, createFolderAPI } from '../../helpers/ap
 // isDraftClean(...) false on the frontend (src/utils/draftReview.js) — nothing
 // here is provider-specific, so no @needs-mock tag is required (same rationale
 // as generate_accept.spec.js).
-const ENVELOPE = JSON.stringify({
-    test_cases: [
-        {
-            name: '[Functional] Reviewer flow happy path',
-            category: 'Functional',
-            description: 'Clean draft.',
-            source_refs: ['AC-1'],
-            steps: [{ action: 'Enter "user@example.com" and sign in', expected_result: 'The dashboard page is displayed' }],
-        },
-        {
-            name: '[Negative] Reviewer flow wrong password',
-            category: 'Negative',
-            description: 'Also clean.',
-            source_refs: ['AC-2'],
-            steps: [{ action: 'Enter "wrong-pass-1" and sign in', expected_result: 'An inline "Invalid credentials" error is displayed' }],
-        },
-        {
-            name: '[Boundary] Broken draft with no steps',
-            category: 'Boundary',
-            description: 'Invalid: no steps.',
-            source_refs: [],
-            steps: [],
-        },
-    ],
-});
+//
+// To ensure idempotency across runs, the two clean drafts' names are tokened
+// with Date.now() in beforeAll (mirroring generate_accept.spec.js's UI_ENVELOPE
+// pattern) so they never collide with previously accepted test cases in the DB.
+// The invalid draft keeps a fixed name (it's never accepted, so no duplicate risk).
 
 let fakeLLM, providerId, requirementId, folderName;
+let cleanDraft1Name, cleanDraft2Name;
 
 test.describe('AI reviewer workflow — edit, reject/restore, accept all clean, resume', () => {
     test.beforeAll(async ({ request }) => {
+        // Create a per-run token to ensure the two clean drafts' names are
+        // unique per run, preventing duplicate-detection collisions with prior
+        // runs' accepted test cases on a persistent dev DB.
+        const token = Date.now();
+        cleanDraft1Name = `[Functional] Reviewer happy ${token}`;
+        cleanDraft2Name = `[Negative] Reviewer wrong-pass ${token}`;
+
+        const ENVELOPE = JSON.stringify({
+            test_cases: [
+                {
+                    name: cleanDraft1Name,
+                    category: 'Functional',
+                    description: 'Clean draft.',
+                    source_refs: ['AC-1'],
+                    steps: [{ action: 'Enter "user@example.com" and sign in', expected_result: 'The dashboard page is displayed' }],
+                },
+                {
+                    name: cleanDraft2Name,
+                    category: 'Negative',
+                    description: 'Also clean.',
+                    source_refs: ['AC-2'],
+                    steps: [{ action: 'Enter "wrong-pass-1" and sign in', expected_result: 'An inline "Invalid credentials" error is displayed' }],
+                },
+                {
+                    name: '[Boundary] Broken draft with no steps',
+                    category: 'Boundary',
+                    description: 'Invalid: no steps.',
+                    source_refs: [],
+                    steps: [],
+                },
+            ],
+        });
+
         // Self-hosted fake LLM speaking the OpenAI-compatible chat-completions
         // wire format (see pkg/tracker/llm/openai_compat.go); ignores the
-        // request body and always returns the fixed envelope above.
+        // request body and always returns the envelope above with tokened names.
         fakeLLM = http.createServer((req, res) => {
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({
@@ -105,23 +119,23 @@ test.describe('AI reviewer workflow — edit, reject/restore, accept all clean, 
                 r.url().endsWith('/api/ai-generations') && r.request().method() === 'POST');
             await page.getByRole('button', { name: /^generate$/i }).click();
             expect((await createResp).status()).toBe(201);
-            await expect(page.getByText('Reviewer flow happy path').first()).toBeVisible();
+            await expect(page.getByText(cleanDraft1Name).first()).toBeVisible();
         });
 
         await test.step('edit the selected draft and autosave via PATCH', async () => {
             // Generate auto-selects the first pending draft, but click it
             // explicitly so this step doesn't depend on that default.
-            await page.getByText('Reviewer flow happy path').first().click();
+            await page.getByText(cleanDraft1Name).first().click();
             const nameInput = page.getByTestId('draft-editor').locator('input').first();
             const patchResp = page.waitForResponse(r =>
                 /\/api\/ai-generations\/.+\/drafts\/.+$/.test(r.url()) && r.request().method() === 'PATCH');
-            await nameInput.fill('[Functional] Reviewer flow happy path (edited)');
+            await nameInput.fill(`${cleanDraft1Name} (edited)`);
             expect((await patchResp).status()).toBe(200);
             await expect(page.getByTestId('save-state')).toHaveText('Saved');
         });
 
         await test.step('reject with a structured reason, then restore', async () => {
-            await page.getByText('Reviewer flow wrong password').first().click();
+            await page.getByText(cleanDraft2Name).first().click();
 
             // "Reject" alone is not a unique accessible name on this page: every
             // pending row in the drafts list (drafts.jsx DraftRow) also renders
@@ -176,7 +190,7 @@ test.describe('AI reviewer workflow — edit, reject/restore, accept all clean, 
             // match "Accept all clean (1)" (still rendered — the invalid draft
             // is still pending), which also contains the substring "all".
             await page.getByRole('button', { name: /^all\b/i }).click();
-            await expect(page.getByText('Reviewer flow happy path (edited)').first()).toBeVisible();
+            await expect(page.getByText(`${cleanDraft1Name} (edited)`).first()).toBeVisible();
         });
     });
 });
