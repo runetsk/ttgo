@@ -1312,6 +1312,33 @@ paths:
       summary: Restore a rejected AI draft
       tags:
       - ai-generations
+  /ai-generations/reports/summary:
+    get:
+      description: Aggregated run outcomes, draft feedback (accepted unchanged/edited,
+        rejected with reasons, superseded), token/cost totals, and provider comparisons
+        for a date window (default last 30 days).
+      parameters:
+      - description: YYYY-MM-DD
+        in: query
+        name: start_date
+        type: string
+      - description: YYYY-MM-DD (inclusive)
+        in: query
+        name: end_date
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: AI generation summary report
+      tags:
+      - ai-generations
   /analytics/flaky:
     get:
       description: Returns tests ranked by status-switch percentage

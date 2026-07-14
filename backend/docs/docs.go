@@ -216,6 +216,46 @@ const docTemplate = `{
                 }
             }
         },
+        "/ai-generations/reports/summary": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Aggregated run outcomes, draft feedback (accepted unchanged/edited, rejected with reasons, superseded), token/cost totals, and provider comparisons for a date window (default last 30 days).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-generations"
+                ],
+                "summary": "AI generation summary report",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "YYYY-MM-DD",
+                        "name": "start_date",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "YYYY-MM-DD (inclusive)",
+                        "name": "end_date",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/ai-generations/{id}": {
             "get": {
                 "security": [

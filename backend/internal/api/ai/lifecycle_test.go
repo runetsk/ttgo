@@ -1228,3 +1228,34 @@ func TestCreateGeneration_BudgetWarningIsAcknowledgeable(t *testing.T) {
 	rr = doRequest(env, "POST", "/api/ai-generations", body)
 	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
 }
+
+func TestAIGenerationReportEndpoint(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-REPORT-1", "T", "D")
+	createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "GET", "/api/ai-generations/reports/summary", nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var rep struct {
+		Runs struct {
+			Total     int `json:"total"`
+			Completed int `json:"completed"`
+		} `json:"runs"`
+		Drafts struct {
+			Generated int `json:"generated"`
+		} `json:"drafts"`
+		Providers []struct {
+			ProviderLabel string `json:"provider_label"`
+		} `json:"providers"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &rep))
+	assert.Equal(t, 1, rep.Runs.Total)
+	assert.Equal(t, 1, rep.Runs.Completed)
+	assert.Equal(t, 2, rep.Drafts.Generated)
+	require.NotEmpty(t, rep.Providers)
+}
