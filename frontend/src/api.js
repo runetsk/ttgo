@@ -448,6 +448,8 @@ export const aiGeneration = {
         api.patch(`/ai-generations/${runId}/drafts/${draftId}`, changes).then(res => res.data),
     rejectGenerationDraft: (runId, draftId, data) =>
         api.post(`/ai-generations/${runId}/drafts/${draftId}/reject`, data).then(res => res.data),
+    restoreGenerationDraft: (runId, draftId) =>
+        api.post(`/ai-generations/${runId}/drafts/${draftId}/restore`).then(res => res.data),
     acceptGeneration: (runId, data) =>
         api.post(`/ai-generations/${runId}/accept`, data).then(res => res.data),
 };
