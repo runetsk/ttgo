@@ -440,7 +440,7 @@ function RegenSection({ draft, disabled, onRegenerate, onOpenCompare }) {
 // ── Right pane: Detail ──────────────────────────────────────────────────────
 export function StudioDraftDetail({
     ai, draft, status, onAccept, onReject, onCollapse, stage, linkedReqId, disabled,
-    onRegenerate, onOpenCompare,
+    onRegenerate, onOpenCompare, onCompareVersions,
 }) {
     if (!draft || stage !== 'review') {
         return (
@@ -457,6 +457,11 @@ export function StudioDraftDetail({
             </aside>
         );
     }
+
+    // An un-chosen regeneration leaves 2+ pending drafts at the same position —
+    // the compare modal is otherwise dismissable with no other way back in.
+    const hasPendingSibling = (ai.drafts || [])
+        .filter(d => d.position === draft.position && d.status === 'pending').length > 1;
 
     return (
         <aside style={{
@@ -501,6 +506,21 @@ export function StudioDraftDetail({
                     <AIBtn variant="danger" onClick={onReject} disabled={disabled}
                         style={{ flex: 1, justifyContent: 'center' }}>
                         {Icon.x(13)} Reject
+                    </AIBtn>
+                </div>
+            )}
+
+            {status === 'pending' && hasPendingSibling && (
+                <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14,
+                    padding: '8px 12px', borderRadius: 8,
+                    background: 'var(--aig-surface-tint)', border: `1px solid ${AIC.border}`,
+                }}>
+                    <span style={{ fontSize: 11.5, color: AIC.muted, flex: 1, lineHeight: 1.5 }}>
+                        An un-chosen regenerated version is pending too — excluded from "Accept all clean" until resolved.
+                    </span>
+                    <AIBtn onClick={() => onCompareVersions(draft)} disabled={disabled}>
+                        {Icon.history(12)} Compare versions
                     </AIBtn>
                 </div>
             )}

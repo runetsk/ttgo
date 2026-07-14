@@ -179,13 +179,18 @@ export default function AIGenerateStudio() {
     // Opens the confirm phase: clean pending drafts vs. what gets excluded/overridden.
     const handleAcceptAllClean = () => {
         const pending = drafts.filter(d => statusOf(d) === 'pending');
-        const clean = pending.filter(isDraftClean);
+        // Position -> count of pending drafts (an un-chosen regeneration leaves 2+ pending at one position)
+        const pendingByPos = {};
+        pending.forEach(d => { pendingByPos[d.position] = (pendingByPos[d.position] || 0) + 1; });
+        const hasUnresolvedSibling = d => (pendingByPos[d.position] || 0) > 1;
+        const clean = pending.filter(d => isDraftClean(d) && !hasUnresolvedSibling(d));
         setAcceptResult(null);
         setAcceptPlan({
             clean,
             excludedInvalid: pending.filter(d => draftFlags(d).invalid).length,
             excludedDuplicates: pending.filter(d => !draftFlags(d).invalid && draftFlags(d).highConfidenceDuplicate).length,
             overriddenWarnings: clean.filter(d => draftFlags(d).warnings || draftFlags(d).possibleDuplicate).length,
+            excludedUnresolved: pending.filter(hasUnresolvedSibling).length,
         });
     };
     const confirmAcceptAllClean = async () => {
@@ -193,6 +198,18 @@ export default function AIGenerateStudio() {
         if (res) setAcceptResult(res);
         else setAcceptPlan(null); // toast already shown by context on failure
     };
+
+    // Re-opens the compare/choose modal for a pending draft that still has an
+    // un-chosen regenerated sibling at the same position. The compare modal is
+    // otherwise the only path to chooseDraft and it's dismissable, so without
+    // this a dismissed pair would be a dead-end.
+    const handleCompareVersions = useCallback((draft) => {
+        const siblings = drafts
+            .filter(d => d.position === draft.position && statusOf(d) === 'pending')
+            .sort((a, b) => a.version - b.version);
+        if (siblings.length < 2) return;
+        setCompare({ original: siblings[0], alternative: siblings[siblings.length - 1] });
+    }, [drafts, statusOf]);
 
     const selectByOffset = useCallback((dir) => {
         if (!filtered.length) return;
@@ -328,6 +345,7 @@ export default function AIGenerateStudio() {
                         disabled={disabled}
                         onRegenerate={ai.regenerateDraft}
                         onOpenCompare={(original, alternative) => setCompare({ original, alternative })}
+                        onCompareVersions={handleCompareVersions}
                     />
                 )}
 

@@ -2,7 +2,7 @@ import React from 'react';
 import { AIC } from './constants';
 import { AIBtn } from './primitives';
 
-// Two-phase modal. plan = {clean, excludedInvalid, excludedDuplicates, overriddenWarnings}
+// Two-phase modal. plan = {clean, excludedInvalid, excludedDuplicates, overriddenWarnings, excludedUnresolved}
 // result = accept response {created_ids, count, subfolders_created} | null (confirm phase)
 export function CommitSummaryModal({ plan, result, onConfirm, onClose }) {
     if (!plan) return null;
@@ -25,6 +25,7 @@ export function CommitSummaryModal({ plan, result, onConfirm, onClose }) {
                             )}
                             {plan.excludedInvalid > 0 && <li><b>{plan.excludedInvalid}</b> invalid draft(s) excluded</li>}
                             {plan.excludedDuplicates > 0 && <li><b>{plan.excludedDuplicates}</b> high-confidence duplicate(s) excluded</li>}
+                            {plan.excludedUnresolved > 0 && <li><b>{plan.excludedUnresolved}</b> draft(s) with unchosen versions excluded — choose a version first</li>}
                         </ul>
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 14 }}>
                             <button className="action-btn" onClick={onClose}>Cancel</button>
