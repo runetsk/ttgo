@@ -893,7 +893,7 @@ paths:
         returns the stored result without calling the provider.
       parameters:
       - description: requirement_id (required), provider_id, coverage_level, detail_level,
-          additional_instructions, idempotency_key, parent_run_id
+          additional_instructions, idempotency_key, parent_run_id, run_critic
         in: body
         name: body
         required: true

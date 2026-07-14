@@ -35,6 +35,7 @@ type createGenerationRequest struct {
 	AdditionalInstructions string `json:"additional_instructions"`
 	IdempotencyKey         string `json:"idempotency_key"`
 	ParentRunID            string `json:"parent_run_id"`
+	RunCritic              bool   `json:"run_critic"`
 }
 
 // runResponse builds the canonical {run, drafts} payload for a run.
@@ -215,7 +216,7 @@ func (h *Handler) failRun(run *models.AIGenerationRun, status string, category l
 // @Tags         ai-generations
 // @Accept       json
 // @Produce      json
-// @Param        body  body  object  true  "requirement_id (required), provider_id, coverage_level, detail_level, additional_instructions, idempotency_key, parent_run_id"
+// @Param        body  body  object  true  "requirement_id (required), provider_id, coverage_level, detail_level, additional_instructions, idempotency_key, parent_run_id, run_critic"
 // @Success      201  {object}  map[string]interface{}
 // @Success      200  {object}  map[string]interface{}
 // @Failure      400  {object}  map[string]string
@@ -459,6 +460,15 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	criticWarning := ""
+	if req.RunCritic && (plan.CoverageLevel == "thorough" || plan.CoverageLevel == "comprehensive") && len(rows) > 0 {
+		criticResp, warn := h.runCriticPass(ctx, provider, providerCfg, plan.Requirement.Title, parsed, rows)
+		criticWarning = warn
+		if criticResp != nil {
+			accumulateUsage(chatResp, criticResp)
+		}
+	}
+
 	now := time.Now()
 	run.Status = models.AIGenerationRunStatusCompleted
 	run.CompletedAt = &now
@@ -491,6 +501,9 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 	}
 	if plan.TemplateWarning != "" {
 		out["template_warning"] = plan.TemplateWarning
+	}
+	if criticWarning != "" {
+		out["critic_warning"] = criticWarning
 	}
 	httpx.JSON(w, http.StatusCreated, out)
 }

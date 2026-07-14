@@ -933,3 +933,87 @@ func TestChooseDraftVersionEndpoint(t *testing.T) {
 	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/choose", nil)
 	require.Equal(t, http.StatusConflict, rr.Code)
 }
+
+func TestCreateGeneration_CriticPassAppendsFindings(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	criticReply := `{"findings":[{"draft_index":0,"dimension":"relevance","message":"drifts away from the requirement"}]}`
+	call := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		call++
+		content := fakeEnvelopeJSON
+		if call > 1 {
+			content = criticReply
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"model": "fake-model",
+			"choices": []map[string]interface{}{
+				{"finish_reason": "stop", "message": map[string]string{"content": content}},
+			},
+			"usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
+		})
+	}))
+	defer srv.Close()
+	providerID := createFakeProvider(t, env, srv.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-CRITIC-1", "T", "D")
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]interface{}{
+		"requirement_id": reqID, "provider_id": providerID,
+		"coverage_level": "thorough", "run_critic": true,
+		"idempotency_key": uuid.NewString(),
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	assert.Equal(t, 2, call, "exactly one critic call on top of generation")
+
+	var body struct {
+		Run struct {
+			TotalTokens int `json:"total_tokens"`
+		} `json:"run"`
+		Drafts []struct {
+			Quality []struct {
+				Key string `json:"key"`
+			} `json:"quality"`
+		} `json:"drafts"`
+		CriticWarning string `json:"critic_warning"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	assert.Empty(t, body.CriticWarning)
+	assert.Equal(t, 60, body.Run.TotalTokens, "generation + critic usage accumulated")
+	var keys []string
+	for _, dim := range body.Drafts[0].Quality {
+		keys = append(keys, dim.Key)
+	}
+	assert.Contains(t, keys, "critic")
+}
+
+func TestCreateGeneration_CriticOffByDefault(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-CRITIC-2", "T", "D")
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": uuid.NewString(),
+	})
+	require.Equal(t, http.StatusCreated, rr.Code)
+	// One call only — the shared fake counts via capture (path set once is enough here);
+	// stronger: assert no draft has a critic dimension.
+	var body struct {
+		Drafts []struct {
+			Quality []struct {
+				Key string `json:"key"`
+			} `json:"quality"`
+		} `json:"drafts"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	for _, d := range body.Drafts {
+		for _, dim := range d.Quality {
+			assert.NotEqual(t, "critic", dim.Key)
+		}
+	}
+}

@@ -153,7 +153,7 @@ const docTemplate = `{
                 "summary": "Create an AI generation run",
                 "parameters": [
                     {
-                        "description": "requirement_id (required), provider_id, coverage_level, detail_level, additional_instructions, idempotency_key, parent_run_id",
+                        "description": "requirement_id (required), provider_id, coverage_level, detail_level, additional_instructions, idempotency_key, parent_run_id, run_critic",
                         "name": "body",
                         "in": "body",
                         "required": true,

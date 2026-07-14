@@ -25,6 +25,7 @@ var QualityDimensionLabels = map[string]string{
 	"expected_observability": "Expected-result observability",
 	"uniqueness":             "Scenario uniqueness",
 	"traceability":           "Coverage traceability",
+	"critic":                 "LLM critic",
 }
 
 var (
