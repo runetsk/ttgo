@@ -1,11 +1,34 @@
 package store
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 	"ttgo/pkg/tracker/secretbox"
 
 	"github.com/stretchr/testify/require"
 )
+
+// TestEncryptionKeyStoredBesideDatabase verifies the at-rest encryption key file
+// is created in the DATABASE's directory (the persisted volume in the Docker
+// deployment), not in the process CWD. If it lands in CWD it is lost on container
+// recreation, a new key is generated, and every stored secret (LLM/integration
+// API keys) becomes undecryptable — the "401 Missing Authentication header after
+// rebuild" bug.
+func TestEncryptionKeyStoredBesideDatabase(t *testing.T) {
+	t.Setenv("TTGO_ENCRYPTION_KEY", "") // force the file-based key, not an env-provided one
+	dir := t.TempDir()
+	s, err := New(filepath.Join(dir, "test.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		if sqlDB, err := s.db.DB(); err == nil {
+			_ = sqlDB.Close() // close before TempDir removal (Windows can't delete an open SQLite file)
+		}
+	})
+
+	_, statErr := os.Stat(filepath.Join(dir, "secret.key"))
+	require.NoError(t, statErr, "secret.key must be created beside the database, not in CWD")
+}
 
 // TestJiraConfigTokenEncryptedAtRest verifies F-016: the API token is stored as
 // ciphertext but returned decrypted from the store API.

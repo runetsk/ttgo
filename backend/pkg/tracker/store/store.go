@@ -84,7 +84,13 @@ func New(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("failed to create backups directory: %w", err)
 	}
 
-	box, err := secretbox.LoadOrCreate("TTGO_ENCRYPTION_KEY", "secret.key")
+	// Keep the key file BESIDE the database so it shares the DB's persisted
+	// volume and survives container recreation / a DB restore. A bare relative
+	// path put it in the process CWD (e.g. an ephemeral container layer), so a
+	// rebuild regenerated the key and made every stored secret undecryptable.
+	// An explicit TTGO_ENCRYPTION_KEY env var still overrides the file.
+	keyPath := filepath.Join(filepath.Dir(dsn), "secret.key")
+	box, err := secretbox.LoadOrCreate("TTGO_ENCRYPTION_KEY", keyPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load encryption key: %w", err)
 	}
