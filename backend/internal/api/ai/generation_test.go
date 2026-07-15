@@ -384,6 +384,60 @@ func TestLegacyAcceptCompletesLifecycleAndFallsBack(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
 }
 
+// TestLegacyAcceptRecomputesQualityOnEdit locks down a fix for a bug where the
+// legacy accept endpoint's lifecycle-match path called SaveDraftEdit with
+// hard-coded empty quality/duplicates JSON ("", "") whenever a client edited a
+// draft, instead of recomputing them the way UpdateGenerationDraft's PATCH
+// endpoint does. That silently wiped the draft's Stage-3 quality findings and
+// duplicate candidates the moment it was edited-then-accepted through the
+// deprecated endpoint (e.g. an accepted duplicate would vanish from the
+// accepted_with_duplicate_warning report metric).
+func TestLegacyAcceptRecomputesQualityOnEdit(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-LEGACY-QUALITY", "T", "D")
+	folderID := createTestFolder(t, env, "Legacy Accept Quality")
+
+	rr := doRequest(env, "POST", "/api/requirements/"+reqID+"/generate-tests",
+		map[string]string{"provider_id": providerID})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var gen struct {
+		Drafts []models.GeneratedTestCase `json:"drafts"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &gen))
+	require.Len(t, gen.Drafts, 2)
+
+	// Edit draft 0's expected result to a vague, non-observable outcome
+	// client-side (legacy contract). This changes content (so the edit branch
+	// calls SaveDraftEdit) and deterministically trips the
+	// "expected_observability" quality dimension (aigen.EvaluateDraftQuality /
+	// rubric.go's vagueExpectedRe matches "it works") without tripping any
+	// aigen.ValidateDraft error — it's non-blank and well under
+	// MaxStepFieldLen, so AcceptGenerationDrafts' validation-error gate still
+	// lets the batch through.
+	gen.Drafts[0].Steps[0].ExpectedResult = "it works"
+	rr = doRequest(env, "POST", "/api/requirements/"+reqID+"/accept-generated-tests", map[string]interface{}{
+		"folder_id": folderID, "tests": gen.Drafts, "group_by_category": false,
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+
+	drafts, err := env.store.GetDraftsByIDs([]string{gen.Drafts[0].TempID})
+	require.NoError(t, err)
+	require.Len(t, drafts, 1)
+	edited := drafts[0]
+	assert.Equal(t, models.AIDraftStatusAccepted, edited.Status)
+	// Before the fix this was exactly "" (SaveDraftEdit's hard-coded blank).
+	assert.NotEqual(t, "", edited.QualityJSON, "legacy accept must recompute quality, not blank it")
+	assert.NotEqual(t, "null", edited.QualityJSON)
+	assert.NotEqual(t, "[]", edited.QualityJSON)
+	assert.Contains(t, edited.QualityJSON, "expected_observability",
+		"the vague edited expected_result should trip the expected_observability rubric dimension")
+}
+
 // TestLegacyAcceptRejectsMalformedLifecycleIDs locks down the fix for a bug in
 // matchLifecycleDrafts: GetDraftsByIDs runs a deduplicating "WHERE id IN"
 // query, so it used to compare len(drafts) != len(ids) to decide whether the

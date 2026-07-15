@@ -1041,7 +1041,15 @@ func (h *Handler) AcceptGeneratedTests(w http.ResponseWriter, r *http.Request) {
 			if stored, err := d.Content(); err == nil && !reflect.DeepEqual(stored, content) {
 				findings := aigen.ValidateDraft(tcase)
 				vb, _ := json.Marshal(findings)
-				if _, err := h.store.SaveDraftEdit(d.ID, content, string(vb), "", "", actorID); err != nil {
+				// Recompute quality and duplicates against the edited content —
+				// mirrors UpdateGenerationDraft's PATCH behavior — so this legacy
+				// edit never blanks Stage-3 analysis with a bare "".
+				qJSON, dJSON, _, _, qerr := h.recomputeEditedDraftQuality(runID, d.ID, content)
+				if qerr != nil {
+					httpx.Error(w, http.StatusInternalServerError, qerr)
+					return
+				}
+				if _, err := h.store.SaveDraftEdit(d.ID, content, string(vb), qJSON, dJSON, actorID); err != nil {
 					httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 					return
 				}

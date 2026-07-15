@@ -102,6 +102,48 @@ func (h *Handler) analyzeDraftQuality(drafts []models.GeneratedTestCase, targets
 	return qualityJSONs, duplicatesJSONs
 }
 
+// recomputeEditedDraftQuality rebuilds runID's draft batch with `content`
+// applied at draftID's position (mirroring create-time behavior: accepted/
+// rejected drafts still occupy positions and count toward name-uniqueness/
+// duplicate checks) and returns that draft's fresh quality and duplicate
+// JSON, plus the coverage targets and rebuilt batch — callers that also
+// refresh run-level coverage (e.g. the PATCH endpoint) need those two to
+// build the coverage report without re-fetching. Shared by the lifecycle
+// PATCH (UpdateGenerationDraft) and the deprecated legacy accept adapter
+// (AcceptGeneratedTests) so an edit never blanks Stage-3 analysis the way a
+// bare "" used to for legacy accept.
+func (h *Handler) recomputeEditedDraftQuality(runID, draftID string, content models.DraftContent) (qualityJSON, duplicatesJSON string, targets []aigen.CoverageTarget, all []models.GeneratedTestCase, err error) {
+	runWithDrafts, err := h.store.GetGenerationRunWithDrafts(runID)
+	if err != nil {
+		return "", "", nil, nil, err
+	}
+	if runWithDrafts.CoverageJSON != "" {
+		var stored aigen.CoverageReport
+		if json.Unmarshal([]byte(runWithDrafts.CoverageJSON), &stored) == nil {
+			for _, tc := range stored.Targets {
+				targets = append(targets, tc.CoverageTarget)
+			}
+		}
+	}
+	// Rebuild the batch with the edit applied at this draft's position.
+	all = make([]models.GeneratedTestCase, 0, len(runWithDrafts.Drafts))
+	editedPos := 0
+	for _, d := range runWithDrafts.Drafts {
+		c, cerr := d.Content()
+		if cerr != nil {
+			return "", "", nil, nil, cerr
+		}
+		gc := models.GeneratedTestCase{Name: c.Name, Category: c.Category, Description: c.Description, SourceRefs: c.SourceRefs, Steps: c.Steps}
+		if d.ID == draftID {
+			editedPos = len(all)
+			gc = models.GeneratedTestCase{Name: content.Name, Category: content.Category, Description: content.Description, SourceRefs: content.SourceRefs, Steps: content.Steps}
+		}
+		all = append(all, gc)
+	}
+	qualityJSONs, duplicatesJSONs := h.analyzeDraftQuality(all, targets, runWithDrafts.RequirementID)
+	return qualityJSONs[editedPos], duplicatesJSONs[editedPos], targets, all, nil
+}
+
 // httpStatusForCategory maps a normalized LLM error category to the HTTP status
 // the original request returned, so an idempotency-key replay of a failed run
 // reproduces that status instead of a misleading 200.
@@ -816,38 +858,11 @@ func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) 
 	// drafts still participate in the batch (they occupy positions and their
 	// names count for uniqueness/duplicates) — matches create-time behavior.
 	runID := r.PathValue("id")
-	runWithDrafts, err := h.store.GetGenerationRunWithDrafts(runID)
+	qualityJSON, duplicatesJSON, targets, all, err := h.recomputeEditedDraftQuality(runID, draft.ID, content)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	var targets []aigen.CoverageTarget
-	if runWithDrafts.CoverageJSON != "" {
-		var stored aigen.CoverageReport
-		if err := json.Unmarshal([]byte(runWithDrafts.CoverageJSON), &stored); err == nil {
-			for _, tc := range stored.Targets {
-				targets = append(targets, tc.CoverageTarget)
-			}
-		}
-	}
-	// Rebuild the batch with the edit applied at this draft's position.
-	all := make([]models.GeneratedTestCase, 0, len(runWithDrafts.Drafts))
-	editedPos := 0
-	for _, d := range runWithDrafts.Drafts {
-		c, cerr := d.Content()
-		if cerr != nil {
-			httpx.Error(w, http.StatusInternalServerError, cerr)
-			return
-		}
-		gc := models.GeneratedTestCase{Name: c.Name, Category: c.Category, Description: c.Description, SourceRefs: c.SourceRefs, Steps: c.Steps}
-		if d.ID == draft.ID {
-			editedPos = len(all)
-			gc = models.GeneratedTestCase{Name: content.Name, Category: content.Category, Description: content.Description, SourceRefs: content.SourceRefs, Steps: content.Steps}
-		}
-		all = append(all, gc)
-	}
-	qualityJSONs, duplicatesJSONs := h.analyzeDraftQuality(all, targets, runWithDrafts.RequirementID)
-	qualityJSON, duplicatesJSON := qualityJSONs[editedPos], duplicatesJSONs[editedPos]
 
 	updated, err := h.store.SaveDraftEdit(draft.ID, content, string(findingsJSON), qualityJSON, duplicatesJSON, actorID)
 	if err != nil {
