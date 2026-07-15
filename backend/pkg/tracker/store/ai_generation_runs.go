@@ -368,8 +368,12 @@ func (s *Store) AcceptGenerationDrafts(runID string, draftIDs []string, folderID
 		if err := tx.First(&models.Folder{}, "id = ?", folderID).Error; err != nil {
 			return fmt.Errorf("target folder: %w", err)
 		}
-		if err := tx.First(&models.Requirement{}, "id = ?", run.RequirementID).Error; err != nil {
-			return fmt.Errorf("linked requirement: %w", err)
+		// A no-requirement run has an empty RequirementID — skip the requirement
+		// existence check (and, in materializeDraftContentsTx, the link row).
+		if run.RequirementID != "" {
+			if err := tx.First(&models.Requirement{}, "id = ?", run.RequirementID).Error; err != nil {
+				return fmt.Errorf("linked requirement: %w", err)
+			}
 		}
 		contents := make([]models.DraftContent, len(drafts))
 		positionCounts := map[int]int{}
@@ -483,11 +487,13 @@ func (s *Store) materializeDraftContentsTx(tx *gorm.DB, requirementID, folderID 
 		if err := s.createTestCaseTx(tx, tc); err != nil {
 			return nil, 0, fmt.Errorf("test case %q: %w", c.Name, err)
 		}
-		if err := tx.Create(&models.RequirementTestCaseLink{
-			ID: uuid.New().String(), RequirementID: requirementID,
-			TestCaseID: tc.ID, CreatedAt: now,
-		}).Error; err != nil {
-			return nil, 0, fmt.Errorf("link for %q: %w", c.Name, err)
+		if requirementID != "" {
+			if err := tx.Create(&models.RequirementTestCaseLink{
+				ID: uuid.New().String(), RequirementID: requirementID,
+				TestCaseID: tc.ID, CreatedAt: now,
+			}).Error; err != nil {
+				return nil, 0, fmt.Errorf("link for %q: %w", c.Name, err)
+			}
 		}
 		createdIDs = append(createdIDs, tc.ID)
 	}

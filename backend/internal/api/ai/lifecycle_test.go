@@ -1440,3 +1440,36 @@ func TestCreateGeneration_NoRequirement_CriticDoesNotPanic(t *testing.T) {
 	// The critic pass must not dereference the nil requirement.
 	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
 }
+
+func TestAcceptGeneration_NoRequirement_CreatesNoLink(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	folderID := createTestFolder(t, env, "No-Req Accept")
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]interface{}{
+		"provider_id":             providerID,
+		"additional_instructions": "Generate tests for a search feature",
+		"idempotency_key":         "noreq-accept",
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	run, drafts := decodeRunResponse(t, rr)
+	runID := run["id"].(string)
+	draftIDs := []string{drafts[0]["id"].(string), drafts[1]["id"].(string)}
+
+	acc := doRequest(env, "POST", "/api/ai-generations/"+runID+"/accept", map[string]interface{}{
+		"folder_id": folderID,
+		"draft_ids": draftIDs,
+	})
+	require.Equal(t, http.StatusCreated, acc.Code, acc.Body.String())
+
+	var linkCount int64
+	require.NoError(t, env.store.DB().Model(&models.RequirementTestCaseLink{}).Count(&linkCount).Error)
+	assert.Equal(t, int64(0), linkCount, "no-requirement accept must not create requirement links")
+	var tcCount int64
+	require.NoError(t, env.store.DB().Model(&models.TestCase{}).Count(&tcCount).Error)
+	assert.Equal(t, int64(2), tcCount, "both drafts materialized into test cases")
+}
