@@ -67,6 +67,11 @@ export function AIGenerationProvider({ children }) {
     // Soft budget pre-flight warning (409 {category:"budget"}) — non-null shows
     // the confirm modal; startGeneration({ acknowledgeBudget: true }) resends.
     const [budgetWarning, setBudgetWarning] = useState(null);
+    // What to retry when the user clicks "Proceed anyway" on the budget modal —
+    // { kind: 'generate' } or { kind: 'regenerate', draftId, opts }. Set
+    // alongside budgetWarning wherever a budget 409 is caught; consumed (and
+    // cleared) by confirmBudget().
+    const budgetRetryRef = useRef(null);
     const [hasGenerated, setHasGenerated] = useState(false);
     const [lastDebug, setLastDebug] = useState(null); // debug info from last successful generation
     const [attempts, setAttempts] = useState([]); // per-attempt token/cost breakdown for the current run
@@ -336,6 +341,7 @@ export function AIGenerationProvider({ children }) {
         } catch (err) {
             if (err?.response?.status === 409 && err.response.data?.category === 'budget') {
                 setBudgetWarning(err.response.data);
+                budgetRetryRef.current = { kind: 'generate' };
                 return;
             }
             if (err?.code === 'ERR_CANCELED') {
@@ -403,14 +409,46 @@ export function AIGenerationProvider({ children }) {
     // the original so the pair sits together for compare/choose (Task 7 UI).
     const regenerateDraft = useCallback(async (draftId, opts) => {
         if (!runId) return null;
-        const result = await aiGeneration.regenerateGenerationDraft(runId, draftId, opts || {});
-        setDrafts(prev => {
-            const idx = prev.findIndex(d => d.id === draftId);
-            if (idx < 0) return [...prev, result.draft];
-            return [...prev.slice(0, idx + 1), result.draft, ...prev.slice(idx + 1)];
-        });
-        return result;
+        const { acknowledgeBudget, ...rest } = opts || {};
+        try {
+            const result = await aiGeneration.regenerateGenerationDraft(runId, draftId, {
+                ...rest,
+                acknowledge_budget: !!acknowledgeBudget,
+            });
+            setDrafts(prev => {
+                const idx = prev.findIndex(d => d.id === draftId);
+                if (idx < 0) return [...prev, result.draft];
+                return [...prev.slice(0, idx + 1), result.draft, ...prev.slice(idx + 1)];
+            });
+            return result;
+        } catch (err) {
+            if (err?.response?.status === 409 && err.response.data?.category === 'budget') {
+                setBudgetWarning(err.response.data);
+                budgetRetryRef.current = { kind: 'regenerate', draftId, opts: opts || {} };
+                return null;
+            }
+            throw err;
+        }
     }, [runId]);
+
+    // Retry whatever action the budget modal is currently blocking ("Proceed
+    // anyway"): re-runs generation or the specific draft regeneration with
+    // acknowledge_budget: true, using what the 409 catch recorded above.
+    const confirmBudget = useCallback(async () => {
+        const retry = budgetRetryRef.current;
+        budgetRetryRef.current = null;
+        setBudgetWarning(null);
+        if (!retry) return;
+        try {
+            if (retry.kind === 'regenerate') {
+                await regenerateDraft(retry.draftId, { ...retry.opts, acknowledgeBudget: true });
+            } else {
+                await startGeneration({ acknowledgeBudget: true });
+            }
+        } catch (err) {
+            toast.error(err?.response?.data?.error || 'Retry failed');
+        }
+    }, [regenerateDraft, startGeneration]);
 
     // Keep one version of a draft family; the losing versions come back
     // superseded (excluded from pending counts/accept-all).
@@ -712,6 +750,7 @@ export function AIGenerationProvider({ children }) {
         templateWarning,
         budgetWarning,
         setBudgetWarning,
+        confirmBudget,
         hasGenerated,
         lastDebug,
         attempts,

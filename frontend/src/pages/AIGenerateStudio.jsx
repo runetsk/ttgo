@@ -429,7 +429,7 @@ export default function AIGenerateStudio() {
 
             <BudgetConfirmModal
                 warning={ai.budgetWarning}
-                onConfirm={() => { ai.setBudgetWarning(null); ai.startGeneration({ acknowledgeBudget: true }); }}
+                onConfirm={ai.confirmBudget}
                 onClose={() => ai.setBudgetWarning(null)}
             />
 
