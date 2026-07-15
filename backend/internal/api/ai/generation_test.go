@@ -437,4 +437,30 @@ func TestProviderPricingRejectsInvalid(t *testing.T) {
 		"api_key": "sk-test", "prompt_price_per_mtok": 1e308,
 	})
 	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+	// Negative completion_price_per_mtok must also be rejected (POST path).
+	rr = doRequest(env, "POST", "/api/settings/llm-providers", map[string]interface{}{
+		"label": "Negative Completion Price", "provider_type": "openai", "model_name": "gpt-test",
+		"api_key": "sk-test", "completion_price_per_mtok": -1,
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+	// Price validation must also run on the update path (PUT).
+	// First create a valid provider.
+	rr = doRequest(env, "POST", "/api/settings/llm-providers", map[string]interface{}{
+		"label": "Valid Provider", "provider_type": "openai", "model_name": "gpt-test",
+		"api_key": "sk-test",
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	var created struct {
+		ID string `json:"id"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &created))
+
+	// Then attempt to update it with an invalid price.
+	rr = doRequest(env, "PUT", "/api/settings/llm-providers/"+created.ID, map[string]interface{}{
+		"label": "Valid Provider", "provider_type": "openai", "model_name": "gpt-test",
+		"prompt_price_per_mtok": -5,
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
 }
