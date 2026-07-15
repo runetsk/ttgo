@@ -243,21 +243,28 @@ export function DraftCompareModal({ original, alternative, onChoose, onClose }) 
     const [view, setView] = useState(readCompareView);
     const dialogRef = useRef(null);
     const restoreFocusRef = useRef(null);
+    const onCloseRef = useRef(onClose);
 
     useEffect(() => {
         try { localStorage.setItem(COMPARE_VIEW_KEY, view); } catch { /* ignore */ }
     }, [view]);
 
+    // Keep the latest onClose in a ref so the focus/Escape effect below can run
+    // mount/unmount-only — the caller passes a new onClose closure every render,
+    // and depending on it would tear down + re-run the effect (and churn focus)
+    // on incidental parent re-renders.
+    useEffect(() => { onCloseRef.current = onClose; });
+
     useEffect(() => {
         restoreFocusRef.current = document.activeElement;
         dialogRef.current?.focus();
-        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        const onKey = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
         document.addEventListener('keydown', onKey);
         return () => {
             document.removeEventListener('keydown', onKey);
             restoreFocusRef.current?.focus?.();
         };
-    }, [onClose]);
+    }, []);
 
     if (!diff) return null;
     return (
