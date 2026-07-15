@@ -8,6 +8,7 @@ import {
 import PromptPreviewPanel from './PromptPreviewPanel';
 import { DraftEditor } from './draftEditor';
 import { REVIEW_FILTERS, filterDrafts, draftFlags } from '../../utils/draftReview';
+import { decodeEntities } from '../../utils/decodeEntities';
 
 // ── Middle top: Header ───────────────────────────────────────────────────────
 export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDiscardAll, onGenerate, onImport, onCancel, disabled }) {
@@ -203,7 +204,7 @@ export function DraftRow({ draft, status, selected, onSelect, onAccept, onReject
                             display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
                             overflow: 'hidden',
                         }}>
-                            {String(draft.description).replace(/<[^>]+>/g, '')}
+                            {decodeEntities(String(draft.description).replace(/<[^>]+>/g, ''))}
                         </div>
                     )}
                     <div style={{
