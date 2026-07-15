@@ -1386,3 +1386,57 @@ func TestAIGenerationReportEndpoint(t *testing.T) {
 	assert.Equal(t, 2, rep.Drafts.Generated)
 	require.NotEmpty(t, rep.Providers)
 }
+
+func TestCreateGeneration_NoRequirement_Succeeds(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]interface{}{
+		"provider_id":             providerID,
+		"additional_instructions": "Generate tests for a password-reset email flow",
+		"idempotency_key":         "noreq-ok",
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	run, drafts := decodeRunResponse(t, rr)
+	assert.Equal(t, "completed", run["status"])
+	assert.Equal(t, "", run["requirement_id"], "no-requirement run stores an empty requirement id")
+	require.Len(t, drafts, 2)
+}
+
+func TestCreateGeneration_NoRequirementNoPrompt_Rejected(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]interface{}{
+		"provider_id":     providerID,
+		"idempotency_key": "noreq-empty",
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+}
+
+func TestCreateGeneration_NoRequirement_CriticDoesNotPanic(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]interface{}{
+		"provider_id":             providerID,
+		"additional_instructions": "Generate tests for a checkout flow",
+		"coverage_level":          "thorough",
+		"run_critic":              true,
+		"idempotency_key":         "noreq-critic",
+	})
+	// The critic pass must not dereference the nil requirement.
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+}

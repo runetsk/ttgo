@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"ttgo/internal/api/authctx"
@@ -323,8 +324,8 @@ func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
 // legacy GenerateTests adapter (Task 7: ai-generation-improvements stage 6)
 // can share one implementation.
 func (h *Handler) executeGeneration(r *http.Request, req createGenerationRequest) *generationOutcome {
-	if req.RequirementID == "" {
-		return &generationOutcome{status: http.StatusBadRequest, payload: map[string]interface{}{"error": "requirement_id is required"}}
+	if req.RequirementID == "" && strings.TrimSpace(req.AdditionalInstructions) == "" {
+		return &generationOutcome{status: http.StatusBadRequest, payload: map[string]interface{}{"error": "a requirement or a prompt is required"}}
 	}
 	if len(req.AdditionalInstructions) > maxAdditionalInstructionsLen {
 		return &generationOutcome{status: http.StatusBadRequest, payload: map[string]interface{}{"error": "additional_instructions is too long"}}
@@ -558,7 +559,13 @@ func (h *Handler) executeGeneration(r *http.Request, req createGenerationRequest
 	criticWarning := ""
 	if req.RunCritic && (plan.CoverageLevel == "thorough" || plan.CoverageLevel == "comprehensive") && len(rows) > 0 {
 		criticStart := time.Now()
-		criticResp, warn := h.runCriticPass(ctx, provider, providerCfg, plan.Requirement.Title, parsed, rows)
+		// Fall back to the prompt when there's no linked requirement, so the
+		// critic still has a subject and never dereferences a nil requirement.
+		criticSubject := strings.TrimSpace(req.AdditionalInstructions)
+		if plan.Requirement != nil {
+			criticSubject = plan.Requirement.Title
+		}
+		criticResp, warn := h.runCriticPass(ctx, provider, providerCfg, criticSubject, parsed, rows)
 		criticWarning = warn
 		if criticResp != nil {
 			h.recordAttempt(run.ID, nil, models.AIGenAttemptCritic, providerCfg, criticResp, nil, criticStart, 0)
