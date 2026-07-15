@@ -120,6 +120,13 @@ test.describe('AI draft regeneration — compare and choose', () => {
             await expect(page.getByTestId('draft-compare')).toBeVisible();
         });
 
+        await test.step('toggle split/unified persists the choice', async () => {
+            await page.getByRole('button', { name: /^unified$/i }).click();
+            expect(await page.evaluate(() => localStorage.getItem('aig.compareView'))).toBe('unified');
+            await page.getByRole('button', { name: /^split$/i }).click();
+            expect(await page.evaluate(() => localStorage.getItem('aig.compareView'))).toBe('split');
+        });
+
         await test.step('choose the new version — original becomes superseded', async () => {
             const chooseResp = page.waitForResponse(r => r.url().includes('/choose'));
             await page.getByRole('button', { name: /use new version/i }).click();

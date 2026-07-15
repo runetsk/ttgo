@@ -1,7 +1,66 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { AIC } from './constants';
-import { AIBtn, Pill } from './primitives';
+import { AIBtn, Pill, Segmented } from './primitives';
 import { buildDraftDiff, leftParts, rightParts } from '../../utils/draftDiff';
+
+const STEP_LABEL = { changed: '±', added: '+', removed: '−', unchanged: '=' };
+const COMPARE_VIEW_KEY = 'aig.compareView';
+
+function readCompareView() {
+    try { return localStorage.getItem(COMPARE_VIEW_KEY) === 'unified' ? 'unified' : 'split'; }
+    catch { return 'split'; }
+}
+
+function DiffText({ parts }) {
+    if (!parts) return null;
+    return (
+        <span>
+            {parts.map((p, i) => {
+                if (p.added) return <mark key={i} style={{ background: 'var(--aig-success-bg)', color: 'var(--aig-success-fg)', borderRadius: 3, padding: '0 1px' }}>{p.value}</mark>;
+                if (p.removed) return <mark key={i} style={{ background: 'var(--aig-danger-bg)', color: 'var(--aig-danger-fg)', textDecoration: 'line-through', borderRadius: 3, padding: '0 1px' }}>{p.value}</mark>;
+                return <span key={i}>{p.value}</span>;
+            })}
+        </span>
+    );
+}
+
+function UnifiedView({ diff }) {
+    return (
+        <div style={{ fontSize: 12.5, color: AIC.dim, lineHeight: 1.6 }}>
+            <div style={{ marginBottom: 8 }}><b style={{ color: AIC.text }}>Name:</b> <DiffText parts={diff.name} /></div>
+            {diff.category.changed && (
+                <div style={{ marginBottom: 8 }}><b style={{ color: AIC.text }}>Category:</b> {diff.category.from} → {diff.category.to}</div>
+            )}
+            <div style={{ marginBottom: 8 }}><b style={{ color: AIC.text }}>Description:</b> <DiffText parts={diff.description} /></div>
+            {(diff.sourceRefs.added.length > 0 || diff.sourceRefs.removed.length > 0) && (
+                <div style={{ marginBottom: 8 }}>
+                    <b style={{ color: AIC.text }}>Refs:</b>{' '}
+                    {diff.sourceRefs.added.map(r => <span key={`a-${r}`} style={{ color: 'var(--aig-success-fg)', marginRight: 6 }}>+{r}</span>)}
+                    {diff.sourceRefs.removed.map(r => <span key={`r-${r}`} style={{ color: 'var(--aig-danger-fg)', marginRight: 6 }}>−{r}</span>)}
+                </div>
+            )}
+            <b style={{ color: AIC.text }}>Steps:</b>
+            {diff.steps.map(st => (
+                st.type === 'unchanged' ? (
+                    <div key={st.index} style={{ padding: '5px 8px', marginTop: 4, fontSize: 11.5, color: AIC.muted }}>
+                        Step {st.index + 1} · unchanged
+                    </div>
+                ) : (
+                    <div key={st.index} style={{
+                        display: 'flex', gap: 8, padding: '5px 8px', marginTop: 4,
+                        border: `1px solid ${AIC.border}`, borderRadius: 6, background: 'var(--aig-surface-tint)',
+                    }}>
+                        <span style={{ fontWeight: 700, color: AIC.muted }}>{STEP_LABEL[st.type]} #{st.index + 1}</span>
+                        <div style={{ flex: 1 }}>
+                            <div><DiffText parts={st.action} /></div>
+                            <div style={{ color: AIC.muted }}><DiffText parts={st.expected} /></div>
+                        </div>
+                    </div>
+                )
+            ))}
+        </div>
+    );
+}
 
 // One side of a word-diff: highlight only THIS side's edits (removed on the
 // left, added on the right). Pass parts already narrowed via leftParts/rightParts.
@@ -181,26 +240,56 @@ export function DraftCompareModal({ original, alternative, onChoose, onClose }) 
         () => (original && alternative ? buildDraftDiff(original, alternative) : null),
         [original, alternative]
     );
+    const [view, setView] = useState(readCompareView);
+    const dialogRef = useRef(null);
+    const restoreFocusRef = useRef(null);
+
+    useEffect(() => {
+        try { localStorage.setItem(COMPARE_VIEW_KEY, view); } catch { /* ignore */ }
+    }, [view]);
+
+    useEffect(() => {
+        restoreFocusRef.current = document.activeElement;
+        dialogRef.current?.focus();
+        const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+        document.addEventListener('keydown', onKey);
+        return () => {
+            document.removeEventListener('keydown', onKey);
+            restoreFocusRef.current?.focus?.();
+        };
+    }, [onClose]);
+
     if (!diff) return null;
     return (
         <div onClick={onClose} style={{
             position: 'fixed', inset: 0, zIndex: 60, background: 'var(--aig-modal-backdrop)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
         }}>
-            <div onClick={e => e.stopPropagation()} data-testid="draft-compare" style={{
-                width: 'min(840px, 94vw)', maxHeight: '85vh', display: 'flex', flexDirection: 'column',
-                background: 'var(--bg-secondary)', borderRadius: 12, border: `1px solid ${AIC.border}`,
-                boxShadow: 'var(--shadow-md)',
-            }}>
+            <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="aig-compare-title"
+                onClick={e => e.stopPropagation()} data-testid="draft-compare" style={{
+                    width: 'min(840px, 94vw)', maxHeight: '85vh', display: 'flex', flexDirection: 'column',
+                    background: 'var(--bg-secondary)', borderRadius: 12, border: `1px solid ${AIC.border}`,
+                    boxShadow: 'var(--shadow-md)', outline: 'none',
+                }}>
                 <div style={{ padding: '16px 18px 0' }}>
-                    <h3 style={{ margin: '0 0 4px', fontSize: 14, color: AIC.text }}>Compare versions</h3>
-                    <p style={{ margin: '0 0 12px', fontSize: 11.5, color: AIC.muted }}>
-                        v{original.version} (current) → v{alternative.version} (regenerated). Choosing keeps one and marks the other superseded.
-                    </p>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                        <div style={{ minWidth: 0 }}>
+                            <h3 id="aig-compare-title" style={{ margin: '0 0 4px', fontSize: 14, color: AIC.text }}>Compare versions</h3>
+                            <p style={{ margin: '0 0 12px', fontSize: 11.5, color: AIC.muted }}>
+                                v{original.version} (current) → v{alternative.version} (regenerated). Choosing keeps one and marks the other superseded.
+                            </p>
+                        </div>
+                        <Segmented value={view} onChange={setView} options={[
+                            { value: 'split', label: 'Split' },
+                            { value: 'unified', label: 'Unified' },
+                        ]} />
+                    </div>
                     <SummaryBar summary={diff.summary} />
                 </div>
                 <div style={{ padding: '0 18px 8px', overflowY: 'auto', flex: 1 }}>
-                    <SplitView diff={diff} original={original} alternative={alternative} />
+                    {view === 'split'
+                        ? <SplitView diff={diff} original={original} alternative={alternative} />
+                        : <UnifiedView diff={diff} />}
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '14px 18px', borderTop: `1px solid ${AIC.border}` }}>
                     <AIBtn onClick={() => onChoose(original.id)}>Keep original</AIBtn>
