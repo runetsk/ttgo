@@ -73,3 +73,21 @@ test('buildDraftDiff.summary counts changed fields and steps', () => {
     assert.equal(d.summary.refsAdded, 1);
     assert.equal(d.summary.refsRemoved, 0);
 });
+
+test('decodes HTML entities before diffing step and description text', () => {
+    const o = { name: 'n', category: 'c', description: "was &#39;old&#39;", source_refs: [],
+        steps: [{ action: "click &#39;Save&#39;", expected_result: 'a &amp; b' }] };
+    const a = { name: 'n', category: 'c', description: "now &#39;new&#39;", source_refs: [],
+        steps: [{ action: "tap &#39;Save&#39;", expected_result: 'a &amp; b' }] };
+    const d = buildDraftDiff(o, a);
+    // Join each SIDE of the word-diff separately (as the compare modal does via
+    // leftParts/rightParts) rather than all parts in array order — "old"/"new"
+    // sit inside shared quote punctuation, so a naive full-array join
+    // interleaves both sides into a string that contains neither intact.
+    const oldDescText = leftParts(d.description).map(p => p.value).join('');
+    const newDescText = rightParts(d.description).map(p => p.value).join('');
+    assert.ok(oldDescText.includes("'old'") && newDescText.includes("'new'"), 'description entities decoded');
+    assert.ok(!oldDescText.includes('&#39;') && !newDescText.includes('&#39;'), 'no raw entities in description diff');
+    const actionText = d.steps[0].action.map(p => p.value).join('');
+    assert.ok(actionText.includes("'Save'") && !actionText.includes('&#39;'), 'step action entities decoded');
+});

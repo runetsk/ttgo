@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { AIC, Icon } from './constants';
 import { AIBtn, SectionLabel } from './primitives';
+import { decodeEntities } from '../../utils/decodeEntities';
 
 const AUTOSAVE_MS = 800;
 
@@ -38,9 +39,9 @@ function FieldFindings({ findings }) {
 const contentOf = (draft) => ({
     name: draft.name || '',
     category: draft.category || '',
-    description: draft.description || '',
+    description: decodeEntities(draft.description || ''),
     source_refs: draft.source_refs || [],
-    steps: (draft.steps || []).map(s => ({ action: s.action || '', expected_result: s.expected_result || '' })),
+    steps: (draft.steps || []).map(s => ({ action: decodeEntities(s.action || ''), expected_result: decodeEntities(s.expected_result || '') })),
 });
 
 // Hosted with `key={draft.id}` by StudioDraftDetail (see drafts.jsx), so
@@ -112,9 +113,9 @@ export function DraftEditor({ draft, onSave, disabled }) {
         if (!draft.original) return;
         const orig = {
             name: draft.original.name, category: draft.original.category,
-            description: draft.original.description,
+            description: decodeEntities(draft.original.description || ''),
             source_refs: draft.original.source_refs || [],
-            steps: draft.original.steps || [],
+            steps: (draft.original.steps || []).map(s => ({ action: decodeEntities(s.action || ''), expected_result: decodeEntities(s.expected_result || '') })),
         };
         setForm(orig);
         pendingRef.current = orig;

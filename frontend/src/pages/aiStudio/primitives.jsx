@@ -1,4 +1,5 @@
 import { AIC, MONO, Icon } from './constants';
+import { decodeEntities } from '../../utils/decodeEntities';
 
 // ── Primitive components ─────────────────────────────────────────────────────
 export function SectionLabel({ children, right }) {
@@ -175,9 +176,9 @@ export function Stepper({ steps }) {
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         fontFamily: MONO,
                     }}>{i + 1}</div>
-                    <div style={{ fontSize: 12.5, color: AIC.text, lineHeight: 1.45 }}>{s.action}</div>
+                    <div style={{ fontSize: 12.5, color: AIC.text, lineHeight: 1.45 }}>{decodeEntities(s.action)}</div>
                     <div style={{ fontSize: 12.5, color: AIC.text, lineHeight: 1.45 }}>
-                        {s.expected_result || ''}
+                        {decodeEntities(s.expected_result || '')}
                     </div>
                 </div>
             ))}

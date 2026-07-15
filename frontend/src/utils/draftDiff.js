@@ -1,4 +1,5 @@
 import { diffWordsWithSpace } from 'diff';
+import { decodeEntities as dec } from './decodeEntities.js';
 
 // Word-level text diff -> [{value, added, removed}]. First in-repo use of the
 // long-installed `diff` package (see CLAUDE.md stack notes).
@@ -31,11 +32,11 @@ export function buildDraftDiff(original, alternative) {
         if (o && a) {
             steps.push(stepEqual(o, a)
                 ? { type: 'unchanged', index: i, action: null, expected: null }
-                : { type: 'changed', index: i, action: diffText(o.action, a.action), expected: diffText(o.expected_result, a.expected_result) });
+                : { type: 'changed', index: i, action: diffText(dec(o.action), dec(a.action)), expected: diffText(dec(o.expected_result), dec(a.expected_result)) });
         } else if (a) {
-            steps.push({ type: 'added', index: i, action: [{ value: a.action, added: true }], expected: [{ value: a.expected_result, added: true }] });
+            steps.push({ type: 'added', index: i, action: [{ value: dec(a.action), added: true }], expected: [{ value: dec(a.expected_result), added: true }] });
         } else {
-            steps.push({ type: 'removed', index: i, action: [{ value: o.action, removed: true }], expected: [{ value: o.expected_result, removed: true }] });
+            steps.push({ type: 'removed', index: i, action: [{ value: dec(o.action), removed: true }], expected: [{ value: dec(o.expected_result), removed: true }] });
         }
     }
     const oRefs = original.source_refs || [];
@@ -43,8 +44,8 @@ export function buildDraftDiff(original, alternative) {
     const refsAdded = aRefs.filter(r => !oRefs.includes(r));
     const refsRemoved = oRefs.filter(r => !aRefs.includes(r));
 
-    const name = diffText(original.name, alternative.name);
-    const description = diffText(original.description, alternative.description);
+    const name = diffText(dec(original.name), dec(alternative.name));
+    const description = diffText(dec(original.description), dec(alternative.description));
     const categoryChanged = original.category !== alternative.category;
     const partsChanged = (parts) => parts.some(p => p.added || p.removed);
 
