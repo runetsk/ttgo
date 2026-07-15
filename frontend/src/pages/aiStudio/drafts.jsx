@@ -402,8 +402,10 @@ function RegenSection({ draft, disabled, onRegenerate, onOpenCompare }) {
         setBusy(true);
         try {
             const result = await onRegenerate(draft.id, { instruction, action });
-            if (result) onOpenCompare(draft, result.draft);
-            setInstruction('');
+            if (result) {
+                onOpenCompare(draft, result.draft);
+                setInstruction('');
+            }
         } catch {
             // ai.regenerateDraft has no internal try/catch (mirrors saveDraftEdit) —
             // a failed regeneration (LLM error, network) rejects. The global axios
