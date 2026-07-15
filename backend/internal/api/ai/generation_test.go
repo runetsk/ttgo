@@ -417,3 +417,24 @@ func TestProviderPricingRoundTrip(t *testing.T) {
 	assert.Nil(t, updated.PromptPricePerMTok)
 	assert.Nil(t, updated.CompletionPricePerMTok)
 }
+
+// TestProviderPricingRejectsInvalid locks down the budget-integrity guard: a
+// negative price would silently reduce estimated cost (bypassing budgets),
+// and a huge price can overflow tokens*price to +Inf (JSON encoder rejects
+// non-finite floats, breaking the response). Both must be rejected with 400.
+func TestProviderPricingRejectsInvalid(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	rr := doRequest(env, "POST", "/api/settings/llm-providers", map[string]interface{}{
+		"label": "Negative Price", "provider_type": "openai", "model_name": "gpt-test",
+		"api_key": "sk-test", "prompt_price_per_mtok": -1,
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+	rr = doRequest(env, "POST", "/api/settings/llm-providers", map[string]interface{}{
+		"label": "Huge Price", "provider_type": "openai", "model_name": "gpt-test",
+		"api_key": "sk-test", "prompt_price_per_mtok": 1e308,
+	})
+	require.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+}

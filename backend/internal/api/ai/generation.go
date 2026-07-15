@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"reflect"
 	"strings"
@@ -56,6 +57,10 @@ func (h *Handler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateProviderInput(req.Label, req.ProviderType, req.ModelName, req.EndpointURL, req.APIKey); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := validateProviderPrices(req.PromptPricePerMTok, req.CompletionPricePerMTok); err != nil {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -122,6 +127,10 @@ func (h *Handler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateProviderInput(req.Label, req.ProviderType, req.ModelName, req.EndpointURL, req.APIKey); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := validateProviderPrices(req.PromptPricePerMTok, req.CompletionPricePerMTok); err != nil {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -258,6 +267,28 @@ func validateProviderInput(label, providerType, modelName, endpointURL, apiKey s
 		}
 	}
 	return nil
+}
+
+// validateProviderPrices rejects negative, non-finite, or absurdly large
+// per-Mtok prices. A negative price would make estimated cost negative,
+// silently offsetting monthly budget spend and bypassing budgets; a huge
+// value (e.g. 1e308) makes tokens*price overflow to +Inf, which the JSON
+// encoder rejects — the response write then fails and the client gets an
+// empty body.
+func validateProviderPrices(prompt, completion *float64) error {
+	check := func(field string, v *float64) error {
+		if v == nil {
+			return nil
+		}
+		if math.IsNaN(*v) || math.IsInf(*v, 0) || *v < 0 || *v > 1_000_000 {
+			return fmt.Errorf("%s must be between 0 and 1000000", field)
+		}
+		return nil
+	}
+	if err := check("prompt_price_per_mtok", prompt); err != nil {
+		return err
+	}
+	return check("completion_price_per_mtok", completion)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
