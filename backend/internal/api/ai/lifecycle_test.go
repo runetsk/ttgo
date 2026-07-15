@@ -3,6 +3,7 @@ package ai_test
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -1172,6 +1173,78 @@ func TestCreateGeneration_PopulatesEstimatedCost(t *testing.T) {
 	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
 	require.NotNil(t, body.Run.EstimatedCost)
 	assert.InDelta(t, (10.0*1+20.0*2)/1e6, *body.Run.EstimatedCost, 1e-12)
+}
+
+// TestRegenerateDraft_CostIsAdditiveNotRepriced guards the fix that made
+// RegenerateDraft add THIS call's own cost as a delta onto the run's
+// estimated_cost, instead of recomputing cost from the run's cumulative
+// tokens at the (possibly changed) current provider price — which would
+// reprice the earlier generation's tokens too.
+//
+// Identical per-call usage can't distinguish the two mechanisms (both give
+// the same total token count and, at a fixed price, the same total cost). The
+// discriminator is changing the provider's price between the initial
+// generation and the regeneration: additive-delta and cumulative-recompute
+// then diverge to different dollar amounts, so asserting the exact final
+// number pins down which mechanism actually ran.
+func TestRegenerateDraft_CostIsAdditiveNotRepriced(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON) // usage: 10 prompt / 20 completion / 30 total, every call
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+
+	// P1: $1/MTok prompt, $2/MTok completion.
+	rr := doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local", "endpoint_url": fake.URL,
+		"model_name": "fake-model", "prompt_price_per_mtok": 1.0, "completion_price_per_mtok": 2.0,
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	reqID := createPreviewRequirement(t, env, "REQ-COST-REGEN-1", "Login", "<ul><li>User can sign in</li></ul>")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr = doRequest(env, "GET", "/api/ai-generations/"+runID, nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var initial struct {
+		Run struct {
+			EstimatedCost *float64 `json:"estimated_cost"`
+		} `json:"run"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &initial))
+	require.NotNil(t, initial.Run.EstimatedCost, "generation must populate estimated_cost when prices are configured")
+	c1 := *initial.Run.EstimatedCost
+	assert.InDelta(t, (10.0*1+20.0*2)/1e6, c1, 1e-9, "initial run cost priced at P1")
+
+	// Reprice the SAME provider to P2 before regenerating.
+	rr = doRequest(env, "PUT", "/api/settings/llm-providers/"+providerID, map[string]interface{}{
+		"label": "Fake Local LLM", "provider_type": "local", "endpoint_url": fake.URL,
+		"model_name": "fake-model", "prompt_price_per_mtok": 10.0, "completion_price_per_mtok": 20.0,
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	rr = doRequest(env, "POST", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0]+"/regenerate",
+		map[string]interface{}{"instruction": "sharpen it", "action": "make_more_specific"})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+
+	rr = doRequest(env, "GET", "/api/ai-generations/"+runID, nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var after struct {
+		Run struct {
+			EstimatedCost *float64 `json:"estimated_cost"`
+		} `json:"run"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &after))
+	require.NotNil(t, after.Run.EstimatedCost)
+
+	callCost2 := (10.0*10 + 20.0*20) / 1e6         // this call's own 10/20 usage, priced at P2
+	wantAdditive := c1 + callCost2                 // fixed behavior: 5e-5 + 5e-4 = 5.5e-4
+	cumulativeReprice := (20.0*10 + 40.0*20) / 1e6 // buggy behavior: cumulative 20/40 tokens repriced at P2 = 1e-3
+
+	assert.InDelta(t, wantAdditive, *after.Run.EstimatedCost, 1e-9,
+		"regeneration must add this call's own cost at CURRENT prices as a delta onto the prior total")
+	assert.Greater(t, math.Abs(cumulativeReprice-*after.Run.EstimatedCost), 1e-6,
+		"must not match cumulative-recompute, which would reprice the original generation's tokens at the new price too")
 }
 
 func TestRunResponsesCarryAttempts(t *testing.T) {
