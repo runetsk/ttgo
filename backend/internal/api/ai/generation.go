@@ -1015,7 +1015,7 @@ func (h *Handler) AcceptGeneratedTests(w http.ResponseWriter, r *http.Request) {
 	// lifecycle accept and must be well-formed or rejected outright — it must
 	// never be silently downgraded to transient legacy creation, which would
 	// double-create test cases while leaving the matched draft(s) pending
-	// forever (F-follow-up).
+	// forever.
 	runID, draftByID, err := h.matchLifecycleDrafts(requirementID, req.Tests)
 	if err != nil {
 		if errors.Is(err, errMalformedLifecycleAccept) {
