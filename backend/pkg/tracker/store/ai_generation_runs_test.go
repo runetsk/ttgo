@@ -10,8 +10,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"ttgo/pkg/tracker/aigen"
+	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
 )
+
+// fptr is a small helper for constructing *float64 literals in tests.
+func fptr(v float64) *float64 { return &v }
 
 func TestAIGenerationLifecycleModelsMigrate(t *testing.T) {
 	s := newTestStore(t)
@@ -140,6 +144,60 @@ func TestGenerationRunLifecycleTransitions(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, models.AIGenerationRunStatusCompleted, back.Status)
 	assert.Equal(t, 42, back.TotalTokens)
+}
+
+// TestAddGenerationRunUsage covers the fix for two Codex findings on the
+// regenerate token/cost fold: (1) a concurrency race from read-modify-write +
+// full-row Save, fixed by an atomic SQL increment; and (2) a re-pricing bug
+// from recomputing cost off CUMULATIVE totals at the CURRENT provider price,
+// fixed by adding this call's own cost as a delta instead.
+func TestAddGenerationRunUsage(t *testing.T) {
+	s := newTestStore(t)
+	run, _, err := s.CreateGenerationRun(&models.AIGenerationRun{RequirementID: "req-1"})
+	require.NoError(t, err)
+
+	// Seed initial cumulative totals as if an earlier (possibly
+	// now-deleted-provider) call had already run.
+	run.PromptTokens = 100
+	run.CompletionTokens = 50
+	run.TotalTokens = 150
+	run.EstimatedCost = fptr(0.10)
+	require.NoError(t, s.UpdateGenerationRun(run))
+
+	// A priced call: tokens accumulate and its cost is ADDED as a delta.
+	require.NoError(t, s.AddGenerationRunUsage(run.ID, 10, 5, 15, fptr(0.02)))
+	got, err := s.GetGenerationRun(run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 110, got.PromptTokens)
+	assert.Equal(t, 55, got.CompletionTokens)
+	assert.Equal(t, 165, got.TotalTokens)
+	require.NotNil(t, got.EstimatedCost)
+	assert.InDelta(t, 0.12, *got.EstimatedCost, 1e-9)
+
+	// A second, unpriced call (nil costDelta, e.g. no provider pricing
+	// configured): tokens still accumulate, but cost is left untouched rather
+	// than being zeroed or recomputed.
+	require.NoError(t, s.AddGenerationRunUsage(run.ID, 10, 5, 15, nil))
+	got, err = s.GetGenerationRun(run.ID)
+	require.NoError(t, err)
+	assert.Equal(t, 120, got.PromptTokens)
+	assert.Equal(t, 60, got.CompletionTokens)
+	assert.Equal(t, 180, got.TotalTokens)
+	require.NotNil(t, got.EstimatedCost)
+	assert.InDelta(t, 0.12, *got.EstimatedCost, 1e-9, "an unpriced call must not change the accumulated cost")
+
+	// Prove history wasn't repriced: the buggy code recomputed
+	// EstimateCostUSD(cumulative tokens, ..., CURRENT provider price) on every
+	// fold, so a later call at a different price would silently rewrite the
+	// cost of tokens already billed at an earlier price. Recomputing that way
+	// here (at some other "current" price) gives a different number than the
+	// additive 0.12 actually stored — confirming the stored value is a sum of
+	// per-call deltas, not a cumulative recompute.
+	currentPromptPrice, currentCompletionPrice := 5.0, 10.0
+	recomputed := llm.EstimateCostUSD(got.PromptTokens, got.CompletionTokens, &currentPromptPrice, &currentCompletionPrice)
+	require.NotNil(t, recomputed)
+	assert.NotEqual(t, *recomputed, *got.EstimatedCost,
+		"cost must not be a recompute from cumulative totals at the current price")
 }
 
 func TestListGenerationRunsNewestFirst(t *testing.T) {

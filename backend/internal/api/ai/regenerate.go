@@ -234,19 +234,21 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fold the attempt's usage into the run totals (kept cumulative; Stage 6
-	// adds per-attempt rows) and refresh the coverage snapshot. The alternative
-	// is already durably persisted above, so these are best-effort: a failure
-	// here must not 500 (that would make clients retry and create duplicate
-	// alternatives).
+	// Fold the attempt's usage into the run totals via an atomic SQL increment
+	// (kept cumulative; Stage 6 adds per-attempt rows) — concurrent
+	// regenerations of the same run must not lose an update to a
+	// read-modify-write race. The cost added is this call's own delta, not a
+	// recompute from cumulative totals, so a small regeneration never reprices
+	// the run's earlier history at today's provider prices. Then refresh the
+	// coverage snapshot. The alternative is already durably persisted above, so
+	// these are best-effort: a failure here must not 500 (that would make
+	// clients retry and create duplicate alternatives).
 	if chatResp.Usage != nil {
-		run.PromptTokens += chatResp.Usage.PromptTokens
-		run.CompletionTokens += chatResp.Usage.CompletionTokens
-		run.TotalTokens += chatResp.Usage.TotalTokens
-		run.EstimatedCost = llm.EstimateCostUSD(run.PromptTokens, run.CompletionTokens,
+		callCost := llm.EstimateCostUSD(chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens,
 			providerCfg.PromptPricePerMTok, providerCfg.CompletionPricePerMTok)
-		if err := h.store.UpdateGenerationRun(run); err != nil {
-			slog.Warn("regenerate: token fold failed", "run_id", run.ID, "error", err)
+		if err := h.store.AddGenerationRunUsage(run.ID, chatResp.Usage.PromptTokens, chatResp.Usage.CompletionTokens,
+			chatResp.Usage.TotalTokens, callCost); err != nil {
+			slog.Warn("regenerate: usage fold failed", "run_id", run.ID, "error", err)
 		}
 	}
 	if coverageJSON != "" {

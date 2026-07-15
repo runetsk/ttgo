@@ -115,6 +115,23 @@ func (s *Store) UpdateGenerationRun(run *models.AIGenerationRun) error {
 	return s.db.Save(run).Error
 }
 
+// AddGenerationRunUsage atomically adds one call's token usage (and optional
+// cost) to a run's cumulative totals. Uses SQL expressions so concurrent
+// regenerations can't lose an update (read-modify-write would race), and adds
+// this call's cost as a delta rather than recomputing from cumulative totals
+// (which would reprice history at the current provider's prices).
+func (s *Store) AddGenerationRunUsage(runID string, promptTokens, completionTokens, totalTokens int, costDelta *float64) error {
+	updates := map[string]interface{}{
+		"prompt_tokens":     gorm.Expr("prompt_tokens + ?", promptTokens),
+		"completion_tokens": gorm.Expr("completion_tokens + ?", completionTokens),
+		"total_tokens":      gorm.Expr("total_tokens + ?", totalTokens),
+	}
+	if costDelta != nil {
+		updates["estimated_cost"] = gorm.Expr("COALESCE(estimated_cost, 0) + ?", *costDelta)
+	}
+	return s.db.Model(&models.AIGenerationRun{}).Where("id = ?", runID).Updates(updates).Error
+}
+
 // createGenerationEventTx appends one lifecycle event inside tx.
 func createGenerationEventTx(tx *gorm.DB, ev *models.AIGenerationEvent) error {
 	if ev.ID == "" {
