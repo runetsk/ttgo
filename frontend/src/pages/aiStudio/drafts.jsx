@@ -14,6 +14,8 @@ import { decodeEntities } from '../../utils/decodeEntities';
 export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDiscardAll, onGenerate, onImport, onCancel, disabled }) {
     const noProviders = ai.providers.length === 0;
     const noReq = !ai.activeRequirement;
+    const noPrompt = !(ai.additionalInstructions || '').trim();
+    const nothingToGenerateFrom = noReq && noPrompt;
     return (
         <div style={{ padding: '14px 20px 12px', borderBottom: `1px solid ${AIC.border}` }}>
             <div style={{
@@ -84,8 +86,8 @@ export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDi
                         </AIBtn>
                     )}
                     {stage !== 'generating' && (
-                        <AIBtn variant="primary" onClick={onGenerate} disabled={disabled || noProviders || noReq}
-                            title={noReq ? 'Link a requirement to get started' : undefined}>
+                        <AIBtn variant="primary" onClick={onGenerate} disabled={disabled || noProviders || nothingToGenerateFrom}
+                            title={nothingToGenerateFrom ? 'Link a requirement or add a prompt to generate' : undefined}>
                             {Icon.sparkles(13)} {ai.hasGenerated ? 'Regenerate' : 'Generate'}
                         </AIBtn>
                     )}
@@ -97,6 +99,7 @@ export function StudioHeader({ ai, counts, totalDrafts, stage, onAcceptAll, onDi
 
 // ── Middle: Composer ────────────────────────────────────────────────────────
 export function StudioComposer({ ai, stage, disabled }) {
+    const noReq = !ai.activeRequirement;
     return (
         <div style={{ padding: '14px 20px', borderBottom: `1px solid ${AIC.border}`, position: 'relative' }}>
             <div style={{
@@ -113,12 +116,19 @@ export function StudioComposer({ ai, stage, disabled }) {
                     )}
                 </div>
             </div>
+            {noReq && (
+                <div style={{ fontSize: 11, color: AIC.muted, marginBottom: 6 }}>
+                    No requirement linked — the AI generates from this prompt.
+                </div>
+            )}
             <textarea
                 value={ai.additionalInstructions}
                 onChange={e => ai.setAdditionalInstructions(e.target.value)}
                 rows={4}
                 disabled={disabled}
-                placeholder="Add additional instructions (optional) — they are appended to the prompt below…"
+                placeholder={noReq
+                    ? 'Describe what to test — this is the generation prompt (required when no requirement is linked)…'
+                    : 'Add additional instructions (optional) — they are appended to the prompt below…'}
                 style={{
                     width: '100%', background: AIC.bg2, border: `1px solid ${AIC.border}`,
                     color: AIC.text, padding: '9px 12px', fontSize: 13.5, lineHeight: 1.55,

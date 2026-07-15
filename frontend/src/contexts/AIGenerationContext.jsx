@@ -301,7 +301,7 @@ export function AIGenerationProvider({ children }) {
     }, []);
 
     const startGeneration = useCallback(async (opts = {}) => {
-        if (!activeRequirement) return;
+        if (!activeRequirement && !additionalInstructions.trim()) return;
         if (!selectedProviderId) {
             toast.error('Select an LLM provider first');
             return;
@@ -315,7 +315,7 @@ export function AIGenerationProvider({ children }) {
             const controller = new AbortController();
             generationAbortRef.current = controller;
             const result = await aiGeneration.createGeneration({
-                requirement_id: activeRequirement.id,
+                requirement_id: activeRequirement?.id || '',
                 provider_id: selectedProviderId,
                 coverage_level: coverageLevel,
                 detail_level: detailLevel,
