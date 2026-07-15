@@ -94,7 +94,7 @@ export default function HelpPage() {
                 </div>
 
                 <div style={styles.sidebarFooter}>
-                    <span style={styles.footerText}>TTGO v1.0</span>
+                    <span style={styles.footerText}>TTGO v0.3.0</span>
                 </div>
             </nav>
 
@@ -380,13 +380,13 @@ function AIGenerationSection() {
             <Card>
                 <Steps items={[
                     { title: 'Navigate to AI Gen', desc: 'The landing page shows two pathways: Generate and Import. Choose Generate.' },
-                    { title: 'Select a requirement', desc: 'Pick from the requirement list or create a new one directly' },
-                    { title: 'Configure options', desc: 'Choose destination folder, LLM provider, count, and detail level' },
+                    { title: 'Link a requirement (optional)', desc: 'Pick a requirement for context and traceability, or skip it and describe what to test in the prompt box instead' },
+                    { title: 'Configure options', desc: 'Choose destination folder, LLM provider, coverage, and detail level' },
                     { title: 'Click "Generate"', desc: 'Wait for the AI to produce test case drafts' },
-                    { title: 'Review & edit', desc: 'Modify names, steps, and descriptions as needed' },
+                    { title: 'Review & edit', desc: 'Edit names, steps and descriptions; regenerate a draft or compare versions before deciding' },
                     { title: 'Accept', desc: 'Selected drafts are created in the target folder with version history' },
                 ]} />
-                <Tip>Select/deselect individual drafts before accepting. Only selected ones are created.</Tip>
+                <Tip>No requirement handy? Just type what to test in the prompt box and generate — the requirement is optional. Select/deselect individual drafts before accepting; only selected ones are created.</Tip>
             </Card>
         </div>
     );

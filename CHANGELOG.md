@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-15
+
 ### Added
 - AI test generation no longer requires a linked requirement — leave the requirement unlinked and describe what to test in the prompt box, and the AI generates from that. No-requirement runs skip requirement-derived coverage analysis and traceability; accepted test cases go to the chosen folder with no requirement link. The requirement-linked flow is unchanged.
 - First-run setup: a fresh instance (no users) shows a "Create admin account" screen at login and bootstraps the admin from the browser (`GET /api/auth/needs-setup`, `POST /api/auth/setup`). `ADMIN_EMAIL`/`ADMIN_PASSWORD` are now optional — still supported for automated seeding — and the server no longer refuses to start without them.

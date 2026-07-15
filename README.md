@@ -32,7 +32,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 ## Highlights
 
 - 🏠 **Self-hosted — own your data.** Runs entirely on your own infrastructure as a single Go binary and one SQLite file. Source-available under PolyForm Shield — no per-seat SaaS bills, nothing leaving your network.
-- 🤖 **AI test generation.** Draft test cases from requirements using your own LLM provider (bring your own key). A review-and-approve flow means nothing is saved until you accept it.
+- 🤖 **AI test generation.** Draft test cases from a requirement — or from a free-text prompt alone — using your own LLM provider (bring your own key). A review-and-approve flow with editing, regeneration and coverage analysis means nothing is saved until you accept it.
 - ⌨️ **CLI & Claude Code automation.** A first-class `ttgo` CLI drives tests, runs, analytics and more from the terminal or CI — and a bundled Claude Code skill lets you operate TTGO in plain English.
 - ⚡ **Real-time collaboration.** WebSocket-powered live sync keeps every open tab and teammate up to date as runs are executed and test cases change.
 
@@ -44,7 +44,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 |:--|:--|
 | <img src="docs/images/02-test-case-detail.png" width="100%"><br>**Rich test cases** — TipTap rich-text descriptions, ordered steps with expected results, full version history, and tabs for runs, defects and linked requirements. | <img src="docs/images/03-test-run-execution.png" width="100%"><br>**Run execution** — snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. |
 | <img src="docs/images/04-analytics-dashboard.png" width="100%"><br>**Analytics** — pass-rate trends, flaky-test detection, slowest tests, component health and side-by-side run comparison across any date range. | <img src="docs/images/05-traceability-matrix.png" width="100%"><br>**Requirements & traceability** — a coverage-at-a-glance matrix linking requirements to test cases and surfacing the gaps. |
-| <img src="docs/images/07-defects.png" width="100%"><br>**Native defect tracking** — lightweight bugs with severity and status, linked to failing results and managed on a dedicated Defects page in the Quality workspace; optionally reference an external Jira issue. | <img src="docs/images/06-ai-generate.png" width="100%"><br>**AI test generation** — pick a requirement for context, describe what you want, and let your configured model draft test cases for review. |
+| <img src="docs/images/07-defects.png" width="100%"><br>**Native defect tracking** — lightweight bugs with severity and status, linked to failing results and managed on a dedicated Defects page in the Quality workspace; optionally reference an external Jira issue. | <img src="docs/images/06-ai-generate.png" width="100%"><br>**AI test generation** — pick a requirement for context (or skip it and just describe what to test), and let your configured model draft test cases for review. |
 
 ## How TTGO compares
 
@@ -94,7 +94,7 @@ A self-hosted test case management tool built with Go and React.
 - **Requirements & Traceability** — link test cases to requirements, traceability matrix view
 - **Jira Integration** — import requirements from Jira and post generated test cases back to the ticket
 - **Confluence Import** — import requirements from Confluence pages
-- **AI Test Generation** — generate test cases from requirements using LLM providers
+- **AI Test Generation** — generate test cases from a requirement or from a free-text prompt alone, using your own LLM provider; review, edit, regenerate, and accept drafts (nothing is saved until you approve), with coverage analysis and an optional critic pass
 - **Database Backups** — manual and scheduled SQLite backups with restore support
 - **API Tokens & Webhooks** — automate runs and receive push notifications
 - **CLI** — `ttgo` command-line tool for managing tests, runs, analytics, and more from the terminal
@@ -137,7 +137,7 @@ frontend; the Docker deployment needs neither.
 ```bash
 cd backend
 make setup             # one-time: enables the required sqlite_fts5 build tag (needs CGO + gcc)
-cp .env.example .env   # set ADMIN_EMAIL and ADMIN_PASSWORD
+cp .env.example .env   # optionally set ADMIN_EMAIL/ADMIN_PASSWORD (else create the admin in-browser on first run)
 go run ./cmd/server/
 ```
 
@@ -210,10 +210,11 @@ The backend is configured via environment variables (or a `.env` file in the `ba
 | Variable | Default | Description |
 |---|---|---|
 | `DB_PATH` | `tracker.db` | Path to the SQLite database file |
-| `ADMIN_EMAIL` | — | Email for the auto-created admin account |
-| `ADMIN_PASSWORD` | — | Password for the auto-created admin account |
+| `ADMIN_EMAIL` | — | Optional. Email for a seeded admin account. Leave blank to create the admin in the browser on first run (the "Create admin account" screen) |
+| `ADMIN_PASSWORD` | — | Optional. Password for the seeded admin account (see `ADMIN_EMAIL`) |
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed CORS origin |
 | `LISTEN_ADDR` | `:8080` | Address the server listens on |
+| `TTGO_ENCRYPTION_KEY` | — | Optional. At-rest encryption key for stored secrets (LLM/integration API keys). Auto-generated and persisted beside the database if unset; set a 32-byte value (hex, base64, or a 32-char string) to manage it yourself |
 
 <a id="deployment-docker"></a>
 
