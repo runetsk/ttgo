@@ -150,6 +150,11 @@ export function StudioStyles() {
             }
             .aig-progress-shuttle { animation: aigShuttle 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
 
+            .aig-compare-cols { min-width: 0; }
+            @media (max-width: 640px) {
+                .aig-compare-cols { grid-template-columns: 1fr !important; }
+            }
+
             @keyframes aigShimmer { to { background-position: -200% 0; } }
             @keyframes aigShuttle {
                 0% { left: -40%; }
