@@ -241,6 +241,34 @@ func TestCreateGeneration_SanitizesStepText(t *testing.T) {
 	assert.NotContains(t, action, "<script>", "step action must be sanitized")
 }
 
+// Step Action/ExpectedResult are plain-text prose fields rendered as plain text
+// in the UI (like Name/Category), so bluemonday's HTML escaping (' -> &#39;,
+// & -> &amp;) must be unescaped back — otherwise the compare/diff and step views
+// show literal entities.
+func TestCreateGeneration_DecodesStepEntities(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	dirty := `{"test_cases":[{"name":"N","category":"Functional","description":"d","source_refs":[],` +
+		`"steps":[{"action":"Type 'jane@example.com'","expected_result":"header shows 'Welcome, Jane' & a Log Out link"}]}]}`
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, dirty)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-ENT-1", "T", "D")
+
+	rr := doRequest(env, "POST", "/api/ai-generations", map[string]string{
+		"requirement_id": reqID, "provider_id": providerID, "idempotency_key": "ent-1",
+	})
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+	_, drafts := decodeRunResponse(t, rr)
+	require.Len(t, drafts, 1)
+	steps := drafts[0]["steps"].([]interface{})
+	action := steps[0].(map[string]interface{})["action"].(string)
+	expected := steps[0].(map[string]interface{})["expected_result"].(string)
+	assert.Equal(t, "Type 'jane@example.com'", action, "apostrophes must not survive as &#39;")
+	assert.Equal(t, "header shows 'Welcome, Jane' & a Log Out link", expected, "entities must be decoded to plain text")
+}
+
 // createCompletedRun generates a run through the API and returns (runID, draftIDs).
 func createCompletedRun(t *testing.T, env *testEnv, reqID, providerID string) (string, []string) {
 	t.Helper()
@@ -358,6 +386,35 @@ func TestUpdateGenerationDraft_SanitizesStepText(t *testing.T) {
 	require.Len(t, steps, 1)
 	action := steps[0].(map[string]interface{})["action"].(string)
 	assert.NotContains(t, action, "<script>", "edited step action must be sanitized")
+}
+
+// Mirror of TestCreateGeneration_DecodesStepEntities for the edit path.
+func TestUpdateGenerationDraft_DecodesStepEntities(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-EDIT-ENT-1", "T", "D")
+	runID, draftIDs := createCompletedRun(t, env, reqID, providerID)
+
+	rr := doRequest(env, "PATCH", "/api/ai-generations/"+runID+"/drafts/"+draftIDs[0], map[string]interface{}{
+		"steps": []map[string]string{
+			{"action": "Type 'x' & 'y'", "expected_result": "shows 'done'"},
+		},
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var body struct {
+		Draft map[string]interface{} `json:"draft"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+	steps := body.Draft["steps"].([]interface{})
+	require.Len(t, steps, 1)
+	action := steps[0].(map[string]interface{})["action"].(string)
+	expected := steps[0].(map[string]interface{})["expected_result"].(string)
+	assert.Equal(t, "Type 'x' & 'y'", action, "edited apostrophes/ampersands must be decoded")
+	assert.Equal(t, "shows 'done'", expected)
 }
 
 func TestRejectGenerationDraftEndpoint(t *testing.T) {

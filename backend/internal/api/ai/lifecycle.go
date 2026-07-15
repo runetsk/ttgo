@@ -261,8 +261,13 @@ func (h *Handler) sanitizeGeneratedTestCase(d models.GeneratedTestCase) models.G
 	d.Description = httpx.NormalizeEmptyHTML(h.sanitizer, d.Description)
 	d.Category = html.UnescapeString(h.sanitizer.Sanitize(d.Category))
 	for i := range d.Steps {
-		d.Steps[i].Action = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[i].Action)
-		d.Steps[i].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[i].ExpectedResult)
+		// Steps are plain-text prose (rendered as plain text in the UI, like
+		// Name/Category), so unescape the sanitizer's entity encoding
+		// (' -> &#39;, & -> &amp;) back to text. NormalizeEmptyHTML still runs
+		// first, so a visually-empty/pure-markup step normalizes to "" and is
+		// rejected by ValidateDraft.
+		d.Steps[i].Action = html.UnescapeString(httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[i].Action))
+		d.Steps[i].ExpectedResult = html.UnescapeString(httpx.NormalizeEmptyHTML(h.sanitizer, d.Steps[i].ExpectedResult))
 	}
 	for i := range d.SourceRefs {
 		d.SourceRefs[i] = httpx.NormalizeEmptyHTML(h.sanitizer, d.SourceRefs[i])
@@ -836,8 +841,10 @@ func (h *Handler) UpdateGenerationDraft(w http.ResponseWriter, r *http.Request) 
 		// validation, mirroring CreateGeneration's draft-generation path.
 		steps := *req.Steps
 		for j := range steps {
-			steps[j].Action = httpx.NormalizeEmptyHTML(h.sanitizer, steps[j].Action)
-			steps[j].ExpectedResult = httpx.NormalizeEmptyHTML(h.sanitizer, steps[j].ExpectedResult)
+			// Plain-text prose fields — unescape entities back to text, matching
+			// sanitizeGeneratedTestCase (see the note there).
+			steps[j].Action = html.UnescapeString(httpx.NormalizeEmptyHTML(h.sanitizer, steps[j].Action))
+			steps[j].ExpectedResult = html.UnescapeString(httpx.NormalizeEmptyHTML(h.sanitizer, steps[j].ExpectedResult))
 		}
 		content.Steps = steps
 	}
