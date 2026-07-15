@@ -25,12 +25,17 @@ func TestAIBudgetSettingsAndMonthlySum(t *testing.T) {
 	require.NoError(t, err)
 	assert.Zero(t, cfg.PerRequestUSD, "explicit zero must persist (map write, not struct update)")
 
-	cost := 1.25
-	run := &models.AIGenerationRun{RequirementID: "r", EstimatedCost: &cost}
+	run := &models.AIGenerationRun{RequirementID: "r"}
 	_, _, err = s.CreateGenerationRun(run)
 	require.NoError(t, err)
-	run.EstimatedCost = &cost
-	require.NoError(t, s.UpdateGenerationRun(run))
+
+	// Monthly spend is tracked by the attempt ledger (stamped when each LLM
+	// round-trip occurs), not the run's own created_at — so regenerating an
+	// old run still counts toward the current month.
+	cost := 1.25
+	require.NoError(t, s.CreateGenerationAttempt(&models.AIGenerationAttempt{
+		RunID: run.ID, Kind: models.AIGenAttemptGeneration, EstimatedCost: &cost,
+	}))
 
 	sum, err := s.SumEstimatedCostSince(time.Now().Add(-time.Hour))
 	require.NoError(t, err)

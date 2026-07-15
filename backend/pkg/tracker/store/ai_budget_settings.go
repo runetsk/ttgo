@@ -40,10 +40,12 @@ func (s *Store) UpdateAIBudgetSettings(updates map[string]interface{}) (*models.
 	return s.GetOrCreateAIBudgetSettings()
 }
 
-// SumEstimatedCostSince totals configured run costs since t (monthly budget).
+// SumEstimatedCostSince totals per-attempt configured cost since t (monthly budget).
+// Attempts are the append-only cost ledger, stamped when each call occurs — so
+// regenerating an OLD run correctly counts toward the current month.
 func (s *Store) SumEstimatedCostSince(t time.Time) (float64, error) {
 	var sum float64
-	err := s.db.Raw(`SELECT COALESCE(SUM(estimated_cost), 0) FROM ai_generation_runs
+	err := s.db.Raw(`SELECT COALESCE(SUM(estimated_cost), 0) FROM ai_generation_attempts
 		WHERE created_at >= ? AND estimated_cost IS NOT NULL`, t).Scan(&sum).Error
 	return sum, err
 }
