@@ -150,6 +150,7 @@ code, pre, .mono { font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo
 
 /* ───────────── Automation pillars ───────────── */
 .pillars { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; max-width: 920px; margin: 0 auto; }
+.auto-demo { max-width: 920px; margin: 32px auto 0; }
 
 /* ───────────── Feature rows ───────────── */
 .feature { display: grid; grid-template-columns: 1fr 1.25fr; gap: 56px; align-items: center; margin-bottom: 72px; }
