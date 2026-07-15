@@ -384,6 +384,70 @@ func TestLegacyAcceptCompletesLifecycleAndFallsBack(t *testing.T) {
 	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
 }
 
+// TestLegacyAcceptRejectsMalformedLifecycleIDs locks down the fix for a bug in
+// matchLifecycleDrafts: GetDraftsByIDs runs a deduplicating "WHERE id IN"
+// query, so it used to compare len(drafts) != len(ids) to decide whether the
+// request was a lifecycle accept — which is true both for a duplicated
+// temp_id (dedup shrinks the row count) AND for a typo'd/partial temp_id
+// (fewer rows resolve than requested). Either case silently fell back to
+// AcceptLegacyGeneratedTests, which double-created test cases while leaving
+// the matched, already-persisted draft(s) stuck pending forever. Once ANY
+// temp_id resolves to a persisted draft, a malformed batch must now be
+// rejected (400), never silently downgraded to transient creation.
+func TestLegacyAcceptRejectsMalformedLifecycleIDs(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	var captured fakeLLMCapture
+	fake := newFakeLLMServer(t, &captured, fakeEnvelopeJSON)
+	defer fake.Close()
+	providerID := createFakeProvider(t, env, fake.URL)
+	reqID := createPreviewRequirement(t, env, "REQ-LEGACY-3", "T", "D")
+	folderID := createTestFolder(t, env, "Legacy Malformed Accept")
+
+	rr := doRequest(env, "POST", "/api/requirements/"+reqID+"/generate-tests",
+		map[string]string{"provider_id": providerID})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var gen struct {
+		Drafts []models.GeneratedTestCase `json:"drafts"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &gen))
+	require.Len(t, gen.Drafts, 2)
+	realTempID := gen.Drafts[0].TempID
+
+	// Case 1: the SAME real (persisted) temp_id submitted twice. The dedup in
+	// GetDraftsByIDs resolves exactly 1 draft for 2 requested tests — this
+	// must be rejected outright, not treated as a fresh transient batch (which
+	// would double-create test cases and orphan the pending draft).
+	rr = doRequest(env, "POST", "/api/requirements/"+reqID+"/accept-generated-tests", map[string]interface{}{
+		"folder_id": folderID, "group_by_category": false,
+		"tests": []models.GeneratedTestCase{gen.Drafts[0], gen.Drafts[0]},
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+	// Case 2: one real (persisted) temp_id plus one garbage/typo'd temp_id.
+	// Same "fewer drafts than requested ids" shape as the historic bug, but
+	// must now reject rather than materialize the whole batch (including the
+	// garbage entry) outside the lifecycle.
+	garbage := gen.Drafts[1]
+	garbage.TempID = "not-a-real-draft-id"
+	rr = doRequest(env, "POST", "/api/requirements/"+reqID+"/accept-generated-tests", map[string]interface{}{
+		"folder_id": folderID, "group_by_category": false,
+		"tests": []models.GeneratedTestCase{gen.Drafts[0], garbage},
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+	// Neither malformed request may have materialized a test case, and the
+	// referenced draft must remain pending — not double-accepted, not orphaned.
+	tcs, err := env.store.ListTestCasesByRequirement(reqID)
+	require.NoError(t, err)
+	assert.Empty(t, tcs, "malformed lifecycle accept must not materialize any test case")
+
+	drafts, err := env.store.GetDraftsByIDs([]string{realTempID})
+	require.NoError(t, err)
+	require.Len(t, drafts, 1)
+	assert.Equal(t, models.AIDraftStatusPending, drafts[0].Status, "matched draft must remain pending, not be orphaned")
+}
+
 func TestProviderPricingRoundTrip(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()

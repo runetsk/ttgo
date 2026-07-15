@@ -1011,7 +1011,21 @@ func (h *Handler) AcceptGeneratedTests(w http.ResponseWriter, r *http.Request) {
 	// Stage 6: when temp_ids identify persisted drafts of ONE run linked to
 	// this requirement (i.e. the client round-tripped a delegated generate
 	// response), complete the lifecycle: save edits, then accept atomically.
-	if runID, draftByID := h.matchLifecycleDrafts(requirementID, req.Tests); runID != "" {
+	// Once ANY temp_id resolves to a persisted draft, the request IS a
+	// lifecycle accept and must be well-formed or rejected outright — it must
+	// never be silently downgraded to transient legacy creation, which would
+	// double-create test cases while leaving the matched draft(s) pending
+	// forever (F-follow-up).
+	runID, draftByID, err := h.matchLifecycleDrafts(requirementID, req.Tests)
+	if err != nil {
+		if errors.Is(err, errMalformedLifecycleAccept) {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		} else {
+			httpx.Error(w, http.StatusInternalServerError, err)
+		}
+		return
+	}
+	if runID != "" {
 		var actorID *string
 		if u := authctx.UserFromRequest(r); u != nil {
 			actorID = &u.ID
@@ -1057,36 +1071,82 @@ func (h *Handler) AcceptGeneratedTests(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// matchLifecycleDrafts returns (runID, byID) when every test's temp_id is a
-// persisted draft of one single run whose requirement matches; else ("", nil).
-func (h *Handler) matchLifecycleDrafts(requirementID string, tests []models.GeneratedTestCase) (string, map[string]*models.AIGeneratedDraft) {
-	if len(tests) == 0 {
-		return "", nil
+// errMalformedLifecycleAccept indicates the request's test temp_ids reference
+// one or more persisted generation drafts but do not form a single complete,
+// unique, single-run lifecycle accept (duplicate temp_ids, a partial/typo'd
+// id mixed in with real ones, drafts spanning multiple runs, or a run linked
+// to a different requirement). Once any temp_id resolves to a persisted
+// draft, the request must be treated as a lifecycle-accept attempt and
+// rejected when malformed — never silently downgraded to transient legacy
+// materialization, which would double-create test cases and orphan the
+// matched draft(s) in pending status.
+var errMalformedLifecycleAccept = errors.New("test temp_ids reference generation drafts but do not form a single valid lifecycle accept")
+
+// matchLifecycleDrafts classifies an accept request into one of three
+// outcomes:
+//   - runID != "", err == nil: every test's temp_id is a persisted draft of
+//     one single run whose requirement matches — a clean lifecycle accept.
+//   - runID == "", err == nil: no temp_id matches any persisted draft — a
+//     genuine transient/legacy accept; the caller may fall back safely.
+//   - err != nil wrapping errMalformedLifecycleAccept: some (but not a clean
+//     complete set of) temp_ids matched persisted drafts — the caller must
+//     reject the request (400), not fall back to transient creation. Any
+//     other non-nil error is a store/DB failure (caller should return 500).
+func (h *Handler) matchLifecycleDrafts(requirementID string, tests []models.GeneratedTestCase) (string, map[string]*models.AIGeneratedDraft, error) {
+	n := len(tests)
+	if n == 0 {
+		return "", nil, nil
 	}
-	ids := make([]string, 0, len(tests))
+	ids := make([]string, 0, n)
 	for _, t := range tests {
 		if t.TempID == "" {
-			return "", nil
+			// A missing temp_id can't be a round-tripped delegated response —
+			// treat the whole request as transient.
+			return "", nil, nil
 		}
 		ids = append(ids, t.TempID)
 	}
-	drafts, err := h.store.GetDraftsByIDs(ids)
-	if err != nil || len(drafts) != len(ids) {
-		return "", nil
+	uniqueSet := make(map[string]struct{}, n)
+	unique := make([]string, 0, n)
+	for _, id := range ids {
+		if _, ok := uniqueSet[id]; !ok {
+			uniqueSet[id] = struct{}{}
+			unique = append(unique, id)
+		}
 	}
-	byID := make(map[string]*models.AIGeneratedDraft, len(drafts))
+	drafts, err := h.store.GetDraftsByIDs(unique)
+	if err != nil {
+		return "", nil, err
+	}
+	matched := len(drafts)
+	if matched == 0 {
+		return "", nil, nil // no lifecycle drafts involved — transient fallback OK
+	}
+	// At least one real draft is referenced: this must be a complete, unique,
+	// single-run set or it's rejected. matched <= len(unique) <= n always
+	// (GetDraftsByIDs returns at most one row per requested id), so
+	// matched == n forces len(unique) == n (no duplicates) AND every id
+	// resolved to a persisted draft — catching both duplicates and
+	// partial/typo'd batches in one comparison.
+	if matched != n {
+		return "", nil, fmt.Errorf("incomplete or duplicate draft temp_ids: %w", errMalformedLifecycleAccept)
+	}
+	byID := make(map[string]*models.AIGeneratedDraft, matched)
 	runID := drafts[0].RunID
 	for _, d := range drafts {
 		if d.RunID != runID {
-			return "", nil
+			return "", nil, fmt.Errorf("temp_ids span multiple runs: %w", errMalformedLifecycleAccept)
 		}
 		byID[d.ID] = d
 	}
 	run, err := h.store.GetGenerationRun(runID)
-	if err != nil || run.RequirementID != requirementID {
-		return "", nil
+	if err != nil {
+		return "", nil, err
 	}
-	return runID, byID
+	if run.RequirementID != requirementID {
+		return "", nil, fmt.Errorf("drafts belong to a different requirement: %w", errMalformedLifecycleAccept)
+	}
+	return runID, byID, nil
 }
 
 // writeLegacyAcceptError maps store acceptance errors onto legacy-friendly
