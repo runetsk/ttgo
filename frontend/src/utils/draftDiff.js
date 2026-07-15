@@ -6,6 +6,15 @@ export function diffText(a, b) {
     return diffWordsWithSpace(a || '', b || '');
 }
 
+// One side of a word-diff. leftParts is the ORIGINAL text (drop insertions);
+// rightParts is the NEW text (drop deletions). Common segments stay on both.
+export function leftParts(parts) {
+    return (parts || []).filter(p => !p.added);
+}
+export function rightParts(parts) {
+    return (parts || []).filter(p => !p.removed);
+}
+
 const stepEqual = (a, b) => a.action === b.action && a.expected_result === b.expected_result;
 
 // Concise field/step diff between a draft and its regenerated alternative
@@ -31,14 +40,32 @@ export function buildDraftDiff(original, alternative) {
     }
     const oRefs = original.source_refs || [];
     const aRefs = alternative.source_refs || [];
+    const refsAdded = aRefs.filter(r => !oRefs.includes(r));
+    const refsRemoved = oRefs.filter(r => !aRefs.includes(r));
+
+    const name = diffText(original.name, alternative.name);
+    const description = diffText(original.description, alternative.description);
+    const categoryChanged = original.category !== alternative.category;
+    const partsChanged = (parts) => parts.some(p => p.added || p.removed);
+
+    const summary = {
+        nameChanged: partsChanged(name),
+        categoryChanged,
+        descriptionChanged: partsChanged(description),
+        stepsChanged: steps.filter(s => s.type === 'changed').length,
+        stepsAdded: steps.filter(s => s.type === 'added').length,
+        stepsRemoved: steps.filter(s => s.type === 'removed').length,
+        stepsUnchanged: steps.filter(s => s.type === 'unchanged').length,
+        refsAdded: refsAdded.length,
+        refsRemoved: refsRemoved.length,
+    };
+
     return {
-        name: diffText(original.name, alternative.name),
-        description: diffText(original.description, alternative.description),
-        category: { from: original.category, to: alternative.category, changed: original.category !== alternative.category },
-        sourceRefs: {
-            added: aRefs.filter(r => !oRefs.includes(r)),
-            removed: oRefs.filter(r => !aRefs.includes(r)),
-        },
+        name,
+        description,
+        category: { from: original.category, to: alternative.category, changed: categoryChanged },
+        sourceRefs: { added: refsAdded, removed: refsRemoved },
         steps,
+        summary,
     };
 }
