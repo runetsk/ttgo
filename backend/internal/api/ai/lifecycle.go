@@ -353,6 +353,15 @@ func (h *Handler) executeGeneration(r *http.Request, req createGenerationRequest
 		run.ParentRunID = &req.ParentRunID
 	}
 	if warn := h.checkBudget(providerCfg, len(plan.Prompt), plan.MaxTokens, req.AcknowledgeBudget); warn != nil {
+		// TOCTOU guard: a concurrent same-key request may have created (and been
+		// billed for) the run between our fast-path lookup and this gate. That would
+		// push us over budget here, but this request is really an idempotent retry —
+		// replay the existing run rather than 409ing it.
+		if req.IdempotencyKey != "" {
+			if existing, lookErr := h.store.GetGenerationRunByKey(req.IdempotencyKey); lookErr == nil && existing != nil {
+				return h.existingRunOutcome(existing, req.RequirementID)
+			}
+		}
 		return &generationOutcome{status: http.StatusConflict, payload: warn}
 	}
 	run, created, err := h.store.CreateGenerationRun(run)
