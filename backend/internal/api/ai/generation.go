@@ -1097,18 +1097,26 @@ func (h *Handler) matchLifecycleDrafts(requirementID string, tests []models.Gene
 	if n == 0 {
 		return "", nil, nil
 	}
-	ids := make([]string, 0, n)
+	// Skip blanks when building the id list but keep n at len(tests) (the FULL
+	// count, blanks included): a blank temp_id mixed with real persisted-draft
+	// ids must NOT short-circuit to transient fallback here. That fallback
+	// would double-create test cases while leaving the matched draft(s)
+	// pending forever — the same failure the tri-state fix targeted, via a
+	// blank id instead of a duplicate or typo. Leaving n at the full count
+	// means the matched != n check below rejects the blank-mixed case too.
+	nonEmpty := make([]string, 0, n)
 	for _, t := range tests {
 		if t.TempID == "" {
-			// A missing temp_id can't be a round-tripped delegated response —
-			// treat the whole request as transient.
-			return "", nil, nil
+			continue
 		}
-		ids = append(ids, t.TempID)
+		nonEmpty = append(nonEmpty, t.TempID)
 	}
-	uniqueSet := make(map[string]struct{}, n)
-	unique := make([]string, 0, n)
-	for _, id := range ids {
+	if len(nonEmpty) == 0 {
+		return "", nil, nil // no temp_ids at all — genuinely transient
+	}
+	uniqueSet := make(map[string]struct{}, len(nonEmpty))
+	unique := make([]string, 0, len(nonEmpty))
+	for _, id := range nonEmpty {
 		if _, ok := uniqueSet[id]; !ok {
 			uniqueSet[id] = struct{}{}
 			unique = append(unique, id)
@@ -1123,13 +1131,15 @@ func (h *Handler) matchLifecycleDrafts(requirementID string, tests []models.Gene
 		return "", nil, nil // no lifecycle drafts involved — transient fallback OK
 	}
 	// At least one real draft is referenced: this must be a complete, unique,
-	// single-run set or it's rejected. matched <= len(unique) <= n always
-	// (GetDraftsByIDs returns at most one row per requested id), so
-	// matched == n forces len(unique) == n (no duplicates) AND every id
-	// resolved to a persisted draft — catching both duplicates and
-	// partial/typo'd batches in one comparison.
+	// single-run set with no blanks, or it's rejected. matched <= len(unique)
+	// <= len(nonEmpty) <= n always (GetDraftsByIDs returns at most one row per
+	// requested id), so matched == n forces every inequality to equality:
+	// len(nonEmpty) == n (no blanks), len(unique) == len(nonEmpty) (no
+	// duplicates), and matched == len(unique) (every id resolved to a
+	// persisted draft) — one comparison catches blank-mixes, duplicates, AND
+	// partial/typo'd batches.
 	if matched != n {
-		return "", nil, fmt.Errorf("incomplete or duplicate draft temp_ids: %w", errMalformedLifecycleAccept)
+		return "", nil, fmt.Errorf("incomplete, duplicate, or blank draft temp_ids: %w", errMalformedLifecycleAccept)
 	}
 	byID := make(map[string]*models.AIGeneratedDraft, matched)
 	runID := drafts[0].RunID

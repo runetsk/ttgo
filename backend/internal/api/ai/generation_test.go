@@ -393,7 +393,12 @@ func TestLegacyAcceptCompletesLifecycleAndFallsBack(t *testing.T) {
 // AcceptLegacyGeneratedTests, which double-created test cases while leaving
 // the matched, already-persisted draft(s) stuck pending forever. Once ANY
 // temp_id resolves to a persisted draft, a malformed batch must now be
-// rejected (400), never silently downgraded to transient creation.
+// rejected (400), never silently downgraded to transient creation. It also
+// locks down a reopen of the same bug: matchLifecycleDrafts used to
+// early-return transient on the FIRST blank temp_id, before checking whether
+// OTHER entries in the batch matched real persisted drafts — so a real draft
+// temp_id mixed with a blank one hit the exact same double-create/orphan
+// failure via a blank id instead of a duplicate or typo.
 func TestLegacyAcceptRejectsMalformedLifecycleIDs(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
@@ -436,8 +441,22 @@ func TestLegacyAcceptRejectsMalformedLifecycleIDs(t *testing.T) {
 	})
 	assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
 
-	// Neither malformed request may have materialized a test case, and the
-	// referenced draft must remain pending — not double-accepted, not orphaned.
+	// Case 3: one real (persisted) temp_id plus one entry with a blank
+	// temp_id. This is the reopened gap: matchLifecycleDrafts used to
+	// early-return transient the moment it saw the FIRST blank temp_id,
+	// without checking whether the other entry matched a real draft — so this
+	// exact batch used to double-create test cases while leaving the real
+	// draft stuck pending. Must reject (400), same as the duplicate/typo cases.
+	blank := gen.Drafts[1]
+	blank.TempID = ""
+	rr = doRequest(env, "POST", "/api/requirements/"+reqID+"/accept-generated-tests", map[string]interface{}{
+		"folder_id": folderID, "group_by_category": false,
+		"tests": []models.GeneratedTestCase{gen.Drafts[0], blank},
+	})
+	assert.Equal(t, http.StatusBadRequest, rr.Code, rr.Body.String())
+
+	// None of the malformed requests may have materialized a test case, and
+	// the referenced draft must remain pending — not double-accepted, not orphaned.
 	tcs, err := env.store.ListTestCasesByRequirement(reqID)
 	require.NoError(t, err)
 	assert.Empty(t, tcs, "malformed lifecycle accept must not materialize any test case")
