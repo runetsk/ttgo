@@ -241,11 +241,9 @@ func TestCreateGeneration_SanitizesStepText(t *testing.T) {
 	assert.NotContains(t, action, "<script>", "step action must be sanitized")
 }
 
-// Step Action/ExpectedResult are plain-text prose fields rendered as plain text
-// in the UI (like Name/Category), so bluemonday's HTML escaping (' -> &#39;,
-// & -> &amp;) must be unescaped back — otherwise the compare/diff and step views
-// show literal entities.
-func TestCreateGeneration_DecodesStepEntities(t *testing.T) {
+// Steps are stored as sanitized HTML (the frontend decodes entities for its
+// plain-text draft views), consistent with the persisted/import/manual paths.
+func TestCreateGeneration_EscapesStepEntitiesForStorage(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
 	dirty := `{"test_cases":[{"name":"N","category":"Functional","description":"d","source_refs":[],` +
@@ -265,8 +263,8 @@ func TestCreateGeneration_DecodesStepEntities(t *testing.T) {
 	steps := drafts[0]["steps"].([]interface{})
 	action := steps[0].(map[string]interface{})["action"].(string)
 	expected := steps[0].(map[string]interface{})["expected_result"].(string)
-	assert.Equal(t, "Type 'jane@example.com'", action, "apostrophes must not survive as &#39;")
-	assert.Equal(t, "header shows 'Welcome, Jane' & a Log Out link", expected, "entities must be decoded to plain text")
+	assert.Equal(t, "Type &#39;jane@example.com&#39;", action)
+	assert.Equal(t, "header shows &#39;Welcome, Jane&#39; &amp; a Log Out link", expected)
 }
 
 // createCompletedRun generates a run through the API and returns (runID, draftIDs).
@@ -388,8 +386,7 @@ func TestUpdateGenerationDraft_SanitizesStepText(t *testing.T) {
 	assert.NotContains(t, action, "<script>", "edited step action must be sanitized")
 }
 
-// Mirror of TestCreateGeneration_DecodesStepEntities for the edit path.
-func TestUpdateGenerationDraft_DecodesStepEntities(t *testing.T) {
+func TestUpdateGenerationDraft_EscapesStepEntitiesForStorage(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
 	var captured fakeLLMCapture
@@ -413,8 +410,8 @@ func TestUpdateGenerationDraft_DecodesStepEntities(t *testing.T) {
 	require.Len(t, steps, 1)
 	action := steps[0].(map[string]interface{})["action"].(string)
 	expected := steps[0].(map[string]interface{})["expected_result"].(string)
-	assert.Equal(t, "Type 'x' & 'y'", action, "edited apostrophes/ampersands must be decoded")
-	assert.Equal(t, "shows 'done'", expected)
+	assert.Equal(t, "Type &#39;x&#39; &amp; &#39;y&#39;", action)
+	assert.Equal(t, "shows &#39;done&#39;", expected)
 }
 
 func TestRejectGenerationDraftEndpoint(t *testing.T) {
