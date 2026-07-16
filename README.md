@@ -168,7 +168,7 @@ Run `ttgo --help` for all available commands (tests, runs, folders, analytics, r
 
 **Claude Code & agent automation**
 
-Any agent or script can drive TTGO — every operation is a `ttgo` command — so it drops straight into an agent's loop. To make that turnkey, the repo ships a Claude Code skill (`.claude/skills/ttgo/SKILL.md`) that teaches an agent the whole command surface. With [Claude Code](https://claude.com/claude-code) installed (the skill loads automatically when you work in this repo), just describe what you need:
+Any agent or script can drive TTGO — every operation is a `ttgo` command — so it drops straight into an agent's loop. To make that turnkey, the repo ships a Claude Code skill (`.claude/skills/ttgo/SKILL.md`) that teaches an agent the whole command surface. It's a deliberately lightweight alternative to an MCP server: no separate integration to build, run, or keep in sync with the API — the skill just points your agent at the CLI, so it works with any agent that can run a shell. With [Claude Code](https://claude.com/claude-code) installed (the skill loads automatically when you work in this repo), just describe what you need:
 
 ```
 > "Run the smoke tests and report the results"
