@@ -33,7 +33,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 
 - 🏠 **Self-hosted — own your data.** Runs entirely on your own infrastructure as a single Go binary and one SQLite file. Source-available under PolyForm Shield — no per-seat SaaS bills, nothing leaving your network.
 - 🤖 **AI test generation.** Draft test cases from a requirement — or from a free-text prompt alone — using your own LLM provider (bring your own key). A review-and-approve flow with editing, regeneration and coverage analysis means nothing is saved until you accept it.
-- ⌨️ **CLI & Claude Code automation.** A first-class `ttgo` CLI drives tests, runs, analytics and more from the terminal or CI — and a bundled Claude Code skill lets you operate TTGO in plain English.
+- ⌨️ **CLI & agent automation.** A first-class `ttgo` CLI drives tests, runs, analytics and more from the terminal or CI. The bundled Claude Code skill lets an agent operate TTGO in plain English — even read your app's code to draft test cases — and slot it into your automation loop. And since the skill is just Markdown in your repo, you can have your agent extend it for your own workflows.
 - ⚡ **Real-time collaboration.** WebSocket-powered live sync keeps every open tab and teammate up to date as runs are executed and test cases change.
 
 …plus built-in defect tracking, rich-text editing with full version history, scheduled SQLite backups, API tokens & webhooks, and Jira / Confluence integrations. See the [full feature list](#features) below.
@@ -166,9 +166,9 @@ ttgo tests list
 
 Run `ttgo --help` for all available commands (tests, runs, folders, analytics, requirements, AI, backups, and more).
 
-**Claude Code Integration**
+**Claude Code & agent automation**
 
-The project includes a Claude Code skill (`.claude/skills/ttgo/SKILL.md`) that lets you operate TTGO through natural language. With [Claude Code](https://claude.com/claude-code) installed, just describe what you need:
+Any agent or script can drive TTGO — every operation is a `ttgo` command — so it drops straight into an agent's loop. To make that turnkey, the repo ships a Claude Code skill (`.claude/skills/ttgo/SKILL.md`) that teaches an agent the whole command surface. With [Claude Code](https://claude.com/claude-code) installed (the skill loads automatically when you work in this repo), just describe what you need:
 
 ```
 > "Run the smoke tests and report the results"
@@ -176,7 +176,28 @@ The project includes a Claude Code skill (`.claude/skills/ttgo/SKILL.md`) that l
 > "Import REQ-42 from Jira and generate test cases for it"
 ```
 
-Claude Code will translate your request into the appropriate `ttgo` CLI commands, parse the output, and chain multi-step workflows automatically. The skill is loaded automatically when working in this repo.
+The agent translates each request into `ttgo` commands, parses the output, and chains multi-step workflows on its own.
+
+**From code to coverage.** Point the agent at your own application and let it make the analysis-to-authoring hop — read the frontend or backend, work out what needs testing, and create the cases in TTGO for you:
+
+```
+> "Analyze the checkout flow in frontend/src and write test cases for it in TTGO"
+> "Review the payments handlers in backend/ and add coverage for the edge cases we're missing"
+```
+
+It reads the code, drafts the cases, and creates them through the CLI — either authoring them directly or routing through TTGO's AI generation and its review-and-approve flow so nothing lands unchecked.
+
+**Close the loop.** Point the same setup at your CI and let the agent react after every build:
+
+```
+> "After the nightly run, open a defect for each new failure, pull the flaky-test
+>  history for anything intermittent, and draft test cases for the requirements
+>  that dropped below full coverage."
+```
+
+The same commands run headless in CI (e.g. `claude -p "<prompt>"`), so the loop works unattended as well as interactively.
+
+**Make the skill yours.** The skill is plain Markdown in your repo — nothing is baked into TTGO. Ask your agent to extend it for the way your team works: add your smoke-run recipe, your defect-triage conventions, a release-readiness check, or a CI entrypoint, then commit it. As the `ttgo` CLI grows, tell your agent to refresh the skill to match.
 
 **E2E result reporting (dogfooding)**
 
