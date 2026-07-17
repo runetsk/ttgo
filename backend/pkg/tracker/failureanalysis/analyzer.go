@@ -52,6 +52,24 @@ func Analyze(ctx context.Context, provider llm.Provider, in AnalyzeContext) (*An
 		errMsg = Redact(errMsg)
 		stack = Redact(stack)
 		logs = Redact(logs)
+
+		// Enriched history carries OTHER failures' error text, which can hold
+		// secrets, so redact each SimilarFailures[i].ErrorMessage before it
+		// reaches BuildPrompt. Build a fresh slice + backing array rather than
+		// mutating in place: SimilarFailures is []SimilarFailure (value
+		// elements) whose backing array is shared with the caller's
+		// AnalyzeContext, so an in-place write would leak the redacted text
+		// back into the caller's copy. Defect/requirement titles are curated
+		// human text (not machine-captured output), so they are intentionally
+		// left un-redacted.
+		if len(in.SimilarFailures) > 0 {
+			redacted := make([]SimilarFailure, len(in.SimilarFailures))
+			copy(redacted, in.SimilarFailures)
+			for i := range redacted {
+				redacted[i].ErrorMessage = Redact(redacted[i].ErrorMessage)
+			}
+			in.SimilarFailures = redacted
+		}
 	}
 
 	prompt, meta, err := BuildPrompt(PromptInput{

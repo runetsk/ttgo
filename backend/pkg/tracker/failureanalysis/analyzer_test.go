@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
 
@@ -117,4 +118,56 @@ func TestAnalyzeReturnsProviderErrorDirectly(t *testing.T) {
 	_, err := Analyze(context.Background(), prov, baseContext())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "provider unavailable")
+}
+
+// capturingProvider records the rendered prompt from the first chat message so
+// tests can assert what actually reached the model.
+type capturingProvider struct {
+	lastPrompt string
+}
+
+func (c *capturingProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	if len(req.Messages) > 0 {
+		c.lastPrompt = req.Messages[0].Content
+	}
+	return &llm.ChatResponse{
+		Content: `{"verdict":"product_bug","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`,
+		Usage:   &llm.ChatUsage{PromptTokens: 100, CompletionTokens: 20, TotalTokens: 120},
+	}, nil
+}
+
+func TestAnalyzeRedactsSimilarFailureMessages(t *testing.T) {
+	const raw = "auth failed: Bearer abcdefghijklmnopqrstuvwxyz0123456789"
+	prov := &capturingProvider{}
+	in := baseContext() // RedactionEnabled: true
+	in.SimilarFailures = []SimilarFailure{
+		{RunStartedAt: time.Now(), Status: "FAIL", ErrorMessage: raw},
+	}
+
+	_, err := Analyze(context.Background(), prov, in)
+	require.NoError(t, err)
+
+	// The enriched history secret must be scrubbed in the rendered prompt.
+	require.Contains(t, prov.lastPrompt, "Bearer <REDACTED_TOKEN>")
+	require.NotContains(t, prov.lastPrompt, "abcdefghijklmnopqrstuvwxyz0123456789")
+
+	// Redaction must not mutate the caller's shared backing array.
+	require.Equal(t, raw, in.SimilarFailures[0].ErrorMessage,
+		"caller's SimilarFailures slice must not be mutated by redaction")
+}
+
+func TestAnalyzeLeavesSimilarFailuresRawWhenRedactionDisabled(t *testing.T) {
+	const raw = "auth failed: Bearer abcdefghijklmnopqrstuvwxyz0123456789"
+	prov := &capturingProvider{}
+	in := baseContext()
+	in.RedactionEnabled = false
+	in.SimilarFailures = []SimilarFailure{
+		{RunStartedAt: time.Now(), Status: "FAIL", ErrorMessage: raw},
+	}
+
+	_, err := Analyze(context.Background(), prov, in)
+	require.NoError(t, err)
+
+	require.Contains(t, prov.lastPrompt, "abcdefghijklmnopqrstuvwxyz0123456789")
+	require.NotContains(t, prov.lastPrompt, "<REDACTED_TOKEN>")
 }
