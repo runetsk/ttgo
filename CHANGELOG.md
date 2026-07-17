@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **AI failure-analysis now grounds its verdict in context.** Each analysis enriches the LLM prompt with the failing test's own recent history (failures over the last 30 days for the same test case), its linked defects and requirements, the executed steps, and the run environment (browser / OS / app version) — plus each prior failure's human triage label (`DefectType`) and a rollup of the label distribution — instead of classifying the bare failure in isolation. It's wired into both the batch failure-analysis worker and the synchronous single-result path. Enrichment is best-effort — a failing source logs and yields an empty slot, never failing the analysis — and the enriched history is redacted alongside the primary error when redaction is on. Installs that never customized the analysis prompt template are upgraded to the new history-aware default automatically on startup; customized templates are untouched (Reset to Default adopts the new default).
+
 ## [0.3.0] - 2026-07-15
 
 ### Added
