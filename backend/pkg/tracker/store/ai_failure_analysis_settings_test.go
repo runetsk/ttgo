@@ -50,3 +50,52 @@ func TestResetFailureAnalysisPrompt(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, failureanalysis.DefaultPromptTemplate, got.PromptTemplate)
 }
+
+// TestSeedFailureAnalysisUpgradesUnmodifiedPrompt verifies that an install still
+// running the previous shipped default (the admin never edited it) is auto-upgraded
+// to the new default on the next boot.
+func TestSeedFailureAnalysisUpgradesUnmodifiedPrompt(t *testing.T) {
+	s := newTestStore(t)
+
+	// Simulate an install that booted on a previous shipped default: both the
+	// stored template and the default_prompt_template column hold that old text.
+	const oldDefault = "OLD SHIPPED DEFAULT TEMPLATE"
+	require.NoError(t, s.db.Model(&models.AIFailureAnalysisSettings{}).
+		Where("id = ?", failureAnalysisSettingsID).
+		Updates(map[string]interface{}{
+			"prompt_template":         oldDefault,
+			"default_prompt_template": oldDefault,
+		}).Error)
+
+	require.NoError(t, s.seedFailureAnalysisSettings())
+
+	got, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	require.Equal(t, failureanalysis.DefaultPromptTemplate, got.PromptTemplate)
+	require.Equal(t, failureanalysis.DefaultPromptTemplate, got.DefaultPromptTemplate)
+}
+
+// TestSeedFailureAnalysisPreservesCustomizedPrompt verifies that an admin-customized
+// template (diverged from the previous default) is left untouched on upgrade; only
+// the default_prompt_template column realigns to the current default.
+func TestSeedFailureAnalysisPreservesCustomizedPrompt(t *testing.T) {
+	s := newTestStore(t)
+
+	// default_prompt_template holds the previous default, but prompt_template
+	// diverges from it — the admin hand-edited the prompt.
+	const oldDefault = "OLD SHIPPED DEFAULT TEMPLATE"
+	const custom = "admin hand-edited template"
+	require.NoError(t, s.db.Model(&models.AIFailureAnalysisSettings{}).
+		Where("id = ?", failureAnalysisSettingsID).
+		Updates(map[string]interface{}{
+			"prompt_template":         custom,
+			"default_prompt_template": oldDefault,
+		}).Error)
+
+	require.NoError(t, s.seedFailureAnalysisSettings())
+
+	got, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	require.Equal(t, custom, got.PromptTemplate)
+	require.Equal(t, failureanalysis.DefaultPromptTemplate, got.DefaultPromptTemplate)
+}

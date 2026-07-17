@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"log/slog"
 	"time"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/models"
@@ -33,10 +34,22 @@ func (s *Store) seedFailureAnalysisSettings() error {
 	if err != nil {
 		return err
 	}
-	if row.DefaultPromptTemplate != failureanalysis.DefaultPromptTemplate {
-		return s.db.Model(&row).Update("default_prompt_template", failureanalysis.DefaultPromptTemplate).Error
+	// Capture the previously-shipped default before realigning the column below.
+	// If the admin never customized the prompt (it still equals that previous
+	// default), auto-upgrade it to the new shipped default so unmodified installs
+	// adopt template improvements. A customized template (!= old) is left as-is.
+	old := row.DefaultPromptTemplate
+	if old == failureanalysis.DefaultPromptTemplate {
+		return nil
 	}
-	return nil
+	updates := map[string]interface{}{
+		"default_prompt_template": failureanalysis.DefaultPromptTemplate,
+	}
+	if row.PromptTemplate == old {
+		updates["prompt_template"] = failureanalysis.DefaultPromptTemplate
+		slog.Info("failure-analysis: auto-upgraded unmodified prompt template to new shipped default")
+	}
+	return s.db.Model(&row).Updates(updates).Error
 }
 
 // GetFailureAnalysisSettings returns the singleton settings row.
