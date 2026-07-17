@@ -104,3 +104,79 @@ func TestLogTextKeepsLast2000Chars(t *testing.T) {
 		t.Errorf("expected leading chars trimmed — HEAD_MARKER should not appear")
 	}
 }
+
+func TestBuildPromptRendersHumanLabelsAndRollup(t *testing.T) {
+	in := PromptInput{
+		Template:              DefaultPromptTemplate,
+		TestName:              "Login",
+		ErrorMessage:          "expected 401, got 500",
+		FailureType:           "assertion",
+		SimilarFailuresRollup: "3 prior failures in 30d: 2 product_bug, 1 flaky",
+		SimilarFailures: []SimilarFailure{
+			{Status: "FAIL", ErrorMessage: "boom", DefectType: "product_bug", DefectKey: "BUG-42"},
+			{Status: "ERROR", ErrorMessage: "kapow", DefectType: "flaky"}, // DefectType, no DefectKey
+			{Status: "FAIL", ErrorMessage: "thud"},                        // no human label at all
+		},
+	}
+	got, _, err := BuildPrompt(in)
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	// Rollup header line is present.
+	if !strings.Contains(got, "3 prior failures in 30d: 2 product_bug, 1 flaky") {
+		t.Errorf("prompt missing rollup line\nfull:\n%s", got)
+	}
+	// Row with DefectType + DefectKey renders the full clause with the arrow.
+	if !strings.Contains(got, "(human: product_bug → BUG-42)") {
+		t.Errorf("prompt missing human label with defect key\nfull:\n%s", got)
+	}
+	// Row with DefectType but no DefectKey renders the clause without the arrow.
+	if !strings.Contains(got, "(human: flaky)") {
+		t.Errorf("prompt missing human label without defect key\nfull:\n%s", got)
+	}
+	if strings.Contains(got, "(human: flaky →") {
+		t.Errorf("row without a defect key should omit the arrow\nfull:\n%s", got)
+	}
+	// Row with no DefectType omits the (human: ...) clause entirely.
+	if strings.Contains(got, "thud (human:") {
+		t.Errorf("row without a human label should omit the (human: ...) clause\nfull:\n%s", got)
+	}
+}
+
+func TestBuildPromptDropOrderHoldsWithHumanLabeledHistory(t *testing.T) {
+	// The enlarged per-row history block (human labels) must not disturb the
+	// drop order: logs are dropped before similar failures. A giant step keeps
+	// the prompt over cap so multiple drops are exercised.
+	in := PromptInput{
+		Template:              DefaultPromptTemplate,
+		TestName:              "x",
+		ErrorMessage:          "x",
+		FailureType:           "x",
+		LogText:               strings.Repeat("L", 30000),
+		SimilarFailuresRollup: "2 prior failures: 1 product_bug, 1 flaky",
+		SimilarFailures: []SimilarFailure{
+			{Status: "FAIL", ErrorMessage: "boom", DefectType: "product_bug", DefectKey: "BUG-1"},
+			{Status: "ERROR", ErrorMessage: "kapow", DefectType: "flaky"},
+		},
+		Steps: []PromptStep{{Order: 1, Action: strings.Repeat("a", 25000), Expected: "e"}},
+	}
+	got, meta, err := BuildPrompt(in)
+	if err != nil {
+		t.Fatalf("BuildPrompt: %v", err)
+	}
+	if len(got) > PromptCharCap {
+		t.Errorf("prompt length %d exceeds cap %d", len(got), PromptCharCap)
+	}
+	logIdx := strings.Index(meta.TruncationPrefix, "no logs")
+	simIdx := strings.Index(meta.TruncationPrefix, "no similar failures")
+	if logIdx < 0 || simIdx < 0 {
+		t.Fatalf("expected both 'no logs' and 'no similar failures' in prefix, got %q", meta.TruncationPrefix)
+	}
+	if logIdx > simIdx {
+		t.Errorf("expected logs dropped before similar failures, got prefix %q", meta.TruncationPrefix)
+	}
+	// Once similar failures are dropped, the human-label rows are gone too.
+	if strings.Contains(got, "(human: product_bug") {
+		t.Errorf("dropped similar failures should remove human-label rows\nfull:\n%s", got)
+	}
+}

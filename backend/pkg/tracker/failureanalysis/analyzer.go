@@ -11,16 +11,17 @@ import (
 
 // AnalyzeContext bundles the target RunResult with enrichments and active settings.
 type AnalyzeContext struct {
-	Result             *models.RunResult
-	Steps              []PromptStep
-	SimilarFailures    []SimilarFailure
-	LinkedDefects      []LinkedDefect
-	LinkedRequirements []LinkedRequirement
-	Env                string
-	Browser            string
-	OS                 string
-	AppVersion         string
-	Categories         string
+	Result                *models.RunResult
+	Steps                 []PromptStep
+	SimilarFailures       []SimilarFailure
+	SimilarFailuresRollup string
+	LinkedDefects         []LinkedDefect
+	LinkedRequirements    []LinkedRequirement
+	Env                   string
+	Browser               string
+	OS                    string
+	AppVersion            string
+	Categories            string
 
 	PromptTemplate   string
 	RedactionEnabled bool
@@ -54,21 +55,22 @@ func Analyze(ctx context.Context, provider llm.Provider, in AnalyzeContext) (*An
 	}
 
 	prompt, meta, err := BuildPrompt(PromptInput{
-		Template:           in.PromptTemplate,
-		TestName:           in.Result.TestNameSnapshot,
-		Categories:         in.Categories,
-		Env:                in.Env,
-		Browser:            in.Browser,
-		OS:                 in.OS,
-		AppVersion:         in.AppVersion,
-		Steps:              in.Steps,
-		FailureType:        in.Result.FailureType,
-		ErrorMessage:       errMsg,
-		StackTrace:         stack,
-		LogText:            logs,
-		SimilarFailures:    in.SimilarFailures,
-		LinkedDefects:      in.LinkedDefects,
-		LinkedRequirements: in.LinkedRequirements,
+		Template:              in.PromptTemplate,
+		TestName:              in.Result.TestNameSnapshot,
+		Categories:            in.Categories,
+		Env:                   in.Env,
+		Browser:               in.Browser,
+		OS:                    in.OS,
+		AppVersion:            in.AppVersion,
+		Steps:                 in.Steps,
+		FailureType:           in.Result.FailureType,
+		ErrorMessage:          errMsg,
+		StackTrace:            stack,
+		LogText:               logs,
+		SimilarFailures:       in.SimilarFailures,
+		SimilarFailuresRollup: in.SimilarFailuresRollup,
+		LinkedDefects:         in.LinkedDefects,
+		LinkedRequirements:    in.LinkedRequirements,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("build prompt: %w", err)

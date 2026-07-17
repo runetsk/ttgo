@@ -46,7 +46,8 @@ log_text (tail): <<<DATA
 DATA>>>
 
 ### Historical context (last 30 days, same test_case_id)
-{{range .SimilarFailures}}- {{.RunStartedAt}} [{{.Status}}] {{.ErrorMessage}}
+{{if .SimilarFailuresRollup}}{{.SimilarFailuresRollup}}
+{{end}}{{range .SimilarFailures}}- {{.RunStartedAt}} [{{.Status}}] {{.ErrorMessage}}{{if .DefectType}} (human: {{.DefectType}}{{if .DefectKey}} → {{.DefectKey}}{{end}}){{end}}
 {{end}}
 ### Linked defects on this test case
 {{range .LinkedDefects}}- {{.Key}} ({{.Status}}): {{.Summary}}
@@ -69,6 +70,8 @@ type SimilarFailure struct {
 	RunStartedAt time.Time
 	Status       string
 	ErrorMessage string
+	DefectType   string // human triage label (RunResult.DefectType), may be empty
+	DefectKey    string // linked defect key for this prior failure, may be empty
 }
 
 // LinkedDefect is a Jira defect row for the prompt.
@@ -87,21 +90,22 @@ type LinkedRequirement struct {
 // PromptInput is everything the template needs to render.
 // Caller is expected to have already run Redact on secret-bearing fields.
 type PromptInput struct {
-	Template           string
-	TestName           string
-	Categories         string
-	Env                string
-	Browser            string
-	OS                 string
-	AppVersion         string
-	Steps              []PromptStep
-	FailureType        string
-	ErrorMessage       string
-	StackTrace         string
-	LogText            string
-	SimilarFailures    []SimilarFailure
-	LinkedDefects      []LinkedDefect
-	LinkedRequirements []LinkedRequirement
+	Template              string
+	TestName              string
+	Categories            string
+	Env                   string
+	Browser               string
+	OS                    string
+	AppVersion            string
+	Steps                 []PromptStep
+	FailureType           string
+	ErrorMessage          string
+	StackTrace            string
+	LogText               string
+	SimilarFailures       []SimilarFailure
+	SimilarFailuresRollup string // one-line human-label distribution rollup
+	LinkedDefects         []LinkedDefect
+	LinkedRequirements    []LinkedRequirement
 }
 
 // PromptMeta reports what was trimmed so the caller can prefix Rationale.
