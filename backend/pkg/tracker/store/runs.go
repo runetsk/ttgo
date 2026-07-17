@@ -1230,6 +1230,39 @@ func (s *Store) ListLatestFailingResults(runID string) ([]*models.RunResult, err
 	return results, nil
 }
 
+// ListRecentFailuresByTestCase returns the most recent FAIL/ERROR RunResults for
+// a single test case within the [since, now] window, newest first, capped at
+// limit. The run identified by excludeRunID is left out so a result's own run
+// never appears in its own history block.
+//
+// Feeds the failure-analysis enrichment builder with this test's recent triage
+// history (each row carries its human DefectType label). Rides the composite
+// index idx_run_results_case_time = (test_case_id, start_time, status) for an
+// ordered scan with early LIMIT termination.
+//
+// Guards: an empty tcID or non-positive limit returns (nil, nil) — enrichment is
+// best-effort, so a missing test case (deleted → NULL test_case_id) is not an
+// error. Status is matched UPPERCASE (models.StatusFail/StatusError), mirroring
+// ListLatestFailingResults.
+func (s *Store) ListRecentFailuresByTestCase(tcID string, since time.Time, limit int, excludeRunID string) ([]*models.RunResult, error) {
+	if tcID == "" || limit <= 0 {
+		return nil, nil
+	}
+	var results []*models.RunResult
+	err := s.db.
+		Where("test_case_id = ?", tcID).
+		Where("status IN ('FAIL','ERROR')").
+		Where("start_time >= ?", since).
+		Where("test_run_id != ?", excludeRunID).
+		Order("start_time DESC").
+		Limit(limit).
+		Find(&results).Error
+	if err != nil {
+		return nil, err
+	}
+	return results, nil
+}
+
 // GetRunResultByID returns a single result by id, or (nil, nil) if not found.
 func (s *Store) GetRunResultByID(id string) (*models.RunResult, error) {
 	var r models.RunResult

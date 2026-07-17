@@ -653,3 +653,100 @@ func TestGetRunResultsByIDs(t *testing.T) {
 	require.NotNil(t, byID[r2.ID])
 	assert.Nil(t, byID[r2.ID].TestCase)
 }
+
+func TestListRecentFailuresByTestCase(t *testing.T) {
+	s := newTestStore(t)
+	folder, _ := s.CreateFolder("Root", nil)
+	tc := &models.TestCase{Name: "Login", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc))
+
+	now := time.Now()
+	// seedFail creates a FAIL result for tc in its own run at the given start time.
+	seedFail := func(name string, start time.Time) *models.RunResult {
+		run := &models.TestRun{Name: name}
+		require.NoError(t, s.CreateTestRun(run))
+		rr := &models.RunResult{
+			TestRunID: run.ID, TestCaseID: &tc.ID, TestNameSnapshot: tc.Name,
+			Status: models.StatusFail, StartTime: start, ErrorMessage: name,
+		}
+		require.NoError(t, s.AddRunResult(rr))
+		return rr
+	}
+
+	fresh := seedFail("fresh", now.Add(-1*time.Hour))
+	mid := seedFail("mid", now.Add(-2*time.Hour))
+	old := seedFail("old", now.Add(-3*time.Hour))
+	seedFail("stale", now.Add(-40*24*time.Hour)) // outside the 30-day window
+
+	since := now.Add(-30 * 24 * time.Hour)
+
+	// Full window, generous limit: newest-first, stale row excluded by the window.
+	got, err := s.ListRecentFailuresByTestCase(tc.ID, since, 5, "")
+	require.NoError(t, err)
+	require.Len(t, got, 3, "the 40-day-old failure is outside the 30-day window")
+	assert.Equal(t, fresh.ID, got[0].ID, "start_time DESC: newest first")
+	assert.Equal(t, mid.ID, got[1].ID)
+	assert.Equal(t, old.ID, got[2].ID)
+
+	// LIMIT caps the set to the two newest.
+	limited, err := s.ListRecentFailuresByTestCase(tc.ID, since, 2, "")
+	require.NoError(t, err)
+	require.Len(t, limited, 2, "LIMIT 2 returns only the two newest")
+	assert.Equal(t, fresh.ID, limited[0].ID)
+	assert.Equal(t, mid.ID, limited[1].ID)
+
+	// Guards: empty tcID and non-positive limit both short-circuit to (nil, nil).
+	none, err := s.ListRecentFailuresByTestCase("", since, 5, "")
+	require.NoError(t, err)
+	assert.Nil(t, none, "empty tcID returns nil")
+	none, err = s.ListRecentFailuresByTestCase(tc.ID, since, 0, "")
+	require.NoError(t, err)
+	assert.Nil(t, none, "non-positive limit returns nil")
+}
+
+func TestListRecentFailuresByTestCaseExclusions(t *testing.T) {
+	s := newTestStore(t)
+	folder, _ := s.CreateFolder("Root", nil)
+	tc := &models.TestCase{Name: "Login", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc))
+	other := &models.TestCase{Name: "Logout", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(other))
+
+	now := time.Now()
+	since := now.Add(-30 * 24 * time.Hour)
+
+	// Current run — must be excluded via excludeRunID.
+	curRun := &models.TestRun{Name: "current"}
+	require.NoError(t, s.CreateTestRun(curRun))
+	require.NoError(t, s.AddRunResult(&models.RunResult{
+		TestRunID: curRun.ID, TestCaseID: &tc.ID, TestNameSnapshot: tc.Name,
+		Status: models.StatusFail, StartTime: now.Add(-10 * time.Minute),
+	}))
+
+	// Prior run: one ERROR (expected back) plus non-fail rows (excluded by status)
+	// and a failure for a different test case (excluded by test_case_id).
+	priorRun := &models.TestRun{Name: "prior"}
+	require.NoError(t, s.CreateTestRun(priorRun))
+	priorFail := &models.RunResult{
+		TestRunID: priorRun.ID, TestCaseID: &tc.ID, TestNameSnapshot: tc.Name,
+		Status: models.StatusError, StartTime: now.Add(-1 * time.Hour),
+	}
+	require.NoError(t, s.AddRunResult(priorFail))
+	require.NoError(t, s.AddRunResult(&models.RunResult{
+		TestRunID: priorRun.ID, TestCaseID: &tc.ID, TestNameSnapshot: tc.Name,
+		Status: models.StatusPass, StartTime: now.Add(-2 * time.Hour),
+	}))
+	require.NoError(t, s.AddRunResult(&models.RunResult{
+		TestRunID: priorRun.ID, TestCaseID: &tc.ID, TestNameSnapshot: tc.Name,
+		Status: models.StatusSkip, StartTime: now.Add(-3 * time.Hour),
+	}))
+	require.NoError(t, s.AddRunResult(&models.RunResult{
+		TestRunID: priorRun.ID, TestCaseID: &other.ID, TestNameSnapshot: other.Name,
+		Status: models.StatusFail, StartTime: now.Add(-1 * time.Hour),
+	}))
+
+	got, err := s.ListRecentFailuresByTestCase(tc.ID, since, 10, curRun.ID)
+	require.NoError(t, err)
+	require.Len(t, got, 1, "only the prior FAIL/ERROR for this test case survives the filters")
+	assert.Equal(t, priorFail.ID, got[0].ID)
+}
