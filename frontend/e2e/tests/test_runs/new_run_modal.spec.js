@@ -1,8 +1,7 @@
-import { test, expect } from '@playwright/test';
-import { createFolderAPI, createTestAPI, createRunAPI, addRunResultAPI } from '../../helpers/api.js';
+import { test, expect } from '../../fixtures/test.js';
 
 test.describe('New run modal — tree picker', () => {
-    test('pick a folder in the tree, create the run, and see it in the sidebar', async ({ page, request }) => {
+    test('pick a folder in the tree, create the run, and see it in the sidebar', async ({ page, runsPage, runDetailPage, api }) => {
         const stamp = Date.now();
         const folderName = `Tree Folder ${stamp}`;
         const runName = `Tree Run ${stamp}`;
@@ -10,76 +9,73 @@ test.describe('New run modal — tree picker', () => {
         let folder;
 
         await test.step('Seed a folder with two tests', async () => {
-            folder = await createFolderAPI(request, folderName);
-            for (const n of names) await createTestAPI(request, n, folder.id);
+            folder = await api.createFolder(folderName);
+            for (const n of names) await api.createTest(n, folder.id);
         });
 
         await test.step('Open the modal; the tree shows the folder and tests', async () => {
-            await page.goto('/runs');
-            await page.getByTestId('create-test-run-button').click();
-            await expect(page.getByTestId('test-tree-picker')).toBeVisible();
-            await expect(page.getByTestId(`test-tree-folder-${folder.id}`)).toBeVisible();
+            await runsPage.open();
+            await runsPage.openNewRunModal();
+            await expect(runsPage.treePicker).toBeVisible();
+            await expect(runsPage.treeFolder(folder.id)).toBeVisible();
         });
 
         await test.step('Ticking the folder selects both of its tests', async () => {
-            await page.getByTestId('create-run-name-input').fill(runName);
-            await page.getByTestId(`test-tree-folder-${folder.id}`).check();
-            await expect(page.getByTestId('test-tree-selected-count')).toContainText('2');
+            await runsPage.runNameInput.fill(runName);
+            await runsPage.treeFolder(folder.id).check();
+            await expect(runsPage.treeSelectedCount).toContainText('2');
         });
 
         await test.step('Create Run lands on the run detail with both tests', async () => {
-            await page.getByTestId('create-run-submit').click();
+            await runsPage.submitNewRun();
             await expect(page).toHaveURL(/\/runs\/run\/[a-f0-9-]+$/);
             // stats-passed renders "{passed} / {total}" — both tests are in the run.
-            await expect(page.getByTestId('stats-passed')).toContainText('/ 2');
+            await expect(runDetailPage.stat('passed')).toContainText('/ 2');
         });
 
         await test.step('The new run appears in the left run sidebar without a refresh', async () => {
-            const sidebar = page.getByTestId('run-folder-sidebar');
-            const toggle = page.locator('[data-testid="uncategorised-entry"] .expand-toggle');
-            const expanded = await toggle.evaluate(el => el.classList.contains('expanded'));
-            if (!expanded) await toggle.click();
-            await expect(sidebar.getByText(runName)).toBeVisible();
+            await runsPage.expandUncategorised();
+            await expect(runsPage.sidebar.getByText(runName)).toBeVisible();
         });
     });
 
-    test('run detail Execute runs only the checked results', async ({ page, request }) => {
+    test('run detail Execute runs only the checked results', async ({ page, runDetailPage, runExecutePage, api }) => {
         const stamp = Date.now();
         const names = ['Alpha exec', 'Beta exec', 'Gamma exec'];
         let run;
         const tc = {};
 
         await test.step('Seed a run with three cases via API', async () => {
-            const folder = await createFolderAPI(request, `Exec Folder ${stamp}`);
-            run = await createRunAPI(request, `Exec Run ${stamp}`);
+            const folder = await api.createFolder(`Exec Folder ${stamp}`);
+            run = await api.createRun(`Exec Run ${stamp}`);
             for (const n of names) {
-                tc[n] = await createTestAPI(request, n, folder.id);
-                await addRunResultAPI(request, run.id, tc[n].id);
+                tc[n] = await api.createTest(n, folder.id);
+                await api.addRunResult(run.id, tc[n].id);
             }
         });
 
         await test.step('With nothing checked, Execute is disabled and countless', async () => {
-            await page.goto(`/runs/run/${run.id}`);
-            await expect(page.getByTestId('stats-passed')).toContainText('/ 3');
-            await expect(page.getByTestId('execute-run-button')).toBeDisabled();
-            await expect(page.getByTestId('execute-run-button')).not.toContainText('(');
+            await runDetailPage.open(run.id);
+            await expect(runDetailPage.stat('passed')).toContainText('/ 3');
+            await expect(runDetailPage.executeRunButton).toBeDisabled();
+            await expect(runDetailPage.executeRunButton).not.toContainText('(');
         });
 
         await test.step('Checking two rows enables Execute and shows the count (2)', async () => {
             // The row checkbox is a custom-styled label wrapping a collapsed native
             // input; clicking the label natively toggles it and fires onChange.
-            await page.getByTestId(`select-result-${tc['Beta exec'].id}`).click();
-            await page.getByTestId(`select-result-${tc['Gamma exec'].id}`).click();
-            await expect(page.getByTestId('execute-run-button')).toBeEnabled();
-            await expect(page.getByTestId('execute-run-button')).toContainText('(2)');
+            await runDetailPage.selectResult(tc['Beta exec'].id).click();
+            await runDetailPage.selectResult(tc['Gamma exec'].id).click();
+            await expect(runDetailPage.executeRunButton).toBeEnabled();
+            await expect(runDetailPage.executeRunButton).toContainText('(2)');
         });
 
         await test.step('Execute scopes the queue to just those two tests', async () => {
-            await page.getByTestId('execute-run-button').click();
+            await runDetailPage.executeRunButton.click();
             await expect(page).toHaveURL(/\/execute\?only=/);
-            await expect(page.getByTestId('execute-progress')).toContainText('0 / 2');
+            await expect(runExecutePage.progress).toContainText('0 / 2');
             // Queue is sorted by name, so Beta is current and Alpha is absent.
-            await expect(page.getByTestId('execute-current-name')).toHaveText('Beta exec');
+            await expect(runExecutePage.currentName).toHaveText('Beta exec');
         });
     });
 });

@@ -1,96 +1,51 @@
-import { test, expect } from '@playwright/test';
-
-/**
- * Helper: activate a RichTextField by clicking its container, wait for the
- * editor toolbar (confirms isEditing=true), then type via keyboard.
- *
- * Clicking the name input between fields deactivates the previous editor so
- * that blur/focus events don't interfere with the next activation.
- */
-async function fillRichField(page, containerSelector, text) {
-    // Deactivate any currently-open editor by focusing the name input
-    await page.getByTestId('test-case-name-input').click();
-
-    // Click the rich-text-field div to enter edit mode
-    const richField = page.locator(`${containerSelector} .rich-text-field`);
-    await richField.click();
-
-    // Wait for the toolbar — its appearance confirms isEditing=true
-    await page.locator(`${containerSelector} .rich-text-toolbar`).waitFor({ state: 'visible', timeout: 5000 });
-
-    // Click the ProseMirror contenteditable to ensure it has focus, then type
-    const proseMirror = page.locator(`${containerSelector} .ProseMirror`);
-    await proseMirror.click();
-    await page.keyboard.type(text);
-}
+import { test, expect } from '../../fixtures/test.js';
+import { TIMEOUTS } from '../../config.js';
 
 test.describe('Test Steps Management', () => {
-    test('should add and reorder steps', async ({ page }) => {
+    test('should add and reorder steps', async ({ page, libraryPage, testCaseDetailPage }) => {
         const folderName = `Steps Demo ${Date.now()}`;
         const testName = `Step Test ${Date.now()}`;
 
         await test.step('Create a folder and a test case', async () => {
-            await page.goto('/');
-            await page.getByTestId('create-root-folder-button').click();
-            await page.getByTestId('modal-input').fill(folderName);
-            await page.getByTestId('modal-confirm-button').click();
+            await libraryPage.open();
+            await libraryPage.createRootFolder(folderName);
             await expect(page.getByText('New Root Folder')).not.toBeVisible();
-
-            // Wait for folder and click
-            await expect(page.getByTestId('folder-name').filter({ hasText: folderName })).toBeVisible();
-            await page.getByTestId('folder-name').filter({ hasText: folderName }).click();
-
-            await page.getByTestId('create-test-button').click();
-            await page.getByTestId('modal-input').fill(testName);
-            await page.getByTestId('modal-confirm-button').click();
+            await libraryPage.selectFolder(folderName);
+            await libraryPage.createTestCase(testName);
         });
 
         await test.step('Open the test detail view', async () => {
-            await page.getByText(testName).click();
-            await expect(page.getByTestId('test-case-name-input')).toBeVisible();
+            await libraryPage.openTestCase(testName);
+            await expect(testCaseDetailPage.nameInput).toBeVisible();
         });
 
         await test.step('Add the first step with action and expected result', async () => {
-            // Each RichTextField requires explicit activation
-            await page.getByTestId('add-step-button').click();
-            // Wait for step 0 container to appear
-            await page.locator('[data-testid="step-action-0"]').waitFor({ state: 'visible', timeout: 10000 });
-            await fillRichField(page, '[data-testid="step-action-0"]', 'First Step');
-            await fillRichField(page, '[data-testid="step-expected-0"]', 'First Result');
+            await testCaseDetailPage.addStep(0);
+            await testCaseDetailPage.fillRichField('[data-testid="step-action-0"]', 'First Step');
+            await testCaseDetailPage.fillRichField('[data-testid="step-expected-0"]', 'First Result');
         });
 
         await test.step('Add the second step with action and expected result', async () => {
-            // Deactivate before clicking add again
-            await page.getByTestId('test-case-name-input').click();
-            await page.getByTestId('add-step-button').click();
-            // Wait for step 1 container to appear
-            await page.locator('[data-testid="step-action-1"]').waitFor({ state: 'visible', timeout: 10000 });
-            await fillRichField(page, '[data-testid="step-action-1"]', 'Second Step');
-            await fillRichField(page, '[data-testid="step-expected-1"]', 'Second Result');
-
-            // Deactivate the last field before saving
-            await page.getByTestId('test-case-name-input').click();
+            await testCaseDetailPage.deactivateEditors();
+            await testCaseDetailPage.addStep(1);
+            await testCaseDetailPage.fillRichField('[data-testid="step-action-1"]', 'Second Step');
+            await testCaseDetailPage.fillRichField('[data-testid="step-expected-1"]', 'Second Result');
+            await testCaseDetailPage.deactivateEditors();
         });
 
         await test.step('Save the changes', async () => {
-            await page.getByRole('button', { name: 'Save Changes' }).click();
-
-            // Debug error banner if visible
-            if (await page.locator('.error-banner').isVisible()) {
-                console.log('Error banner text:', await page.locator('.error-banner').innerText());
-            }
-
-            // After save the detail navigates away
-            await expect(page.getByTestId('test-case-name-input')).not.toBeVisible({ timeout: 10000 });
+            await testCaseDetailPage.save();
+            // After save the detail navigates away.
+            await expect(testCaseDetailPage.nameInput).not.toBeVisible({ timeout: TIMEOUTS.ELEMENT });
         });
 
         await test.step('Reopen the test and verify the steps persisted', async () => {
-            await page.getByText(testName).click();
-            await expect(page.getByTestId('test-case-name-input')).toBeVisible();
+            await libraryPage.openTestCase(testName);
+            await expect(testCaseDetailPage.nameInput).toBeVisible();
 
-            // Steps render in read-only mode via .rich-text-display
-            await expect(page.locator('[data-testid="step-action-0"] .rich-text-display')).toContainText('First Step');
-            await expect(page.locator('[data-testid="step-action-1"] .rich-text-display')).toContainText('Second Step');
+            // Steps render in read-only mode via .rich-text-display.
+            await expect(testCaseDetailPage.stepActionDisplay(0)).toContainText('First Step');
+            await expect(testCaseDetailPage.stepActionDisplay(1)).toContainText('Second Step');
         });
     });
 });

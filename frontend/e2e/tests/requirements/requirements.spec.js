@@ -1,14 +1,11 @@
-import { test, expect } from '@playwright/test';
-import { deleteAllRequirements, createRequirementAPI } from '../../helpers/api.js';
+import { test, expect } from '../../fixtures/test.js';
 
 test.describe('Requirements CRUD', () => {
 
-    test.beforeEach(async ({ request, page }) => {
-        await deleteAllRequirements(request);
-        await page.goto('/requirements');
+    test.beforeEach(async ({ api, requirementsPage }) => {
+        await api.deleteAllRequirements();
+        await requirementsPage.open();
     });
-
-    // ── 1. Empty state ────────────────────────────────────────────────────────
 
     test('shows empty state when no requirements exist', async ({ page }) => {
         await test.step('Verify the empty state message is shown', async () => {
@@ -16,133 +13,92 @@ test.describe('Requirements CRUD', () => {
         });
     });
 
-    // ── 2. Create ─────────────────────────────────────────────────────────────
-
-    test('creates a requirement via modal', async ({ page }) => {
+    test('creates a requirement via modal', async ({ page, requirementsPage }) => {
         const ts = Date.now();
         const identifier = `REQ-${ts}`;
         const title = `Requirement ${ts}`;
         const description = `Description for ${ts}`;
 
         await test.step('Open the create modal and fill in the requirement fields', async () => {
-            await page.getByRole('button', { name: '+ New Requirement' }).click();
-
-            // Fill the create modal
-            await page.getByPlaceholder('e.g. PROJ-001').fill(identifier);
-            await page.getByPlaceholder('Short description of the requirement').fill(title);
-            await page.locator('textarea').fill(description);
-            await page.getByRole('button', { name: 'Create', exact: true }).click();
+            await requirementsPage.create({ identifier, title, description });
         });
 
         await test.step('Verify the new requirement appears in the table', async () => {
-            // Verify the requirement appears in the table
             await expect(page.getByText(identifier)).toBeVisible();
             await expect(page.getByText(title)).toBeVisible();
         });
     });
 
-    // ── 3. Edit ───────────────────────────────────────────────────────────────
-
-    test('edits a requirement', async ({ request, page }) => {
+    test('edits a requirement', async ({ page, api, requirementsPage }) => {
         const ts = Date.now();
 
         await test.step('Create a requirement via API and reload the page', async () => {
-            await createRequirementAPI(request, `EDIT-${ts}`, `Original ${ts}`);
+            await api.createRequirement(`EDIT-${ts}`, `Original ${ts}`);
             await page.reload();
         });
 
         await test.step('Open the edit form and update the title', async () => {
-            // Open the row's kebab actions menu, then click Edit.
-            // The menu is portaled to document.body, so the item is page-scoped (not inside the row).
-            const row = page.locator('tr').filter({ hasText: `EDIT-${ts}` });
-            await row.getByRole('button', { name: 'Actions' }).click();
-            await page.locator('.context-menu-item').filter({ hasText: 'Edit' }).click();
-
-            // Update the title
-            const titleInput = page.getByPlaceholder('Short description of the requirement');
-            await titleInput.clear();
-            await titleInput.fill(`Updated ${ts}`);
-            await page.getByRole('button', { name: 'Save Changes' }).click();
+            await requirementsPage.rowAction(`EDIT-${ts}`, 'Edit');
+            await requirementsPage.titleInput.clear();
+            await requirementsPage.titleInput.fill(`Updated ${ts}`);
+            await requirementsPage.saveChanges();
         });
 
         await test.step('Verify the updated title appears', async () => {
-            // Verify updated title appears
             await expect(page.getByText(`Updated ${ts}`)).toBeVisible();
         });
     });
 
-    // ── 4. Delete ─────────────────────────────────────────────────────────────
-
-    test('deletes a requirement with confirmation', async ({ request, page }) => {
+    test('deletes a requirement with confirmation', async ({ page, api, requirementsPage }) => {
         const ts = Date.now();
 
         await test.step('Create a requirement via API and confirm it is visible', async () => {
-            await createRequirementAPI(request, `DEL-${ts}`, `ToDelete ${ts}`);
+            await api.createRequirement(`DEL-${ts}`, `ToDelete ${ts}`);
             await page.reload();
-
             await expect(page.getByText(`DEL-${ts}`)).toBeVisible();
         });
 
         await test.step('Accept the confirmation dialog and delete the requirement', async () => {
-            // Accept the confirmation dialog
             page.on('dialog', dialog => dialog.accept());
-
-            // Open the row's kebab actions menu, then click Delete.
-            // The menu is portaled to document.body, so the item is page-scoped (not inside the row).
-            const row = page.locator('tr').filter({ hasText: `DEL-${ts}` });
-            await row.getByRole('button', { name: 'Actions' }).click();
-            await page.locator('.context-menu-item').filter({ hasText: 'Delete' }).click();
-
-            // Requirement should disappear
+            await requirementsPage.rowAction(`DEL-${ts}`, 'Delete');
             await expect(page.getByText(`DEL-${ts}`)).not.toBeVisible();
         });
     });
 
-    // ── 5. Search ─────────────────────────────────────────────────────────────
-
-    test('search filters requirements by identifier and title', async ({ request, page }) => {
+    test('search filters requirements by identifier and title', async ({ page, api, requirementsPage }) => {
         const ts = Date.now();
-        let searchInput;
 
         await test.step('Create two requirements via API and reload', async () => {
-            await createRequirementAPI(request, `ALPHA-${ts}`, `First ${ts}`);
-            await createRequirementAPI(request, `BETA-${ts}`, `Second ${ts}`);
+            await api.createRequirement(`ALPHA-${ts}`, `First ${ts}`);
+            await api.createRequirement(`BETA-${ts}`, `Second ${ts}`);
             await page.reload();
-
-            searchInput = page.getByPlaceholder('Search by identifier, title or description…');
         });
 
         await test.step('Filter by identifier and verify only the matching row shows', async () => {
-            // Filter by identifier
-            await searchInput.fill(`ALPHA-${ts}`);
+            await requirementsPage.searchInput.fill(`ALPHA-${ts}`);
             await expect(page.getByText(`ALPHA-${ts}`)).toBeVisible();
             await expect(page.getByText(`BETA-${ts}`)).not.toBeVisible();
         });
 
         await test.step('Clear and filter by title and verify only the matching row shows', async () => {
-            // Clear and filter by title
-            await searchInput.clear();
-            await searchInput.fill(`Second ${ts}`);
+            await requirementsPage.searchInput.clear();
+            await requirementsPage.searchInput.fill(`Second ${ts}`);
             await expect(page.getByText(`Second ${ts}`)).toBeVisible();
             await expect(page.getByText(`First ${ts}`)).not.toBeVisible();
         });
     });
 
-    // ── 6. Coverage summary cards ─────────────────────────────────────────────
-
-    test('coverage summary cards show correct counts', async ({ request, page }) => {
+    test('coverage summary cards show correct counts', async ({ page, api }) => {
         const ts = Date.now();
 
         await test.step('Create two uncovered requirements via API and reload', async () => {
-            // Create two requirements, neither linked to test cases → 0 coverage
-            await createRequirementAPI(request, `COV-A-${ts}`, `CovA ${ts}`);
-            await createRequirementAPI(request, `COV-B-${ts}`, `CovB ${ts}`);
+            await api.createRequirement(`COV-A-${ts}`, `CovA ${ts}`);
+            await api.createRequirement(`COV-B-${ts}`, `CovB ${ts}`);
             await page.reload();
         });
 
         await test.step('Verify the coverage summary strip shows the expected counts', async () => {
-            // Summary is a single glass-panel strip of stat pills (value span + label span)
-            // plus a percentage span. Each pill div's text content is `${value}${label}`.
+            // Each stat pill's text content is `${value}${label}` (value span + label span).
             const summary = page.locator('.glass-panel').first();
             await expect(summary.locator('div').filter({ hasText: /^2Total$/ })).toBeVisible();
             await expect(summary.locator('div').filter({ hasText: /^0Covered$/ })).toBeVisible();

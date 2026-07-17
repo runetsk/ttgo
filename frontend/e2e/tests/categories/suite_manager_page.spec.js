@@ -1,26 +1,26 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../../fixtures/test.js';
 
 // Migrated from the removed `suites` concept to `categories`. The Suite Manager
 // page is now the Category Manager page at /categories.
 test.describe('Category Manager Page', () => {
 
-    test('should navigate to categories page and manage categories', async ({ page }) => {
+    test('should navigate to categories page and manage categories', async ({ page, libraryPage, categoriesPage }) => {
         const catName = `Category Page Test ${Date.now()}`;
 
         await test.step('Open the home page', async () => {
-            await page.goto('/');
+            await libraryPage.open();
         });
 
-        await test.step('Navigate to the Categories page via the top nav', async () => {
-            await page.getByRole('button', { name: 'Categories' }).click();
+        await test.step('Navigate to the Categories page via the Quality section', async () => {
+            // Categories lives under the top-nav "Quality" section, not a direct button.
+            await libraryPage.nav('Quality');
+            await libraryPage.nav('Categories');
             await expect(page.url()).toContain('/categories');
             await expect(page.getByTestId('category-manager')).toBeVisible();
         });
 
         await test.step('Create a category via the modal', async () => {
-            await page.getByTestId('open-create-category-modal').click();
-            await page.getByTestId('category-name-input').fill(catName);
-            await page.getByTestId('create-category-button').click();
+            await categoriesPage.create(catName);
         });
 
         await test.step('Verify the category was created', async () => {
@@ -28,7 +28,7 @@ test.describe('Category Manager Page', () => {
         });
 
         await test.step('Navigate back to Tests', async () => {
-            await page.getByRole('button', { name: 'Tests' }).click();
+            await libraryPage.nav('Tests');
             await expect(page.url()).not.toContain('/categories');
         });
     });

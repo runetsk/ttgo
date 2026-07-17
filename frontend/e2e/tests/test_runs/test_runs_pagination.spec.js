@@ -1,67 +1,52 @@
-import { test, expect } from '@playwright/test';
-import { createCategoryAPI, createRunAPI } from '../../helpers/api.js';
+import { test, expect } from '../../fixtures/test.js';
 
 test.describe('Test Runs Pagination', () => {
-    test('should paginate test runs correctly', async ({ page, request }) => {
+    test('should paginate test runs correctly', async ({ page, runsPage, api }) => {
         let category;
         let timestamp;
 
         await test.step('Seed a category and create 25 runs via API', async () => {
             timestamp = Date.now();
-            const categoryName = `Pagination Category ${timestamp}`;
-            category = await createCategoryAPI(request, categoryName);
+            category = await api.createCategory(`Pagination Category ${timestamp}`);
 
-            // Create 25 runs to test pagination (default limit is 20)
-            console.log('Creating 25 test runs sequentially...');
+            // 25 runs exceeds the default page limit of 20, so pagination engages.
             for (let i = 1; i <= 25; i++) {
-                await createRunAPI(request, `Paginated Run ${i} ${timestamp}`, { categoryId: category.id });
+                await api.createRun(`Paginated Run ${i} ${timestamp}`, { categoryId: category.id });
             }
         });
 
         await test.step('Open the runs page and filter by the seeded category', async () => {
-            await page.goto('/runs');
-            await page.getByRole('button', { name: 'Column Filters' }).click();
-
-            // Open the CategoryFilter popover and select our category
-            await page.getByTestId('filter-run-category').click();
-            await page.getByTestId(`filter-run-category-option-${category.id}`).click();
-            // Close the popover by pressing Escape
-            await page.keyboard.press('Escape');
-
+            await runsPage.open();
+            await runsPage.openColumnFilters();
+            await runsPage.filterByCategory(category.id);
             await page.waitForSelector('text=Showing');
         });
 
         await test.step('Verify the default state shows 20 per page', async () => {
-            // 1. Verify default state (20 per page)
-            // Component renders "Showing 1–20 of 25" format
-            await expect(page.locator('[data-testid="page-size-selector"]')).toHaveValue('20');
+            await expect(runsPage.pageSizeSelector).toHaveValue('20');
             await expect(page.getByText(/Showing 1.20 of 25/)).toBeVisible();
         });
 
         await test.step('Verify the Next button advances to the second page', async () => {
-            // 2. Verify "Next" button works
-            await page.click('[data-testid="next-page"]');
+            await runsPage.nextPage();
             await expect(page.getByText(/Showing 21.25 of 25/)).toBeVisible();
         });
 
         await test.step('Verify the Prev button returns to the first page', async () => {
-            // 3. Verify "Prev" button works
-            await page.click('[data-testid="prev-page"]');
+            await runsPage.prevPage();
             await expect(page.getByText(/Showing 1.20 of 25/)).toBeVisible();
         });
 
         await test.step('Change page size to 50 and verify all runs fit on one page', async () => {
-            // 4. Change page size to 50 — all 25 fit on one page, no pagination buttons
-            await page.selectOption('[data-testid="page-size-selector"]', '50');
+            await runsPage.pageSizeSelector.selectOption('50');
             await expect(page.getByText(/Showing 1.25 of 25/)).toBeVisible();
-            await expect(page.locator('[data-testid="next-page"]')).not.toBeVisible();
+            await expect(runsPage.nextPageButton).not.toBeVisible();
         });
 
         await test.step('Change page size to 10 and verify pagination reappears', async () => {
-            // 5. Change page size to 10
-            await page.selectOption('[data-testid="page-size-selector"]', '10');
+            await runsPage.pageSizeSelector.selectOption('10');
             await expect(page.getByText(/Showing 1.10 of 25/)).toBeVisible();
-            await expect(page.locator('[data-testid="next-page"]')).toBeVisible();
+            await expect(runsPage.nextPageButton).toBeVisible();
         });
     });
 });

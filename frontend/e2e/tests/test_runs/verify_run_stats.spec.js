@@ -1,101 +1,60 @@
-import { test, expect } from '@playwright/test';
-import { API_URL } from '../../config.js';
+import { test, expect } from '../../fixtures/test.js';
+import { ApiClient } from '../../helpers/api.js';
 
 test.describe('Test Run Stats Verification', () => {
     let runId;
     let categoryId;
-    let folderId;
-    let testIds = [];
 
+    // beforeAll only has the worker-scoped `request` fixture, so build the client
+    // from it directly (mirrors the AI-generation pilot).
     test.beforeAll(async ({ request }) => {
+        const api = new ApiClient(request);
         const timestamp = Date.now();
 
-        // 1. Create a unique category for isolation
-        const categoryRes = await request.post(`${API_URL}/categories`, {
-            data: { name: `Stats Category ${timestamp}`, description: 'E2E stats test' }
-        });
-        expect(categoryRes.ok()).toBeTruthy();
-        const category = await categoryRes.json();
+        const category = await api.createCategory(`Stats Category ${timestamp}`, 'E2E stats test');
         categoryId = category.id;
-
-        // 2. Create a folder
-        const folderRes = await request.post(`${API_URL}/folders`, {
-            data: { name: `Stats Folder ${timestamp}`, parent_id: null }
-        });
-        expect(folderRes.ok()).toBeTruthy();
-        const folder = await folderRes.json();
-        folderId = folder.id;
-
-        // 3. Create a test run linked to the category
-        const runRes = await request.post(`${API_URL}/runs`, {
-            data: { category_id: categoryId, name: `Stats Verify Run ${timestamp}` }
-        });
-        expect(runRes.ok()).toBeTruthy();
-        const run = await runRes.json();
+        const folder = await api.createFolder(`Stats Folder ${timestamp}`);
+        const run = await api.createRun(`Stats Verify Run ${timestamp}`, { categoryId });
         runId = run.id;
 
-        // 4. Create 3 tests and add as run results
-        testIds = [];
+        // 3 tests as run results, then set statuses: 1 PASS, 1 FAIL, 1 left PENDING.
         const resultIds = [];
         for (let i = 0; i < 3; i++) {
-            const testRes = await request.post(`${API_URL}/tests`, {
-                data: { name: `Stats Test ${i} ${timestamp}`, folder_id: folderId, description: 'Temp test' }
-            });
-            expect(testRes.ok()).toBeTruthy();
-            const t = await testRes.json();
-            testIds.push(t.id);
-
-            const resultRes = await request.post(`${API_URL}/runs/${runId}/results`, {
-                data: { test_case_id: t.id }
-            });
-            expect(resultRes.ok()).toBeTruthy();
-            const result = await resultRes.json();
+            const t = await api.createTest(`Stats Test ${i} ${timestamp}`, folder.id, 'Temp test');
+            const result = await api.addRunResult(runId, t.id);
             resultIds.push(result.id);
         }
-
-        // 5. Update statuses: 1 PASS, 1 FAIL, 1 remains PENDING
-        await request.put(`${API_URL}/runs/${runId}/results/${resultIds[0]}`, {
-            data: { status: 'PASS' }
-        });
-        await request.put(`${API_URL}/runs/${runId}/results/${resultIds[1]}`, {
-            data: { status: 'FAIL' }
-        });
+        await api.updateRunResult(runId, resultIds[0], { status: 'PASS' });
+        await api.updateRunResult(runId, resultIds[1], { status: 'FAIL' });
     });
 
-    test('should display correct stats in TestRunList columns', async ({ page }) => {
+    test('should display correct stats in TestRunList columns', async ({ runsPage }) => {
         await test.step('Open the runs page and filter by the seeded category', async () => {
-            await page.goto('/runs');
-
-            // Show filter row and filter by our specific category
-            await page.getByRole('button', { name: 'Column Filters' }).click();
-            await page.getByTestId('filter-run-category').click();
-            await page.getByTestId(`filter-run-category-option-${categoryId}`).click();
-            await page.keyboard.press('Escape');
+            await runsPage.open();
+            await runsPage.openColumnFilters();
+            await runsPage.filterByCategory(categoryId);
         });
 
         await test.step('Verify the run row is visible and the stats columns are correct', async () => {
-            const checkbox = page.locator(`[data-testid="select-run-checkbox-${runId}"]`);
-            await expect(checkbox).toBeVisible();
-
-            // Check columns
+            await expect(runsPage.selectRunCheckbox(runId)).toBeVisible();
             // Passed/Failed are default-visible columns; Pending/Total are optional
             // columns hidden by default, so assert the visible stats here.
-            await expect(page.getByTestId(`run-passed-${runId}`)).toHaveText('1');
-            await expect(page.getByTestId(`run-failed-${runId}`)).toHaveText('1');
+            await expect(runsPage.runPassed(runId)).toHaveText('1');
+            await expect(runsPage.runFailed(runId)).toHaveText('1');
         });
     });
 
-    test('should display correct stats in TestRunDetail header', async ({ page }) => {
+    test('should display correct stats in TestRunDetail header', async ({ runDetailPage }) => {
         await test.step('Open the run detail page', async () => {
-            await page.goto(`/runs/run/${runId}`);
+            await runDetailPage.open(runId);
         });
 
         await test.step('Verify the stats bar shows correct passed, failed, and pending counts', async () => {
             // Redesigned stats bar shows passed as "{passed} / {total}" — no separate total testid.
-            await expect(page.getByTestId('stats-passed')).toContainText('1');
-            await expect(page.getByTestId('stats-passed')).toContainText('3');
-            await expect(page.getByTestId('stats-failed')).toContainText('1');
-            await expect(page.getByTestId('stats-pending')).toContainText('1');
+            await expect(runDetailPage.stat('passed')).toContainText('1');
+            await expect(runDetailPage.stat('passed')).toContainText('3');
+            await expect(runDetailPage.stat('failed')).toContainText('1');
+            await expect(runDetailPage.stat('pending')).toContainText('1');
         });
     });
 });

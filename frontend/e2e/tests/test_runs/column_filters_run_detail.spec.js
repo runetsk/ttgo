@@ -1,86 +1,70 @@
-import { test, expect } from '@playwright/test';
-import { createFolderAPI, createTestAPI, createRunAPI, addRunResultAPI } from '../../helpers/api.js';
+import { test, expect } from '../../fixtures/test.js';
+import { TIMEOUTS } from '../../config.js';
 
 test.describe('Run detail results filters', () => {
-    test('filter row toggles and status filter narrows results', async ({ page, request }) => {
+    test('filter row toggles and status filter narrows results', async ({ runDetailPage, api }) => {
         let run;
 
         await test.step('Seed a folder, two tests, a run, and two PENDING results via API', async () => {
-            // Seed: folder + 2 tests + a run + 2 PENDING run results
             const stamp = Date.now();
-            const folder = await createFolderAPI(request, `CF Folder ${stamp}`);
-            const t1 = await createTestAPI(request, `CF Test A ${stamp}`, folder.id);
-            const t2 = await createTestAPI(request, `CF Test B ${stamp}`, folder.id);
-            run = await createRunAPI(request, `CF Run ${stamp}`);
-            await addRunResultAPI(request, run.id, t1.id, { status: 'PENDING' });
-            await addRunResultAPI(request, run.id, t2.id, { status: 'PENDING' });
+            const folder = await api.createFolder(`CF Folder ${stamp}`);
+            const t1 = await api.createTest(`CF Test A ${stamp}`, folder.id);
+            const t2 = await api.createTest(`CF Test B ${stamp}`, folder.id);
+            run = await api.createRun(`CF Run ${stamp}`);
+            await api.addRunResult(run.id, t1.id, { status: 'PENDING' });
+            await api.addRunResult(run.id, t2.id, { status: 'PENDING' });
         });
 
         await test.step('Open the run detail page and verify the toolbar is visible', async () => {
-            await page.goto(`/runs/run/${run.id}`);
-            await page.waitForLoadState('domcontentloaded');
-
-            // Toolbar must be visible
-            const toolbar = page.getByTestId('run-results-toolbar');
-            await expect(toolbar).toBeVisible({ timeout: 30000 });
+            await runDetailPage.open(run.id);
+            await expect(runDetailPage.toolbar).toBeVisible({ timeout: TIMEOUTS.HEAVY_GRID });
         });
 
         await test.step('Toggle Column Filters on and verify the status filter appears', async () => {
-            // Initially, status filter should not be visible
-            await expect(page.getByTestId('filter-result-status')).not.toBeVisible();
-
-            // Click the Column Filters toggle button
-            await page.getByRole('button', { name: 'Column Filters' }).click();
-
-            // Status filter control is now visible
-            await expect(page.getByTestId('filter-result-status')).toBeVisible();
+            await expect(runDetailPage.resultStatusFilter).not.toBeVisible();
+            await runDetailPage.openColumnFilters();
+            await expect(runDetailPage.resultStatusFilter).toBeVisible();
         });
 
         await test.step('Verify two rows are visible before filtering', async () => {
-            // 2 rows visible before filtering
-            await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(2);
+            await expect(runDetailPage.resultRows).toHaveCount(2);
         });
 
         await test.step('Filter to PASS and verify no rows remain', async () => {
-            // Filter to PASS → 0 result rows (all are PENDING)
-            await page.getByTestId('filter-result-status').selectOption('PASS');
-            await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(0);
+            await runDetailPage.resultStatusFilter.selectOption('PASS');
+            await expect(runDetailPage.resultRows).toHaveCount(0);
         });
 
         await test.step('Filter back to PENDING and verify two rows return', async () => {
-            // Filter back to PENDING → 2 result rows
-            await page.getByTestId('filter-result-status').selectOption('PENDING');
-            await expect(page.locator('tbody tr[data-result-id]')).toHaveCount(2);
+            await runDetailPage.resultStatusFilter.selectOption('PENDING');
+            await expect(runDetailPage.resultRows).toHaveCount(2);
         });
     });
 
-    test('filter row toggle shows and hides', async ({ page, request }) => {
+    test('filter row toggle shows and hides', async ({ runDetailPage, api }) => {
         let run;
 
         await test.step('Seed a folder, a test, a run, and a PENDING result via API', async () => {
             const stamp = Date.now();
-            const folder = await createFolderAPI(request, `CF2 Folder ${stamp}`);
-            const t1 = await createTestAPI(request, `CF2 Test A ${stamp}`, folder.id);
-            run = await createRunAPI(request, `CF2 Run ${stamp}`);
-            await addRunResultAPI(request, run.id, t1.id, { status: 'PENDING' });
+            const folder = await api.createFolder(`CF2 Folder ${stamp}`);
+            const t1 = await api.createTest(`CF2 Test A ${stamp}`, folder.id);
+            run = await api.createRun(`CF2 Run ${stamp}`);
+            await api.addRunResult(run.id, t1.id, { status: 'PENDING' });
         });
 
         await test.step('Open the run detail page and verify the toolbar is visible', async () => {
-            await page.goto(`/runs/run/${run.id}`);
-            await page.waitForLoadState('domcontentloaded');
-            await expect(page.getByTestId('run-results-toolbar')).toBeVisible({ timeout: 30000 });
+            await runDetailPage.open(run.id);
+            await expect(runDetailPage.toolbar).toBeVisible({ timeout: TIMEOUTS.HEAVY_GRID });
         });
 
         await test.step('Show the filters and verify the status filter appears', async () => {
-            // Show filters
-            await page.getByRole('button', { name: 'Column Filters' }).click();
-            await expect(page.getByTestId('filter-result-status')).toBeVisible();
+            await runDetailPage.openColumnFilters();
+            await expect(runDetailPage.resultStatusFilter).toBeVisible();
         });
 
         await test.step('Hide the filters and verify the status filter disappears', async () => {
-            // Hide filters
-            await page.getByRole('button', { name: 'Hide Filters' }).click();
-            await expect(page.getByTestId('filter-result-status')).not.toBeVisible();
+            await runDetailPage.hideColumnFilters();
+            await expect(runDetailPage.resultStatusFilter).not.toBeVisible();
         });
     });
 });
