@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"fmt"
+	"time"
 	"ttgo/internal/api/websocket"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/llm"
@@ -51,12 +52,15 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	if err != nil {
 		return nil, err
 	}
-	res, err := failureanalysis.Analyze(ctx, provider, failureanalysis.AnalyzeContext{
-		Result:           result,
-		RedactionEnabled: settings.RedactionEnabled,
-		PromptTemplate:   settings.PromptTemplate,
-		ProviderModel:    model,
-	})
+	// Assemble enrichment (history, linked defects/requirements, steps, env) from
+	// the shared builder, then layer the active settings + resolved model onto it.
+	// BuildContext does not set these fields, so applying them here is required or
+	// redaction and the admin prompt template silently break.
+	actx := failureanalysis.BuildContext(h.store, result, time.Now())
+	actx.RedactionEnabled = settings.RedactionEnabled
+	actx.PromptTemplate = settings.PromptTemplate
+	actx.ProviderModel = model
+	res, err := failureanalysis.Analyze(ctx, provider, actx)
 	if err != nil {
 		return nil, err
 	}

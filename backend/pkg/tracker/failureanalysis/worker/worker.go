@@ -119,12 +119,15 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		}
 
 		rep := g.Representative
-		res, err := failureanalysis.Analyze(ctx, w.provider, failureanalysis.AnalyzeContext{
-			Result:           rep,
-			RedactionEnabled: settings.RedactionEnabled,
-			PromptTemplate:   settings.PromptTemplate,
-			ProviderModel:    "",
-		})
+		// Assemble enrichment (history, linked defects/requirements, steps, env)
+		// from the shared builder, then layer the active settings onto it. The
+		// settings-derived fields are NOT set by BuildContext, so they must be
+		// applied here or redaction and the admin prompt template silently break.
+		// ProviderModel is left "" — the lazy provider fills it downstream.
+		actx := failureanalysis.BuildContext(w.store, rep, time.Now())
+		actx.RedactionEnabled = settings.RedactionEnabled
+		actx.PromptTemplate = settings.PromptTemplate
+		res, err := failureanalysis.Analyze(ctx, w.provider, actx)
 		if err != nil {
 			slog.Warn("failure-analysis: analyze failed — recording unknown verdict", "err", err, "result_id", rep.ID)
 			res = &failureanalysis.AnalyzeResult{
