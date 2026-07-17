@@ -441,6 +441,7 @@ function RegenSection({ draft, disabled, onRegenerate, onOpenCompare }) {
             <div style={{ display: 'flex', gap: 6 }}>
                 <input className="modern-input" style={{ flex: 1, fontSize: 12 }}
                     placeholder="Optional instruction, e.g. cover the lockout rule"
+                    data-testid="regen-instruction-input"
                     value={instruction} onChange={e => setInstruction(e.target.value)} disabled={disabled || busy} />
                 <AIBtn variant="primary" disabled={disabled || busy} onClick={() => fire('')}>
                     {busy ? 'Regenerating…' : 'Regenerate'}

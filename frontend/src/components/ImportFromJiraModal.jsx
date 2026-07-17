@@ -100,6 +100,7 @@ export default function ImportFromJiraModal({ onClose, onImported, jiraEnabled }
                                 className="modern-input"
                                 style={{ flex: 1 }}
                                 placeholder="e.g. PROJ-123"
+                                data-testid="jira-import-ticket-input"
                                 value={ticketKey}
                                 onChange={e => { setTicketKey(e.target.value); setError(''); }}
                                 onKeyDown={handleKeyDown}

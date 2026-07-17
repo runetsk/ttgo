@@ -343,6 +343,7 @@ export default function RequirementsPage() {
                         className="modern-input"
                         style={{ width: '100%', paddingLeft: 32, boxSizing: 'border-box' }}
                         placeholder="Search by identifier, title or description…"
+                        data-testid="requirement-search-input"
                         value={search}
                         onChange={e => setSearch(e.target.value)}
                     />
@@ -514,6 +515,7 @@ export default function RequirementsPage() {
                             className="modern-input"
                             style={{ width: '100%' }}
                             placeholder="e.g. PROJ-001"
+                            data-testid="requirement-identifier-input"
                             value={formId}
                             onChange={e => setFormId(e.target.value)}
                             autoFocus
@@ -525,6 +527,7 @@ export default function RequirementsPage() {
                             className="modern-input"
                             style={{ width: '100%' }}
                             placeholder="Short description of the requirement"
+                            data-testid="requirement-title-input"
                             value={formTitle}
                             onChange={e => setFormTitle(e.target.value)}
                         />
@@ -535,6 +538,7 @@ export default function RequirementsPage() {
                             className="modern-input"
                             style={{ width: '100%', minHeight: 90, resize: 'vertical' }}
                             placeholder="Detailed acceptance criteria or context"
+                            data-testid="requirement-description-input"
                             value={formDesc}
                             onChange={e => setFormDesc(e.target.value)}
                         />

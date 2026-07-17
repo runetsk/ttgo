@@ -182,7 +182,7 @@ export default function SettingsPage() {
                         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
                             <div style={{ flex: 1, minWidth: 200 }}>
                                 <label style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Field Name</label>
-                                <input className="modern-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priority" style={{ width: '100%' }} />
+                                <input className="modern-input" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Priority" data-testid="custom-field-name-input" style={{ width: '100%' }} />
                             </div>
 
                             <div style={{ width: 150 }}>
@@ -199,7 +199,7 @@ export default function SettingsPage() {
                             {type === 'SELECT' && (
                                 <div style={{ flex: 2, minWidth: 300 }}>
                                     <label style={{ display: 'block', marginBottom: 4, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Options (comma separated)</label>
-                                    <input className="modern-input" value={options} onChange={e => setOptions(e.target.value)} placeholder="Low, Medium, High" style={{ width: '100%' }} />
+                                    <input className="modern-input" value={options} onChange={e => setOptions(e.target.value)} placeholder="Low, Medium, High" data-testid="custom-field-options-input" style={{ width: '100%' }} />
                                 </div>
                             )}
 
@@ -313,6 +313,7 @@ function JiraTestConnection() {
                     className="modern-input"
                     style={{ width: 180 }}
                     placeholder="e.g. PROJ-123"
+                    data-testid="jira-test-ticket-input"
                     value={testTicketId}
                     onChange={e => setTestTicketId(e.target.value)}
                 />

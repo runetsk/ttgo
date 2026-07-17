@@ -208,6 +208,7 @@ export default function BulkImportModal({ source, onClose, onImported }) {
                                             className="modern-input"
                                             style={{ flex: 1 }}
                                             placeholder='e.g. project = PROJ AND type = Story'
+                                            data-testid="jira-bulk-jql-input"
                                             value={jql}
                                             onChange={e => setJql(e.target.value)}
                                             onKeyDown={e => { if (e.key === 'Enter') handleJiraSearch(); }}

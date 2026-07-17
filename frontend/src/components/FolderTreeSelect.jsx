@@ -90,6 +90,7 @@ export default function FolderTreeSelect({ folders, value, onChange, disabled })
                 onClick={() => !disabled && setOpen(o => !o)}
                 disabled={disabled}
                 className="folder-tree-trigger"
+                data-testid="folder-tree-trigger"
                 style={{
                     width: '100%', display: 'flex', alignItems: 'center', gap: 8,
                     padding: '0 10px', height: 36, borderRadius: 7,
@@ -145,6 +146,7 @@ export default function FolderTreeSelect({ folders, value, onChange, disabled })
                                 value={search}
                                 onChange={e => setSearch(e.target.value)}
                                 placeholder="Search folders…"
+                                data-testid="folder-tree-search"
                                 onKeyDown={e => e.key === 'Escape' && (search ? setSearch('') : setOpen(false))}
                                 style={{
                                     width: '100%', padding: '5px 8px 5px 27px',
@@ -197,6 +199,7 @@ export default function FolderTreeSelect({ folders, value, onChange, disabled })
                                         type="button"
                                         onClick={() => select(f.id)}
                                         className="folder-tree-row"
+                                        data-testid="folder-tree-row"
                                         style={{
                                             flex: 1, display: 'flex', alignItems: 'center', gap: 6,
                                             padding: '5px 6px', borderRadius: 5, border: 'none',

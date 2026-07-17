@@ -136,6 +136,7 @@ export default function IntegrationSettings({
                             className="modern-input"
                             style={{ width: '100%' }}
                             placeholder="https://yourcompany.atlassian.net"
+                            data-testid="integration-base-url-input"
                             value={baseUrl}
                             onChange={e => setBaseUrl(e.target.value)}
                         />
@@ -146,6 +147,7 @@ export default function IntegrationSettings({
                             className="modern-input"
                             style={{ width: '100%' }}
                             placeholder="you@yourcompany.com"
+                            data-testid="integration-email-input"
                             type="email"
                             value={email}
                             onChange={e => setEmail(e.target.value)}
