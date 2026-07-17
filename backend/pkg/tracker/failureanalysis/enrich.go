@@ -37,10 +37,13 @@ const timesGlyph = "×"
 // stepDTO is the tagged intermediate for RunResult.Steps. The stored JSON keys
 // (action / expected_result / order_index) differ from PromptStep's field names,
 // so unmarshalling straight into PromptStep would silently drop Expected/Order.
+// OrderIndex is a pointer so a stored zero (order_index is 0-based repo-wide —
+// see StepsEditor.jsx / import.go / seed_dataset_catalog.go) is distinguishable
+// from an absent key: nil means synthesize from position, present means render *+1.
 type stepDTO struct {
 	Action         string `json:"action"`
 	ExpectedResult string `json:"expected_result"`
-	OrderIndex     int    `json:"order_index"`
+	OrderIndex     *int   `json:"order_index"`
 }
 
 // BuildContext assembles a fully-populated AnalyzeContext for result using src.
@@ -105,9 +108,9 @@ func buildSteps(raw json.RawMessage) []PromptStep {
 	}
 	steps := make([]PromptStep, 0, len(dtos))
 	for i, d := range dtos {
-		order := d.OrderIndex
-		if order == 0 {
-			order = i + 1 // synthesize from position when order_index is 0/absent
+		order := i + 1 // synthesize 1-based position when order_index is absent (nil)
+		if d.OrderIndex != nil {
+			order = *d.OrderIndex + 1 // stored order_index is 0-based; render 1-based
 		}
 		steps = append(steps, PromptStep{
 			Order:    order,

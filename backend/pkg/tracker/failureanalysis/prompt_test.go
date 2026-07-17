@@ -126,6 +126,12 @@ func TestBuildPromptRendersHumanLabelsAndRollup(t *testing.T) {
 	if !strings.Contains(got, "3 prior failures in 30d: 2 product_bug, 1 flaky") {
 		t.Errorf("prompt missing rollup line\nfull:\n%s", got)
 	}
+	// Untrusted historical error messages must be wrapped in DATA fences, like
+	// the primary error_message/stack_trace/log_text — so a replayed prior error
+	// can't smuggle instructions past the SECURITY preamble.
+	if !strings.Contains(got, "<<<DATA boom DATA>>>") {
+		t.Errorf("historical error message should be wrapped in DATA fences\nfull:\n%s", got)
+	}
 	// Row with DefectType + DefectKey renders the full clause with the arrow.
 	if !strings.Contains(got, "(human: product_bug → BUG-42)") {
 		t.Errorf("prompt missing human label with defect key\nfull:\n%s", got)
@@ -178,5 +184,10 @@ func TestBuildPromptDropOrderHoldsWithHumanLabeledHistory(t *testing.T) {
 	// Once similar failures are dropped, the human-label rows are gone too.
 	if strings.Contains(got, "(human: product_bug") {
 		t.Errorf("dropped similar failures should remove human-label rows\nfull:\n%s", got)
+	}
+	// The rollup summarizes rows that no longer appear — it must be cleared with
+	// them, otherwise the prompt claims a distribution over failures it doesn't show.
+	if strings.Contains(got, "prior failures") {
+		t.Errorf("dropped similar failures should also drop the rollup line\nfull:\n%s", got)
 	}
 }

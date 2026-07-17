@@ -56,8 +56,8 @@ var _ EnrichmentSource = (*mockSource)(nil)
 func TestBuildContextMapsAllSlots(t *testing.T) {
 	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
 	steps, err := json.Marshal([]map[string]any{
-		{"action": "<p>Go to /login</p>", "expected_result": "Login &amp; form shows", "order_index": 1},
-		{"action": "Enter creds", "expected_result": "<b>Redirect</b>", "order_index": 2},
+		{"action": "<p>Go to /login</p>", "expected_result": "Login &amp; form shows", "order_index": 0},
+		{"action": "Enter creds", "expected_result": "<b>Redirect</b>", "order_index": 1},
 	})
 	require.NoError(t, err)
 
@@ -97,7 +97,7 @@ func TestBuildContextMapsAllSlots(t *testing.T) {
 	require.Equal(t, "linux", ctx.OS)
 	require.Equal(t, "1.2.3", ctx.AppVersion)
 
-	// Steps: HTML stripped, entities unescaped, order preserved.
+	// Steps: HTML stripped, entities unescaped, 0-based order_index rendered 1-based.
 	require.Len(t, ctx.Steps, 2)
 	require.Equal(t, PromptStep{Order: 1, Action: "Go to /login", Expected: "Login & form shows"}, ctx.Steps[0])
 	require.Equal(t, PromptStep{Order: 2, Action: "Enter creds", Expected: "Redirect"}, ctx.Steps[1])
@@ -232,6 +232,35 @@ func TestBuildContextStepOrderSynthesizedAndRollupEmptyWithoutLabels(t *testing.
 	// No labels anywhere -> empty rollup, but the history rows still map.
 	require.Len(t, ctx.SimilarFailures, 2)
 	require.Equal(t, "", ctx.SimilarFailuresRollup)
+}
+
+func TestBuildContextStepOrderZeroBasedRenderedOneBased(t *testing.T) {
+	now := time.Date(2026, 7, 17, 12, 0, 0, 0, time.UTC)
+	// order_index is 0-based repo-wide, so a PRESENT 0 must not be mistaken for
+	// absent: real steps [0,1,2] must render Orders [1,2,3], not [1,1,2].
+	steps, err := json.Marshal([]map[string]any{
+		{"action": "first", "expected_result": "a", "order_index": 0},
+		{"action": "second", "expected_result": "b", "order_index": 1},
+		{"action": "third", "expected_result": "c", "order_index": 2},
+	})
+	require.NoError(t, err)
+
+	result := &models.RunResult{ID: "rr1", TestRunID: "run1", TestCaseID: strptr("tc1"), Steps: steps}
+	ctx := BuildContext(&mockSource{}, result, now)
+
+	require.Len(t, ctx.Steps, 3)
+	require.Equal(t, 1, ctx.Steps[0].Order)
+	require.Equal(t, 2, ctx.Steps[1].Order)
+	require.Equal(t, 3, ctx.Steps[2].Order)
+}
+
+func TestRollupDefectTypesTieBreakAlphabetical(t *testing.T) {
+	// Equal counts must break ties alphabetically for a deterministic rollup.
+	hist := []*models.RunResult{
+		{DefectType: "zebra_bug"},
+		{DefectType: "apple_bug"},
+	}
+	require.Equal(t, "apple_bug "+timesGlyph+"1, zebra_bug "+timesGlyph+"1", rollupDefectTypes(hist))
 }
 
 // errContext is a tiny error helper so tests don't need the errors import churn.

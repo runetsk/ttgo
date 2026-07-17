@@ -171,3 +171,25 @@ func TestAnalyzeLeavesSimilarFailuresRawWhenRedactionDisabled(t *testing.T) {
 	require.Contains(t, prov.lastPrompt, "abcdefghijklmnopqrstuvwxyz0123456789")
 	require.NotContains(t, prov.lastPrompt, "<REDACTED_TOKEN>")
 }
+
+func TestAnalyzeSendsRollupToProvider(t *testing.T) {
+	// Guards the SimilarFailuresRollup mapping in Analyze -> BuildPrompt. The
+	// per-row "(human: ...)" clause repeats each label, so only the "×N"
+	// distribution line proves the rollup itself reached the model; drop the
+	// mapping and this is the sole test that fails.
+	prov := &capturingProvider{}
+	in := baseContext()
+	in.RedactionEnabled = false
+	in.SimilarFailures = []SimilarFailure{
+		{Status: "FAIL", ErrorMessage: "boom", DefectType: "product_bug"},
+		{Status: "FAIL", ErrorMessage: "bang", DefectType: "product_bug"},
+		{Status: "ERROR", ErrorMessage: "thud", DefectType: "flaky"},
+	}
+	in.SimilarFailuresRollup = "product_bug " + timesGlyph + "2, flaky " + timesGlyph + "1"
+
+	_, err := Analyze(context.Background(), prov, in)
+	require.NoError(t, err)
+
+	// "×N" appears only in the rollup, never in a per-row clause.
+	require.Contains(t, prov.lastPrompt, "product_bug "+timesGlyph+"2, flaky "+timesGlyph+"1")
+}

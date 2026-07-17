@@ -47,7 +47,7 @@ DATA>>>
 
 ### Historical context (last 30 days, same test_case_id)
 {{if .SimilarFailuresRollup}}{{.SimilarFailuresRollup}}
-{{end}}{{range .SimilarFailures}}- {{.RunStartedAt}} [{{.Status}}] {{.ErrorMessage}}{{if .DefectType}} (human: {{.DefectType}}{{if .DefectKey}} → {{.DefectKey}}{{end}}){{end}}
+{{end}}{{range .SimilarFailures}}- {{.RunStartedAt}} [{{.Status}}] <<<DATA {{.ErrorMessage}} DATA>>>{{if .DefectType}} (human: {{.DefectType}}{{if .DefectKey}} → {{.DefectKey}}{{end}}){{end}}
 {{end}}
 ### Linked defects on this test case
 {{range .LinkedDefects}}- {{.Key}} ({{.Status}}): {{.Summary}}
@@ -146,6 +146,7 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 			dropped = append(dropped, "no logs")
 		case len(in.SimilarFailures) > 0:
 			in.SimilarFailures = nil
+			in.SimilarFailuresRollup = "" // rollup summarizes the now-dropped rows — clear it to avoid a self-contradiction
 			dropped = append(dropped, "no similar failures")
 		case len(in.Steps) > 0:
 			in.Steps = nil
