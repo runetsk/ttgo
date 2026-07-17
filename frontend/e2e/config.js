@@ -11,3 +11,44 @@
 //   TTGO_E2E_BASE_URL=http://localhost:5173 npx playwright test
 export const BASE_URL = process.env.TTGO_E2E_BASE_URL || 'http://localhost';
 export const API_URL = `${BASE_URL}/api`;
+
+// ── Routes ────────────────────────────────────────────────────────────────────
+// SPA paths, resolved by the browser against BASE_URL. Static entries plus
+// builders for the parameterized routes (param names mirror App.jsx: runId,
+// testId, reqId).
+export const ROUTES = {
+    HOME: '/',
+    RUNS: '/runs',
+    CATEGORIES: '/categories',
+    REQUIREMENTS: '/requirements',
+    SETTINGS: '/settings',
+    ANALYTICS: '/analytics',
+};
+
+export const runDetail = (runId) => `/runs/run/${runId}`;
+export const runExecute = (runId) => `/runs/run/${runId}/execute`;
+export const runCompare = (runId, compareWithId) => `/runs/run/${runId}?compareWith=${compareWithId}`;
+export const testCase = (testId) => `/library/tests/${testId}`;
+export const requirement = (reqId) => `/requirements/${reqId}`;
+export const runFolder = (runFolderId) => `/runs/folders/${runFolderId}`;
+export const libraryFolder = (folderId) => `/library/folders/${folderId}`;
+
+// ── Timeouts ──────────────────────────────────────────────────────────────────
+// Named buckets so a spec picks intent, not a magic number. The suite-wide
+// per-test and expect timeouts live in playwright.config.js; these are the
+// per-assertion overrides for surfaces that render slower than the default.
+export const TIMEOUTS = {
+    UI_SETTLE: 5000,      // toggle on an already-rendered list, negative assertion, inline widget
+    ELEMENT: 10000,       // default element / tree-node visibility after a nav or action
+    APP_RENDER: 15000,    // app + sidebar first paint; list reconcile after a bulk mutation
+    HEAVY_GRID: 30000,    // run-detail results / compare grids after navigating in
+    AI_LIFECYCLE: 45000,  // test.setTimeout budget for the AI generate/regenerate lifecycle
+};
+
+// Hard sleeps. Prefer a real wait (waitForResponse / toBeVisible) over these;
+// the ones that remain are deliberate observation windows, not settle hacks.
+export const SLEEPS = {
+    SEARCH_DEBOUNCE: 400,   // mirrors the app's search-input debounce before results settle
+    PAGEERROR_OBSERVE: 500, // window to collect pageerror events and assert none fired
+    LOOP_OBSERVE: 2000,     // window to confirm a deep-link reload triggers no navigation loop
+};

@@ -29,13 +29,15 @@ export default defineConfig([
   {
     // e2e/ files (Playwright specs, global setup, the TTGO reporter) and the Node
     // config files (playwright/vite/eslint) run in Node, not the browser. Give them
-    // Node globals and turn off the React-only rule.
+    // Node globals and turn off the React-only rules — the fixture `use` callback
+    // is not React's `use` hook.
     files: ['e2e/**/*.js', '*.config.js'],
     languageOptions: {
       globals: { ...globals.node },
     },
     rules: {
       'react-refresh/only-export-components': 'off',
+      'react-hooks/rules-of-hooks': 'off',
     },
   },
 ])
