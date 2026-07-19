@@ -34,6 +34,34 @@ export class RunDetailPage extends BasePage {
         return this.resultRow(rowName).locator('select').first();
     }
 
+    // ── Defect-type cell (OPTIONAL `defect_type` column) ──
+    // Everything below lives inside a cell gated on isVisible('defect_type').
+    // Pin the column with pinColumns() before asserting, or the locators resolve
+    // to nothing whenever a stored preference has the column hidden.
+    defectTypeSelect(testCaseId) {
+        return this.page.getByTestId(`defect-type-select-${testCaseId}`);
+    }
+
+    // AI failure-analysis suggestion chip; renders only for untriaged FAIL rows
+    // that have a current analysis with a mapped defect_type.
+    defectSuggestion(testCaseId) {
+        return this.page.getByTestId(`defect-suggestion-${testCaseId}`);
+    }
+
+    defectSuggestionAccept(testCaseId) {
+        return this.page.getByTestId(`defect-suggestion-accept-${testCaseId}`);
+    }
+
+    // Pin the run-detail grid's column-visibility preference before the page
+    // mounts (useColumnPreference reads localStorage during the initial render,
+    // so setting it after a goto would be too late). `pref` is a partial
+    // { columnKey: boolean } map — unlisted keys keep their defaultVisible.
+    async pinColumns(pref) {
+        await this.page.addInitScript((p) => {
+            localStorage.setItem('ttgo_columns_run-detail-results', JSON.stringify(p));
+        }, pref);
+    }
+
     // Stats-bar pill, e.g. stat('passed') / stat('failed') / stat('pending').
     stat(kind) {
         return this.page.getByTestId(`stats-${kind}`);

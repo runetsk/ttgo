@@ -216,6 +216,20 @@ async function linkRequirementToTestCaseAPI(request, reqId, testCaseId) {
     return res.json();
 }
 
+// ── AI failure analysis ──────────────────────────────────────────────────────
+
+// Runs synchronous AI failure analysis on ONE run result and returns the created
+// RunResultAnalysis (incl. the computed `suggested_defect_type`).
+//
+// ⚠️ This path is LLM rate-limited server-side (isLLMPath matches the /analyze
+// suffix, server.go), so keep specs to a small number of calls — a burst gets
+// 429s, not analyses.
+async function analyzeRunResultAPI(request, resultId) {
+    const res = await request.post(`${API_URL}/run-results/${resultId}/analyze`);
+    await ensureOk(res);
+    return res.json();
+}
+
 // ── Seed helpers ──────────────────────────────────────────────────────────────
 
 // Folder + test + run + one result, optionally forced to a status. Unifies the
@@ -364,6 +378,9 @@ class ApiClient {
         return res.json();
     }
 
+    // AI failure analysis — LLM rate-limited, see analyzeRunResultAPI.
+    analyzeRunResult(...a) { return analyzeRunResultAPI(this.request, ...a); }
+
     // LLM providers (used by the fake-LLM helper)
     async createLlmProvider(fields) {
         const res = await this.post('/settings/llm-providers', fields);
@@ -410,4 +427,5 @@ export {
     linkTestCaseDefectAPI,
     updateDefectAPI,
     linkRequirementToTestCaseAPI,
+    analyzeRunResultAPI,
 };
