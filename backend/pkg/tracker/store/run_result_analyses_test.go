@@ -94,6 +94,35 @@ func TestGetCurrentAnalysesByRun_ReturnsHighestVersionPerResult(t *testing.T) {
 	require.Equal(t, 2, m[rr.ID].Version)
 }
 
+func TestGetCurrentAnalysisForResult_NilWhenNone(t *testing.T) {
+	s := newTestStore(t)
+	rr := seedFailingResult(t, s)
+	a, err := s.GetCurrentAnalysisForResult(rr.ID)
+	require.NoError(t, err)
+	require.Nil(t, a)
+}
+
+func TestGetCurrentAnalysisForResult_ReturnsNewestVersion(t *testing.T) {
+	s := newTestStore(t)
+	rr := seedFailingResult(t, s)
+
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceLow, ModelName: "m",
+	})
+	require.NoError(t, err)
+	newest, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	got, err := s.GetCurrentAnalysisForResult(rr.ID)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, newest.ID, got.ID)
+	require.Equal(t, 2, got.Version)
+	require.Equal(t, models.VerdictProductBug, got.Verdict)
+}
+
 func seedRun(t *testing.T, s *Store) string {
 	t.Helper()
 	run := &models.TestRun{Name: "r"}

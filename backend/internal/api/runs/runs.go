@@ -1,6 +1,7 @@
 package runs
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -258,6 +259,10 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.DefectType != nil {
 		updateMap["defect_type"] = *req.DefectType
+		// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
+		// suggested at this exact moment. Deliberately NOT done for the "to_investigate"
+		// auto-default above: that means "not triaged yet", not a decision.
+		h.snapshotAISuggestion(r.Context(), resultID, updateMap)
 	}
 	if req.ErrorMessage != nil {
 		updateMap["error_message"] = *req.ErrorMessage
@@ -339,6 +344,40 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	h.broadcastResultDelta(apiws.EventResultUpdated, runID, []string{resultID}, nil, nil)
 
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
+}
+
+// snapshotAISuggestion adds the AI failure-analysis suggestion columns to updateMap so the
+// calibration record captures what the AI proposed at the instant a human triaged the result.
+// Snapshotting (rather than joining later) keeps the record immune to a subsequent re-analysis
+// changing the verdict.
+//
+// Callers must invoke this ONLY when the caller explicitly supplied a defect_type. It further
+// requires the stored result to be FAIL and to already have an analysis.
+//
+// Best-effort by design: a lookup error or a missing result/analysis logs and skips the snapshot.
+// A calibration nicety must never fail a human's triage write.
+func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, updateMap map[string]interface{}) {
+	rr, err := h.store.GetRunResultByID(resultID)
+	if err != nil {
+		slog.WarnContext(ctx, "ai-suggestion snapshot: result lookup failed", "result_id", resultID, "error", err)
+		return
+	}
+	if rr == nil || rr.Status != models.StatusFail {
+		return
+	}
+
+	a, err := h.store.GetCurrentAnalysisForResult(resultID)
+	if err != nil {
+		slog.WarnContext(ctx, "ai-suggestion snapshot: analysis lookup failed", "result_id", resultID, "error", err)
+		return
+	}
+	if a == nil {
+		return
+	}
+
+	updateMap["suggested_verdict"] = a.Verdict
+	updateMap["suggested_defect_type"] = models.SuggestedDefectType(a.Verdict)
+	updateMap["suggested_confidence"] = a.Confidence
 }
 
 // DeleteTestRun godoc

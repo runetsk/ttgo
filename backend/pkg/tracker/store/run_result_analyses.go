@@ -54,6 +54,20 @@ func (s *Store) ListAnalysesForResult(runResultID string) ([]*models.RunResultAn
 	return out, err
 }
 
+// GetCurrentAnalysisForResult returns the newest-version analysis for a single
+// result, or (nil, nil) when the result has no analysis at all.
+func (s *Store) GetCurrentAnalysisForResult(runResultID string) (*models.RunResultAnalysis, error) {
+	// ListAnalysesForResult is already ordered version DESC, so index 0 is current.
+	list, err := s.ListAnalysesForResult(runResultID)
+	if err != nil {
+		return nil, err
+	}
+	if len(list) == 0 {
+		return nil, nil
+	}
+	return list[0], nil
+}
+
 // GetCurrentAnalysesByRun returns the newest-version analysis for every
 // RunResult in the given run. The map key is run_result_id. Results with
 // no analysis are simply absent from the map.

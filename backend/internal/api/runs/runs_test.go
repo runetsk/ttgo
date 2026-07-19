@@ -8,6 +8,7 @@ import (
 	"testing"
 	api "ttgo/internal/api"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/store"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -99,6 +100,165 @@ func TestRetryRunResultEndpointNotFound(t *testing.T) {
 	srv.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// --- AI suggestion snapshot on explicit defect_type triage ---
+
+// newSnapshotEnv returns a file-backed store plus a server over it. A ":memory:" DB can hand
+// separate pool connections separate databases, so seeding via the store and reading back after
+// an HTTP round-trip is safer on a real file.
+func newSnapshotEnv(t *testing.T) (*store.Store, *api.Server) {
+	t.Helper()
+	dir := t.TempDir()
+	s, err := store.New(dir + "/snapshot.db")
+	require.NoError(t, err)
+	// Close before TempDir cleanup: Windows cannot delete an open SQLite file.
+	t.Cleanup(func() { _ = s.Close() })
+	return s, api.NewServer(s)
+}
+
+// seedResultWithStatus creates a run holding a single result in the given status.
+func seedResultWithStatus(t *testing.T, s *store.Store, status models.ExecutionStatus) *models.RunResult {
+	t.Helper()
+	run := &models.TestRun{Name: "Snapshot Run"}
+	require.NoError(t, s.CreateTestRun(run))
+	rr := &models.RunResult{
+		TestRunID: run.ID, TestNameSnapshot: "case", AttemptNumber: 1,
+		Status: status, ErrorMessage: "boom",
+	}
+	require.NoError(t, s.AddRunResult(rr))
+	return rr
+}
+
+func putRunResult(t *testing.T, s *store.Store, srv *api.Server, rr *models.RunResult, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPut, "/api/runs/"+rr.TestRunID+"/results/"+rr.ID, bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	addTestAuth(t, s, req)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	return w
+}
+
+// An explicit defect_type on a FAIL result that has an analysis snapshots all three columns —
+// the verdict verbatim, the mapped defect_type, and the confidence. The mapped value comes from
+// the AI verdict, NOT from what the human chose, so an override is recorded as a disagreement.
+func TestUpdateRunResultSnapshotsAISuggestion(t *testing.T) {
+	tests := []struct {
+		name          string
+		verdict       string
+		confidence    string
+		humanChoice   string
+		wantSuggested string
+	}{
+		{"accept", models.VerdictFlakyTest, models.ConfidenceHigh, "automation_bug", "automation_bug"},
+		{"override", models.VerdictProductBug, models.ConfidenceLow, "system_issue", "product_bug"},
+		{"unmappable verdict still records verdict+confidence", models.VerdictUnknown, models.ConfidenceMedium, "product_bug", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, srv := newSnapshotEnv(t)
+			rr := seedResultWithStatus(t, s, models.StatusFail)
+			_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+				RunResultID: rr.ID, Verdict: tt.verdict, Confidence: tt.confidence, ModelName: "m",
+			})
+			require.NoError(t, err)
+
+			// The frontend sends defect_type alone, with no status (ResultsTab.jsx).
+			w := putRunResult(t, s, srv, rr, map[string]any{"defect_type": tt.humanChoice})
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			got, err := s.GetRunResultByID(rr.ID)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			assert.Equal(t, tt.humanChoice, got.DefectType)
+			assert.Equal(t, tt.verdict, got.SuggestedVerdict)
+			assert.Equal(t, tt.wantSuggested, got.SuggestedDefectType)
+			assert.Equal(t, tt.confidence, got.SuggestedConfidence)
+		})
+	}
+}
+
+// The snapshot must come from the newest analysis version, not the first one written.
+func TestUpdateRunResultSnapshotUsesNewestAnalysis(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusFail)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceLow, ModelName: "m",
+	})
+	require.NoError(t, err)
+	_, err = s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictEnvironment, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := putRunResult(t, s, srv, rr, map[string]any{"defect_type": "system_issue"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.VerdictEnvironment, got.SuggestedVerdict)
+	assert.Equal(t, "system_issue", got.SuggestedDefectType)
+	assert.Equal(t, models.ConfidenceHigh, got.SuggestedConfidence)
+}
+
+// Best-effort: a FAIL result with no analysis is triaged normally, just without a snapshot.
+func TestUpdateRunResultNoAnalysisStillTriages(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusFail)
+
+	w := putRunResult(t, s, srv, rr, map[string]any{"defect_type": "product_bug"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "product_bug", got.DefectType, "triage write must succeed without an analysis")
+	assert.Empty(t, got.SuggestedVerdict)
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
+}
+
+// The "to_investigate" auto-default means "not triaged yet", not a human decision — snapshotting
+// it would poison the calibration record with non-events. Every other precondition is satisfied
+// here (stored status FAIL, analysis present); only the absent explicit defect_type stops it.
+func TestUpdateRunResultAutoDefaultWritesNoSnapshot(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusFail)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := putRunResult(t, s, srv, rr, map[string]any{"status": "FAIL"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, "to_investigate", got.DefectType, "auto-default should still apply")
+	assert.Empty(t, got.SuggestedVerdict, "auto-default is not a human decision")
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
+}
+
+// Only FAIL results are in the calibration set — the defect_type control renders for FAIL alone.
+func TestUpdateRunResultNoSnapshotForNonFailResult(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusPass)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := putRunResult(t, s, srv, rr, map[string]any{"defect_type": "product_bug"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.SuggestedVerdict)
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
 }
 
 func TestLinkExistingDefectToResult(t *testing.T) {
