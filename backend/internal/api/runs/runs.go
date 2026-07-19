@@ -429,12 +429,16 @@ func (h *Handler) effectiveResultStatus(ctx context.Context, resultID string, re
 // a pure function of the verdict, so the bucket key needs only (verdict, confidence) — in
 // practice at most 6 verdicts x 3 confidences = 18 statements, regardless of selection size.
 //
-// Results with no analysis are not skipped but CLEARED, for the same reason as the single-result
-// path: the bulk UPDATE has already overwritten defect_type on those rows, so a suggestion left
-// behind by an earlier decision would be scored against this new one.
+// Results with no analysis are not skipped but CLEARED. The caller's main UPDATE has already
+// blanked these columns atomically with defect_type, so this is a redundant safety net rather
+// than the only guard — it keeps the function correct on its own terms (as snapshotAISuggestion
+// is, clearing before every early return) should a future caller not pre-blank.
 //
 // Best-effort by design: a failed lookup or grouped write logs and moves on. The human's bulk
-// triage has already been committed and must stand.
+// triage has already been committed and must stand. That is only safe BECAUSE the caller blanked
+// in the main statement: every write here either fills in a correct snapshot or leaves the
+// columns blank, and blank is excluded from the calibration set. This pass can never resurrect a
+// stale suggestion by failing.
 func (h *Handler) snapshotAISuggestionsBulk(ctx context.Context, runID string, resultIDs []string, now time.Time) {
 	clearRows := func(ids []string, reason string) {
 		if len(ids) == 0 {
@@ -1058,6 +1062,15 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := time.Now()
+
+	// An explicitly supplied defect_type on a FAIL is a human triage decision; the
+	// "to_investigate" auto-default (empty req.DefectType) means "not triaged yet" and is
+	// deliberately not one. This single gate drives BOTH the clearing folded into the main
+	// statement below and the snapshot pass after it, so the two can never disagree about what
+	// counts as a decision. It matches the single-result path, which touches these columns only
+	// when the caller explicitly supplied a defect_type.
+	isTriage := models.ExecutionStatus(req.Status) == models.StatusFail && req.DefectType != ""
+
 	updateMap := map[string]interface{}{
 		"status":     req.Status,
 		"updated_at": now,
@@ -1072,6 +1085,15 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	default:
 		updateMap["defect_type"] = ""
 	}
+	if isTriage {
+		// Blanked in the SAME statement that writes defect_type, exactly as the single-result
+		// path does — this is what makes bulk fail CLOSED. The per-row snapshot below is a
+		// separate, best-effort pass; if it never lands (SQLite busy, disk error) these columns
+		// stay BLANK, which accuracyCalibrationFilter excludes. Leaving them untouched here
+		// instead would pair the brand-new defect_type with the suggestion snapshotted for some
+		// EARLIER decision and fabricate a calibration record out of two unrelated events.
+		clearAISuggestion(updateMap)
+	}
 
 	if err := h.store.BulkUpdateRunResults(runID, req.ResultIDs, updateMap); err != nil {
 		slog.ErrorContext(r.Context(), "failed to bulk update results in run", "run_id", runID, "error", err)
@@ -1079,12 +1101,10 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
-	// suggested for each result. The gate is uniform because one status/defect_type applies to
-	// every ID in the request; only the snapshot VALUES vary per row, which is why they need the
-	// separate grouped pass. As in the single-result path, the "to_investigate" auto-default
-	// (empty req.DefectType) means "not triaged yet" and is deliberately not snapshotted.
-	if models.ExecutionStatus(req.Status) == models.StatusFail && req.DefectType != "" {
+	// Snapshot what the AI suggested for each result. The gate is uniform because one
+	// status/defect_type applies to every ID in the request; only the snapshot VALUES vary per
+	// row, which is why they need the separate grouped pass.
+	if isTriage {
 		h.snapshotAISuggestionsBulk(r.Context(), runID, req.ResultIDs, now)
 	}
 

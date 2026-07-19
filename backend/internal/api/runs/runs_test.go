@@ -509,6 +509,58 @@ func TestBulkUpdateAutoDefaultWritesNoSnapshot(t *testing.T) {
 	}
 }
 
+// THE fail-closed guard. The bulk snapshot is best-effort and runs as a SEPARATE pass after the
+// main UPDATE, so its write can fail (SQLite busy past the timeout, disk error) while the triage
+// itself has already committed. That must leave the snapshot columns BLANK — excluded from the
+// calibration set — never holding the suggestion from an EARLIER decision, which the brand-new
+// defect_type would then be scored against.
+//
+// The failure is forced with a trigger that aborts any write of a NON-EMPTY suggestion, which is
+// exactly the grouped second-pass write and nothing else: the main statement only ever blanks
+// these columns, so it passes straight through. Without the clearing folded into that main
+// statement the row here would end up FAIL + the new system_issue + the stale product_bug
+// suggestion — satisfying every clause of accuracyCalibrationFilter and fabricating a
+// disagreement that no human ever made.
+func TestBulkUpdateFailedSnapshotLeavesNoStaleSuggestion(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 1)
+	rr := results[0]
+
+	// A previous decision already put this row in the calibration set...
+	stale := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, s.UpdateRunResult(run.ID, rr.ID, map[string]interface{}{
+		"defect_type":           "product_bug",
+		"suggested_verdict":     models.VerdictProductBug,
+		"suggested_defect_type": "product_bug",
+		"suggested_confidence":  models.ConfidenceHigh,
+		"decided_at":            stale,
+	}))
+	// ...and it still has an analysis, so the second pass WOULD bucket and snapshot it.
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceLow, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.DB().Exec(`
+		CREATE TRIGGER fail_snapshot_write BEFORE UPDATE OF suggested_verdict ON run_results
+		WHEN NEW.suggested_verdict != ''
+		BEGIN SELECT RAISE(ABORT, 'simulated snapshot write failure'); END`).Error)
+	t.Cleanup(func() { _ = s.DB().Exec(`DROP TRIGGER IF EXISTS fail_snapshot_write`).Error })
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": []string{rr.ID}, "status": "FAIL", "defect_type": "system_issue",
+	})
+	require.Equal(t, http.StatusOK, w.Code, "a failed snapshot must never fail the human's triage: %s", w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, "system_issue", got.DefectType, "the triage decision itself must land")
+	assert.Empty(t, got.SuggestedVerdict, "the old suggestion belonged to the previous decision")
+	assert.Empty(t, got.SuggestedDefectType, "leaving it would score system_issue against a product_bug suggestion")
+	assert.Empty(t, got.SuggestedConfidence)
+	assert.Nil(t, got.DecidedAt, "a blank decided_at keeps the row out of the calibration window")
+}
+
 // A non-FAIL bulk status clears defect_type entirely, so there is no decision to calibrate.
 func TestBulkUpdateNoSnapshotForNonFailStatus(t *testing.T) {
 	s, srv := newSnapshotEnv(t)
