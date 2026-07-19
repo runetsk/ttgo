@@ -140,6 +140,24 @@ var ValidVerdicts = map[string]bool{
 	VerdictTestData: true, VerdictInfrastructure: true, VerdictUnknown: true,
 }
 
+// SuggestedDefectType maps an AI failure-analysis verdict to the defect_type it suggests.
+// The mapping is lossy (6 verdicts -> 4 defect types): flaky_test and test_data both suggest
+// "automation_bug"; environment and infrastructure both suggest "system_issue". "unknown" and
+// any unrecognized value yield "" — no suggestion is offered rather than a wrong one.
+// This is the single source of truth for the mapping; the frontend never maps.
+func SuggestedDefectType(verdict string) string {
+	switch verdict {
+	case VerdictProductBug:
+		return "product_bug"
+	case VerdictFlakyTest, VerdictTestData:
+		return "automation_bug"
+	case VerdictEnvironment, VerdictInfrastructure:
+		return "system_issue"
+	default:
+		return ""
+	}
+}
+
 // Confidence levels returned by the AI failure analyzer.
 const (
 	ConfidenceLow    = "low"
@@ -184,6 +202,9 @@ type RunResultAnalysis struct {
 	SourceAnalysisID     *string   `json:"source_analysis_id,omitempty"`
 	CreatedBy            *string   `json:"created_by,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
+
+	// SuggestedDefectType is derived from Verdict via SuggestedDefectType(); never persisted.
+	SuggestedDefectType string `json:"suggested_defect_type" gorm:"-"`
 }
 
 // RunAnalysisJob tracks a batch/auto analysis of a TestRun.

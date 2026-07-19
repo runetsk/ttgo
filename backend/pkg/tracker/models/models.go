@@ -270,6 +270,17 @@ type RunResult struct {
 	// Values: "to_investigate" | "product_bug" | "automation_bug" | "system_issue" | "" (not applicable)
 	DefectType string `json:"defect_type" gorm:"default:''"`
 
+	// Snapshot of what the AI failure analysis suggested at the moment a human explicitly set
+	// DefectType. Written only on an explicit triage decision on a FAIL result that has an
+	// analysis — never on the "to_investigate" auto-default path. Agreement is then a pure
+	// comparison of SuggestedDefectType vs DefectType.
+	//
+	// SuggestedVerdict is kept alongside SuggestedDefectType because the verdict -> defect_type
+	// mapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.
+	SuggestedVerdict    string `json:"suggested_verdict" gorm:"default:''"`
+	SuggestedDefectType string `json:"suggested_defect_type" gorm:"default:''"`
+	SuggestedConfidence string `json:"suggested_confidence" gorm:"default:''"`
+
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
