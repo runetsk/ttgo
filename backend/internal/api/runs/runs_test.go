@@ -3,6 +3,7 @@ package runs_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -256,6 +257,163 @@ func TestUpdateRunResultNoSnapshotForNonFailResult(t *testing.T) {
 
 	got, err := s.GetRunResultByID(rr.ID)
 	require.NoError(t, err)
+	assert.Empty(t, got.SuggestedVerdict)
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
+}
+
+// --- AI suggestion snapshot on bulk defect_type triage ---
+
+// seedRunWithResults creates one run holding n results, all in the given status.
+func seedRunWithResults(t *testing.T, s *store.Store, status models.ExecutionStatus, n int) (*models.TestRun, []*models.RunResult) {
+	t.Helper()
+	run := &models.TestRun{Name: "Bulk Snapshot Run"}
+	require.NoError(t, s.CreateTestRun(run))
+	out := make([]*models.RunResult, 0, n)
+	for i := 0; i < n; i++ {
+		rr := &models.RunResult{
+			TestRunID: run.ID, TestNameSnapshot: fmt.Sprintf("case-%d", i), AttemptNumber: 1,
+			Status: status, ErrorMessage: "boom",
+		}
+		require.NoError(t, s.AddRunResult(rr))
+		out = append(out, rr)
+	}
+	return run, out
+}
+
+func postBulkUpdate(t *testing.T, s *store.Store, srv *api.Server, runID string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/api/runs/"+runID+"/results/bulk-update", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	addTestAuth(t, s, req)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	return w
+}
+
+// THE regression guard for the shared-map trap. store.BulkUpdateRunResults applies ONE map across
+// every ID, so a snapshot folded into that statement would smear a single row's verdict over the
+// whole selection. Every row must carry ITS OWN triple.
+//
+// The seeded verdicts are chosen to catch the smear in every direction: flaky_test and test_data
+// collapse to the same defect_type, so only the snapshotted verdict distinguishes them; two rows
+// share a bucket (proving grouping merges rather than overwrites); and the confidences differ
+// from the verdict grouping so a mismatched pairing cannot pass by luck.
+func TestBulkUpdateSnapshotsPerResultAISuggestion(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 5)
+
+	seeded := []struct{ verdict, confidence, wantSuggested string }{
+		{models.VerdictFlakyTest, models.ConfidenceHigh, "automation_bug"},
+		{models.VerdictTestData, models.ConfidenceLow, "automation_bug"},
+		{models.VerdictProductBug, models.ConfidenceMedium, "product_bug"},
+		{models.VerdictEnvironment, models.ConfidenceHigh, "system_issue"},
+		{models.VerdictFlakyTest, models.ConfidenceHigh, "automation_bug"}, // shares row 0's bucket
+	}
+	ids := make([]string, len(results))
+	for i, rr := range results {
+		ids[i] = rr.ID
+		_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+			RunResultID: rr.ID, Verdict: seeded[i].verdict, Confidence: seeded[i].confidence, ModelName: "m",
+		})
+		require.NoError(t, err)
+	}
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": ids, "status": "FAIL", "defect_type": "product_bug",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	for i, rr := range results {
+		got, err := s.GetRunResultByID(rr.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		assert.Equal(t, "product_bug", got.DefectType, "row %d: the one human decision applies to every row", i)
+		assert.Equal(t, seeded[i].verdict, got.SuggestedVerdict, "row %d got another row's verdict", i)
+		assert.Equal(t, seeded[i].wantSuggested, got.SuggestedDefectType, "row %d got another row's suggestion", i)
+		assert.Equal(t, seeded[i].confidence, got.SuggestedConfidence, "row %d got another row's confidence", i)
+	}
+}
+
+// Best-effort: results with no analysis are skipped, and their presence must not stop the rows
+// that DO have one from being snapshotted, nor fail the bulk triage itself.
+func TestBulkUpdateSkipsResultsWithoutAnalysis(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 3)
+	analyzed := results[1]
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: analyzed.ID, Verdict: models.VerdictInfrastructure, Confidence: models.ConfidenceLow, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	ids := []string{results[0].ID, results[1].ID, results[2].ID}
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": ids, "status": "FAIL", "defect_type": "system_issue",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	for _, rr := range []*models.RunResult{results[0], results[2]} {
+		got, err := s.GetRunResultByID(rr.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "system_issue", got.DefectType, "triage must land even with no analysis")
+		assert.Empty(t, got.SuggestedVerdict)
+		assert.Empty(t, got.SuggestedDefectType)
+		assert.Empty(t, got.SuggestedConfidence)
+	}
+
+	got, err := s.GetRunResultByID(analyzed.ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.VerdictInfrastructure, got.SuggestedVerdict)
+	assert.Equal(t, "system_issue", got.SuggestedDefectType)
+	assert.Equal(t, models.ConfidenceLow, got.SuggestedConfidence)
+}
+
+// The gate is uniform: omitting defect_type makes the endpoint apply the "to_investigate"
+// auto-default, which means "not triaged yet" and must never enter the calibration record.
+func TestBulkUpdateAutoDefaultWritesNoSnapshot(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 2)
+	for _, rr := range results {
+		_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+			RunResultID: rr.ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+		})
+		require.NoError(t, err)
+	}
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": []string{results[0].ID, results[1].ID}, "status": "FAIL",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	for i, rr := range results {
+		got, err := s.GetRunResultByID(rr.ID)
+		require.NoError(t, err)
+		require.Equal(t, "to_investigate", got.DefectType, "row %d: auto-default should still apply", i)
+		assert.Empty(t, got.SuggestedVerdict, "row %d: auto-default is not a human decision", i)
+		assert.Empty(t, got.SuggestedDefectType, "row %d", i)
+		assert.Empty(t, got.SuggestedConfidence, "row %d", i)
+	}
+}
+
+// A non-FAIL bulk status clears defect_type entirely, so there is no decision to calibrate.
+func TestBulkUpdateNoSnapshotForNonFailStatus(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 1)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: results[0].ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": []string{results[0].ID}, "status": "PASS", "defect_type": "product_bug",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(results[0].ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.DefectType, "non-FAIL clears defect_type")
 	assert.Empty(t, got.SuggestedVerdict)
 	assert.Empty(t, got.SuggestedDefectType)
 	assert.Empty(t, got.SuggestedConfidence)

@@ -380,6 +380,53 @@ func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, upd
 	updateMap["suggested_confidence"] = a.Confidence
 }
 
+// snapshotAISuggestionsBulk records, for each bulk-triaged result, what the AI suggested at the
+// moment of the human decision — the bulk counterpart of snapshotAISuggestion.
+//
+// It must run as a SEPARATE pass after the main bulk UPDATE: store.BulkUpdateRunResults applies
+// ONE shared map to every ID, so the shared status/defect_type can go in a single statement but
+// the snapshot values, which differ per row, cannot. Writing them there would smear one row's
+// verdict across the whole selection and silently corrupt the calibration record.
+//
+// Rather than one UPDATE per row (up to 500), results are bucketed by their snapshot values and
+// each bucket is written with a single grouped "id IN (...)" statement. suggested_defect_type is
+// a pure function of the verdict, so the bucket key needs only (verdict, confidence) — in
+// practice at most 6 verdicts x 3 confidences = 18 statements, regardless of selection size.
+//
+// Best-effort by design: results with no analysis are skipped, and a failed lookup or grouped
+// write logs and moves on. The human's bulk triage has already been committed and must stand.
+func (h *Handler) snapshotAISuggestionsBulk(ctx context.Context, runID string, resultIDs []string, now time.Time) {
+	analyses, err := h.store.GetCurrentAnalysesByRun(runID)
+	if err != nil {
+		slog.WarnContext(ctx, "ai-suggestion bulk snapshot: analysis lookup failed", "run_id", runID, "error", err)
+		return
+	}
+
+	type snapshotKey struct{ verdict, confidence string }
+	buckets := make(map[snapshotKey][]string)
+	for _, id := range resultIDs {
+		a := analyses[id]
+		if a == nil {
+			continue // no analysis for this result — nothing to record
+		}
+		k := snapshotKey{verdict: a.Verdict, confidence: a.Confidence}
+		buckets[k] = append(buckets[k], id)
+	}
+
+	for k, ids := range buckets {
+		updates := map[string]interface{}{
+			"suggested_verdict":     k.verdict,
+			"suggested_defect_type": models.SuggestedDefectType(k.verdict),
+			"suggested_confidence":  k.confidence,
+			"updated_at":            now,
+		}
+		if err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {
+			slog.WarnContext(ctx, "ai-suggestion bulk snapshot: grouped update failed",
+				"run_id", runID, "verdict", k.verdict, "count", len(ids), "error", err)
+		}
+	}
+}
+
 // DeleteTestRun godoc
 //
 // @Summary      Delete a test run
@@ -972,6 +1019,15 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "failed to bulk update results in run", "run_id", runID, "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
+	}
+
+	// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
+	// suggested for each result. The gate is uniform because one status/defect_type applies to
+	// every ID in the request; only the snapshot VALUES vary per row, which is why they need the
+	// separate grouped pass. As in the single-result path, the "to_investigate" auto-default
+	// (empty req.DefectType) means "not triaged yet" and is deliberately not snapshotted.
+	if models.ExecutionStatus(req.Status) == models.StatusFail && req.DefectType != "" {
+		h.snapshotAISuggestionsBulk(r.Context(), runID, req.ResultIDs, now)
 	}
 
 	if _, err := h.store.MarkRunRunningIfPending(runID); err != nil {
