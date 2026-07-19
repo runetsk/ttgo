@@ -11,6 +11,16 @@ import RunAnalysisBanner from '../../components/RunAnalysisBanner';
 import RunResultsToolbar from '../../components/RunResultsToolbar';
 import { useRunViewPreference } from '../../hooks/useRunViewPreference';
 import { groupResults, GROUP_DIMENSIONS } from '../../utils/runResultsGrouping';
+import { shouldShowSuggestion, suggestionLabel } from '../../utils/defectSuggestion';
+
+// Theme-readable text tones for the AI suggestion chip, echoing the defect_type
+// <select> colors below. --aig-tone-*-fg and --text-secondary are defined for
+// BOTH themes; --surface-bg / --accent-purple are not, so they are avoided here.
+const SUGGESTION_FG = {
+    product_bug: 'var(--aig-tone-red-fg)',
+    automation_bug: 'var(--aig-tone-purple-fg)',
+    system_issue: 'var(--text-secondary)',
+};
 
 export default function ResultsTab({
     runId,
@@ -690,6 +700,7 @@ export default function ResultsTab({
                             {isVisible('defect_type') && (
                                 <td onClick={e => e.stopPropagation()} style={{ overflow: 'hidden' }}>
                                     {result.status === 'FAIL' ? (
+                                        <>
                                         <select
                                             value={result.defect_type || 'to_investigate'}
                                             onChange={(e) => handleUpdateDefectType(result.id, e.target.value)}
@@ -717,6 +728,53 @@ export default function ResultsTab({
                                             <option value="automation_bug">🤖 Automation Bug</option>
                                             <option value="system_issue">⚙️ System Issue</option>
                                         </select>
+                                        {(() => {
+                                            // Aid, not a nag: only for untriaged FAILs that have a
+                                            // suggestion. Accept reuses the normal triage write, so
+                                            // the backend snapshot/calibration path is identical to
+                                            // a human picking the value from the <select> above.
+                                            const analysis = currentAnalyses?.[result.id];
+                                            if (!shouldShowSuggestion(result, analysis)) return null;
+                                            const suggested = analysis.suggested_defect_type;
+                                            return (
+                                                <div
+                                                    data-testid={`defect-suggestion-${result.test_case_id}`}
+                                                    title={`AI failure analysis suggests "${suggestionLabel(suggested)}" — accept it, or pick another value above`}
+                                                    style={{
+                                                        display: 'flex', alignItems: 'center', gap: 4,
+                                                        marginTop: 3, padding: '1px 4px',
+                                                        background: 'var(--bg-secondary)',
+                                                        border: '1px solid var(--border-color)',
+                                                        borderRadius: 6, fontSize: '0.68rem',
+                                                        maxWidth: '100%', overflow: 'hidden',
+                                                    }}
+                                                >
+                                                    <span style={{
+                                                        color: SUGGESTION_FG[suggested] || 'var(--text-secondary)',
+                                                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                                                    }}>
+                                                        AI: {suggestionLabel(suggested)}
+                                                    </span>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleUpdateDefectType(result.id, suggested)}
+                                                        data-testid={`defect-suggestion-accept-${result.test_case_id}`}
+                                                        style={{
+                                                            marginLeft: 'auto', flexShrink: 0,
+                                                            padding: '0 5px', borderRadius: 5,
+                                                            border: '1px solid var(--border-color)',
+                                                            background: 'transparent',
+                                                            color: 'var(--text-primary)',
+                                                            fontSize: '0.68rem', lineHeight: '15px',
+                                                            cursor: 'pointer',
+                                                        }}
+                                                    >
+                                                        Accept
+                                                    </button>
+                                                </div>
+                                            );
+                                        })()}
+                                        </>
                                     ) : (
                                         <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>—</span>
                                     )}

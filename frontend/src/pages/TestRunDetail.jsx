@@ -79,6 +79,7 @@ export default function TestRunDetail() {
                     id: d.analysis_id,
                     version: d.version,
                     verdict: d.verdict,
+                    suggested_defect_type: d.suggested_defect_type,
                     confidence: d.confidence,
                     dedup_group_key: d.dedup_group_key || null,
                 },
