@@ -321,6 +321,135 @@ func TestAnalyzeRunResult_SendsEnrichmentToProvider(t *testing.T) {
 	require.Contains(t, prov.lastPrompt, "product_bug", "human triage label / rollup missing from prompt")
 }
 
+// ── Suggested defect_type exposure ───────────────────────────────────────
+
+// seedAnalyzedResult builds a store holding one FAIL result plus a handler whose
+// provider always returns the given verdict. Returns the handler and the run /
+// result IDs so each analysis endpoint can be driven directly.
+func seedAnalyzedResult(t *testing.T, verdict string) (h *ai.Handler, runID, resultID string) {
+	t.Helper()
+	s, err := store.New(":memory:")
+	require.NoError(t, err)
+
+	run := &models.TestRun{Name: "suggestion"}
+	require.NoError(t, s.CreateTestRun(run))
+	result := &models.RunResult{
+		TestRunID:        run.ID,
+		TestNameSnapshot: "t",
+		AttemptNumber:    1,
+		Status:           models.StatusFail,
+		FailureType:      "assertion",
+		ErrorMessage:     "boom",
+	}
+	require.NoError(t, s.AddRunResult(result))
+
+	h = ai.NewHandler(s, bluemonday.UGCPolicy())
+	h.SetFailureAnalysisDeps(func() (llm.Provider, string, error) {
+		return &verdictProvider{verdict: verdict}, "mock-model", nil
+	}, nil)
+	return h, run.ID, result.ID
+}
+
+// callAnalyze drives POST /run-results/{id}/analyze and decodes the body into out.
+func callAnalyze(t *testing.T, h *ai.Handler, resultID string, out interface{}) {
+	t.Helper()
+	req := httptest.NewRequest("POST", "/api/run-results/"+resultID+"/analyze", nil)
+	req.SetPathValue("id", resultID)
+	rr := httptest.NewRecorder()
+	h.AnalyzeRunResult(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code, "analyze failed: %s", rr.Body.String())
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), out))
+}
+
+// callListAnalyses drives GET /run-results/{id}/analyses and decodes the body into out.
+func callListAnalyses(t *testing.T, h *ai.Handler, resultID string, out interface{}) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/run-results/"+resultID+"/analyses", nil)
+	req.SetPathValue("id", resultID)
+	rr := httptest.NewRecorder()
+	h.ListRunResultAnalyses(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, "list analyses failed: %s", rr.Body.String())
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), out))
+}
+
+// callCurrentAnalyses drives GET /runs/{id}/analyses/current and decodes the body into out.
+func callCurrentAnalyses(t *testing.T, h *ai.Handler, runID string, out interface{}) {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/api/runs/"+runID+"/analyses/current", nil)
+	req.SetPathValue("id", runID)
+	rr := httptest.NewRecorder()
+	h.ListCurrentAnalysesForRun(rr, req)
+	require.Equal(t, http.StatusOK, rr.Code, "current analyses failed: %s", rr.Body.String())
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), out))
+}
+
+// TestAnalysisEndpoints_ExposeSuggestedDefectType asserts every verdict surfaces
+// the documented suggested defect_type on ALL THREE analysis endpoints: the
+// synchronous analyze (a single object — no loop, so it needs its own
+// assignment), the per-result version list, and the per-run current map.
+// The mapping is lossy (6 verdicts → 4 defect types) and lives only in
+// models.SuggestedDefectType; the frontend must never re-derive it.
+func TestAnalysisEndpoints_ExposeSuggestedDefectType(t *testing.T) {
+	tests := []struct {
+		verdict string
+		want    string
+	}{
+		{models.VerdictProductBug, "product_bug"},
+		{models.VerdictFlakyTest, "automation_bug"},
+		{models.VerdictTestData, "automation_bug"},
+		{models.VerdictEnvironment, "system_issue"},
+		{models.VerdictInfrastructure, "system_issue"},
+		{models.VerdictUnknown, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.verdict, func(t *testing.T) {
+			h, runID, resultID := seedAnalyzedResult(t, tt.verdict)
+
+			var created models.RunResultAnalysis
+			callAnalyze(t, h, resultID, &created)
+			require.Equal(t, tt.verdict, created.Verdict)
+			require.Equal(t, tt.want, created.SuggestedDefectType, "AnalyzeRunResult")
+
+			var list []*models.RunResultAnalysis
+			callListAnalyses(t, h, resultID, &list)
+			require.Len(t, list, 1)
+			require.Equal(t, tt.want, list[0].SuggestedDefectType, "ListRunResultAnalyses")
+
+			var current map[string]*models.RunResultAnalysis
+			callCurrentAnalyses(t, h, runID, &current)
+			require.Contains(t, current, resultID)
+			require.Equal(t, tt.want, current[resultID].SuggestedDefectType, "ListCurrentAnalysesForRun")
+		})
+	}
+}
+
+// TestAnalysisEndpoints_RawResponseStrippedFromListsOnly locks in the exact scope
+// of F-068: the raw LLM output is omitted from the two LIST responses but stays
+// on the synchronous analyze response. Decoded as raw maps because RawResponse is
+// `omitempty` — stripping it drops the key entirely rather than emptying it.
+func TestAnalysisEndpoints_RawResponseStrippedFromListsOnly(t *testing.T) {
+	h, runID, resultID := seedAnalyzedResult(t, models.VerdictFlakyTest)
+
+	var created map[string]interface{}
+	callAnalyze(t, h, resultID, &created)
+	raw, ok := created["raw_response"]
+	require.True(t, ok, "AnalyzeRunResult must still return raw_response — F-068 covers list responses only")
+	require.NotEmpty(t, raw)
+	require.Equal(t, "automation_bug", created["suggested_defect_type"])
+
+	var list []map[string]interface{}
+	callListAnalyses(t, h, resultID, &list)
+	require.Len(t, list, 1)
+	require.NotContains(t, list[0], "raw_response", "raw_response must stay stripped from ListRunResultAnalyses (F-068)")
+	require.Equal(t, "automation_bug", list[0]["suggested_defect_type"])
+
+	var current map[string]map[string]interface{}
+	callCurrentAnalyses(t, h, runID, &current)
+	require.Contains(t, current, resultID)
+	require.NotContains(t, current[resultID], "raw_response", "raw_response must stay stripped from ListCurrentAnalysesForRun (F-068)")
+	require.Equal(t, "automation_bug", current[resultID]["suggested_defect_type"])
+}
+
 // createTestRun creates an empty run and returns its ID.
 func createTestRun(t *testing.T, env *testEnv, name string) string {
 	t.Helper()
