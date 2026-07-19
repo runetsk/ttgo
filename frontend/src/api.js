@@ -504,6 +504,9 @@ export const updateFailureAnalysisSettings = (body) =>
 export const resetFailureAnalysisPrompt = () =>
     api.post('/settings/ai-failure-analysis/prompt/reset').then(r => r.data);
 
+export const getFailureAnalysisAccuracy = (days = 30) =>
+    api.get('/ai/failure-analysis/accuracy', { params: { days } }).then(r => r.data);
+
 // ── Database Backups (015-database-backups) ──
 export const backups = {
     list: () => api.get('/backups').then(res => res.data),

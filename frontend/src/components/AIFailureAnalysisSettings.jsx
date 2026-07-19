@@ -3,8 +3,14 @@ import {
     getFailureAnalysisSettings,
     updateFailureAnalysisSettings,
     resetFailureAnalysisPrompt,
+    getFailureAnalysisAccuracy,
 } from '../api';
+import { summarizeAccuracy, confidenceRows } from './aiSettings/accuracyFormat';
 import { toast } from '../toast';
+
+// Rolling window for the accuracy panel. Matches the backend default so the
+// panel and the endpoint never describe different periods.
+const ACCURACY_WINDOW_DAYS = 30;
 
 export default function AIFailureAnalysisSettings({ isAdmin }) {
     const [settings, setSettings] = useState(null);
@@ -105,6 +111,8 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
             <p style={s.desc}>
                 Automatically classify failing test results to help triage. All controls admin-only.
             </p>
+
+            <AccuracyPanel />
 
             {/* Toggles */}
             <div style={s.togglesGrid}>
@@ -220,6 +228,79 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
                 </div>
             </div>
         </section>
+    );
+}
+
+// AccuracyPanel reports how often the AI's suggested defect type matched the human's
+// triage decision. The by-confidence ladder is the point: a clean descent from high to
+// low means confidence is trustworthy, a flat one means it is noise. Self-contained —
+// it owns its fetch so a failure here never blocks the settings form.
+function AccuracyPanel() {
+    const [report, setReport] = useState(null);
+    const [status, setStatus] = useState('loading');
+
+    useEffect(() => {
+        let alive = true;
+        getFailureAnalysisAccuracy(ACCURACY_WINDOW_DAYS)
+            .then((r) => {
+                if (!alive) return;
+                setReport(r);
+                setStatus('ready');
+            })
+            .catch((e) => {
+                console.error('Load AI failure analysis accuracy failed', e);
+                if (alive) setStatus('failed');
+            });
+        return () => { alive = false; };
+    }, []);
+
+    // Both derivations tolerate a null report, so they are safe before the fetch lands.
+    const summary = summarizeAccuracy(report);
+    const rows = confidenceRows(report);
+
+    return (
+        <div style={s.accuracyPanel}>
+            <div style={s.accuracyHead}>
+                <div style={{ minWidth: 0 }}>
+                    <div style={s.subTitle}>Suggestion accuracy</div>
+                    <p style={s.fieldHint}>
+                        How often the suggested defect type matched the human triage decision, last {ACCURACY_WINDOW_DAYS} days.
+                    </p>
+                </div>
+                {status === 'ready' && summary.hasData && (
+                    <div style={s.accuracyHeadline}>
+                        <span style={s.accuracyRate}>{summary.rateLabel}</span>
+                        <span style={s.accuracySamples}>{summary.samples}</span>
+                    </div>
+                )}
+            </div>
+
+            {status === 'loading' && <div style={s.accuracyNote}>Loading accuracy…</div>}
+            {status === 'failed' && <div style={s.accuracyNote}>Accuracy stats unavailable.</div>}
+            {status === 'ready' && !summary.hasData && (
+                <div style={s.accuracyNote}>
+                    Not enough triaged results yet — accuracy appears once failing results are triaged with a defect type.
+                </div>
+            )}
+            {status === 'ready' && summary.hasData && (
+                <div style={s.ladder}>
+                    {rows.map((row) => (
+                        <div key={row.key} style={s.ladderRow}>
+                            <span style={s.ladderLabel}>{row.label} confidence</span>
+                            <span
+                                style={{
+                                    ...s.ladderRate,
+                                    color: row.hasSamples ? 'var(--text-primary)' : 'var(--text-secondary)',
+                                }}
+                            >
+                                {row.rateLabel}
+                            </span>
+                            <span style={s.ladderSamples}>{row.hasSamples ? row.samples : 'no samples yet'}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -399,6 +480,73 @@ const s = {
         fontWeight: 700,
         color: 'var(--text-primary)',
         marginBottom: 2,
+    },
+    accuracyPanel: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+        padding: '12px 14px',
+        borderRadius: 10,
+        border: '1px solid var(--border-color)',
+        background: 'var(--bg-secondary)',
+    },
+    accuracyHead: {
+        display: 'flex',
+        alignItems: 'flex-start',
+        justifyContent: 'space-between',
+        gap: 16,
+    },
+    accuracyHeadline: {
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-end',
+        flexShrink: 0,
+    },
+    accuracyRate: {
+        fontSize: '1.35rem',
+        fontWeight: 700,
+        lineHeight: 1.1,
+        color: 'var(--aig-tone-indigo-fg)',
+    },
+    accuracySamples: {
+        fontSize: '0.72rem',
+        color: 'var(--text-secondary)',
+    },
+    accuracyNote: {
+        fontSize: '0.78rem',
+        color: 'var(--text-secondary)',
+        lineHeight: 1.5,
+    },
+    ladder: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 2,
+        borderTop: '1px solid var(--border-color)',
+        paddingTop: 8,
+    },
+    ladderRow: {
+        display: 'flex',
+        alignItems: 'baseline',
+        gap: 10,
+    },
+    ladderLabel: {
+        flex: 1,
+        minWidth: 0,
+        fontSize: '0.8rem',
+        color: 'var(--text-primary)',
+    },
+    ladderRate: {
+        width: 46,
+        textAlign: 'right',
+        fontSize: '0.82rem',
+        fontWeight: 700,
+        fontVariantNumeric: 'tabular-nums',
+    },
+    ladderSamples: {
+        width: 130,
+        textAlign: 'right',
+        fontSize: '0.72rem',
+        color: 'var(--text-secondary)',
     },
     resetBtn: {
         display: 'inline-flex',
