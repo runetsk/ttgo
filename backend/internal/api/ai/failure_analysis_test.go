@@ -450,6 +450,74 @@ func TestAnalysisEndpoints_RawResponseStrippedFromListsOnly(t *testing.T) {
 	require.Equal(t, "automation_bug", current[resultID]["suggested_defect_type"])
 }
 
+// ── Accuracy endpoint ────────────────────────────────────────────────────
+
+// TestFailureAnalysisAccuracy_EndpointShapeAndExclusions checks the wiring end to end: the route
+// resolves, the documented JSON shape comes back, and the untriaged auto-default is excluded
+// rather than counted against the AI.
+func TestFailureAnalysisAccuracy_EndpointShapeAndExclusions(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	s := env.store
+
+	run := &models.TestRun{Name: "triaged"}
+	require.NoError(t, s.CreateTestRun(run))
+	add := func(attempt int, verdict, suggested, confidence, defectType string) {
+		require.NoError(t, s.AddRunResult(&models.RunResult{
+			TestRunID: run.ID, TestNameSnapshot: "t", AttemptNumber: attempt,
+			Status: models.StatusFail, ErrorMessage: "boom",
+			DefectType:          defectType,
+			SuggestedVerdict:    verdict,
+			SuggestedDefectType: suggested,
+			SuggestedConfidence: confidence,
+		}))
+	}
+	add(1, models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug")    // agreed
+	add(2, models.VerdictFlakyTest, "automation_bug", models.ConfidenceLow, "product_bug")   // overridden
+	add(3, models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "to_investigate") // untriaged
+	add(4, models.VerdictUnknown, "", models.ConfidenceLow, "product_bug")                   // no suggestion
+
+	rr := doRequest(env, "GET", "/api/ai/failure-analysis/accuracy", nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	var got struct {
+		Total         int     `json:"total"`
+		Agreed        int     `json:"agreed"`
+		AgreementRate float64 `json:"agreement_rate"`
+		ByVerdict     []struct {
+			Verdict string  `json:"verdict"`
+			Total   int     `json:"total"`
+			Agreed  int     `json:"agreed"`
+			Rate    float64 `json:"rate"`
+		} `json:"by_verdict"`
+		ByConfidence []struct {
+			Confidence string  `json:"confidence"`
+			Total      int     `json:"total"`
+			Agreed     int     `json:"agreed"`
+			Rate       float64 `json:"rate"`
+		} `json:"by_confidence"`
+	}
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+
+	require.Equal(t, 2, got.Total, "untriaged and no-suggestion rows are not part of the calibration set")
+	require.Equal(t, 1, got.Agreed)
+	require.InDelta(t, 0.5, got.AgreementRate, 1e-9)
+	require.Len(t, got.ByVerdict, 2)
+	require.Len(t, got.ByConfidence, 2)
+}
+
+// TestFailureAnalysisAccuracy_DaysParam covers the window parameter: a junk or non-positive
+// value falls back to the 30-day default, and an absurd value is clamped instead of rejected.
+func TestFailureAnalysisAccuracy_DaysParam(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	for _, q := range []string{"", "?days=7", "?days=abc", "?days=0", "?days=-5", "?days=99999"} {
+		rr := doRequest(env, "GET", "/api/ai/failure-analysis/accuracy"+q, nil)
+		require.Equal(t, http.StatusOK, rr.Code, "days=%q: %s", q, rr.Body.String())
+	}
+}
+
 // createTestRun creates an empty run and returns its ID.
 func createTestRun(t *testing.T, env *testEnv, name string) string {
 	t.Helper()

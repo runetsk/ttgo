@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
+	"time"
 	"ttgo/internal/api/authctx"
 	"ttgo/internal/api/httpx"
 	"ttgo/pkg/tracker/models"
@@ -204,4 +206,41 @@ func (h *Handler) CancelRunAnalysisJob(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// Accuracy window bounds for GET /ai/failure-analysis/accuracy. The default matches the other
+// reporting endpoints; the cap keeps a hand-typed ?days from widening the query to all history.
+const (
+	defaultAccuracyWindowDays = 30
+	maxAccuracyWindowDays     = 365
+)
+
+// GetFailureAnalysisAccuracy reports how often the AI's suggested defect_type matched the
+// human's triage decision.
+//
+// @Summary      AI failure-analysis accuracy
+// @Description  Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. Only explicitly triaged FAIL results that carried a suggestion at the decision moment are counted — results still sitting at the "to_investigate" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements.
+// @Tags         ai-failure-analysis
+// @Produce      json
+// @Param        days  query     int  false  "Rolling window in days, counted from the triage decision (1-365)"  default(30)
+// @Success      200   {object}  map[string]interface{}  "{total, agreed, agreement_rate, by_verdict:[{verdict,total,agreed,rate}], by_confidence:[{confidence,total,agreed,rate}]}"
+// @Failure      500   {object}  map[string]interface{}
+// @Router       /ai/failure-analysis/accuracy [get]
+// @Security     BearerAuth
+func (h *Handler) GetFailureAnalysisAccuracy(w http.ResponseWriter, r *http.Request) {
+	days := defaultAccuracyWindowDays
+	if d := r.URL.Query().Get("days"); d != "" {
+		if v, err := strconv.Atoi(d); err == nil && v > 0 {
+			days = v
+		}
+	}
+	if days > maxAccuracyWindowDays {
+		days = maxAccuracyWindowDays
+	}
+	rep, err := h.store.GetFailureAnalysisAccuracy(time.Now().UTC().AddDate(0, 0, -days))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, rep)
 }

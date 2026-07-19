@@ -51,6 +51,7 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("POST /runs/{id}/analyze-failures", requireAuth("write", h.EnqueueRunAnalysis))
 	api.HandleFunc("GET /runs/{id}/analysis-job", requireAuth("read", h.GetRunAnalysisJob))
 	api.HandleFunc("POST /runs/{id}/analysis-job/cancel", requireAuth("write", h.CancelRunAnalysisJob))
+	api.HandleFunc("GET /ai/failure-analysis/accuracy", requireAuth("read", h.GetFailureAnalysisAccuracy))
 	api.HandleFunc("GET /settings/ai-failure-analysis", requireAuth("read", h.GetFailureAnalysisSettings))
 	api.HandleFunc("PUT /settings/ai-failure-analysis", requireAdmin(h.UpdateFailureAnalysisSettings))
 	api.HandleFunc("POST /settings/ai-failure-analysis/prompt/reset", requireAdmin(h.ResetFailureAnalysisPrompt))

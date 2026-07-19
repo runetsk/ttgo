@@ -593,6 +593,20 @@ definitions:
         items:
           type: integer
         type: array
+      suggested_confidence:
+        type: string
+      suggested_defect_type:
+        type: string
+      suggested_verdict:
+        description: |-
+          Snapshot of what the AI failure analysis suggested at the moment a human explicitly set
+          DefectType. Written only on an explicit triage decision on a FAIL result that has an
+          analysis — never on the "to_investigate" auto-default path. Agreement is then a pure
+          comparison of SuggestedDefectType vs DefectType.
+
+          SuggestedVerdict is kept alongside SuggestedDefectType because the verdict -> defect_type
+          mapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.
+        type: string
       test_case:
         allOf:
         - $ref: '#/definitions/ttgo_pkg_tracker_models.TestCase'
@@ -1339,6 +1353,39 @@ paths:
       summary: AI generation summary report
       tags:
       - ai-generations
+  /ai/failure-analysis/accuracy:
+    get:
+      description: Agreement between the AI's suggested defect_type and the human
+        triage decision over a rolling window, overall and broken down by the snapshotted
+        verdict and confidence. Only explicitly triaged FAIL results that carried
+        a suggestion at the decision moment are counted — results still sitting at
+        the "to_investigate" auto-default (i.e. untriaged) and results with no suggestion
+        are excluded rather than counted as disagreements.
+      parameters:
+      - default: 30
+        description: Rolling window in days, counted from the triage decision (1-365)
+        in: query
+        name: days
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: '{total, agreed, agreement_rate, by_verdict:[{verdict,total,agreed,rate}],
+            by_confidence:[{confidence,total,agreed,rate}]}'
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: AI failure-analysis accuracy
+      tags:
+      - ai-failure-analysis
   /analytics/flaky:
     get:
       description: Returns tests ranked by status-switch percentage

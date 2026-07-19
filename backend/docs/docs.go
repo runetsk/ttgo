@@ -793,6 +793,48 @@ const docTemplate = `{
                 }
             }
         },
+        "/ai/failure-analysis/accuracy": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. Only explicitly triaged FAIL results that carried a suggestion at the decision moment are counted — results still sitting at the \"to_investigate\" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "AI failure-analysis accuracy",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "default": 30,
+                        "description": "Rolling window in days, counted from the triage decision (1-365)",
+                        "name": "days",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "{total, agreed, agreement_rate, by_verdict:[{verdict,total,agreed,rate}], by_confidence:[{confidence,total,agreed,rate}]}",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/analytics/flaky": {
             "get": {
                 "description": "Returns tests ranked by status-switch percentage",
@@ -9636,6 +9678,16 @@ const docTemplate = `{
                     "items": {
                         "type": "integer"
                     }
+                },
+                "suggested_confidence": {
+                    "type": "string"
+                },
+                "suggested_defect_type": {
+                    "type": "string"
+                },
+                "suggested_verdict": {
+                    "description": "Snapshot of what the AI failure analysis suggested at the moment a human explicitly set\nDefectType. Written only on an explicit triage decision on a FAIL result that has an\nanalysis — never on the \"to_investigate\" auto-default path. Agreement is then a pure\ncomparison of SuggestedDefectType vs DefectType.\n\nSuggestedVerdict is kept alongside SuggestedDefectType because the verdict -\u003e defect_type\nmapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.",
+                    "type": "string"
                 },
                 "test_case": {
                     "description": "Association (not stored, loaded via preload)",
