@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { getTestRun, deleteTestRun, updateTestRun, listRunDefects, analyzeRunFailures, completeTestRun, reopenTestRun } from '../api';
 import { activeColumns } from '../utils/columnFeatures';
@@ -100,10 +100,29 @@ export default function TestRunDetail() {
 
     // Declared before the mount effect below — its dependency array reads
     // these bindings during render, so declaring them later is a TDZ crash.
+    // Two orderings can make a REST response wrong by the time it lands, and a blind
+    // setCurrentAnalyses(fetched) loses to both: an older fetch resolving after a newer one, and
+    // a `run_result_analysis.created` WS event delivering an analysis the response predates.
+    // The sequence retires stale responses; the per-result version merge keeps whichever side
+    // holds the newer analysis, so a live suggestion is never clobbered back to a stale one.
+    const analysesSeq = useRef(0);
     const loadCurrentAnalyses = useCallback(() => {
         if (!runId) return;
+        const seq = ++analysesSeq.current;
         import('../api').then(({ getCurrentRunAnalyses }) =>
-            getCurrentRunAnalyses(runId).then(setCurrentAnalyses).catch(() => {})
+            getCurrentRunAnalyses(runId).then((fetched) => {
+                if (seq !== analysesSeq.current) return;
+                setCurrentAnalyses((prev) => {
+                    const merged = { ...(fetched || {}) };
+                    for (const [resultId, live] of Object.entries(prev || {})) {
+                        const incoming = merged[resultId];
+                        if (!incoming || (live?.version ?? 0) > (incoming?.version ?? 0)) {
+                            merged[resultId] = live;
+                        }
+                    }
+                    return merged;
+                });
+            }).catch(() => {})
         );
     }, [runId]);
 

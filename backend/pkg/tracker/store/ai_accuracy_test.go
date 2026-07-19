@@ -16,13 +16,17 @@ type calibrationRow struct {
 	suggested  string        // snapshotted suggested_defect_type
 	confidence string        // snapshotted suggested_confidence
 	defectType string        // the human's triage decision (or the untriaged auto-default)
-	decidedAgo time.Duration // how long ago updated_at says the decision was made
+	decidedAgo time.Duration // how long ago decided_at says the decision was made
 }
 
 func seedCalibrationRows(t *testing.T, s *Store, rows []calibrationRow) {
 	t.Helper()
 	runID := seedRun(t, s)
 	for i, r := range rows {
+		// decided_at is written in UTC, exactly as the triage handlers write it: SQLite stores
+		// time as TEXT carrying the writer's offset and compares it as TEXT, so seeding a local
+		// timestamp here would only prove that a local-vs-UTC comparison is off by the offset.
+		decided := time.Now().UTC().Add(-r.decidedAgo)
 		rr := &models.RunResult{
 			TestRunID: runID, TestNameSnapshot: fmt.Sprintf("t%d", i),
 			AttemptNumber: i + 1, Status: models.StatusFail, ErrorMessage: "boom",
@@ -30,17 +34,14 @@ func seedCalibrationRows(t *testing.T, s *Store, rows []calibrationRow) {
 			SuggestedVerdict:    r.verdict,
 			SuggestedDefectType: r.suggested,
 			SuggestedConfidence: r.confidence,
+			DecidedAt:           &decided,
 		}
 		require.NoError(t, s.AddRunResult(rr))
-		// AddRunResult stamps updated_at = now (local, like production); rewrite it to
-		// place the decision moment inside or outside the window under test.
-		require.NoError(t, s.db.Exec(`UPDATE run_results SET updated_at = ? WHERE id = ?`,
-			time.Now().Add(-r.decidedAgo), rr.ID).Error)
 	}
 }
 
-// last30d matches what the handler passes: a UTC cutoff, while rows are written with a local
-// timestamp. Keeping the mismatch in the test proves the production comparison is sound.
+// last30d matches what the handler passes: a UTC cutoff against UTC-written decided_at values,
+// so the TEXT comparison SQLite performs is exact and the boundary means what it says.
 func last30d() time.Time { return time.Now().UTC().AddDate(0, 0, -30) }
 
 // TestAccuracyExcludesUntriagedToInvestigate is the keystone guard. 'to_investigate' is the
@@ -186,7 +187,59 @@ func TestAccuracyByConfidenceBuckets(t *testing.T) {
 	require.InDelta(t, 0.0, got.ByConfidence[2].Rate, 1e-9)
 }
 
-// TestAccuracyWindowsOnDecisionTime pins the window to updated_at (when the human decided).
+// TestAccuracyWindowBoundaryIsExact pins the edge to the hour rather than the day. Every other
+// window test uses day-sized margins, which would still pass if the comparison were skewed by a
+// timezone offset — this one fails if it is off by more than an hour in either direction.
+func TestAccuracyWindowBoundaryIsExact(t *testing.T) {
+	s := newTestStore(t)
+	day := 24 * time.Hour
+	seedCalibrationRows(t, s, []calibrationRow{
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug", 30*day - time.Hour}, // just inside
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug", 30*day + time.Hour}, // just outside
+	})
+
+	got, err := s.GetFailureAnalysisAccuracy(last30d())
+	require.NoError(t, err)
+	require.Equal(t, 1, got.Total, "a decision an hour past the cutoff is outside the window")
+}
+
+// TestAccuracyIgnoresLaterUnrelatedWrites is why decided_at exists at all. updated_at means "row
+// last touched" and is re-stamped by writes that are not decisions — an artifact edit, a plain
+// status change, or the test-case delete cascade NULLing test_case_id across every historical
+// result. Windowing on it would drag a years-old decision into the last-30-days figure.
+func TestAccuracyIgnoresLaterUnrelatedWrites(t *testing.T) {
+	s := newTestStore(t)
+	day := 24 * time.Hour
+	seedCalibrationRows(t, s, []calibrationRow{
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug", 400 * day},
+	})
+	// Touch every row the way an unrelated write would: updated_at moves to now, decided_at does not.
+	require.NoError(t, s.db.Exec(`UPDATE run_results SET updated_at = ?, log_text = 'attached later'`,
+		time.Now()).Error)
+
+	got, err := s.GetFailureAnalysisAccuracy(last30d())
+	require.NoError(t, err)
+	require.Equal(t, 0, got.Total, "touching a row is not deciding it")
+}
+
+// TestAccuracyExcludesRowsNoLongerFailing makes the calibration set self-enforcing: a triaged
+// failure that is later re-executed to PASS is no longer a failure anyone decided on, and the
+// filter must drop it without depending on every writer having cleared the snapshot first.
+func TestAccuracyExcludesRowsNoLongerFailing(t *testing.T) {
+	s := newTestStore(t)
+	seedCalibrationRows(t, s, []calibrationRow{
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug", time.Hour},
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug", time.Hour},
+	})
+	require.NoError(t, s.db.Exec(`UPDATE run_results SET status = ? WHERE test_name_snapshot = 't1'`,
+		models.StatusPass).Error)
+
+	got, err := s.GetFailureAnalysisAccuracy(last30d())
+	require.NoError(t, err)
+	require.Equal(t, 1, got.Total, "only rows that are still FAIL carry a failure triage decision")
+}
+
+// TestAccuracyWindowsOnDecisionTime pins the window to decided_at (when the human decided).
 func TestAccuracyWindowsOnDecisionTime(t *testing.T) {
 	s := newTestStore(t)
 	day := 24 * time.Hour

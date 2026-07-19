@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"time"
 	"ttgo/pkg/tracker/models"
@@ -57,15 +58,22 @@ func (s *Store) ListAnalysesForResult(runResultID string) ([]*models.RunResultAn
 // GetCurrentAnalysisForResult returns the newest-version analysis for a single
 // result, or (nil, nil) when the result has no analysis at all.
 func (s *Store) GetCurrentAnalysisForResult(runResultID string) (*models.RunResultAnalysis, error) {
-	// ListAnalysesForResult is already ordered version DESC, so index 0 is current.
-	list, err := s.ListAnalysesForResult(runResultID)
+	// LIMIT 1 rather than reusing ListAnalysesForResult: this runs on the triage write path, and
+	// every row carries a full RawResponse LLM blob, so loading the whole version history to
+	// keep the first record would read (and discard) kilobytes per re-analysis.
+	var out models.RunResultAnalysis
+	err := s.db.
+		Where("run_result_id = ?", runResultID).
+		Order("version DESC").
+		Limit(1).
+		Take(&out).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, err
 	}
-	if len(list) == 0 {
-		return nil, nil
-	}
-	return list[0], nil
+	return &out, nil
 }
 
 // GetCurrentAnalysesByRun returns the newest-version analysis for every

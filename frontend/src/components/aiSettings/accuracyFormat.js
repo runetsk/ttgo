@@ -86,3 +86,31 @@ export function confidenceRows(report) {
     const extras = [...byKey.keys()].filter((k) => !CONFIDENCE_LEVELS.includes(k));
     return [...CONFIDENCE_LEVELS, ...extras].map((key) => shapeRow(key, byKey.get(key)));
 }
+
+// Verdicts the analyzer emits, rendered as human text. The mapping to defect_type is
+// lossy (flaky_test and test_data both suggest automation_bug), which is exactly why
+// the backend groups on the verdict — labelling by the mapped value would merge two
+// distinct verdicts into one meaningless row.
+const VERDICT_LABELS = {
+    product_bug: 'Product bug',
+    flaky_test: 'Flaky test',
+    test_data: 'Test data',
+    environment: 'Environment',
+    infrastructure: 'Infrastructure',
+    unknown: 'Unknown',
+};
+
+// verdictRows shapes the per-verdict breakdown. Unlike the confidence ladder there is no
+// fixed row set: only verdicts the AI actually produced are shown, in the server's order
+// (most samples first), because an empty row per unseen verdict would be noise rather than
+// the missing rung a blank confidence level represents. Buckets with no samples are dropped
+// for the same reason.
+export function verdictRows(report) {
+    const buckets = Array.isArray(report?.by_verdict) ? report.by_verdict : [];
+    return buckets
+        .filter((b) => b && typeof b.verdict === 'string' && toCount(b.total) > 0)
+        .map((b) => ({
+            ...shapeRow(b.verdict, b),
+            label: VERDICT_LABELS[b.verdict] || b.verdict,
+        }));
+}

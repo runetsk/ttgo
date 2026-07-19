@@ -549,6 +549,20 @@ definitions:
       created_at:
         description: Timestamps
         type: string
+      decided_at:
+        description: |-
+          DecidedAt is the instant the human triage decision above was recorded, written in UTC
+          alongside the snapshot columns and NULL until a real decision lands.
+
+          The accuracy window is measured on this column and NOT on UpdatedAt: UpdatedAt means
+          "row last touched" and is re-stamped by writes that are not decisions at all — a
+          screenshot/log edit, a plain status change, or the test-case delete cascade NULLing
+          TestCaseID across every historical result — any of which would silently drag old
+          decisions into a recent window.
+
+          UTC is load-bearing: SQLite stores time as TEXT with the writer's offset and compares it
+          as TEXT, so a local-offset value measured against a UTC cutoff is skewed by that offset.
+        type: string
       defect_type:
         description: |-
           DefectType classifies the failure reason for FAIL results.
@@ -606,6 +620,10 @@ definitions:
 
           SuggestedVerdict is kept alongside SuggestedDefectType because the verdict -> defect_type
           mapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.
+
+          All three are CLEARED whenever a triage decision is written without a snapshot behind it
+          (non-FAIL result, no analysis, lookup failure) so a new decision can never be scored
+          against a suggestion left over from an older one.
         type: string
       test_case:
         allOf:
@@ -1355,12 +1373,15 @@ paths:
       - ai-generations
   /ai/failure-analysis/accuracy:
     get:
-      description: Agreement between the AI's suggested defect_type and the human
+      description: 'Agreement between the AI''s suggested defect_type and the human
         triage decision over a rolling window, overall and broken down by the snapshotted
-        verdict and confidence. Only explicitly triaged FAIL results that carried
-        a suggestion at the decision moment are counted — results still sitting at
-        the "to_investigate" auto-default (i.e. untriaged) and results with no suggestion
-        are excluded rather than counted as disagreements.
+        verdict and confidence. The window is measured on the moment the decision
+        was recorded, not on when the row was last touched. Only explicitly triaged
+        FAIL results that carried a suggestion at the decision moment are counted
+        — results still sitting at the "to_investigate" auto-default (i.e. untriaged)
+        and results with no suggestion are excluded rather than counted as disagreements.
+        ERROR results are outside the set by construction: only FAIL rows expose the
+        defect_type control that records a decision.'
       parameters:
       - default: 30
         description: Rolling window in days, counted from the triage decision (1-365)

@@ -5,7 +5,7 @@ import {
     resetFailureAnalysisPrompt,
     getFailureAnalysisAccuracy,
 } from '../api';
-import { summarizeAccuracy, confidenceRows } from './aiSettings/accuracyFormat';
+import { summarizeAccuracy, confidenceRows, verdictRows } from './aiSettings/accuracyFormat';
 import { toast } from '../toast';
 
 // Rolling window for the accuracy panel. Matches the backend default so the
@@ -254,9 +254,10 @@ function AccuracyPanel() {
         return () => { alive = false; };
     }, []);
 
-    // Both derivations tolerate a null report, so they are safe before the fetch lands.
+    // All three derivations tolerate a null report, so they are safe before the fetch lands.
     const summary = summarizeAccuracy(report);
     const rows = confidenceRows(report);
+    const byVerdict = verdictRows(report);
 
     return (
         <div style={s.accuracyPanel}>
@@ -296,6 +297,22 @@ function AccuracyPanel() {
                                 {row.rateLabel}
                             </span>
                             <span style={s.ladderSamples}>{row.hasSamples ? row.samples : 'no samples yet'}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Per-verdict breakdown: which kind of call the AI actually gets wrong. This is what
+                justifies snapshotting the verdict separately — the verdict -> defect_type mapping
+                is lossy, so flaky_test and test_data would otherwise merge into one bucket. */}
+            {status === 'ready' && byVerdict.length > 0 && (
+                <div style={s.ladder}>
+                    <div style={s.ladderCaption}>By verdict</div>
+                    {byVerdict.map((row) => (
+                        <div key={row.key} style={s.ladderRow}>
+                            <span style={s.ladderLabel}>{row.label}</span>
+                            <span style={{ ...s.ladderRate, color: 'var(--text-primary)' }}>{row.rateLabel}</span>
+                            <span style={s.ladderSamples}>{row.samples}</span>
                         </div>
                     ))}
                 </div>
@@ -523,6 +540,14 @@ const s = {
         gap: 2,
         borderTop: '1px solid var(--border-color)',
         paddingTop: 8,
+    },
+    ladderCaption: {
+        fontSize: '0.72rem',
+        fontWeight: 700,
+        textTransform: 'uppercase',
+        letterSpacing: '0.04em',
+        color: 'var(--text-secondary)',
+        marginBottom: 2,
     },
     ladderRow: {
         display: 'flex',

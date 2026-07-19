@@ -1,6 +1,10 @@
 package store
 
-import "time"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 // AIAccuracyVerdictBucket is the agreement breakdown for one snapshotted AI verdict.
 type AIAccuracyVerdictBucket struct {
@@ -32,8 +36,17 @@ type AIFailureAnalysisAccuracy struct {
 // can be compared against a real AI suggestion. It is declared once and shared verbatim by
 // every query below so the breakdowns can never drift apart from each other or from the total.
 //
-// Both exclusions are load-bearing — a wrong accuracy number is worse than no number:
+// Every exclusion is load-bearing — a wrong accuracy number is worse than no number:
 //
+//   - decided_at >= ? — the window is measured on the moment the human DECIDED, a column
+//     written only by the triage snapshot. updated_at would be wrong here: it means "row last
+//     touched" and is re-stamped by writes that are not decisions (an artifact or log edit, a
+//     plain status change, the test-case delete cascade), any of which would drag an old
+//     decision into a recent window. decided_at is written in UTC, and the handler's cutoff is
+//     UTC, so the TEXT comparison SQLite performs is exact rather than offset-skewed.
+//   - status = 'FAIL' — only failing results carry a triage decision, and a result can be
+//     re-executed to PASS after being triaged. Filtering here makes the calibration set
+//     self-enforcing instead of trusting every writer to have cleared the snapshot.
 //   - a non-empty suggested_defect_type — the AI actually suggested something at the decision
 //     moment. An empty snapshot means there was nothing to agree or disagree with.
 //   - defect_type IN ('product_bug', 'automation_bug', 'system_issue') — a REAL human decision.
@@ -41,12 +54,14 @@ type AIFailureAnalysisAccuracy struct {
 //     triaged this yet". Counting untriaged rows as disagreements would tank the AI's score and
 //     make the whole metric meaningless. Empty is excluded for the same reason.
 //
-// NULL is not-true under both predicates, so any pre-migration row fails safe (excluded).
+// NULL is not-true under every predicate, so any pre-migration row fails safe (excluded).
 //
-// The window is on updated_at — the moment the human decided — not created_at, which is when
-// the result was first ingested.
+// Caveat: ERROR results are outside the set by construction. The analyzer produces verdicts for
+// FAIL and ERROR alike, but only FAIL rows expose the defect_type control that records a human
+// decision, so an ERROR row never has a decision to compare against.
 const accuracyCalibrationFilter = `
-	WHERE updated_at >= ?
+	WHERE decided_at >= ?
+	  AND status = 'FAIL'
 	  AND suggested_defect_type != ''
 	  AND defect_type IN ('product_bug', 'automation_bug', 'system_issue')`
 
@@ -67,30 +82,36 @@ func (s *Store) GetFailureAnalysisAccuracy(since time.Time) (*AIFailureAnalysisA
 		ByConfidence: []AIAccuracyConfidenceBucket{},
 	}
 
-	if err := s.db.Raw(`
-		SELECT suggested_verdict AS verdict,
-		       COUNT(*) AS total,
-		       SUM(CASE WHEN suggested_defect_type = defect_type THEN 1 ELSE 0 END) AS agreed
-		FROM run_results`+accuracyCalibrationFilter+`
-		GROUP BY suggested_verdict
-		ORDER BY total DESC, verdict ASC`, since).Scan(&out.ByVerdict).Error; err != nil {
-		return nil, err
-	}
+	// One transaction for both breakdowns: they are rendered side by side and the headline is
+	// derived from by_verdict, so a triage write landing between two independent queries would
+	// show a total that disagrees with the confidence ladder next to it.
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Raw(`
+			SELECT suggested_verdict AS verdict,
+			       COUNT(*) AS total,
+			       SUM(CASE WHEN suggested_defect_type = defect_type THEN 1 ELSE 0 END) AS agreed
+			FROM run_results`+accuracyCalibrationFilter+`
+			GROUP BY suggested_verdict
+			ORDER BY total DESC, verdict ASC`, since).Scan(&out.ByVerdict).Error; err != nil {
+			return err
+		}
 
-	// Ordered high -> medium -> low so the calibration ladder reads as a descent: a clean
-	// drop means confidence is trustworthy, a flat one means it is noise.
-	if err := s.db.Raw(`
-		SELECT suggested_confidence AS confidence,
-		       COUNT(*) AS total,
-		       SUM(CASE WHEN suggested_defect_type = defect_type THEN 1 ELSE 0 END) AS agreed
-		FROM run_results`+accuracyCalibrationFilter+`
-		GROUP BY suggested_confidence
-		ORDER BY CASE suggested_confidence
-		           WHEN 'high' THEN 0
-		           WHEN 'medium' THEN 1
-		           WHEN 'low' THEN 2
-		           ELSE 3
-		         END, confidence ASC`, since).Scan(&out.ByConfidence).Error; err != nil {
+		// Ordered high -> medium -> low so the calibration ladder reads as a descent: a clean
+		// drop means confidence is trustworthy, a flat one means it is noise.
+		return tx.Raw(`
+			SELECT suggested_confidence AS confidence,
+			       COUNT(*) AS total,
+			       SUM(CASE WHEN suggested_defect_type = defect_type THEN 1 ELSE 0 END) AS agreed
+			FROM run_results`+accuracyCalibrationFilter+`
+			GROUP BY suggested_confidence
+			ORDER BY CASE suggested_confidence
+			           WHEN 'high' THEN 0
+			           WHEN 'medium' THEN 1
+			           WHEN 'low' THEN 2
+			           ELSE 3
+			         END, confidence ASC`, since).Scan(&out.ByConfidence).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 

@@ -7,6 +7,7 @@ import {
     sampleLabel,
     summarizeAccuracy,
     confidenceRows,
+    verdictRows,
 } from './accuracyFormat.js';
 
 // ── formatPercent ────────────────────────────────────────────────────────
@@ -94,13 +95,15 @@ test('confidenceRows always returns the three levels in high -> medium -> low or
     }
 });
 
-test('confidenceRows preserves the server order and shapes each bucket', () => {
+test('confidenceRows shapes every bucket and pins each one to its own level', () => {
+    // Deliberately NOT in high -> medium -> low order: shaping must follow the level, not the
+    // array position, so a bucket cannot pick up the rate or sample count of its neighbour.
     const rows = confidenceRows({
         total: 26, agreed: 18,
         by_confidence: [
-            { confidence: 'high', total: 10, agreed: 9, rate: 0.9 },
             { confidence: 'medium', total: 13, agreed: 9, rate: 9 / 13 },
             { confidence: 'low', total: 3, agreed: 0, rate: 0 },
+            { confidence: 'high', total: 10, agreed: 9, rate: 0.9 },
         ],
     });
     assert.deepEqual(rows.map((r) => r.label), ['High', 'Medium', 'Low']);
@@ -156,4 +159,50 @@ test('confidenceRows ignores malformed bucket entries', () => {
     const rows = confidenceRows({ by_confidence: [null, 'x', { total: 5 }, { confidence: 'high', total: 1, agreed: 1, rate: 1 }] });
     assert.deepEqual(rows.map((r) => r.key), CONFIDENCE_LEVELS);
     assert.equal(rows[0].rateLabel, '100%');
+});
+
+// ── verdictRows: the per-verdict breakdown ───────────────────────────────
+
+test('verdictRows keeps verdicts that share a defect_type apart', () => {
+    // The whole reason the backend snapshots the verdict as well as the mapped defect_type:
+    // flaky_test and test_data both suggest automation_bug, so a breakdown keyed on the mapped
+    // value would merge a perfect verdict with a useless one into one meaningless row.
+    const rows = verdictRows({
+        by_verdict: [
+            { verdict: 'flaky_test', total: 6, agreed: 6, rate: 1 },
+            { verdict: 'test_data', total: 4, agreed: 0, rate: 0 },
+        ],
+    });
+    assert.deepEqual(rows.map((r) => r.label), ['Flaky test', 'Test data']);
+    assert.deepEqual(rows.map((r) => r.rateLabel), ['100%', '0%']);
+    assert.deepEqual(rows.map((r) => r.samples), ['6 triaged results', '4 triaged results']);
+});
+
+test('verdictRows preserves the server order rather than re-sorting', () => {
+    const rows = verdictRows({
+        by_verdict: [
+            { verdict: 'environment', total: 9, agreed: 3, rate: 1 / 3 },
+            { verdict: 'product_bug', total: 5, agreed: 5, rate: 1 },
+        ],
+    });
+    assert.deepEqual(rows.map((r) => r.key), ['environment', 'product_bug'], 'most samples first, as the server sent it');
+});
+
+test('verdictRows labels an unrecognised verdict with its raw key', () => {
+    const rows = verdictRows({ by_verdict: [{ verdict: 'brand_new_verdict', total: 2, agreed: 1, rate: 0.5 }] });
+    assert.deepEqual(rows.map((r) => r.label), ['brand_new_verdict']);
+    assert.equal(rows[0].rateLabel, '50%');
+});
+
+test('verdictRows drops empty and malformed buckets', () => {
+    const rows = verdictRows({
+        by_verdict: [null, 'x', { total: 3 }, { verdict: 'unknown', total: 0, agreed: 0 }, { verdict: 'product_bug', total: 1, agreed: 1, rate: 1 }],
+    });
+    assert.deepEqual(rows.map((r) => r.key), ['product_bug'], 'a zero-sample verdict is noise, not a missing rung');
+});
+
+test('verdictRows tolerates a missing or malformed report', () => {
+    for (const input of [undefined, null, {}, { by_verdict: [] }, { by_verdict: 'nope' }]) {
+        assert.deepEqual(verdictRows(input), []);
+    }
 });

@@ -66,5 +66,21 @@ test.describe('AI failure analysis — suggested defect_type', () => {
             await expect(runDetailPage.defectSuggestion(seed.tc.id))
                 .not.toBeVisible({ timeout: TIMEOUTS.UI_SETTLE });
         });
+
+        await test.step('The calibration record lands on the row, not just the defect_type', async () => {
+            // The point of the whole feature is the snapshot behind the UI: without reading the
+            // suggested_* columns back, this spec would still pass if Accept wrote defect_type
+            // alone and the row never entered the accuracy calibration set.
+            const run = await api.getRun(seed.run.id);
+            const row = (run.run_results || []).find(r => r.id === seed.result.id);
+            expect(row, 'the seeded result must still be on the run').toBeTruthy();
+            expect(row.defect_type).toBe('product_bug');
+            expect(row.suggested_verdict).toBe('product_bug');
+            expect(row.suggested_defect_type).toBe('product_bug');
+            expect(row.suggested_confidence).toBe('high');
+            // decided_at is what the accuracy window is measured on — an unset one silently
+            // drops the decision out of every report.
+            expect(row.decided_at, 'the decision moment must be stamped').toBeTruthy();
+        });
     });
 });

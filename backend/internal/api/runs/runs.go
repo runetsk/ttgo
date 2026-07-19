@@ -262,7 +262,7 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 		// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
 		// suggested at this exact moment. Deliberately NOT done for the "to_investigate"
 		// auto-default above: that means "not triaged yet", not a decision.
-		h.snapshotAISuggestion(r.Context(), resultID, updateMap)
+		h.snapshotAISuggestion(r.Context(), resultID, updateMap, req.Status)
 	}
 	if req.ErrorMessage != nil {
 		updateMap["error_message"] = *req.ErrorMessage
@@ -346,23 +346,39 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "updated"})
 }
 
+// clearAISuggestion blanks the snapshot columns in updateMap. Every path that writes a triage
+// decision WITHOUT a matching snapshot must call this: the columns are written in the same
+// statement as defect_type, so leaving them untouched would pair a brand-new human decision
+// with the AI suggestion recorded for some EARLIER one and fabricate an agreement.
+func clearAISuggestion(updateMap map[string]interface{}) {
+	updateMap["suggested_verdict"] = ""
+	updateMap["suggested_defect_type"] = ""
+	updateMap["suggested_confidence"] = ""
+	updateMap["decided_at"] = nil
+}
+
 // snapshotAISuggestion adds the AI failure-analysis suggestion columns to updateMap so the
 // calibration record captures what the AI proposed at the instant a human triaged the result.
 // Snapshotting (rather than joining later) keeps the record immune to a subsequent re-analysis
 // changing the verdict.
 //
 // Callers must invoke this ONLY when the caller explicitly supplied a defect_type. It further
-// requires the stored result to be FAIL and to already have an analysis.
+// requires the result to be FAIL *after this update lands* and to already have an analysis.
+// Gating on the EFFECTIVE status is what makes this path agree with the bulk one: both decide
+// from the status the row will have, so identical input produces an identical record whichever
+// endpoint wrote it. Gating on the stored status instead would miss the single-call
+// {status:"FAIL", defect_type:"X"} shape the CLI and the execute page actually send, and would
+// wrongly snapshot {status:"PASS", defect_type:"X"} on a row that happened to be FAIL before.
 //
-// Best-effort by design: a lookup error or a missing result/analysis logs and skips the snapshot.
-// A calibration nicety must never fail a human's triage write.
-func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, updateMap map[string]interface{}) {
-	rr, err := h.store.GetRunResultByID(resultID)
-	if err != nil {
-		slog.WarnContext(ctx, "ai-suggestion snapshot: result lookup failed", "result_id", resultID, "error", err)
-		return
-	}
-	if rr == nil || rr.Status != models.StatusFail {
+// Best-effort by design: a lookup error or a missing result/analysis logs and CLEARS the
+// snapshot instead of failing. A calibration nicety must never fail a human's triage write.
+func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, updateMap map[string]interface{}, reqStatus *string) {
+	// Cleared first, filled in only on the fully-verified path below, so every early return
+	// leaves the columns blank rather than stale.
+	clearAISuggestion(updateMap)
+
+	status, ok := h.effectiveResultStatus(ctx, resultID, reqStatus)
+	if !ok || status != models.StatusFail {
 		return
 	}
 
@@ -378,6 +394,26 @@ func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, upd
 	updateMap["suggested_verdict"] = a.Verdict
 	updateMap["suggested_defect_type"] = models.SuggestedDefectType(a.Verdict)
 	updateMap["suggested_confidence"] = a.Confidence
+	updateMap["decided_at"] = time.Now().UTC()
+}
+
+// effectiveResultStatus resolves the status the result will hold once the update is applied:
+// the requested status when the caller supplied one, otherwise the stored status. The second
+// return is false when the status could not be established (lookup error or missing row), which
+// callers must treat as "no snapshot".
+func (h *Handler) effectiveResultStatus(ctx context.Context, resultID string, reqStatus *string) (models.ExecutionStatus, bool) {
+	if reqStatus != nil {
+		return models.ExecutionStatus(*reqStatus), true
+	}
+	rr, err := h.store.GetRunResultByID(resultID)
+	if err != nil {
+		slog.WarnContext(ctx, "ai-suggestion snapshot: result lookup failed", "result_id", resultID, "error", err)
+		return "", false
+	}
+	if rr == nil {
+		return "", false
+	}
+	return rr.Status, true
 }
 
 // snapshotAISuggestionsBulk records, for each bulk-triaged result, what the AI suggested at the
@@ -393,31 +429,53 @@ func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, upd
 // a pure function of the verdict, so the bucket key needs only (verdict, confidence) — in
 // practice at most 6 verdicts x 3 confidences = 18 statements, regardless of selection size.
 //
-// Best-effort by design: results with no analysis are skipped, and a failed lookup or grouped
-// write logs and moves on. The human's bulk triage has already been committed and must stand.
+// Results with no analysis are not skipped but CLEARED, for the same reason as the single-result
+// path: the bulk UPDATE has already overwritten defect_type on those rows, so a suggestion left
+// behind by an earlier decision would be scored against this new one.
+//
+// Best-effort by design: a failed lookup or grouped write logs and moves on. The human's bulk
+// triage has already been committed and must stand.
 func (h *Handler) snapshotAISuggestionsBulk(ctx context.Context, runID string, resultIDs []string, now time.Time) {
+	clearRows := func(ids []string, reason string) {
+		if len(ids) == 0 {
+			return
+		}
+		updates := map[string]interface{}{"updated_at": now}
+		clearAISuggestion(updates)
+		if err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {
+			slog.WarnContext(ctx, "ai-suggestion bulk snapshot: clearing update failed",
+				"run_id", runID, "reason", reason, "count", len(ids), "error", err)
+		}
+	}
+
 	analyses, err := h.store.GetCurrentAnalysesByRun(runID)
 	if err != nil {
 		slog.WarnContext(ctx, "ai-suggestion bulk snapshot: analysis lookup failed", "run_id", runID, "error", err)
+		clearRows(resultIDs, "analysis lookup failed")
 		return
 	}
 
 	type snapshotKey struct{ verdict, confidence string }
 	buckets := make(map[snapshotKey][]string)
+	var noAnalysis []string
 	for _, id := range resultIDs {
 		a := analyses[id]
 		if a == nil {
-			continue // no analysis for this result — nothing to record
+			noAnalysis = append(noAnalysis, id)
+			continue
 		}
 		k := snapshotKey{verdict: a.Verdict, confidence: a.Confidence}
 		buckets[k] = append(buckets[k], id)
 	}
+	clearRows(noAnalysis, "no analysis")
 
+	decidedAt := now.UTC() // UTC: the accuracy window compares decided_at as TEXT, see models.RunResult
 	for k, ids := range buckets {
 		updates := map[string]interface{}{
 			"suggested_verdict":     k.verdict,
 			"suggested_defect_type": models.SuggestedDefectType(k.verdict),
 			"suggested_confidence":  k.confidence,
+			"decided_at":            decidedAt,
 			"updated_at":            now,
 		}
 		if err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {

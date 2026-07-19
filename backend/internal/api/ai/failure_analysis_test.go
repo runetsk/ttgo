@@ -463,6 +463,7 @@ func TestFailureAnalysisAccuracy_EndpointShapeAndExclusions(t *testing.T) {
 	run := &models.TestRun{Name: "triaged"}
 	require.NoError(t, s.CreateTestRun(run))
 	add := func(attempt int, verdict, suggested, confidence, defectType string) {
+		decided := time.Now().UTC().Add(-time.Hour)
 		require.NoError(t, s.AddRunResult(&models.RunResult{
 			TestRunID: run.ID, TestNameSnapshot: "t", AttemptNumber: attempt,
 			Status: models.StatusFail, ErrorMessage: "boom",
@@ -470,6 +471,7 @@ func TestFailureAnalysisAccuracy_EndpointShapeAndExclusions(t *testing.T) {
 			SuggestedVerdict:    verdict,
 			SuggestedDefectType: suggested,
 			SuggestedConfidence: confidence,
+			DecidedAt:           &decided,
 		}))
 	}
 	add(1, models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug")    // agreed
@@ -506,15 +508,54 @@ func TestFailureAnalysisAccuracy_EndpointShapeAndExclusions(t *testing.T) {
 	require.Len(t, got.ByConfidence, 2)
 }
 
-// TestFailureAnalysisAccuracy_DaysParam covers the window parameter: a junk or non-positive
-// value falls back to the 30-day default, and an absurd value is clamped instead of rejected.
+// TestFailureAnalysisAccuracy_DaysParam covers the window parameter by what it actually SELECTS,
+// not merely by a 200: a junk or non-positive value falls back to the 30-day default, and an
+// absurd value is clamped to 365 rather than widening the query to all history. Asserting the
+// status code alone would pass with `days` ignored entirely or the clamp deleted.
 func TestFailureAnalysisAccuracy_DaysParam(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
+	s := env.store
 
-	for _, q := range []string{"", "?days=7", "?days=abc", "?days=0", "?days=-5", "?days=99999"} {
-		rr := doRequest(env, "GET", "/api/ai/failure-analysis/accuracy"+q, nil)
-		require.Equal(t, http.StatusOK, rr.Code, "days=%q: %s", q, rr.Body.String())
+	run := &models.TestRun{Name: "windowed"}
+	require.NoError(t, s.CreateTestRun(run))
+	day := 24 * time.Hour
+	add := func(attempt int, decidedAgo time.Duration) {
+		decided := time.Now().UTC().Add(-decidedAgo)
+		require.NoError(t, s.AddRunResult(&models.RunResult{
+			TestRunID: run.ID, TestNameSnapshot: "t", AttemptNumber: attempt,
+			Status: models.StatusFail, ErrorMessage: "boom",
+			DefectType:          "product_bug",
+			SuggestedVerdict:    models.VerdictProductBug,
+			SuggestedDefectType: "product_bug",
+			SuggestedConfidence: models.ConfidenceHigh,
+			DecidedAt:           &decided,
+		}))
+	}
+	add(1, 3*day)   // inside every window under test
+	add(2, 20*day)  // inside the 30-day default, outside days=7
+	add(3, 200*day) // only inside the 365-day cap
+	add(4, 500*day) // outside even the cap — proves ?days=99999 is clamped, not honoured
+
+	for _, tc := range []struct {
+		query     string
+		wantTotal int
+		why       string
+	}{
+		{"", 2, "no param means the 30-day default"},
+		{"?days=7", 1, "a valid value narrows the window"},
+		{"?days=abc", 2, "junk falls back to the default"},
+		{"?days=0", 2, "zero is not a window, fall back to the default"},
+		{"?days=-5", 2, "negative is not a window, fall back to the default"},
+		{"?days=99999", 3, "clamped to 365 days, so the 500-day-old decision stays out"},
+	} {
+		rr := doRequest(env, "GET", "/api/ai/failure-analysis/accuracy"+tc.query, nil)
+		require.Equal(t, http.StatusOK, rr.Code, "days=%q: %s", tc.query, rr.Body.String())
+		var got struct {
+			Total int `json:"total"`
+		}
+		require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+		require.Equal(t, tc.wantTotal, got.Total, "days=%q: %s", tc.query, tc.why)
 	}
 }
 

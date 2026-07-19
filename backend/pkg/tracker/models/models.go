@@ -277,9 +277,26 @@ type RunResult struct {
 	//
 	// SuggestedVerdict is kept alongside SuggestedDefectType because the verdict -> defect_type
 	// mapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.
+	//
+	// All three are CLEARED whenever a triage decision is written without a snapshot behind it
+	// (non-FAIL result, no analysis, lookup failure) so a new decision can never be scored
+	// against a suggestion left over from an older one.
 	SuggestedVerdict    string `json:"suggested_verdict" gorm:"default:''"`
 	SuggestedDefectType string `json:"suggested_defect_type" gorm:"default:''"`
 	SuggestedConfidence string `json:"suggested_confidence" gorm:"default:''"`
+
+	// DecidedAt is the instant the human triage decision above was recorded, written in UTC
+	// alongside the snapshot columns and NULL until a real decision lands.
+	//
+	// The accuracy window is measured on this column and NOT on UpdatedAt: UpdatedAt means
+	// "row last touched" and is re-stamped by writes that are not decisions at all — a
+	// screenshot/log edit, a plain status change, or the test-case delete cascade NULLing
+	// TestCaseID across every historical result — any of which would silently drag old
+	// decisions into a recent window.
+	//
+	// UTC is load-bearing: SQLite stores time as TEXT with the writer's offset and compares it
+	// as TEXT, so a local-offset value measured against a UTC cutoff is skewed by that offset.
+	DecidedAt *time.Time `json:"decided_at,omitempty" gorm:"index"`
 
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`

@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 	api "ttgo/internal/api"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
@@ -260,6 +262,102 @@ func TestUpdateRunResultNoSnapshotForNonFailResult(t *testing.T) {
 	assert.Empty(t, got.SuggestedVerdict)
 	assert.Empty(t, got.SuggestedDefectType)
 	assert.Empty(t, got.SuggestedConfidence)
+	assert.Nil(t, got.DecidedAt)
+}
+
+// The gate is the status the row will HAVE, not the one it had. The CLI (internal/cli/cmd/runs.go)
+// and the execute page (RunExecutePage.submitVerdict) both send status and defect_type in ONE
+// call against a row that is still PENDING — reading the stored status would see PENDING, skip
+// the snapshot, and make the single-result path disagree with the bulk one on identical input.
+func TestUpdateRunResultSnapshotsWhenStatusAndDefectTypeArriveTogether(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusPending)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := putRunResult(t, s, srv, rr, map[string]any{"status": "FAIL", "defect_type": "automation_bug"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "automation_bug", got.DefectType)
+	assert.Equal(t, models.VerdictProductBug, got.SuggestedVerdict, "the decision must be recorded, stored status was PENDING")
+	assert.Equal(t, "product_bug", got.SuggestedDefectType, "an override is still a calibration data point")
+	assert.Equal(t, models.ConfidenceHigh, got.SuggestedConfidence)
+	require.NotNil(t, got.DecidedAt)
+
+	// SQLite stores a timestamp as TEXT carrying the writer's offset and compares it as TEXT, so
+	// the accuracy window is only exact if the write side matches the UTC cutoff the handler
+	// passes. Reading the column back through GORM cannot show this — it parses into local time —
+	// so assert on the raw stored text.
+	var stored string
+	require.NoError(t, s.DB().Raw(`SELECT CAST(decided_at AS TEXT) FROM run_results WHERE id = ?`, rr.ID).
+		Scan(&stored).Error)
+	assert.True(t, strings.HasSuffix(stored, "+00:00"),
+		"decided_at must be written in UTC, got %q — a local offset skews the window by that offset", stored)
+}
+
+// The mirror image: a row that WAS failing is re-executed to PASS in the same call that carries a
+// defect_type. Gating on the stored FAIL would snapshot a passing row straight into the
+// calibration set — and the stale suggestion must go with it.
+func TestUpdateRunResultClearsSnapshotWhenStatusLeavesFail(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusFail)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+	// An earlier decision already put this row in the calibration set.
+	w := putRunResult(t, s, srv, rr, map[string]any{"defect_type": "product_bug"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	before, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, "product_bug", before.SuggestedDefectType, "precondition: the row starts out snapshotted")
+
+	w = putRunResult(t, s, srv, rr, map[string]any{"status": "PASS", "defect_type": "product_bug"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusPass, got.Status)
+	assert.Empty(t, got.SuggestedVerdict, "a passing row is not a triage decision")
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
+	assert.Nil(t, got.DecidedAt)
+}
+
+// A skipped snapshot must CLEAR, never leave the previous one in place: defect_type is
+// overwritten in the same statement, so a stale suggestion would be scored against a decision it
+// was never made for — fabricating an agreement (or a disagreement) out of two unrelated events.
+func TestUpdateRunResultClearsStaleSnapshotWhenAnalysisIsGone(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run := &models.TestRun{Name: "Stale Snapshot Run"}
+	require.NoError(t, s.CreateTestRun(run))
+	decided := time.Now().UTC().Add(-time.Hour)
+	rr := &models.RunResult{
+		TestRunID: run.ID, TestNameSnapshot: "case", AttemptNumber: 1,
+		Status: models.StatusFail, ErrorMessage: "boom",
+		DefectType:          "product_bug",
+		SuggestedVerdict:    models.VerdictProductBug,
+		SuggestedDefectType: "product_bug",
+		SuggestedConfidence: models.ConfidenceHigh,
+		DecidedAt:           &decided,
+	}
+	require.NoError(t, s.AddRunResult(rr))
+
+	// A new decision on the same row, with no analysis behind it any more.
+	w := putRunResult(t, s, srv, rr, map[string]any{"defect_type": "system_issue"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, "system_issue", got.DefectType)
+	assert.Empty(t, got.SuggestedVerdict, "the old suggestion belonged to the previous decision")
+	assert.Empty(t, got.SuggestedDefectType, "leaving it would score system_issue against a product_bug suggestion")
+	assert.Empty(t, got.SuggestedConfidence)
+	assert.Nil(t, got.DecidedAt)
 }
 
 // --- AI suggestion snapshot on bulk defect_type triage ---
@@ -299,11 +397,12 @@ func postBulkUpdate(t *testing.T, s *store.Store, srv *api.Server, runID string,
 //
 // The seeded verdicts are chosen to catch the smear in every direction: flaky_test and test_data
 // collapse to the same defect_type, so only the snapshotted verdict distinguishes them; two rows
-// share a bucket (proving grouping merges rather than overwrites); and the confidences differ
-// from the verdict grouping so a mismatched pairing cannot pass by luck.
+// share a bucket (proving grouping merges rather than overwrites); and flaky_test appears at two
+// DIFFERENT confidences, so a bucket keyed on the verdict alone would hand one of those rows the
+// other's confidence and fail here rather than passing by luck.
 func TestBulkUpdateSnapshotsPerResultAISuggestion(t *testing.T) {
 	s, srv := newSnapshotEnv(t)
-	run, results := seedRunWithResults(t, s, models.StatusFail, 5)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 6)
 
 	seeded := []struct{ verdict, confidence, wantSuggested string }{
 		{models.VerdictFlakyTest, models.ConfidenceHigh, "automation_bug"},
@@ -311,6 +410,7 @@ func TestBulkUpdateSnapshotsPerResultAISuggestion(t *testing.T) {
 		{models.VerdictProductBug, models.ConfidenceMedium, "product_bug"},
 		{models.VerdictEnvironment, models.ConfidenceHigh, "system_issue"},
 		{models.VerdictFlakyTest, models.ConfidenceHigh, "automation_bug"}, // shares row 0's bucket
+		{models.VerdictFlakyTest, models.ConfidenceLow, "automation_bug"},  // same verdict, other confidence
 	}
 	ids := make([]string, len(results))
 	for i, rr := range results {
@@ -337,9 +437,11 @@ func TestBulkUpdateSnapshotsPerResultAISuggestion(t *testing.T) {
 	}
 }
 
-// Best-effort: results with no analysis are skipped, and their presence must not stop the rows
-// that DO have one from being snapshotted, nor fail the bulk triage itself.
-func TestBulkUpdateSkipsResultsWithoutAnalysis(t *testing.T) {
+// Best-effort: results with no analysis get their snapshot CLEARED rather than skipped, and
+// their presence must not stop the rows that DO have one from being snapshotted, nor fail the
+// bulk triage itself. Row 0 carries a snapshot from an earlier decision — leaving it in place
+// would score this bulk decision against a suggestion made for a different one.
+func TestBulkUpdateClearsResultsWithoutAnalysis(t *testing.T) {
 	s, srv := newSnapshotEnv(t)
 	run, results := seedRunWithResults(t, s, models.StatusFail, 3)
 	analyzed := results[1]
@@ -348,19 +450,28 @@ func TestBulkUpdateSkipsResultsWithoutAnalysis(t *testing.T) {
 	})
 	require.NoError(t, err)
 
+	stale := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, s.UpdateRunResult(run.ID, results[0].ID, map[string]interface{}{
+		"suggested_verdict":     models.VerdictProductBug,
+		"suggested_defect_type": "product_bug",
+		"suggested_confidence":  models.ConfidenceHigh,
+		"decided_at":            stale,
+	}))
+
 	ids := []string{results[0].ID, results[1].ID, results[2].ID}
 	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
 		"result_ids": ids, "status": "FAIL", "defect_type": "system_issue",
 	})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 
-	for _, rr := range []*models.RunResult{results[0], results[2]} {
+	for i, rr := range []*models.RunResult{results[0], results[2]} {
 		got, err := s.GetRunResultByID(rr.ID)
 		require.NoError(t, err)
-		assert.Equal(t, "system_issue", got.DefectType, "triage must land even with no analysis")
-		assert.Empty(t, got.SuggestedVerdict)
-		assert.Empty(t, got.SuggestedDefectType)
-		assert.Empty(t, got.SuggestedConfidence)
+		assert.Equal(t, "system_issue", got.DefectType, "row %d: triage must land even with no analysis", i)
+		assert.Empty(t, got.SuggestedVerdict, "row %d: a stale suggestion must not survive a new decision", i)
+		assert.Empty(t, got.SuggestedDefectType, "row %d", i)
+		assert.Empty(t, got.SuggestedConfidence, "row %d", i)
+		assert.Nil(t, got.DecidedAt, "row %d", i)
 	}
 
 	got, err := s.GetRunResultByID(analyzed.ID)
@@ -368,6 +479,7 @@ func TestBulkUpdateSkipsResultsWithoutAnalysis(t *testing.T) {
 	assert.Equal(t, models.VerdictInfrastructure, got.SuggestedVerdict)
 	assert.Equal(t, "system_issue", got.SuggestedDefectType)
 	assert.Equal(t, models.ConfidenceLow, got.SuggestedConfidence)
+	require.NotNil(t, got.DecidedAt)
 }
 
 // The gate is uniform: omitting defect_type makes the endpoint apply the "to_investigate"
