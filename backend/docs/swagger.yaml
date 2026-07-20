@@ -565,7 +565,8 @@ definitions:
         type: string
       defect_type:
         description: |-
-          DefectType classifies the failure reason for FAIL results.
+          DefectType classifies the failure reason for failing results — FAIL and ERROR alike, per
+          IsFailureStatus. Every other status forces "" (there is nothing to triage).
           Values: "to_investigate" | "product_bug" | "automation_bug" | "system_issue" | "" (not applicable)
         type: string
       duration_ms:
@@ -614,15 +615,15 @@ definitions:
       suggested_verdict:
         description: |-
           Snapshot of what the AI failure analysis suggested at the moment a human explicitly set
-          DefectType. Written only on an explicit triage decision on a FAIL result that has an
-          analysis — never on the "to_investigate" auto-default path. Agreement is then a pure
-          comparison of SuggestedDefectType vs DefectType.
+          DefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)
+          that has an analysis — never on the "to_investigate" auto-default path. Agreement is then a
+          pure comparison of SuggestedDefectType vs DefectType.
 
           SuggestedVerdict is kept alongside SuggestedDefectType because the verdict -> defect_type
           mapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.
 
           All three are CLEARED whenever a triage decision is written without a snapshot behind it
-          (non-FAIL result, no analysis, lookup failure) so a new decision can never be scored
+          (non-failure result, no analysis, lookup failure) so a new decision can never be scored
           against a suggestion left over from an older one.
         type: string
       test_case:
@@ -1373,15 +1374,14 @@ paths:
       - ai-generations
   /ai/failure-analysis/accuracy:
     get:
-      description: 'Agreement between the AI''s suggested defect_type and the human
+      description: Agreement between the AI's suggested defect_type and the human
         triage decision over a rolling window, overall and broken down by the snapshotted
         verdict and confidence. The window is measured on the moment the decision
         was recorded, not on when the row was last touched. Only explicitly triaged
-        FAIL results that carried a suggestion at the decision moment are counted
-        — results still sitting at the "to_investigate" auto-default (i.e. untriaged)
-        and results with no suggestion are excluded rather than counted as disagreements.
-        ERROR results are outside the set by construction: only FAIL rows expose the
-        defect_type control that records a decision.'
+        failing results (FAIL or ERROR) that carried a suggestion at the decision
+        moment are counted — results still sitting at the "to_investigate" auto-default
+        (i.e. untriaged) and results with no suggestion are excluded rather than counted
+        as disagreements.
       parameters:
       - default: 30
         description: Rolling window in days, counted from the triage decision (1-365)
@@ -5213,8 +5213,13 @@ paths:
     post:
       consumes:
       - application/json
-      description: Applies the same status (and, for FAIL, a defect_type — defaulting
-        to "to_investigate" when not given) to multiple results within a run.
+      description: 'Applies the same status and/or defect_type to multiple results
+        within a run. At least one of the two is required. When status is given it
+        is applied to every selected result; for a failure status (FAIL or ERROR)
+        defect_type defaults to "to_investigate" when not given, and every other status
+        clears it. When status is omitted the request is a triage-only decision: defect_type
+        is applied without touching status, and only to results whose stored status
+        is FAIL or ERROR — the rest are left untouched and reported in "skipped".'
       parameters:
       - description: Test run ID
         in: path
@@ -5243,6 +5248,8 @@ paths:
           description: OK
           schema:
             properties:
+              skipped:
+                type: integer
               status:
                 type: string
               updated:

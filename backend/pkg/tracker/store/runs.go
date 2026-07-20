@@ -654,6 +654,35 @@ func (s *Store) BulkUpdateRunResults(runID string, resultIDs []string, updates m
 		Updates(updates).Error
 }
 
+// ListRunResultStatuses returns the STORED status of each given result, keyed by result ID. IDs
+// that do not belong to the run are simply absent from the map, so a lookup on them yields the
+// zero ExecutionStatus — callers partitioning on models.IsFailureStatus therefore treat a foreign
+// or deleted id as "not applicable", which is the safe reading.
+//
+// Deliberately NOT GetRunResultsByIDs: that one preloads TestCase.Categories and runs
+// CountDefectLinksByRunResults, two extra joins over up to 500 rows, to build full WS row shapes.
+// Bulk triage needs one column to decide which rows a status-less request applies to.
+func (s *Store) ListRunResultStatuses(runID string, ids []string) (map[string]models.ExecutionStatus, error) {
+	out := make(map[string]models.ExecutionStatus, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	var rows []struct {
+		ID     string
+		Status models.ExecutionStatus
+	}
+	if err := s.db.Model(&models.RunResult{}).
+		Select("id, status").
+		Where("test_run_id = ? AND id IN ?", runID, ids).
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[r.ID] = r.Status
+	}
+	return out, nil
+}
+
 // removeScreenshotDir removes the screenshot directory for a result.
 func removeScreenshotDir(resultID string) {
 	dir := filepath.Join("uploads", "screenshots", resultID)

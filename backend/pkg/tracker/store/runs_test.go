@@ -654,6 +654,38 @@ func TestGetRunResultsByIDs(t *testing.T) {
 	assert.Nil(t, byID[r2.ID].TestCase)
 }
 
+// The status read behind bulk triage mode. Foreign ids must be absent from the map rather than
+// present with a zero value, so the caller's IsFailureStatus partition drops them instead of
+// silently counting them as updated.
+func TestListRunResultStatuses(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "Triage Run"}
+	require.NoError(t, s.CreateTestRun(run))
+	otherRun := &models.TestRun{Name: "Other Run"}
+	require.NoError(t, s.CreateTestRun(otherRun))
+
+	failed := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: "failed", Status: models.StatusFail}
+	require.NoError(t, s.AddRunResult(failed))
+	errored := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: "errored", Status: models.StatusError}
+	require.NoError(t, s.AddRunResult(errored))
+	passed := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: "passed", Status: models.StatusPass}
+	require.NoError(t, s.AddRunResult(passed))
+	foreign := &models.RunResult{TestRunID: otherRun.ID, TestNameSnapshot: "foreign", Status: models.StatusFail}
+	require.NoError(t, s.AddRunResult(foreign))
+
+	got, err := s.ListRunResultStatuses(run.ID, []string{failed.ID, errored.ID, passed.ID, foreign.ID, "no-such-id"})
+	require.NoError(t, err)
+	assert.Equal(t, map[string]models.ExecutionStatus{
+		failed.ID:  models.StatusFail,
+		errored.ID: models.StatusError,
+		passed.ID:  models.StatusPass,
+	}, got, "ids outside the run must be absent, not zero-valued")
+
+	empty, err := s.ListRunResultStatuses(run.ID, nil)
+	require.NoError(t, err)
+	assert.Empty(t, empty, "an empty id list must not become an unbounded query")
+}
+
 func TestListRecentFailuresByTestCase(t *testing.T) {
 	s := newTestStore(t)
 	folder, _ := s.CreateFolder("Root", nil)

@@ -219,7 +219,7 @@ const (
 // human's triage decision.
 //
 // @Summary      AI failure-analysis accuracy
-// @Description  Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. The window is measured on the moment the decision was recorded, not on when the row was last touched. Only explicitly triaged FAIL results that carried a suggestion at the decision moment are counted — results still sitting at the "to_investigate" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements. ERROR results are outside the set by construction: only FAIL rows expose the defect_type control that records a decision.
+// @Description  Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. The window is measured on the moment the decision was recorded, not on when the row was last touched. Only explicitly triaged failing results (FAIL or ERROR) that carried a suggestion at the decision moment are counted — results still sitting at the "to_investigate" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements.
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        days  query     int  false  "Rolling window in days, counted from the triage decision (1-365)"  default(30)

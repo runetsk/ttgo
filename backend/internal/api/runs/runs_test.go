@@ -800,6 +800,223 @@ func TestBulkUpdateValidatesStatusAndDefectType(t *testing.T) {
 	}
 }
 
+// --- Bulk triage mode (Mode 2): defect_type with no status ---
+
+// seedRunWithMixedResults creates one run holding one result per given status, in the given order.
+// The single-status seedRunWithResults above cannot express the selections this mode exists for.
+func seedRunWithMixedResults(t *testing.T, s *store.Store, statuses ...models.ExecutionStatus) (*models.TestRun, []*models.RunResult) {
+	t.Helper()
+	run := &models.TestRun{Name: "Bulk Triage Run"}
+	require.NoError(t, s.CreateTestRun(run))
+	out := make([]*models.RunResult, 0, len(statuses))
+	for i, status := range statuses {
+		rr := &models.RunResult{
+			TestRunID: run.ID, TestNameSnapshot: fmt.Sprintf("case-%d", i), AttemptNumber: 1,
+			Status: status, ErrorMessage: "boom",
+		}
+		require.NoError(t, s.AddRunResult(rr))
+		out = append(out, rr)
+	}
+	return run, out
+}
+
+func idsOf(results []*models.RunResult) []string {
+	ids := make([]string, len(results))
+	for i, rr := range results {
+		ids[i] = rr.ID
+	}
+	return ids
+}
+
+// A status-less request is a pure triage decision, so the STORED status decides who it applies to:
+// there is no status in the request that could turn a non-failure into a triageable row. The rows
+// that don't qualify must come back untouched in BOTH columns — applying the shared map to them
+// would put a defect_type on a PASS, a state no other path in this file can produce — and be
+// counted, so the caller can tell "applied to 2 of 5" from "applied to 5".
+func TestBulkTriageAppliesOnlyToFailureRows(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithMixedResults(t, s,
+		models.StatusFail, models.StatusError, models.StatusPass, models.StatusSkip, models.StatusPending)
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": idsOf(results), "defect_type": "product_bug",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, 2, resp["updated"], "only the FAIL and the ERROR are triageable")
+	assert.EqualValues(t, 3, resp["skipped"], "the caller must learn the decision did not apply everywhere")
+
+	wantDefectType := []string{"product_bug", "product_bug", "", "", ""}
+	for i, rr := range results {
+		got, err := s.GetRunResultByID(rr.ID)
+		require.NoError(t, err)
+		assert.Equal(t, rr.Status, got.Status, "row %d: triage must never move a status", i)
+		assert.Equal(t, wantDefectType[i], got.DefectType, "row %d", i)
+	}
+}
+
+// THE data-corruption guard this whole mode is shaped around. store.BulkUpdateRunResults applies
+// ONE shared map across every id, so a "status" key in it rewrites every selected row to the same
+// value — collapsing a mixed FAIL+ERROR selection onto whichever status the map happened to carry,
+// or blanking all of them when a status-less request supplied the empty string. Each row must come
+// back holding its OWN original status.
+func TestBulkTriageNeverModifiesStatus(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithMixedResults(t, s,
+		models.StatusFail, models.StatusError, models.StatusError, models.StatusFail)
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": idsOf(results), "defect_type": "automation_bug",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, 4, resp["updated"], "every row in this selection is a failure")
+	assert.EqualValues(t, 0, resp["skipped"])
+
+	for i, rr := range results {
+		got, err := s.GetRunResultByID(rr.ID)
+		require.NoError(t, err)
+		assert.Equal(t, rr.Status, got.Status, "row %d lost its own status to the shared update map", i)
+		assert.Equal(t, "automation_bug", got.DefectType, "row %d: the one decision applies to every failure", i)
+	}
+}
+
+// The smear guard of TestBulkUpdateSnapshotsPerResultAISuggestion, extended over a selection that
+// mixes FAIL and ERROR — the combination Mode 2 makes reachable for the first time. Same trap:
+// the snapshot values differ per row, so folding them into the shared statement would hand every
+// row one row's verdict. Two verdicts collapse to the same defect_type (only the snapshotted
+// verdict distinguishes them), two rows share a bucket, and flaky_test appears at two DIFFERENT
+// confidences so a bucket keyed on the verdict alone fails here rather than passing by luck.
+func TestBulkTriageSnapshotsPerResultAcrossFailAndError(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithMixedResults(t, s,
+		models.StatusFail, models.StatusError, models.StatusError,
+		models.StatusFail, models.StatusError, models.StatusPass)
+
+	seeded := []struct{ verdict, confidence, wantSuggested string }{
+		{models.VerdictFlakyTest, models.ConfidenceHigh, "automation_bug"},
+		{models.VerdictTestData, models.ConfidenceLow, "automation_bug"},   // same defect_type, other verdict
+		{models.VerdictProductBug, models.ConfidenceMedium, "product_bug"}, // on an ERROR row
+		{models.VerdictFlakyTest, models.ConfidenceHigh, "automation_bug"}, // shares row 0's bucket
+		{models.VerdictFlakyTest, models.ConfidenceLow, "automation_bug"},  // same verdict, other confidence
+		{models.VerdictEnvironment, models.ConfidenceHigh, "system_issue"}, // on the PASS row: never snapshotted
+	}
+	for i, rr := range results {
+		_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+			RunResultID: rr.ID, Verdict: seeded[i].verdict, Confidence: seeded[i].confidence, ModelName: "m",
+		})
+		require.NoError(t, err)
+	}
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": idsOf(results), "defect_type": "system_issue",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	for i, rr := range results[:5] {
+		got, err := s.GetRunResultByID(rr.ID)
+		require.NoError(t, err)
+		assert.Equal(t, rr.Status, got.Status, "row %d", i)
+		assert.Equal(t, "system_issue", got.DefectType, "row %d: the one human decision applies to every failure", i)
+		assert.Equal(t, seeded[i].verdict, got.SuggestedVerdict, "row %d got another row's verdict", i)
+		assert.Equal(t, seeded[i].wantSuggested, got.SuggestedDefectType, "row %d got another row's suggestion", i)
+		assert.Equal(t, seeded[i].confidence, got.SuggestedConfidence, "row %d got another row's confidence", i)
+		assert.NotNil(t, got.DecidedAt, "row %d: an explicit decision belongs in the calibration window", i)
+	}
+
+	// The skipped PASS row took no part in the decision, so it must carry no calibration record —
+	// snapshotting it would invent a decision against a row nobody triaged.
+	got, err := s.GetRunResultByID(results[5].ID)
+	require.NoError(t, err)
+	assert.Equal(t, models.StatusPass, got.Status)
+	assert.Empty(t, got.DefectType)
+	assert.Empty(t, got.SuggestedVerdict, "a skipped row must never be snapshotted")
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
+	assert.Nil(t, got.DecidedAt)
+}
+
+// The fail-closed guard of TestBulkUpdateFailedSnapshotLeavesNoStaleSuggestion, carried into
+// Mode 2 — the invariant that had to survive the partition refactor. The clearing must stay folded
+// into the SAME statement that writes defect_type; the snapshot remains a separate best-effort
+// pass, so when it fails the columns are left BLANK (excluded from the calibration set) rather
+// than holding the suggestion recorded for an EARLIER decision.
+//
+// The trigger aborts any write of a NON-EMPTY suggestion, which is exactly the grouped second-pass
+// write: the main statement only ever blanks these columns and passes straight through. Move the
+// clearing out of it and this row ends up ERROR + the new system_issue + the stale product_bug
+// suggestion — every clause of accuracyCalibrationFilter satisfied, fabricating a disagreement no
+// human ever made.
+func TestBulkTriageFailedSnapshotLeavesNoStaleSuggestion(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithMixedResults(t, s, models.StatusError)
+	rr := results[0]
+
+	// A previous decision already put this row in the calibration set...
+	stale := time.Now().UTC().Add(-time.Hour)
+	require.NoError(t, s.UpdateRunResult(run.ID, rr.ID, map[string]interface{}{
+		"defect_type":           "product_bug",
+		"suggested_verdict":     models.VerdictProductBug,
+		"suggested_defect_type": "product_bug",
+		"suggested_confidence":  models.ConfidenceHigh,
+		"decided_at":            stale,
+	}))
+	// ...and it still has an analysis, so the second pass WOULD bucket and snapshot it.
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceLow, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, s.DB().Exec(`
+		CREATE TRIGGER fail_snapshot_write BEFORE UPDATE OF suggested_verdict ON run_results
+		WHEN NEW.suggested_verdict != ''
+		BEGIN SELECT RAISE(ABORT, 'simulated snapshot write failure'); END`).Error)
+	t.Cleanup(func() { _ = s.DB().Exec(`DROP TRIGGER IF EXISTS fail_snapshot_write`).Error })
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": []string{rr.ID}, "defect_type": "system_issue",
+	})
+	require.Equal(t, http.StatusOK, w.Code, "a failed snapshot must never fail the human's triage: %s", w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusError, got.Status, "triage must not have touched the status")
+	require.Equal(t, "system_issue", got.DefectType, "the triage decision itself must land")
+	assert.Empty(t, got.SuggestedVerdict, "the old suggestion belonged to the previous decision")
+	assert.Empty(t, got.SuggestedDefectType, "leaving it would score system_issue against a product_bug suggestion")
+	assert.Empty(t, got.SuggestedConfidence)
+	assert.Nil(t, got.DecidedAt, "a blank decided_at keeps the row out of the calibration window")
+}
+
+// Selecting rows that all turn out to be non-failures is a normal outcome of triaging a mixed
+// grid, not a malformed request: nothing was written, and the counts say so. A 4xx here would push
+// the frontend into presenting an ordinary edge case as an error worth retrying.
+func TestBulkTriageAllSkippedIsSuccessWithZeroUpdated(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithMixedResults(t, s, models.StatusPass, models.StatusSkip)
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": idsOf(results), "defect_type": "product_bug",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	var resp map[string]any
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.EqualValues(t, 0, resp["updated"])
+	assert.EqualValues(t, 2, resp["skipped"])
+
+	for i, rr := range results {
+		got, err := s.GetRunResultByID(rr.ID)
+		require.NoError(t, err)
+		assert.Equal(t, rr.Status, got.Status, "row %d", i)
+		assert.Empty(t, got.DefectType, "row %d", i)
+	}
+}
+
 // The single-result path validates defect_type against the SAME canonical set, so the two
 // endpoints agree on what is acceptable. Without this, bulk would 400 on garbage while this
 // endpoint silently persisted it.

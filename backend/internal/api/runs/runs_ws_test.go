@@ -142,6 +142,45 @@ func TestBulkUpdateBroadcastsPatch(t *testing.T) {
 	assert.EqualValues(t, 2, run["passed_results"])
 }
 
+// The Mode-2 counterpart of the test above, and the guard on the LIVE GRID rather than the DB.
+// applyResultDelta (frontend src/utils/runResults.js) merges the patch into every id the event
+// lists, so a status-less bulk triage that broadcast the whole selection with "status": "" would
+// blank the status of every row on screen — including the PASS rows the server correctly refused
+// to touch, which would then read as untriaged failures until the next full refetch. The patch
+// must omit status entirely and the event must list only the rows actually written.
+func TestBulkTriageBroadcastsPatchWithoutStatus(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	conn, done := dialRunsWS(t, env)
+	defer done()
+
+	runID, tcIDs := createRunWithCases(t, env, 3)
+	statuses := []string{"FAIL", "ERROR", "PASS"}
+	var ids []string
+	for i, tcID := range tcIDs {
+		created := createJSON(t, env, "/api/runs/"+runID+"/results",
+			map[string]any{"test_case_id": tcID, "status": statuses[i]})
+		ids = append(ids, created["id"].(string))
+	}
+
+	rr := doRequest(env, http.MethodPost, "/api/runs/"+runID+"/results/bulk-update",
+		map[string]any{"result_ids": ids, "defect_type": "product_bug"})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	msg := readEventOfType(t, conn, "result_bulk_updated")
+	data := msg["data"].(map[string]any)
+	assert.Equal(t, runID, data["run_id"])
+	assert.ElementsMatch(t, []any{ids[0], ids[1]}, data["result_ids"].([]any),
+		"the skipped PASS row must not appear in the event at all")
+	patch := data["patch"].(map[string]any)
+	assert.NotContains(t, patch, "status",
+		"an empty status in the patch blanks the status of every listed row in the live grid")
+	assert.Equal(t, "product_bug", patch["defect_type"])
+	assert.Contains(t, patch, "updated_at")
+	_, hasRows := data["results"]
+	assert.False(t, hasRows, "bulk delta carries ids+patch, not rows")
+}
+
 func TestRetryBroadcastsNewRow(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()

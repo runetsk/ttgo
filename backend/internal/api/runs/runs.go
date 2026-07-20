@@ -1032,7 +1032,7 @@ func (h *Handler) AssignRun(w http.ResponseWriter, r *http.Request) {
 // BulkUpdateRunResults godoc
 //
 // @Summary      Bulk update run results
-// @Description  Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. For a failure status (FAIL or ERROR) defect_type defaults to "to_investigate" when not given; every other status clears it.
+// @Description  Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. When status is given it is applied to every selected result; for a failure status (FAIL or ERROR) defect_type defaults to "to_investigate" when not given, and every other status clears it. When status is omitted the request is a triage-only decision: defect_type is applied without touching status, and only to results whose stored status is FAIL or ERROR — the rest are left untouched and reported in "skipped".
 // @Tags         runs
 // @Accept       json
 // @Produce      json
@@ -1082,15 +1082,54 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 
 	now := time.Now()
 
+	// Which rows the request actually applies to.
+	//
+	// Mode 1 (status supplied): every selected row, as always — the caller is stating what the
+	// rows should become, so their stored status is irrelevant.
+	//
+	// Mode 2 (status absent, defect_type supplied): a pure triage decision. defect_type is only
+	// meaningful on a failure, and there is no status in the request to make a non-failure row
+	// into one, so the STORED status decides. Rows failing that test are reported as skipped and
+	// left completely alone — writing the shared map over them would set defect_type on a PASS,
+	// which every other path in this file treats as impossible.
+	targetIDs, skipped := req.ResultIDs, 0
+	if req.Status == "" {
+		statuses, err := h.store.ListRunResultStatuses(runID, req.ResultIDs)
+		if err != nil {
+			slog.ErrorContext(r.Context(), "failed to read result statuses for bulk triage", "run_id", runID, "error", err)
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		applicable := make([]string, 0, len(req.ResultIDs))
+		for _, id := range req.ResultIDs {
+			// An id absent from the map (not in this run) resolves to the zero status, which is
+			// not a failure — so foreign ids are skipped rather than silently counted as updated.
+			if models.IsFailureStatus(statuses[id]) {
+				applicable = append(applicable, id)
+			}
+		}
+		targetIDs, skipped = applicable, len(req.ResultIDs)-len(applicable)
+	}
+	if len(targetIDs) == 0 {
+		// Only reachable in Mode 2 (Mode 1 keeps the whole non-empty selection). Nothing was
+		// written, so nothing is broadcast either. This is a 200, not an error: selecting a mixed
+		// set and triaging it is the normal way to use the picker, and "none of these were
+		// failures" is a reportable outcome rather than a bad request.
+		httpx.JSON(w, http.StatusOK, map[string]interface{}{"status": "updated", "updated": 0, "skipped": skipped})
+		return
+	}
+
 	// An explicitly supplied defect_type on a failure is a human triage decision; the
 	// "to_investigate" auto-default (empty req.DefectType) means "not triaged yet" and is
 	// deliberately not one. It matches the single-result path, which touches these columns only
 	// when the caller explicitly supplied a defect_type.
 	//
-	// This gate drives the CLEARING folded into the main statement below. The snapshot pass after
-	// it uses a narrower gate; clearing on the wider one is what keeps the pair fail-closed, since
-	// clearing without snapshotting leaves the columns blank and blank is excluded from the
-	// calibration set. The reverse pairing would be the bug.
+	// One gate drives BOTH the clearing folded into the main statement below and the snapshot pass
+	// after it, because both now run over targetIDs — the rows that are failures either way they
+	// got there. That pairing is what keeps bulk fail-closed: the clear lands atomically with
+	// defect_type, the snapshot is a separate best-effort pass, so a failure of the second leaves
+	// the columns blank and blank is excluded from the calibration set. The reverse pairing —
+	// snapshotting rows the main statement did not clear — would be the bug.
 	isTriage := req.DefectType != "" &&
 		(req.Status == "" || models.IsFailureStatus(models.ExecutionStatus(req.Status)))
 
@@ -1099,8 +1138,10 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case req.Status == "":
-		// Triage-only: apply the defect_type and leave status alone. Narrowing this to rows whose
-		// STORED status is a failure, and snapshotting them, is Mode 2 — see the snapshot gate below.
+		// Mode 2: apply the defect_type and leave status alone. "status" is deliberately absent
+		// from this map — targetIDs was already narrowed to the stored failures above, so there is
+		// nothing to correct here, and a status key would silently rewrite rows the caller never
+		// asked to change.
 		updateMap["defect_type"] = req.DefectType
 	case models.IsFailureStatus(models.ExecutionStatus(req.Status)):
 		// FAIL and ERROR are both failures and both triageable, exactly as the single-result path
@@ -1128,37 +1169,49 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		clearAISuggestion(updateMap)
 	}
 
-	if err := h.store.BulkUpdateRunResults(runID, req.ResultIDs, updateMap); err != nil {
+	if err := h.store.BulkUpdateRunResults(runID, targetIDs, updateMap); err != nil {
 		slog.ErrorContext(r.Context(), "failed to bulk update results in run", "run_id", runID, "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
 
 	// Snapshot what the AI suggested for each result. snapshotAISuggestionsBulk has no status gate
-	// of its own — it snapshots every id handed to it — so it may only run when a supplied failure
-	// status makes EVERY selected row a failure. The status-absent shape needs a partition on the
-	// STORED status first; until that lands it triages fail-closed instead: defect_type is written,
-	// the snapshot columns are cleared above and stay blank, and blank is excluded from
-	// accuracyCalibrationFilter. Only the snapshot is deferred, never the correctness.
-	if isTriage && req.Status != "" {
-		h.snapshotAISuggestionsBulk(r.Context(), runID, req.ResultIDs, now)
+	// of its own — it snapshots every id handed to it — which is exactly why it is handed targetIDs
+	// and not req.ResultIDs: in Mode 1 a supplied failure status makes every selected row a
+	// failure, and in Mode 2 the partition above already dropped everything that was not one.
+	if isTriage {
+		h.snapshotAISuggestionsBulk(r.Context(), runID, targetIDs, now)
 	}
 
-	if _, err := h.store.MarkRunRunningIfPending(runID); err != nil {
-		slog.WarnContext(r.Context(), "failed to auto-start run", "run_id", runID, "error", err)
+	// Mode 2 changes no result status, so it must not start a PENDING run either — matching the
+	// single-result path, which auto-starts only when the caller supplied a status.
+	if req.Status != "" {
+		if _, err := h.store.MarkRunRunningIfPending(runID); err != nil {
+			slog.WarnContext(r.Context(), "failed to auto-start run", "run_id", runID, "error", err)
+		}
 	}
 
 	h.store.TouchTestRun(runID)
 
-	h.broadcastResultDelta(apiws.EventResultBulkUpdated, runID, req.ResultIDs, map[string]any{
-		"status":      req.Status,
+	// The patch is applied client-side to every id in the event (frontend utils/runResults.js,
+	// applyResultDelta), so it must describe ONLY what was actually written and target ONLY the
+	// rows it was written to. A "status" key here in Mode 2 would carry the empty req.Status and
+	// blank the status of every listed row in the live grid; listing the skipped ids would apply
+	// someone else's defect_type to them. Mode 1 is unaffected: targetIDs is the full selection
+	// and req.Status is non-empty by definition.
+	patch := map[string]any{
 		"defect_type": updateMap["defect_type"],
 		"updated_at":  now,
-	}, nil)
+	}
+	if req.Status != "" {
+		patch["status"] = req.Status
+	}
+	h.broadcastResultDelta(apiws.EventResultBulkUpdated, runID, targetIDs, patch, nil)
 
 	resp := map[string]interface{}{
 		"status":  "updated",
-		"updated": len(req.ResultIDs),
+		"updated": len(targetIDs),
+		"skipped": skipped,
 	}
 	httpx.JSON(w, http.StatusOK, resp)
 }

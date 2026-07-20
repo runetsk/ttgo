@@ -800,7 +800,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. The window is measured on the moment the decision was recorded, not on when the row was last touched. Only explicitly triaged FAIL results that carried a suggestion at the decision moment are counted — results still sitting at the \"to_investigate\" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements. ERROR results are outside the set by construction: only FAIL rows expose the defect_type control that records a decision.",
+                "description": "Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. The window is measured on the moment the decision was recorded, not on when the row was last touched. Only explicitly triaged failing results (FAIL or ERROR) that carried a suggestion at the decision moment are counted — results still sitting at the \"to_investigate\" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements.",
                 "produces": [
                     "application/json"
                 ],
@@ -5909,7 +5909,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Applies the same status (and, for FAIL, a defect_type — defaulting to \"to_investigate\" when not given) to multiple results within a run.",
+                "description": "Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. When status is given it is applied to every selected result; for a failure status (FAIL or ERROR) defect_type defaults to \"to_investigate\" when not given, and every other status clears it. When status is omitted the request is a triage-only decision: defect_type is applied without touching status, and only to results whose stored status is FAIL or ERROR — the rest are left untouched and reported in \"skipped\".",
                 "consumes": [
                     "application/json"
                 ],
@@ -5958,6 +5958,9 @@ const docTemplate = `{
                         "schema": {
                             "type": "object",
                             "properties": {
+                                "skipped": {
+                                    "type": "integer"
+                                },
                                 "status": {
                                     "type": "string"
                                 },
@@ -9624,7 +9627,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "defect_type": {
-                    "description": "DefectType classifies the failure reason for FAIL results.\nValues: \"to_investigate\" | \"product_bug\" | \"automation_bug\" | \"system_issue\" | \"\" (not applicable)",
+                    "description": "DefectType classifies the failure reason for failing results — FAIL and ERROR alike, per\nIsFailureStatus. Every other status forces \"\" (there is nothing to triage).\nValues: \"to_investigate\" | \"product_bug\" | \"automation_bug\" | \"system_issue\" | \"\" (not applicable)",
                     "type": "string"
                 },
                 "duration_ms": {
@@ -9690,7 +9693,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "suggested_verdict": {
-                    "description": "Snapshot of what the AI failure analysis suggested at the moment a human explicitly set\nDefectType. Written only on an explicit triage decision on a FAIL result that has an\nanalysis — never on the \"to_investigate\" auto-default path. Agreement is then a pure\ncomparison of SuggestedDefectType vs DefectType.\n\nSuggestedVerdict is kept alongside SuggestedDefectType because the verdict -\u003e defect_type\nmapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.\n\nAll three are CLEARED whenever a triage decision is written without a snapshot behind it\n(non-FAIL result, no analysis, lookup failure) so a new decision can never be scored\nagainst a suggestion left over from an older one.",
+                    "description": "Snapshot of what the AI failure analysis suggested at the moment a human explicitly set\nDefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)\nthat has an analysis — never on the \"to_investigate\" auto-default path. Agreement is then a\npure comparison of SuggestedDefectType vs DefectType.\n\nSuggestedVerdict is kept alongside SuggestedDefectType because the verdict -\u003e defect_type\nmapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.\n\nAll three are CLEARED whenever a triage decision is written without a snapshot behind it\n(non-failure result, no analysis, lookup failure) so a new decision can never be scored\nagainst a suggestion left over from an older one.",
                     "type": "string"
                 },
                 "test_case": {
