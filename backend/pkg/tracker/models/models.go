@@ -115,6 +115,12 @@ func IsFailureStatus(s ExecutionStatus) bool {
 	return s == StatusFail || s == StatusError
 }
 
+// FailureStatuses is the same set as IsFailureStatus, in the form SQL needs: an `IN (?)` bind for
+// queries that must narrow to failing rows inside the statement rather than in Go. Kept next to the
+// predicate, and pinned to it by TestFailureStatusesMatchesPredicate, so a future third failure
+// status cannot be added to one and forgotten in the other.
+var FailureStatuses = []ExecutionStatus{StatusFail, StatusError}
+
 // ValidRunStatuses is the set of allowed test run statuses.
 //
 // Run-level only. See the warning on IsFailureStatus above: this set omits ERROR and is not a
@@ -309,8 +315,15 @@ type RunResult struct {
 
 	// Snapshot of what the AI failure analysis suggested at the moment a human explicitly set
 	// DefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)
-	// that has an analysis — never on the "to_investigate" auto-default path. Agreement is then a
-	// pure comparison of SuggestedDefectType vs DefectType.
+	// that has an analysis — never on the AUTO-default path, where a bare status change stamps
+	// "to_investigate" with no human having chosen anything. Agreement is then a pure comparison of
+	// SuggestedDefectType vs DefectType.
+	//
+	// Explicitly PICKING "to_investigate" (both endpoints allow it — it is how a reviewer sends a
+	// row back to the untriaged pile) does write these columns: it is a real request, and treating
+	// it differently would make the two endpoints disagree on identical input. Such a row still
+	// contributes nothing to the metric, because accuracyCalibrationFilter counts only the three
+	// conclusive defect types.
 	//
 	// SuggestedVerdict is kept alongside SuggestedDefectType because the verdict -> defect_type
 	// mapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.

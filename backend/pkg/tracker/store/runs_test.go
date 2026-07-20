@@ -169,6 +169,64 @@ func TestUpdateRunResultByPK(t *testing.T) {
 	assert.Equal(t, models.StatusPass, got.RunResults[0].Status)
 }
 
+// BulkTriageRunResults carries the failure test INSIDE the UPDATE, which is what makes the API's
+// read-then-write partition atomic: the handler reads the statuses first, and anything that changes
+// a row in the window between (CI re-reporting, another bulk update, the execute page) must not end
+// up with a triage decision stamped on it. The row seeded PASS below stands in for that racer — the
+// handler's own pre-filter would have dropped it, so only the statement's guard can refuse it here.
+//
+// The returned count is the other half: it reports rows actually written, so the caller can tell
+// "applied to 2 of 3" without trusting the list it sent.
+func TestBulkTriageRunResultsOnlyTouchesFailures(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "Triage Guard"}
+	require.NoError(t, s.CreateTestRun(run))
+
+	var ids []string
+	for _, status := range []models.ExecutionStatus{models.StatusFail, models.StatusError, models.StatusPass} {
+		rr := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: string(status), Status: status}
+		require.NoError(t, s.AddRunResult(rr))
+		ids = append(ids, rr.ID)
+	}
+
+	n, err := s.BulkTriageRunResults(run.ID, ids, map[string]interface{}{"defect_type": "product_bug"})
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, n, "only the FAIL and the ERROR are triageable")
+
+	want := []string{"product_bug", "product_bug", ""}
+	for i, id := range ids {
+		got, err := s.GetRunResultByID(id)
+		require.NoError(t, err)
+		assert.Equal(t, want[i], got.DefectType, "row %d", i)
+	}
+}
+
+// The count must come from the statement, not the caller's list: a repeated id matches its row
+// once, and an id from another run matches nothing at all. Reporting len(ids) would claim writes
+// against rows that do not exist.
+func TestBulkUpdateRunResultsCountsRowsNotIDs(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "Count Test"}
+	require.NoError(t, s.CreateTestRun(run))
+	other := &models.TestRun{Name: "Other Run"}
+	require.NoError(t, s.CreateTestRun(other))
+
+	mine := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: "mine", Status: models.StatusFail}
+	require.NoError(t, s.AddRunResult(mine))
+	foreign := &models.RunResult{TestRunID: other.ID, TestNameSnapshot: "foreign", Status: models.StatusFail}
+	require.NoError(t, s.AddRunResult(foreign))
+
+	n, err := s.BulkUpdateRunResults(run.ID,
+		[]string{mine.ID, mine.ID, foreign.ID, "does-not-exist"},
+		map[string]interface{}{"defect_type": "system_issue"})
+	require.NoError(t, err)
+	assert.EqualValues(t, 1, n, "one real row, however many ids named it")
+
+	got, err := s.GetRunResultByID(foreign.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.DefectType, "a result in another run must be out of reach")
+}
+
 func TestDeleteRunResultByPK(t *testing.T) {
 	s := newTestStore(t)
 	folder, _ := s.CreateFolder("Root", nil)

@@ -15,8 +15,9 @@ export const BULK_DEFECT_TYPE_OPTIONS = [
 
 // buildBulkDefectTypePayload returns the request body for a triage-mode bulk update, or
 // null when the action must not fire at all (nothing selected, or an unknown defect type).
-// A null return is also what drives the picker's enabled state, so the two can never
-// disagree.
+// The picker itself only exists while something is selected — the whole bulk bar is mounted
+// on that condition — so the null return is the guard for the paths that condition does not
+// cover: a selection cleared between render and change, and a value outside the option list.
 //
 // ⚠️ Triage mode is defined by the ABSENCE of `status`. Never add a status key here: that
 // would switch the endpoint to Mode 1, which applies the status to every selected row and

@@ -413,7 +413,6 @@ export default function ResultsTab({
                 aria-label="Set defect type for selected results"
                 title="Apply a defect type to the selected failures — passed and skipped rows are left untouched"
                 defaultValue=""
-                disabled={selectedResults.size === 0}
                 onChange={(e) => {
                     const value = e.target.value;
                     e.target.value = '';

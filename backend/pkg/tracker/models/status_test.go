@@ -30,16 +30,34 @@ func TestIsFailureStatus(t *testing.T) {
 	}
 }
 
-// the failure set must stay a strict subset of the valid execution statuses, so a newly added
-// status constant cannot quietly become a failure without this test being updated.
-func TestIsFailureStatusIsSubsetOfValidExecutionStatuses(t *testing.T) {
-	var failures int
-	for status := range ValidExecutionStatuses {
-		if IsFailureStatus(status) {
-			failures++
-		}
+// The failure set must be a subset of the valid execution statuses: a status nothing can ever be
+// stored as cannot be a failure, and a SQL `status IN (...)` built from one would silently match
+// no rows. Asserted as the actual containment, not as a count of how many valid statuses happen to
+// be failures — a count holds just as well when the two sets have drifted apart.
+func TestFailureStatusesAreValidExecutionStatuses(t *testing.T) {
+	require.NotEmpty(t, FailureStatuses)
+	for _, status := range FailureStatuses {
+		require.True(t, ValidExecutionStatuses[status], "%q is a failure status but not a valid execution status", status)
 	}
-	require.Equal(t, 2, failures, "execution status set changed - review IsFailureStatus and its tests")
+}
+
+// FailureStatuses (what SQL binds) and IsFailureStatus (what Go branches on) are two spellings of
+// one set, so they are pinned to each other here: adding a third failure status to either alone
+// would make the store's triage guard and the handlers' partition disagree about which rows are
+// triageable.
+func TestFailureStatusesMatchesPredicate(t *testing.T) {
+	inSlice := func(s ExecutionStatus) bool {
+		for _, f := range FailureStatuses {
+			if f == s {
+				return true
+			}
+		}
+		return false
+	}
+	for status := range ValidExecutionStatuses {
+		require.Equal(t, IsFailureStatus(status), inSlice(status), "the two spellings of the failure set disagree on %q", status)
+	}
+	require.Len(t, FailureStatuses, 2, "execution status set changed - review IsFailureStatus and its tests")
 }
 
 func TestIsValidDefectType(t *testing.T) {

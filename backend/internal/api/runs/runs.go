@@ -248,17 +248,6 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		updateMap["status"] = *req.Status
-		// FAIL and ERROR are both failures and both triageable — the analyzer produces verdicts for
-		// each, so gating on FAIL alone stranded every ERROR verdict as ungradeable. A failure with
-		// no explicit decision starts at the "nobody has looked at this yet" default; every
-		// non-failure status clears defect_type, because there is nothing to triage.
-		if models.IsFailureStatus(models.ExecutionStatus(*req.Status)) {
-			if req.DefectType == nil {
-				updateMap["defect_type"] = "to_investigate"
-			}
-		} else {
-			updateMap["defect_type"] = ""
-		}
 	}
 	if req.DefectType != nil {
 		// Validated against the same canonical set the bulk endpoint uses. Without this the two
@@ -268,11 +257,38 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid defect_type"})
 			return
 		}
-		updateMap["defect_type"] = *req.DefectType
-		// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
-		// suggested at this exact moment. Deliberately NOT done for the "to_investigate"
-		// auto-default above: that means "not triaged yet", not a decision.
-		h.snapshotAISuggestion(r.Context(), resultID, updateMap, req.Status)
+	}
+
+	// defect_type is decided from the status the row will HOLD, never from what the caller asked
+	// for on its own. Resolving it here rather than inside the `req.Status != nil` block above is
+	// what stops {status:"PASS", defect_type:"product_bug"} from persisting a defect type on a
+	// passing row: the old shape wrote "" for the non-failure and then let the caller's value
+	// overwrite it two lines later, so the single-result path contradicted both the bulk endpoint
+	// and the invariant documented on models.RunResult.DefectType.
+	//
+	// The lookup costs nothing extra: it is skipped entirely when the caller supplied a status, and
+	// otherwise replaces the one snapshotAISuggestion used to make.
+	if req.Status != nil || req.DefectType != nil {
+		effStatus, known := h.effectiveResultStatus(r.Context(), resultID, req.Status)
+		switch {
+		case known && !models.IsFailureStatus(effStatus):
+			// Nothing to triage on a non-failure, whatever the caller sent. The snapshot columns go
+			// with it: leaving a previous decision's suggestion behind on a row whose defect_type
+			// was just blanked is the stale-pairing this codebase clears everywhere else.
+			updateMap["defect_type"] = ""
+			clearAISuggestion(updateMap)
+		case req.DefectType != nil:
+			// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
+			// suggested at this exact moment. `known` is false only when the row could not be read
+			// at all, in which case the UPDATE below matches nothing anyway; the snapshot helper
+			// re-derives the same status and fails closed on it.
+			updateMap["defect_type"] = *req.DefectType
+			h.snapshotAISuggestion(r.Context(), resultID, updateMap, req.Status)
+		case req.Status != nil:
+			// A failure with no explicit decision starts at the "nobody has looked at this yet"
+			// default. Deliberately NOT snapshotted: it is not a decision.
+			updateMap["defect_type"] = "to_investigate"
+		}
 	}
 	if req.ErrorMessage != nil {
 		updateMap["error_message"] = *req.ErrorMessage
@@ -457,7 +473,7 @@ func (h *Handler) snapshotAISuggestionsBulk(ctx context.Context, runID string, r
 		}
 		updates := map[string]interface{}{"updated_at": now}
 		clearAISuggestion(updates)
-		if err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {
+		if _, err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {
 			slog.WarnContext(ctx, "ai-suggestion bulk snapshot: clearing update failed",
 				"run_id", runID, "reason", reason, "count", len(ids), "error", err)
 		}
@@ -493,7 +509,7 @@ func (h *Handler) snapshotAISuggestionsBulk(ctx context.Context, runID string, r
 			"decided_at":            decidedAt,
 			"updated_at":            now,
 		}
-		if err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {
+		if _, err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {
 			slog.WarnContext(ctx, "ai-suggestion bulk snapshot: grouped update failed",
 				"run_id", runID, "verdict", k.verdict, "count", len(ids), "error", err)
 		}
@@ -607,7 +623,7 @@ func (h *Handler) UpdateTestRun(w http.ResponseWriter, r *http.Request) {
 // AddRunResult godoc
 //
 // @Summary      Add a result to a run
-// @Description  Adds a single test-case result snapshot to an existing test run, validating artifact URLs (video, trace_url, screenshots).
+// @Description  Adds a single test-case result snapshot to an existing test run, validating artifact URLs (video, trace_url, screenshots) and defect_type. defect_type is kept only for a failure status (FAIL or ERROR) and cleared for any other.
 // @Tags         runs
 // @Accept       json
 // @Produce      json
@@ -649,8 +665,23 @@ func (h *Handler) AddRunResult(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "screenshots must be a JSON array of http(s)/relative URLs"})
 		return
 	}
+	// Validate defect_type on the create path too, for the same reason the update and bulk paths do
+	// it — and with more urgency, because this is the endpoint CI ingest and `ttgo runs results add
+	// --defect-type` write through, i.e. the highest-volume and least-supervised writer of the
+	// column. Skipping it here let an unvalidated string reach every calibration and counter query
+	// that groups by defect_type, and reach the failure-analysis prompt, where enrich.go interpolates
+	// the stored value OUTSIDE the <<<DATA ... DATA>>> fences that wrap untrusted error text.
+	if !models.IsValidDefectType(req.DefectType) {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid defect_type"})
+		return
+	}
 
 	result := req.ToRunResult(runID)
+	// Same status gate as the update and bulk paths: defect_type is meaningful only on a failure, so
+	// a create that reports PASS carries nothing to triage no matter what it sent.
+	if !models.IsFailureStatus(result.Status) {
+		result.DefectType = ""
+	}
 	if err := h.store.AddRunResult(result); err != nil {
 		if strings.Contains(err.Error(), "already exists") {
 			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
@@ -1029,10 +1060,24 @@ func (h *Handler) AssignRun(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]string{"status": "assigned"})
 }
 
+// dedupeStrings returns the input with repeats removed, preserving first-seen order.
+func dedupeStrings(in []string) []string {
+	seen := make(map[string]struct{}, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		out = append(out, s)
+	}
+	return out
+}
+
 // BulkUpdateRunResults godoc
 //
 // @Summary      Bulk update run results
-// @Description  Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. When status is given it is applied to every selected result; for a failure status (FAIL or ERROR) defect_type defaults to "to_investigate" when not given, and every other status clears it. When status is omitted the request is a triage-only decision: defect_type is applied without touching status, and only to results whose stored status is FAIL or ERROR — the rest are left untouched and reported in "skipped".
+// @Description  Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. When status is given it is applied to every selected result; for a failure status (FAIL or ERROR) defect_type defaults to "to_investigate" when not given, and every other status clears it. When status is omitted the request is a triage-only decision: defect_type is applied without touching status, and only to results whose stored status is FAIL or ERROR — the rest are left untouched and reported in "skipped". "updated" counts the rows actually written, so repeated ids and ids outside this run land in "skipped" rather than being reported as writes.
 // @Tags         runs
 // @Accept       json
 // @Produce      json
@@ -1092,30 +1137,37 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	// into one, so the STORED status decides. Rows failing that test are reported as skipped and
 	// left completely alone — writing the shared map over them would set defect_type on a PASS,
 	// which every other path in this file treats as impossible.
-	targetIDs, skipped := req.ResultIDs, 0
+	//
+	// The selection is deduplicated first, because every count below is a count of ROWS: an UPDATE
+	// matches a row once however many times the caller listed its id, so reporting over the raw
+	// list would claim more rows were written than the run even contains.
+	requestedIDs := dedupeStrings(req.ResultIDs)
+	targetIDs := requestedIDs
 	if req.Status == "" {
-		statuses, err := h.store.ListRunResultStatuses(runID, req.ResultIDs)
+		statuses, err := h.store.ListRunResultStatuses(runID, requestedIDs)
 		if err != nil {
 			slog.ErrorContext(r.Context(), "failed to read result statuses for bulk triage", "run_id", runID, "error", err)
 			httpx.Error(w, http.StatusInternalServerError, err)
 			return
 		}
-		applicable := make([]string, 0, len(req.ResultIDs))
-		for _, id := range req.ResultIDs {
+		applicable := make([]string, 0, len(requestedIDs))
+		for _, id := range requestedIDs {
 			// An id absent from the map (not in this run) resolves to the zero status, which is
 			// not a failure — so foreign ids are skipped rather than silently counted as updated.
 			if models.IsFailureStatus(statuses[id]) {
 				applicable = append(applicable, id)
 			}
 		}
-		targetIDs, skipped = applicable, len(req.ResultIDs)-len(applicable)
+		targetIDs = applicable
 	}
 	if len(targetIDs) == 0 {
 		// Only reachable in Mode 2 (Mode 1 keeps the whole non-empty selection). Nothing was
 		// written, so nothing is broadcast either. This is a 200, not an error: selecting a mixed
 		// set and triaging it is the normal way to use the picker, and "none of these were
 		// failures" is a reportable outcome rather than a bad request.
-		httpx.JSON(w, http.StatusOK, map[string]interface{}{"status": "updated", "updated": 0, "skipped": skipped})
+		httpx.JSON(w, http.StatusOK, map[string]interface{}{
+			"status": "updated", "updated": 0, "skipped": len(requestedIDs),
+		})
 		return
 	}
 
@@ -1155,9 +1207,13 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 			updateMap["defect_type"] = "to_investigate"
 		}
 	default:
-		// PASS/SKIP/PENDING/RUNNING have nothing to triage.
+		// PASS/SKIP/PENDING/RUNNING have nothing to triage. Blanking defect_type without also
+		// blanking the snapshot columns would strand a previous decision's suggestion on the row,
+		// so the clear is folded in here for the same reason isTriage folds it in below — this
+		// branch is simply the other way a row's defect_type gets rewritten.
 		updateMap["status"] = req.Status
 		updateMap["defect_type"] = ""
+		clearAISuggestion(updateMap)
 	}
 	if isTriage {
 		// Blanked in the SAME statement that writes defect_type, exactly as the single-result
@@ -1169,7 +1225,18 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		clearAISuggestion(updateMap)
 	}
 
-	if err := h.store.BulkUpdateRunResults(runID, targetIDs, updateMap); err != nil {
+	// Mode 2 goes through the status-guarded statement so the partition above is ATOMIC. Reading the
+	// statuses and updating afterwards is a check-then-act: between the two, CI can re-report a
+	// result, another bulk update can land, or the execute page can mark it PASS — and the UPDATE
+	// would then write a triage decision onto a row that stopped being a failure. Repeating the test
+	// inside the statement closes that window. Mode 1 needs no such guard: the caller is stating what
+	// the rows should become, so their prior status is irrelevant by definition.
+	update := h.store.BulkUpdateRunResults
+	if req.Status == "" {
+		update = h.store.BulkTriageRunResults
+	}
+	updated, err := update(runID, targetIDs, updateMap)
+	if err != nil {
 		slog.ErrorContext(r.Context(), "failed to bulk update results in run", "run_id", runID, "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -1194,11 +1261,18 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	h.store.TouchTestRun(runID)
 
 	// The patch is applied client-side to every id in the event (frontend utils/runResults.js,
-	// applyResultDelta), so it must describe ONLY what was actually written and target ONLY the
-	// rows it was written to. A "status" key here in Mode 2 would carry the empty req.Status and
+	// applyResultDelta), so it must carry ONLY values that hold for every listed row and target ONLY
+	// the rows it was written to. A "status" key here in Mode 2 would carry the empty req.Status and
 	// blank the status of every listed row in the live grid; listing the skipped ids would apply
 	// someone else's defect_type to them. Mode 1 is unaffected: targetIDs is the full selection
 	// and req.Status is non-empty by definition.
+	//
+	// The snapshot columns are deliberately NOT in here even though the statement above blanked
+	// them. They are per-row by the time the client would see them — snapshotAISuggestionsBulk has
+	// already refilled each row with its OWN verdict — so a shared patch could only carry the
+	// pre-snapshot blanks and would under-report every triaged row. They are display-only (the
+	// suggestion chip hides itself once a row is triaged, which the defect_type in this patch
+	// already conveys), so a stale local copy corrects itself on the next fetch.
 	patch := map[string]any{
 		"defect_type": updateMap["defect_type"],
 		"updated_at":  now,
@@ -1208,10 +1282,14 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	}
 	h.broadcastResultDelta(apiws.EventResultBulkUpdated, runID, targetIDs, patch, nil)
 
+	// Counted from what the statement matched, not from what the caller listed: ids belonging to
+	// another run, ids that no longer exist, and rows a concurrent write moved out of the failure
+	// set in Mode 2 all have to land in "skipped", or the response would claim writes that never
+	// happened.
 	resp := map[string]interface{}{
 		"status":  "updated",
-		"updated": len(targetIDs),
-		"skipped": skipped,
+		"updated": updated,
+		"skipped": len(requestedIDs) - int(updated),
 	}
 	httpx.JSON(w, http.StatusOK, resp)
 }

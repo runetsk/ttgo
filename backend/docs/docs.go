@@ -5740,7 +5740,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Adds a single test-case result snapshot to an existing test run, validating artifact URLs (video, trace_url, screenshots).",
+                "description": "Adds a single test-case result snapshot to an existing test run, validating artifact URLs (video, trace_url, screenshots) and defect_type. defect_type is kept only for a failure status (FAIL or ERROR) and cleared for any other.",
                 "consumes": [
                     "application/json"
                 ],
@@ -5909,7 +5909,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. When status is given it is applied to every selected result; for a failure status (FAIL or ERROR) defect_type defaults to \"to_investigate\" when not given, and every other status clears it. When status is omitted the request is a triage-only decision: defect_type is applied without touching status, and only to results whose stored status is FAIL or ERROR — the rest are left untouched and reported in \"skipped\".",
+                "description": "Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. When status is given it is applied to every selected result; for a failure status (FAIL or ERROR) defect_type defaults to \"to_investigate\" when not given, and every other status clears it. When status is omitted the request is a triage-only decision: defect_type is applied without touching status, and only to results whose stored status is FAIL or ERROR — the rest are left untouched and reported in \"skipped\". \"updated\" counts the rows actually written, so repeated ids and ids outside this run land in \"skipped\" rather than being reported as writes.",
                 "consumes": [
                     "application/json"
                 ],
@@ -9693,7 +9693,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "suggested_verdict": {
-                    "description": "Snapshot of what the AI failure analysis suggested at the moment a human explicitly set\nDefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)\nthat has an analysis — never on the \"to_investigate\" auto-default path. Agreement is then a\npure comparison of SuggestedDefectType vs DefectType.\n\nSuggestedVerdict is kept alongside SuggestedDefectType because the verdict -\u003e defect_type\nmapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.\n\nAll three are CLEARED whenever a triage decision is written without a snapshot behind it\n(non-failure result, no analysis, lookup failure) so a new decision can never be scored\nagainst a suggestion left over from an older one.",
+                    "description": "Snapshot of what the AI failure analysis suggested at the moment a human explicitly set\nDefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)\nthat has an analysis — never on the AUTO-default path, where a bare status change stamps\n\"to_investigate\" with no human having chosen anything. Agreement is then a pure comparison of\nSuggestedDefectType vs DefectType.\n\nExplicitly PICKING \"to_investigate\" (both endpoints allow it — it is how a reviewer sends a\nrow back to the untriaged pile) does write these columns: it is a real request, and treating\nit differently would make the two endpoints disagree on identical input. Such a row still\ncontributes nothing to the metric, because accuracyCalibrationFilter counts only the three\nconclusive defect types.\n\nSuggestedVerdict is kept alongside SuggestedDefectType because the verdict -\u003e defect_type\nmapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.\n\nAll three are CLEARED whenever a triage decision is written without a snapshot behind it\n(non-failure result, no analysis, lookup failure) so a new decision can never be scored\nagainst a suggestion left over from an older one.",
                     "type": "string"
                 },
                 "test_case": {

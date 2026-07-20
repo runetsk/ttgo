@@ -647,11 +647,31 @@ func (s *Store) UpdateRunResult(runID string, resultID string, updates interface
 		Updates(updates).Error
 }
 
-// BulkUpdateRunResults updates multiple run results in a single transaction.
-func (s *Store) BulkUpdateRunResults(runID string, resultIDs []string, updates map[string]interface{}) error {
-	return s.db.Model(&models.RunResult{}).
+// BulkUpdateRunResults updates multiple run results in a single transaction, returning how many
+// rows the statement actually matched. That count — not len(resultIDs) — is what callers must
+// report as "updated": ids belonging to another run, ids that no longer exist, and repeats of the
+// same id all inflate the request list without producing a write.
+func (s *Store) BulkUpdateRunResults(runID string, resultIDs []string, updates map[string]interface{}) (int64, error) {
+	res := s.db.Model(&models.RunResult{}).
 		Where("id IN ? AND test_run_id = ?", resultIDs, runID).
-		Updates(updates).Error
+		Updates(updates)
+	return res.RowsAffected, res.Error
+}
+
+// BulkTriageRunResults is BulkUpdateRunResults narrowed to rows that are STILL failures, for the
+// triage-only bulk mode where the caller supplies a defect_type and no status.
+//
+// The status test belongs in this statement rather than in a Go-side pre-filter alone: reading the
+// statuses first and updating second leaves a window in which a concurrent write (CI re-reporting
+// the result, another bulk update, the execute page) turns a row into a PASS, and the UPDATE would
+// then stamp defect_type and the decision columns onto a row that is no longer triageable. Matching
+// on the status inside the UPDATE makes the partition atomic, and the returned count reports what
+// really landed rather than what the caller hoped would.
+func (s *Store) BulkTriageRunResults(runID string, resultIDs []string, updates map[string]interface{}) (int64, error) {
+	res := s.db.Model(&models.RunResult{}).
+		Where("id IN ? AND test_run_id = ? AND status IN ?", resultIDs, runID, models.FailureStatuses).
+		Updates(updates)
+	return res.RowsAffected, res.Error
 }
 
 // ListRunResultStatuses returns the STORED status of each given result, keyed by result ID. IDs

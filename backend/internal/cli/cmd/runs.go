@@ -358,10 +358,13 @@ func newRunsResultsBulkUpdateCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&ids, "ids", "", "Comma-separated result IDs (required)")
-	cmd.Flags().StringVar(&status, "status", "", "New status (required)")
-	cmd.Flags().StringVar(&defectType, "defect-type", "", "Defect type")
+	// Neither status nor defect-type is required on its own, but the endpoint rejects a request
+	// carrying neither. Marking --status required would make the triage-only mode (--defect-type
+	// with no status, which applies a defect type to the selected failures and leaves every status
+	// alone) unreachable from the CLI.
+	cmd.Flags().StringVar(&status, "status", "", "New status (required unless --defect-type is given)")
+	cmd.Flags().StringVar(&defectType, "defect-type", "", "Defect type (alone: triage the selected failures without changing any status)")
 	cmd.MarkFlagRequired("ids")
-	cmd.MarkFlagRequired("status")
 	return cmd
 }
 

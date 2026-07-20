@@ -54,6 +54,27 @@ func TestBulkResultUpdateAutoStartsRun(t *testing.T) {
 	assert.Equal(t, "RUNNING", getRunStatus(t, env, runID))
 }
 
+// Triage-only bulk (defect_type, no status) moves no result status, so it must not start the run
+// either — matching the single-result path, which auto-starts only when the caller supplied a
+// status. A run that flipped to RUNNING here would claim execution had begun because somebody
+// labelled a failure carried over from an earlier attempt.
+func TestBulkTriageDoesNotAutoStartRun(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	runID, tcIDs := createRunWithCases(t, env, 1)
+	created := createJSON(t, env, "/api/runs/"+runID+"/results",
+		map[string]any{"test_case_id": tcIDs[0], "status": "FAIL"})
+	// The create path does not auto-start either, so the run is still PENDING here.
+	require.Equal(t, "PENDING", getRunStatus(t, env, runID))
+
+	rr := doRequest(env, http.MethodPost, "/api/runs/"+runID+"/results/bulk-update",
+		map[string]any{"result_ids": []string{created["id"].(string)}, "defect_type": "product_bug"})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+
+	assert.Equal(t, "PENDING", getRunStatus(t, env, runID), "a triage decision is not the start of execution")
+}
+
 func TestResultUpdateDoesNotReopenCompletedRun(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()

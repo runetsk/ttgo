@@ -6,6 +6,7 @@ import HistorySidebar from './HistorySidebar';
 import RequirementLinkPanel from './RequirementLinkPanel';
 import LinkedBugsPanel from './LinkedBugsPanel';
 import { updateTest, getCustomFields, getTest, getCategories, getFolderTree, listTestExecutions, versions as versionsApi, requirements as requirementsApi, testCaseDefects } from '../api';
+import { isFailureStatus } from '../utils/resultStatus';
 import { useAbortController } from '../hooks/useAbortController';
 
 function formatRelative(iso) {
@@ -491,7 +492,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     if (inlinePane) {
         const shortId = test?.id ? String(test.id).slice(0, 8) : '';
         const passCount = executions.filter(e => e.status === 'PASS').length;
-        const failCount = executions.filter(e => e.status === 'FAIL').length;
+        const failCount = executions.filter(e => isFailureStatus(e.status)).length;
         const totalRuns = executions.length;
         const passRate = totalRuns > 0 ? passCount / totalRuns : 0;
         const passColor = passRate > 0.85 ? 'var(--accent-green)' : passRate > 0.7 ? 'var(--warning-color)' : 'var(--accent-red)';
@@ -728,7 +729,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                                     ) : (
                                         <div className="detail-pane-runs-bar">
                                             {last10.map((r, i) => {
-                                                const bg = r.status === 'PASS' ? '#22c55e' : r.status === 'FAIL' ? '#ef4444' : '#555';
+                                                const bg = r.status === 'PASS' ? '#22c55e' : isFailureStatus(r.status) ? '#ef4444' : '#555';
                                                 return <div key={r.id || i} className="detail-pane-runs-cell" style={{ background: bg, opacity: r.status === 'PASS' ? 0.78 : 0.9 }} title={`${r.status}${r.run_name ? ` · ${r.run_name}` : ''}`} />;
                                             })}
                                         </div>

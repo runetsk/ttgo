@@ -80,9 +80,13 @@ func (c *Client) RetryRunResult(runID, resultID string) (json.RawMessage, error)
 
 // BulkUpdateRunResults updates multiple results at once.
 func (c *Client) BulkUpdateRunResults(runID string, resultIDs []string, status, defectType string) (json.RawMessage, error) {
+	// Both fields are omitted when empty rather than sent blank: an absent status is what selects
+	// the endpoint's triage-only mode, so spelling out "status": "" would only obscure that.
 	body := map[string]interface{}{
 		"result_ids": resultIDs,
-		"status":     status,
+	}
+	if status != "" {
+		body["status"] = status
 	}
 	if defectType != "" {
 		body["defect_type"] = defectType
