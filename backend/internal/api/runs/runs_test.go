@@ -245,7 +245,8 @@ func TestUpdateRunResultAutoDefaultWritesNoSnapshot(t *testing.T) {
 	assert.Empty(t, got.SuggestedConfidence)
 }
 
-// Only FAIL results are in the calibration set — the defect_type control renders for FAIL alone.
+// Only FAILING results (FAIL/ERROR) are in the calibration set — the defect_type control renders
+// for those alone, so a PASS row has no human decision to record.
 func TestUpdateRunResultNoSnapshotForNonFailResult(t *testing.T) {
 	s, srv := newSnapshotEnv(t)
 	rr := seedResultWithStatus(t, s, models.StatusPass)
@@ -263,6 +264,132 @@ func TestUpdateRunResultNoSnapshotForNonFailResult(t *testing.T) {
 	assert.Empty(t, got.SuggestedDefectType)
 	assert.Empty(t, got.SuggestedConfidence)
 	assert.Nil(t, got.DecidedAt)
+}
+
+// ERROR is a failure too. The analyzer has always produced verdicts for ERROR results, but the
+// triage path required FAIL, so those verdicts could never be graded. Both the stored-ERROR shape
+// (defect_type alone, as the grid sends) and the single-call {status,defect_type} shape must write
+// the full snapshot, decided_at included — that column is what puts the row in the accuracy window.
+func TestUpdateRunResultSnapshotsAISuggestionForErrorResult(t *testing.T) {
+	tests := []struct {
+		name        string
+		seedStatus  models.ExecutionStatus
+		body        map[string]any
+		wantVerdict string
+	}{
+		{
+			name:        "stored ERROR, defect_type alone",
+			seedStatus:  models.StatusError,
+			body:        map[string]any{"defect_type": "system_issue"},
+			wantVerdict: models.VerdictEnvironment,
+		},
+		{
+			name:        "status and defect_type arrive together",
+			seedStatus:  models.StatusPending,
+			body:        map[string]any{"status": "ERROR", "defect_type": "system_issue"},
+			wantVerdict: models.VerdictEnvironment,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, srv := newSnapshotEnv(t)
+			rr := seedResultWithStatus(t, s, tt.seedStatus)
+			_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+				RunResultID: rr.ID, Verdict: tt.wantVerdict, Confidence: models.ConfidenceHigh, ModelName: "m",
+			})
+			require.NoError(t, err)
+
+			w := putRunResult(t, s, srv, rr, tt.body)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			got, err := s.GetRunResultByID(rr.ID)
+			require.NoError(t, err)
+			require.NotNil(t, got)
+			require.Equal(t, models.StatusError, got.Status)
+			assert.Equal(t, "system_issue", got.DefectType)
+			assert.Equal(t, tt.wantVerdict, got.SuggestedVerdict)
+			assert.Equal(t, "system_issue", got.SuggestedDefectType)
+			assert.Equal(t, models.ConfidenceHigh, got.SuggestedConfidence)
+			require.NotNil(t, got.DecidedAt, "without decided_at the row never enters the accuracy window")
+		})
+	}
+}
+
+// Moving a result to ERROR must seed the same "nobody has looked at this yet" default FAIL gets.
+// Forcing "" instead (the old non-FAIL branch) hid the row from the triage UI entirely, which is
+// the reason ERROR verdicts never accumulated calibration data.
+func TestUpdateRunResultErrorStatusDefaultsToInvestigate(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusPending)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictEnvironment, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := putRunResult(t, s, srv, rr, map[string]any{"status": "ERROR"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusError, got.Status)
+	assert.Equal(t, "to_investigate", got.DefectType, "ERROR must default like FAIL, not clear like PASS")
+	// The auto-default is not a human decision, so it stays out of the calibration set.
+	assert.Empty(t, got.SuggestedVerdict)
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
+	assert.Nil(t, got.DecidedAt)
+}
+
+// REGRESSION for the ERROR extension: widening "is a failure" must not widen it past FAIL/ERROR.
+// Both halves are asserted per status, because they are driven by different branches: a bare
+// status change still FORCES defect_type to '', and a status change carrying an explicit
+// defect_type still records NO snapshot (the explicit value wins on the column, but a non-failure
+// row must never enter the calibration set).
+func TestUpdateRunResultNonFailureStatusesStillClearDefectType(t *testing.T) {
+	for _, status := range []string{"PASS", "SKIP"} {
+		t.Run(status, func(t *testing.T) {
+			// Seeded FAIL + analysis so only the new status can be what suppresses the snapshot.
+			newEnv := func(t *testing.T) (*store.Store, *api.Server, *models.RunResult) {
+				t.Helper()
+				s, srv := newSnapshotEnv(t)
+				rr := seedResultWithStatus(t, s, models.StatusFail)
+				_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+					RunResultID: rr.ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+				})
+				require.NoError(t, err)
+				return s, srv, rr
+			}
+
+			t.Run("status alone forces defect_type ''", func(t *testing.T) {
+				s, srv, rr := newEnv(t)
+				w := putRunResult(t, s, srv, rr, map[string]any{"status": status})
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+				got, err := s.GetRunResultByID(rr.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ExecutionStatus(status), got.Status)
+				assert.Empty(t, got.DefectType, "%s has nothing to triage", status)
+				assert.Empty(t, got.SuggestedVerdict)
+				assert.Empty(t, got.SuggestedDefectType)
+				assert.Empty(t, got.SuggestedConfidence)
+				assert.Nil(t, got.DecidedAt)
+			})
+
+			t.Run("explicit defect_type writes no snapshot", func(t *testing.T) {
+				s, srv, rr := newEnv(t)
+				w := putRunResult(t, s, srv, rr, map[string]any{"status": status, "defect_type": "product_bug"})
+				require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+				got, err := s.GetRunResultByID(rr.ID)
+				require.NoError(t, err)
+				require.Equal(t, models.ExecutionStatus(status), got.Status)
+				assert.Empty(t, got.SuggestedVerdict, "%s is not a failure and cannot be calibrated", status)
+				assert.Empty(t, got.SuggestedDefectType)
+				assert.Empty(t, got.SuggestedConfidence)
+				assert.Nil(t, got.DecidedAt)
+			})
+		})
+	}
 }
 
 // The gate is the status the row will HAVE, not the one it had. The CLI (internal/cli/cmd/runs.go)

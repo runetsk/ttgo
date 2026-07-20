@@ -44,24 +44,27 @@ type AIFailureAnalysisAccuracy struct {
 //     plain status change, the test-case delete cascade), any of which would drag an old
 //     decision into a recent window. decided_at is written in UTC, and the handler's cutoff is
 //     UTC, so the TEXT comparison SQLite performs is exact rather than offset-skewed.
-//   - status = 'FAIL' — only failing results carry a triage decision, and a result can be
-//     re-executed to PASS after being triaged. Filtering here makes the calibration set
-//     self-enforcing instead of trusting every writer to have cleared the snapshot.
+//   - status IN ('FAIL','ERROR') — only failing results carry a triage decision, and a result can
+//     be re-executed to PASS after being triaged. Filtering here makes the calibration set
+//     self-enforcing instead of trusting every writer to have cleared the snapshot. Both failure
+//     statuses are listed because both are triageable; this must stay in step with
+//     models.IsFailureStatus, which the triage handlers gate on.
 //   - a non-empty suggested_defect_type — the AI actually suggested something at the decision
 //     moment. An empty snapshot means there was nothing to agree or disagree with.
 //   - defect_type IN ('product_bug', 'automation_bug', 'system_issue') — a REAL human decision.
-//     'to_investigate' is the auto-default stamped on every FAIL at ingest, i.e. "nobody has
+//     'to_investigate' is the auto-default stamped on every failure at ingest, i.e. "nobody has
 //     triaged this yet". Counting untriaged rows as disagreements would tank the AI's score and
 //     make the whole metric meaningless. Empty is excluded for the same reason.
 //
 // NULL is not-true under every predicate, so any pre-migration row fails safe (excluded).
 //
-// Caveat: ERROR results are outside the set by construction. The analyzer produces verdicts for
-// FAIL and ERROR alike, but only FAIL rows expose the defect_type control that records a human
-// decision, so an ERROR row never has a decision to compare against.
+// ERROR results belong to the set on the same terms as FAIL: the analyzer produces verdicts for
+// both, and both expose the defect_type control that records a human decision. Pre-existing ERROR
+// rows contribute nothing until genuinely triaged — they carry defect_type = '' (or the untriaged
+// 'to_investigate'), which the last predicate excludes — so no backfill is needed.
 const accuracyCalibrationFilter = `
 	WHERE decided_at >= ?
-	  AND status = 'FAIL'
+	  AND status IN ('FAIL','ERROR')
 	  AND suggested_defect_type != ''
 	  AND defect_type IN ('product_bug', 'automation_bug', 'system_issue')`
 

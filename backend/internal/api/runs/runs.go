@@ -248,12 +248,15 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		updateMap["status"] = *req.Status
-		switch models.ExecutionStatus(*req.Status) {
-		case models.StatusFail:
+		// FAIL and ERROR are both failures and both triageable — the analyzer produces verdicts for
+		// each, so gating on FAIL alone stranded every ERROR verdict as ungradeable. A failure with
+		// no explicit decision starts at the "nobody has looked at this yet" default; every
+		// non-failure status clears defect_type, because there is nothing to triage.
+		if models.IsFailureStatus(models.ExecutionStatus(*req.Status)) {
 			if req.DefectType == nil {
 				updateMap["defect_type"] = "to_investigate"
 			}
-		default:
+		} else {
 			updateMap["defect_type"] = ""
 		}
 	}
@@ -363,7 +366,8 @@ func clearAISuggestion(updateMap map[string]interface{}) {
 // changing the verdict.
 //
 // Callers must invoke this ONLY when the caller explicitly supplied a defect_type. It further
-// requires the result to be FAIL *after this update lands* and to already have an analysis.
+// requires the result to be a FAILURE (FAIL or ERROR, per models.IsFailureStatus) *after this
+// update lands* and to already have an analysis.
 // Gating on the EFFECTIVE status is what makes this path agree with the bulk one: both decide
 // from the status the row will have, so identical input produces an identical record whichever
 // endpoint wrote it. Gating on the stored status instead would miss the single-call
@@ -378,7 +382,7 @@ func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, upd
 	clearAISuggestion(updateMap)
 
 	status, ok := h.effectiveResultStatus(ctx, resultID, reqStatus)
-	if !ok || status != models.StatusFail {
+	if !ok || !models.IsFailureStatus(status) {
 		return
 	}
 

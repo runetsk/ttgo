@@ -302,20 +302,21 @@ type RunResult struct {
 	Environment string `json:"environment" gorm:"index"`
 	AppVersion  string `json:"app_version"`
 
-	// DefectType classifies the failure reason for FAIL results.
+	// DefectType classifies the failure reason for failing results — FAIL and ERROR alike, per
+	// IsFailureStatus. Every other status forces "" (there is nothing to triage).
 	// Values: "to_investigate" | "product_bug" | "automation_bug" | "system_issue" | "" (not applicable)
 	DefectType string `json:"defect_type" gorm:"default:''"`
 
 	// Snapshot of what the AI failure analysis suggested at the moment a human explicitly set
-	// DefectType. Written only on an explicit triage decision on a FAIL result that has an
-	// analysis — never on the "to_investigate" auto-default path. Agreement is then a pure
-	// comparison of SuggestedDefectType vs DefectType.
+	// DefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)
+	// that has an analysis — never on the "to_investigate" auto-default path. Agreement is then a
+	// pure comparison of SuggestedDefectType vs DefectType.
 	//
 	// SuggestedVerdict is kept alongside SuggestedDefectType because the verdict -> defect_type
 	// mapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.
 	//
 	// All three are CLEARED whenever a triage decision is written without a snapshot behind it
-	// (non-FAIL result, no analysis, lookup failure) so a new decision can never be scored
+	// (non-failure result, no analysis, lookup failure) so a new decision can never be scored
 	// against a suggestion left over from an older one.
 	SuggestedVerdict    string `json:"suggested_verdict" gorm:"default:''"`
 	SuggestedDefectType string `json:"suggested_defect_type" gorm:"default:''"`

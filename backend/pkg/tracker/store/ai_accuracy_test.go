@@ -239,6 +239,48 @@ func TestAccuracyExcludesRowsNoLongerFailing(t *testing.T) {
 	require.Equal(t, 1, got.Total, "only rows that are still FAIL carry a failure triage decision")
 }
 
+// TestAccuracyCountsTriagedErrorRows is the other side of that self-enforcing filter. ERROR is a
+// failure: the analyzer has always produced verdicts for ERROR results, and a human triaging one
+// makes exactly the decision they would on a FAIL. Filtering on status = 'FAIL' silently discarded
+// every one of those decisions, which is why calibration volume never grew.
+//
+// The seeded set deliberately mixes in the two rows that must still be excluded, so a filter that
+// simply dropped the status predicate would fail here rather than pass by luck.
+func TestAccuracyCountsTriagedErrorRows(t *testing.T) {
+	s := newTestStore(t)
+	seedCalibrationRows(t, s, []calibrationRow{
+		// t0 stays FAIL — a real decision that agreed.
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug", time.Hour},
+		// t1, t2 become ERROR — real decisions, one agreed and one overridden.
+		{models.VerdictEnvironment, "system_issue", models.ConfidenceHigh, "system_issue", time.Hour},
+		{models.VerdictFlakyTest, "automation_bug", models.ConfidenceLow, "product_bug", time.Hour},
+		// t3 becomes ERROR but sits at the untriaged auto-default — still excluded.
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "to_investigate", time.Hour},
+		// t4 becomes SKIP — a real decision, but not on a failure, so still excluded.
+		{models.VerdictProductBug, "product_bug", models.ConfidenceHigh, "product_bug", time.Hour},
+	})
+	require.NoError(t, s.db.Exec(`UPDATE run_results SET status = ? WHERE test_name_snapshot IN ('t1','t2','t3')`,
+		models.StatusError).Error)
+	require.NoError(t, s.db.Exec(`UPDATE run_results SET status = ? WHERE test_name_snapshot = 't4'`,
+		models.StatusSkip).Error)
+
+	got, err := s.GetFailureAnalysisAccuracy(last30d())
+	require.NoError(t, err)
+	require.Equal(t, 3, got.Total, "one FAIL plus the two genuinely triaged ERROR rows")
+	require.Equal(t, 2, got.Agreed)
+
+	// The ERROR rows must reach the breakdowns too, not just the headline.
+	byVerdict := map[string]int{}
+	var bucketed int
+	for _, b := range got.ByVerdict {
+		byVerdict[b.Verdict] = b.Total
+		bucketed += b.Total
+	}
+	require.Equal(t, 3, bucketed, "by_verdict must cover exactly the calibration set")
+	require.Equal(t, 1, byVerdict[models.VerdictEnvironment], "a triaged ERROR row belongs in its verdict bucket")
+	require.Equal(t, 1, byVerdict[models.VerdictFlakyTest])
+}
+
 // TestAccuracyWindowsOnDecisionTime pins the window to decided_at (when the human decided).
 func TestAccuracyWindowsOnDecisionTime(t *testing.T) {
 	s := newTestStore(t)
