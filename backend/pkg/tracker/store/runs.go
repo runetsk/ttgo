@@ -647,6 +647,26 @@ func (s *Store) UpdateRunResult(runID string, resultID string, updates interface
 		Updates(updates).Error
 }
 
+// TriageRunResult is UpdateRunResult narrowed to a row that is STILL a failure, for the
+// status-omitted single-result triage path where the caller supplies a defect_type and no status.
+// It is the single-row counterpart of BulkTriageRunResults and exists for the same reason.
+//
+// The status test belongs in this statement rather than in a caller-side pre-read: resolving the
+// status first and updating second leaves a window in which a concurrent write (CI re-reporting the
+// result, a bulk update, the execute page) turns the row into a PASS, and the UPDATE would then
+// stamp defect_type and the decision columns onto a row that is no longer triageable — the state
+// models.RunResult.DefectType documents as impossible. Matching on the status inside the UPDATE
+// makes the check and the write atomic.
+//
+// The returned count is what actually landed: 0 means the row was absent, belonged to another run,
+// or had already stopped being a failure.
+func (s *Store) TriageRunResult(runID string, resultID string, updates interface{}) (int64, error) {
+	res := s.db.Model(&models.RunResult{}).
+		Where("id = ? AND test_run_id = ? AND status IN ?", resultID, runID, models.FailureStatuses).
+		Updates(updates)
+	return res.RowsAffected, res.Error
+}
+
 // BulkUpdateRunResults updates multiple run results in a single transaction, returning how many
 // rows the statement actually matched. That count — not len(resultIDs) — is what callers must
 // report as "updated": ids belonging to another run, ids that no longer exist, and repeats of the

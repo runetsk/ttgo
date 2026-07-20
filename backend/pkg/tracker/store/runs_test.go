@@ -201,6 +201,69 @@ func TestBulkTriageRunResultsOnlyTouchesFailures(t *testing.T) {
 	}
 }
 
+// The single-row counterpart of the guard above, and the one that matters most: the per-row triage
+// select and the AI "Accept" button are the highest-traffic triage writers in the app, and both send
+// a status-omitted defect_type through this method. The API resolves the row's status first and
+// writes second, so without the test inside the statement anything that flips the row in the window
+// between (CI re-reporting the result, a bulk update, the execute page) gets a triage decision
+// stamped on it regardless — the non-failure-with-a-defect-type state models.RunResult.DefectType
+// documents as impossible.
+//
+// RowsAffected is the honest proof: this method holds no Go-side status check at all, so a PASS row
+// surviving the call untouched can only have been excluded by the statement's own predicate. Move
+// the guard back out into a caller-side pre-read and this count is 1.
+func TestTriageRunResultOnlyTouchesFailures(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "Single Triage Guard"}
+	require.NoError(t, s.CreateTestRun(run))
+
+	for _, tt := range []struct {
+		status   models.ExecutionStatus
+		wantRows int64
+		wantType string
+	}{
+		{models.StatusFail, 1, "product_bug"},
+		{models.StatusError, 1, "product_bug"},
+		{models.StatusPass, 0, ""},
+		{models.StatusSkip, 0, ""},
+	} {
+		t.Run(string(tt.status), func(t *testing.T) {
+			rr := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: string(tt.status), Status: tt.status}
+			require.NoError(t, s.AddRunResult(rr))
+
+			n, err := s.TriageRunResult(run.ID, rr.ID, map[string]interface{}{"defect_type": "product_bug"})
+			require.NoError(t, err)
+			assert.EqualValues(t, tt.wantRows, n, "the failure test must be in the statement")
+
+			got, err := s.GetRunResultByID(rr.ID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantType, got.DefectType)
+			assert.Equal(t, tt.status, got.Status, "triage must never move the status")
+		})
+	}
+}
+
+// A triage write must not reach across runs, exactly as UpdateRunResult does not: the run id is
+// half the key. Without it a result id alone would be enough to triage a row in someone else's run.
+func TestTriageRunResultIgnoresForeignRun(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "Mine"}
+	require.NoError(t, s.CreateTestRun(run))
+	other := &models.TestRun{Name: "Other"}
+	require.NoError(t, s.CreateTestRun(other))
+
+	foreign := &models.RunResult{TestRunID: other.ID, TestNameSnapshot: "foreign", Status: models.StatusFail}
+	require.NoError(t, s.AddRunResult(foreign))
+
+	n, err := s.TriageRunResult(run.ID, foreign.ID, map[string]interface{}{"defect_type": "product_bug"})
+	require.NoError(t, err)
+	assert.EqualValues(t, 0, n)
+
+	got, err := s.GetRunResultByID(foreign.ID)
+	require.NoError(t, err)
+	assert.Empty(t, got.DefectType)
+}
+
 // The count must come from the statement, not the caller's list: a repeated id matches its row
 // once, and an id from another run matches nothing at all. Reporting len(ids) would claim writes
 // against rows that do not exist.

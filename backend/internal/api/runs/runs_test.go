@@ -1076,6 +1076,47 @@ func TestUpdateRunResultRejectsInvalidDefectType(t *testing.T) {
 	}
 }
 
+// THE fail-closed guard for the status lookup itself. effectiveResultStatus can fail to establish
+// a status two ways — the row is ABSENT, or the read ERRORED — and only the first is harmless. On
+// the error path the row may well exist and be a PASS, so treating the two alike lets a
+// status-omitted {"defect_type":"X"} fall through to the write, which matches on the id alone and
+// lands the decision on whatever the row actually is. Nothing worse than a transient SQLITE_BUSY or
+// IO blip then persists the non-failure-carrying-a-defect-type state models.RunResult.DefectType
+// declares impossible — invisible afterwards, and not undoable through the UI.
+//
+// The fault is injected at the SQL level, into the READ only: a non-numeric duration_ms makes the
+// full-row scan in GetRunResultByID fail while a targeted UPDATE of defect_type still succeeds. The
+// write path staying INTACT is the whole point — it is what makes this test prove the handler
+// declined, rather than that a broken database refused everything anyway. For the same reason the
+// row is seeded FAIL: the status guard on the triage statement would refuse a PASS on its own, so
+// only the handler's refusal can keep this row clean.
+func TestUpdateRunResultFailsClosedOnStatusLookupError(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	rr := seedResultWithStatus(t, s, models.StatusFail)
+
+	require.NoError(t, s.DB().Exec(
+		`UPDATE run_results SET duration_ms = 'not-a-number' WHERE id = ?`, rr.ID).Error)
+	_, readErr := s.GetRunResultByID(rr.ID)
+	require.Error(t, readErr, "the injected fault must make the row read FAIL, not quietly return nil")
+
+	w := putRunResult(t, s, srv, rr, map[string]any{"defect_type": "product_bug"})
+	require.Equal(t, http.StatusInternalServerError, w.Code,
+		"a status that could not be established must be refused, never guessed: %s", w.Body.String())
+
+	// Read back in raw SQL — the corrupted column is exactly what breaks the model scan.
+	var got struct {
+		DefectType          string
+		SuggestedDefectType string
+		DecidedAt           *time.Time
+	}
+	require.NoError(t, s.DB().Raw(
+		`SELECT defect_type, suggested_defect_type, decided_at FROM run_results WHERE id = ?`,
+		rr.ID).Scan(&got).Error)
+	assert.Empty(t, got.DefectType, "no decision may be written against a status nobody established")
+	assert.Empty(t, got.SuggestedDefectType, "and nothing may be snapshotted against it either")
+	assert.Nil(t, got.DecidedAt)
+}
+
 // The create path is the third writer of defect_type and by far the busiest — CI ingest and
 // `ttgo runs results add --defect-type` both land here — yet it was the one path that never checked
 // the value. An unchecked string reaches every calibration and counter query that groups by the

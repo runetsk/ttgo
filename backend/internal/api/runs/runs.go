@@ -267,9 +267,26 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	// and the invariant documented on models.RunResult.DefectType.
 	//
 	// The lookup costs nothing extra: it is skipped entirely when the caller supplied a status, and
-	// otherwise replaces the one snapshotAISuggestion used to make.
+	// otherwise IS the read snapshotAISuggestion would have made — the resolved status is handed
+	// down to it rather than re-derived, so this path performs exactly one.
+	//
+	// guardedTriage marks the status-omitted triage write, which must carry the failure-status test
+	// INSIDE its UPDATE. See the store call at the bottom of this function.
+	guardedTriage := false
 	if req.Status != nil || req.DefectType != nil {
-		effStatus, known := h.effectiveResultStatus(r.Context(), resultID, req.Status)
+		effStatus, known, err := h.effectiveResultStatus(resultID, req.Status)
+		if err != nil {
+			// FAIL CLOSED. An errored read establishes NOTHING about this row: it may exist, and it
+			// may be a PASS. Falling through would hand the caller's defect_type to the write below,
+			// whose WHERE matches on id alone and so lands it on whatever the row actually is —
+			// persisting, out of a transient SQLITE_BUSY or IO blip, exactly the non-failure-with-a-
+			// defect-type state models.RunResult.DefectType declares impossible. Refusing costs the
+			// caller a retry; guessing costs an invisible row nobody can correct through the UI.
+			slog.ErrorContext(r.Context(), "failed to resolve result status for triage",
+				"result_id", resultID, "run_id", runID, "error", err)
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
 		switch {
 		case known && !models.IsFailureStatus(effStatus):
 			// Nothing to triage on a non-failure, whatever the caller sent. The snapshot columns go
@@ -279,11 +296,11 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 			clearAISuggestion(updateMap)
 		case req.DefectType != nil:
 			// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
-			// suggested at this exact moment. `known` is false only when the row could not be read
-			// at all, in which case the UPDATE below matches nothing anyway; the snapshot helper
-			// re-derives the same status and fails closed on it.
+			// suggested at this exact moment. `known` is false only when the row is genuinely
+			// absent (the errored read returned above), so the write below matches nothing anyway.
 			updateMap["defect_type"] = *req.DefectType
-			h.snapshotAISuggestion(r.Context(), resultID, updateMap, req.Status)
+			h.snapshotAISuggestion(r.Context(), resultID, updateMap, effStatus, known)
+			guardedTriage = req.Status == nil
 		case req.Status != nil:
 			// A failure with no explicit decision starts at the "nobody has looked at this yet"
 			// default. Deliberately NOT snapshotted: it is not a decision.
@@ -353,7 +370,24 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 	}
 	updateMap["updated_at"] = time.Now()
 
-	if err := h.store.UpdateRunResult(runID, resultID, updateMap); err != nil {
+	// The status-omitted triage write goes through the status-guarded statement so the check and the
+	// act are ONE operation, exactly as bulk Mode 2 does. Resolving the status above and updating
+	// here is otherwise a check-then-act: between the two, CI can re-report the result, a bulk
+	// update can land, or the execute page can mark it PASS — and this UPDATE, keyed on the id
+	// alone, would stamp the decision onto a row that stopped being a failure. This is the
+	// highest-traffic triage writer in the app (the per-row select and the AI "Accept" button), so
+	// it is the last place that window belongs. A caller that DID supply a status needs no guard:
+	// it is stating what the row should become, so the prior status is irrelevant by definition.
+	var err error
+	if guardedTriage {
+		// Count deliberately discarded: this endpoint has always answered 200 to a write that
+		// matched nothing (an unknown result id), and a row concurrently moved out of the failure
+		// set is the same non-event.
+		_, err = h.store.TriageRunResult(runID, resultID, updateMap)
+	} else {
+		err = h.store.UpdateRunResult(runID, resultID, updateMap)
+	}
+	if err != nil {
 		slog.ErrorContext(r.Context(), "failed to update result", "result_id", resultID, "run_id", runID, "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
@@ -388,24 +422,27 @@ func clearAISuggestion(updateMap map[string]interface{}) {
 // Snapshotting (rather than joining later) keeps the record immune to a subsequent re-analysis
 // changing the verdict.
 //
-// Callers must invoke this ONLY when the caller explicitly supplied a defect_type. It further
-// requires the result to be a FAILURE (FAIL or ERROR, per models.IsFailureStatus) *after this
-// update lands* and to already have an analysis.
+// Callers must invoke this ONLY when the caller explicitly supplied a defect_type, and must pass
+// the EFFECTIVE status already resolved by effectiveResultStatus (with its `known` flag) rather
+// than let this function re-read it — one read per request, and the decision this snapshot is
+// filed against is provably the same one the caller branched on.
+// It further requires the result to be a FAILURE (FAIL or ERROR, per models.IsFailureStatus)
+// *after this update lands* and to already have an analysis.
 // Gating on the EFFECTIVE status is what makes this path agree with the bulk one: both decide
 // from the status the row will have, so identical input produces an identical record whichever
 // endpoint wrote it. Gating on the stored status instead would miss the single-call
 // {status:"FAIL", defect_type:"X"} shape the CLI and the execute page actually send, and would
 // wrongly snapshot {status:"PASS", defect_type:"X"} on a row that happened to be FAIL before.
 //
-// Best-effort by design: a lookup error or a missing result/analysis logs and CLEARS the
-// snapshot instead of failing. A calibration nicety must never fail a human's triage write.
-func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, updateMap map[string]interface{}, reqStatus *string) {
+// Best-effort by design: an unknown status or a missing analysis logs and CLEARS the snapshot
+// instead of failing. A calibration nicety must never fail a human's triage write. (A read that
+// ERRORED never reaches here — the caller rejects the request outright.)
+func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, updateMap map[string]interface{}, status models.ExecutionStatus, known bool) {
 	// Cleared first, filled in only on the fully-verified path below, so every early return
 	// leaves the columns blank rather than stale.
 	clearAISuggestion(updateMap)
 
-	status, ok := h.effectiveResultStatus(ctx, resultID, reqStatus)
-	if !ok || !models.IsFailureStatus(status) {
+	if !known || !models.IsFailureStatus(status) {
 		return
 	}
 
@@ -425,22 +462,26 @@ func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, upd
 }
 
 // effectiveResultStatus resolves the status the result will hold once the update is applied:
-// the requested status when the caller supplied one, otherwise the stored status. The second
-// return is false when the status could not be established (lookup error or missing row), which
-// callers must treat as "no snapshot".
-func (h *Handler) effectiveResultStatus(ctx context.Context, resultID string, reqStatus *string) (models.ExecutionStatus, bool) {
+// the requested status when the caller supplied one, otherwise the stored status.
+//
+// The two ways it can fail to establish a status are returned SEPARATELY, and callers must keep
+// them apart. A missing row is (false, nil): a legitimate no-op, since a statement keyed on that
+// id matches nothing. A read that ERRORED is (false, non-nil): the row may well exist and hold any
+// status at all, so nothing may be decided from it. Collapsing the two into a single "unknown"
+// boolean is what let a transient read failure be treated as "row absent" and fall through to
+// writing a triage decision onto a row whose status was never established.
+func (h *Handler) effectiveResultStatus(resultID string, reqStatus *string) (models.ExecutionStatus, bool, error) {
 	if reqStatus != nil {
-		return models.ExecutionStatus(*reqStatus), true
+		return models.ExecutionStatus(*reqStatus), true, nil
 	}
 	rr, err := h.store.GetRunResultByID(resultID)
 	if err != nil {
-		slog.WarnContext(ctx, "ai-suggestion snapshot: result lookup failed", "result_id", resultID, "error", err)
-		return "", false
+		return "", false, err
 	}
 	if rr == nil {
-		return "", false
+		return "", false, nil
 	}
-	return rr.Status, true
+	return rr.Status, true, nil
 }
 
 // snapshotAISuggestionsBulk records, for each bulk-triaged result, what the AI suggested at the
@@ -1268,11 +1309,14 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	// and req.Status is non-empty by definition.
 	//
 	// The snapshot columns are deliberately NOT in here even though the statement above blanked
-	// them. They are per-row by the time the client would see them — snapshotAISuggestionsBulk has
-	// already refilled each row with its OWN verdict — so a shared patch could only carry the
-	// pre-snapshot blanks and would under-report every triaged row. They are display-only (the
-	// suggestion chip hides itself once a row is triaged, which the defect_type in this patch
-	// already conveys), so a stale local copy corrects itself on the next fetch.
+	// them, for two different reasons depending on the branch. Where isTriage held,
+	// snapshotAISuggestionsBulk has already refilled each row with its OWN verdict, so they are
+	// per-row by the time the client would see them and a shared patch could only carry the
+	// pre-snapshot blanks. Where it did NOT — the non-failure `default:` branch, which blanks them
+	// with nothing running behind it to refill — the client simply never learns they were cleared.
+	// Neither costs anything: no frontend view reads result.suggested_*/decided_at at all (the
+	// suggestion chip reads analysis.suggested_defect_type), so a stale local copy is invisible and
+	// corrects itself on the next fetch regardless.
 	patch := map[string]any{
 		"defect_type": updateMap["defect_type"],
 		"updated_at":  now,
