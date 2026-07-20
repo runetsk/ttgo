@@ -145,8 +145,17 @@ export const updateRunResult = (runId, resultId, data) => {
 };
 export const retryRunResult = (runId, resultId) =>
     api.post(`/runs/${runId}/results/${resultId}/retry`).then(res => res.data);
+// Omitting `status` is meaningful, not just tidy: a body carrying result_ids +
+// defect_type and NO status puts the endpoint in triage mode, where the defect type is
+// applied only to rows whose stored status is a failure and no status is ever written.
+// Sending status: "" or null instead would be the same request, but the conditional
+// spread keeps the wire shape explicit and mirrors defect_type.
 export const bulkUpdateRunResults = (runId, resultIds, status, defectType) =>
-    api.post(`/runs/${runId}/results/bulk-update`, { result_ids: resultIds, status, ...(defectType ? { defect_type: defectType } : {}) }).then(res => res.data);
+    api.post(`/runs/${runId}/results/bulk-update`, {
+        result_ids: resultIds,
+        ...(status ? { status } : {}),
+        ...(defectType ? { defect_type: defectType } : {}),
+    }).then(res => res.data);
 export const uploadScreenshots = (runId, resultId, files) => {
     const fd = new FormData();
     files.forEach(f => fd.append('screenshots', f));

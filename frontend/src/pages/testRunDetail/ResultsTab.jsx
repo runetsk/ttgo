@@ -13,6 +13,8 @@ import { useRunViewPreference } from '../../hooks/useRunViewPreference';
 import { groupResults, GROUP_DIMENSIONS } from '../../utils/runResultsGrouping';
 import { shouldShowSuggestion, suggestionLabel } from '../../utils/defectSuggestion';
 import { isFailureStatus } from '../../utils/resultStatus';
+import { BULK_DEFECT_TYPE_OPTIONS, buildBulkDefectTypePayload, summarizeBulkTriage } from '../../utils/bulkTriage';
+import { toast } from '../../toast';
 
 // Theme-readable text tones for the AI suggestion chip, echoing the defect_type
 // <select> colors below. --aig-tone-*-fg and --text-secondary are defined for
@@ -283,6 +285,25 @@ export default function ResultsTab({
         setSelectedResults(new Set());
     };
 
+    // Triage-only bulk update: no status is sent, so the backend applies the defect type
+    // to the selected FAIL/ERROR rows and leaves everything else (including its status)
+    // alone. Selecting a mixed set is normal, so the skipped count is surfaced rather
+    // than dropped — see summarizeBulkTriage.
+    const handleBulkSetDefectType = async (defectType) => {
+        const payload = buildBulkDefectTypePayload(selectedResults, defectType);
+        if (!payload) return;
+        try {
+            const res = await bulkUpdateRunResults(runId, payload.result_ids, undefined, payload.defect_type);
+            const { tone, message } = summarizeBulkTriage(res);
+            toast[tone](message);
+            setSelectedResults(new Set());
+        } catch (err) {
+            // The api.js interceptor already toasted the failure; keep the selection so
+            // the user can retry.
+            console.error('Failed to bulk-update defect type:', err);
+        }
+    };
+
     const handleBulkDelete = async () => {
         if (selectedResults.size === 0) return;
         if (!window.confirm(`Remove ${selectedResults.size} test${selectedResults.size > 1 ? 's' : ''} from this run?`)) return;
@@ -340,7 +361,7 @@ export default function ResultsTab({
     </div>
 
     {selectedResults.size > 0 && (
-        <div style={{
+        <div data-testid="bulk-action-bar" style={{
             display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px',
             background: 'rgba(99,102,241,0.1)', border: '1px solid rgba(99,102,241,0.3)',
             borderRadius: 10, marginBottom: 12,
@@ -368,6 +389,7 @@ export default function ResultsTab({
                 <button
                     key={opt.value}
                     onClick={() => handleBulkUpdateStatus(opt.value)}
+                    data-testid={`bulk-status-${opt.value}`}
                     style={{
                         display: 'flex', alignItems: 'center', gap: 5,
                         color: opt.color, fontSize: '0.8rem', fontWeight: 600,
@@ -383,8 +405,37 @@ export default function ResultsTab({
                 </button>
             ))}
             <div style={{ width: 1, height: 22, background: 'rgba(99,102,241,0.3)' }} />
+            {/* Triage-only: applies to the selected failures and never writes a status.
+                Resets to the placeholder after each pick so the same value can be applied
+                twice; the toast, not the control, reports what happened. */}
+            <select
+                data-testid="bulk-defect-type-select"
+                aria-label="Set defect type for selected results"
+                title="Apply a defect type to the selected failures — passed and skipped rows are left untouched"
+                defaultValue=""
+                disabled={selectedResults.size === 0}
+                onChange={(e) => {
+                    const value = e.target.value;
+                    e.target.value = '';
+                    handleBulkSetDefectType(value);
+                }}
+                style={{
+                    fontSize: '0.8rem', fontWeight: 600,
+                    color: 'var(--text-primary)', background: 'var(--bg-secondary)',
+                    padding: '5px 10px', borderRadius: 7,
+                    border: '1px solid var(--border-color)',
+                    cursor: 'pointer',
+                }}
+            >
+                <option value="" disabled>Set defect type…</option>
+                {BULK_DEFECT_TYPE_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+            </select>
+            <div style={{ width: 1, height: 22, background: 'rgba(99,102,241,0.3)' }} />
             <button
                 onClick={handleBulkDelete}
+                data-testid="bulk-remove"
                 style={{
                     display: 'flex', alignItems: 'center', gap: 5,
                     color: 'var(--accent-red)', fontSize: '0.8rem', fontWeight: 600,
@@ -400,6 +451,7 @@ export default function ResultsTab({
             </button>
             <button
                 onClick={() => setSelectedResults(new Set())}
+                data-testid="bulk-clear-selection"
                 style={{
                     marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4,
                     color: 'var(--text-secondary)', fontSize: '0.78rem', fontWeight: 500,
