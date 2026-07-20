@@ -104,7 +104,21 @@ func IsValidExecutionStatus(s string) bool {
 	return ValidExecutionStatuses[ExecutionStatus(s)]
 }
 
+// IsFailureStatus reports whether a RESULT status counts as a failure. FAIL and ERROR are both
+// failures: the AI analyzer produces verdicts for both, and the failing-results queries already
+// select `status IN ('FAIL','ERROR')`. This is the single definition of "is this a failure?" for
+// results — prefer it over writing the two-case comparison inline.
+//
+// WARNING: ValidRunStatuses below is a DIFFERENT, unrelated concept — the RUN-level status set
+// (RUNNING/PASS/FAIL, with no ERROR at all). It must NOT be used to reason about results.
+func IsFailureStatus(s ExecutionStatus) bool {
+	return s == StatusFail || s == StatusError
+}
+
 // ValidRunStatuses is the set of allowed test run statuses.
+//
+// Run-level only. See the warning on IsFailureStatus above: this set omits ERROR and is not a
+// substitute for ValidExecutionStatuses when validating an individual result's status.
 var ValidRunStatuses = map[ExecutionStatus]bool{
 	StatusRunning: true,
 	StatusPass:    true,
@@ -114,6 +128,28 @@ var ValidRunStatuses = map[ExecutionStatus]bool{
 // IsValidRunStatus checks whether a string is a valid test run status.
 func IsValidRunStatus(s string) bool {
 	return ValidRunStatuses[ExecutionStatus(s)]
+}
+
+// ValidDefectTypes is the canonical set of defect_type values a human triage decision can record
+// against a failing result. The same set is spelled out as literals in several places that must be
+// kept in sync with it: applyResultStatusCount in store/runs.go (the counter buckets, ~:527-537),
+// accuracyCalibrationFilter in store/ai_accuracy.go (~:66, which deliberately omits the untriaged
+// "to_investigate"), the RunResult.DefectType doc comment below, and DEFECT_TYPE_ORDER in
+// frontend/src/utils/runResultsGrouping.js.
+var ValidDefectTypes = map[string]bool{
+	"product_bug":    true,
+	"automation_bug": true,
+	"system_issue":   true,
+	"to_investigate": true,
+}
+
+// IsValidDefectType checks whether a string is an acceptable defect_type value.
+//
+// The empty string is accepted deliberately: "" is the "not applicable" value, and the non-failure
+// path legitimately writes it to CLEAR defect_type when a result moves to PASS/SKIP/PENDING/RUNNING.
+// Rejecting "" here would break that existing clear path.
+func IsValidDefectType(s string) bool {
+	return s == "" || ValidDefectTypes[s]
 }
 
 // TestStep represents a single step in a test case.
