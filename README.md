@@ -33,6 +33,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 
 - 🏠 **Self-hosted — own your data.** Runs entirely on your own infrastructure as a single Go binary and one SQLite file. Source-available under PolyForm Shield — no per-seat SaaS bills, nothing leaving your network.
 - 🤖 **AI test generation.** Draft test cases from a requirement — or from a free-text prompt alone — using your own LLM provider (bring your own key). A review-and-approve flow with editing, regeneration and coverage analysis means nothing is saved until you accept it.
+- 🔍 **AI failure triage — and it grades itself.** When tests fail, TTGO classifies each failure with your own LLM — product bug, flaky test, environment, test data or infrastructure — grounded in that test's own recent history and how your team triaged it before. It offers the verdict as a *suggested* defect type you accept with one click, never writing the decision for you, then reports how often its suggestions actually matched your calls, split by confidence, so you can see whether it's worth trusting.
 - ⌨️ **CLI & agent automation.** A first-class `ttgo` CLI drives tests, runs, analytics and more from the terminal or CI. The bundled Claude Code skill lets an agent operate TTGO in plain English — even read your app's code to draft test cases — and slot it into your automation loop. And since the skill is just Markdown in your repo, you can have your agent extend it for your own workflows.
 - ⚡ **Real-time collaboration.** WebSocket-powered live sync keeps every open tab and teammate up to date as runs are executed and test cases change.
 
@@ -42,7 +43,7 @@ Test management usually forces a trade-off: a polished commercial SaaS (TestRail
 
 |  |  |
 |:--|:--|
-| <img src="docs/images/02-test-case-detail.png" width="100%"><br>**Rich test cases** — TipTap rich-text descriptions, ordered steps with expected results, full version history, and tabs for runs, defects and linked requirements. | <img src="docs/images/03-test-run-execution.png" width="100%"><br>**Run execution** — snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. |
+| <img src="docs/images/02-test-case-detail.png" width="100%"><br>**Rich test cases** — TipTap rich-text descriptions, ordered steps with expected results, full version history, and tabs for runs, defects and linked requirements. | <img src="docs/images/03-test-run-execution.png" width="100%"><br>**Run execution** — snapshot-based runs with per-result pass/fail, defect classification (product / automation / system) with AI-suggested triage you accept or override, defect links, durations and comments. |
 | <img src="docs/images/04-analytics-dashboard.png" width="100%"><br>**Analytics** — pass-rate trends, flaky-test detection, slowest tests, component health and side-by-side run comparison across any date range. | <img src="docs/images/05-traceability-matrix.png" width="100%"><br>**Requirements & traceability** — a coverage-at-a-glance matrix linking requirements to test cases and surfacing the gaps. |
 | <img src="docs/images/07-defects.png" width="100%"><br>**Native defect tracking** — lightweight bugs with severity and status, linked to failing results and managed on a dedicated Defects page in the Quality workspace; optionally reference an external Jira issue. | <img src="docs/images/06-ai-generate.png" width="100%"><br>**AI test generation** — pick a requirement for context (or skip it and just describe what to test), and let your configured model draft test cases for review. |
 
@@ -95,6 +96,7 @@ A self-hosted test case management tool built with Go and React.
 - **Jira Integration** — import requirements from Jira and post generated test cases back to the ticket
 - **Confluence Import** — import requirements from Confluence pages
 - **AI Test Generation** — generate test cases from a requirement or from a free-text prompt alone, using your own LLM provider; review, edit, regenerate, and accept drafts (nothing is saved until you approve), with coverage analysis and an optional critic pass
+- **AI Failure Analysis** — classify failing results (product bug / flaky test / environment / test data / infrastructure) using your own LLM provider, grounded in the test's own recent failures, its linked defects and requirements, and how your team triaged it before. Verdicts are surfaced as a *suggested* defect type with one-click accept — never written automatically — and TTGO tracks how often its suggestions matched your actual decisions, broken down by verdict and confidence. Secrets are redacted before anything is sent, and automatic analysis is opt-in per provider
 - **Database Backups** — manual and scheduled SQLite backups with restore support
 - **API Tokens & Webhooks** — automate runs and receive push notifications
 - **CLI** — `ttgo` command-line tool for managing tests, runs, analytics, and more from the terminal
