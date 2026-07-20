@@ -9,6 +9,7 @@ const SECTIONS = [
     { id: 'requirements', label: 'Requirements', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
     { id: 'ai-generation', label: 'AI Generation', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
     { id: 'ai-import', label: 'AI Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
+    { id: 'ai-failure-analysis', label: 'AI Failure Analysis', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
     { id: 'analytics', label: 'Analytics', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
     { id: 'traceability', label: 'Traceability', icon: 'M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1' },
     { id: 'backups', label: 'Backups', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4' },
@@ -108,6 +109,7 @@ export default function HelpPage() {
                     {activeSection === 'requirements' && <RequirementsSection />}
                     {activeSection === 'ai-generation' && <AIGenerationSection />}
                     {activeSection === 'ai-import' && <AIImportSection />}
+                    {activeSection === 'ai-failure-analysis' && <AIFailureAnalysisSection />}
                     {activeSection === 'analytics' && <AnalyticsSection />}
                     {activeSection === 'traceability' && <TraceabilitySection />}
                     {activeSection === 'backups' && <BackupsSection />}
@@ -447,6 +449,88 @@ function AIImportSection() {
                     'Maximum 50 test cases per import session.',
                 ]} />
                 <Tip>If a requirement is selected on the Generate tab, it auto-populates in the Import requirement dropdown.</Tip>
+            </Card>
+        </div>
+    );
+}
+
+function AIFailureAnalysisSection() {
+    return (
+        <div>
+            <PageHeader title="AI Failure Analysis" desc="Classify failing results, accept a suggested defect type, and measure how accurate the AI actually is." />
+
+            <SectionHeader>What it does</SectionHeader>
+            <Card>
+                <P>When a test fails, TTGO can ask your configured LLM to work out <em>why</em> it failed and propose how it should be classified. The AI only ever suggests — you decide, and the decisions you make are what reveal how far the AI can be trusted.</P>
+                <P>Only failing results (Failed and Error) are analyzed. Passing results are never sent anywhere.</P>
+            </Card>
+
+            <SectionHeader>Starting an analysis</SectionHeader>
+            <Card>
+                <DL items={[
+                    ['Automatically when a run finishes', 'Turn on "Analyze on run completion" in Settings. The provider you use must also be allowed to run automatic analysis — until you opt it in, nothing is sent on its own.'],
+                    ['On demand for a whole run', 'Open a run and click "Analyze failures". A banner shows progress across the failure groups, and you can cancel part-way through.'],
+                    ['On demand for one result', 'Open a failing result and analyze just that one — useful when you only care about a single failure, or want to re-analyze after the error changed.'],
+                ]} />
+            </Card>
+
+            <SectionHeader>What the AI is given</SectionHeader>
+            <Card>
+                <P>The model sees more than the error message. Each analysis carries the context a human would want before judging:</P>
+                <UL items={[
+                    'The failure itself — failure type, error message, stack trace, and the tail of the log',
+                    "This test's own recent history — how it has failed over the last 30 days",
+                    'How your team triaged those earlier failures — the defect types you picked',
+                    'Defects and requirements linked to the test case',
+                    'The steps that ran, plus browser, OS, environment and app version',
+                ]} />
+                <Tip>Identical failures are grouped and analyzed once, then the verdict is shared across the group — so a run with 40 copies of the same timeout costs one analysis, not 40.</Tip>
+            </Card>
+
+            <SectionHeader>Verdicts and confidence</SectionHeader>
+            <Card>
+                <DL items={[
+                    ['Product bug', 'The application under test is genuinely broken.'],
+                    ['Flaky test', 'The test is non-deterministic, rather than the app being wrong.'],
+                    ['Test data', 'Bad, missing or stale fixture data caused the failure.'],
+                    ['Environment', 'Something about the environment or its configuration.'],
+                    ['Infrastructure', 'CI, the runner, or the network.'],
+                    ['Unknown', 'The model could not tell — no defect type is suggested.'],
+                ]} />
+                <P>Every verdict also carries a confidence of low, medium or high, along with a short summary, a suggested next action, and the reasoning behind it.</P>
+            </Card>
+
+            <SectionHeader>Accepting or overriding the suggestion</SectionHeader>
+            <Card>
+                <Steps items={[
+                    { title: 'Look for the chip', desc: 'An untriaged failing result with a verdict shows a small "AI: ..." chip beside its defect-type control.' },
+                    { title: 'Accept', desc: 'One click applies the suggested defect type to that result.' },
+                    { title: 'Or override', desc: 'Pick a different defect type from the dropdown instead. An override is just as valuable as an accept.' },
+                    { title: 'The chip retires', desc: 'Once the result is triaged the chip disappears. It is an aid, not a nag.' },
+                ]} />
+                <Tip>Nothing is written for you. Your choice is what gets recorded — and that is exactly what makes the accuracy figures below mean something.</Tip>
+            </Card>
+
+            <SectionHeader>Triaging in bulk</SectionHeader>
+            <Card>
+                <P>Select several results and use <strong>Set defect type</strong> in the bulk bar to classify them together. It applies only to failing results — anything else in the selection is left untouched and reported back as skipped, so nothing changes silently.</P>
+            </Card>
+
+            <SectionHeader>How accurate is it?</SectionHeader>
+            <Card>
+                <P>Settings &gt; AI Failure Analysis reports how often the AI&apos;s suggestion matched the decision you actually made — overall, per verdict, and split by confidence.</P>
+                <P>The confidence split is the one to read. If agreement drops as confidence drops (say 90%, then 69%, then 43%), the confidence score is meaningful and you can act on it. If it is flat across all three, confidence is not telling you anything useful yet.</P>
+                <Tip>Expect it to be empty at first. Only results you have genuinely triaged are counted — anything still sitting at &quot;To investigate&quot; is treated as not yet triaged, never as a disagreement.</Tip>
+            </Card>
+
+            <SectionHeader>Privacy and control</SectionHeader>
+            <Card>
+                <UL items={[
+                    'Failure text goes to the LLM provider you configure, and nowhere else.',
+                    'Secrets are stripped first — API keys, bearer tokens, JWTs, private keys, passwords and email addresses are replaced before anything is sent.',
+                    'Automatic analysis needs the provider opted in explicitly, on top of the global setting.',
+                    'You control the cap on analyses per run, whether identical failures are grouped, whether redaction runs, and the prompt itself — which you can edit and reset to default.',
+                ]} />
             </Card>
         </div>
     );
