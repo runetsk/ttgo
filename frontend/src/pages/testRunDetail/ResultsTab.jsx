@@ -12,6 +12,7 @@ import RunResultsToolbar from '../../components/RunResultsToolbar';
 import { useRunViewPreference } from '../../hooks/useRunViewPreference';
 import { groupResults, GROUP_DIMENSIONS } from '../../utils/runResultsGrouping';
 import { shouldShowSuggestion, suggestionLabel } from '../../utils/defectSuggestion';
+import { isFailureStatus } from '../../utils/resultStatus';
 
 // Theme-readable text tones for the AI suggestion chip, echoing the defect_type
 // <select> colors below. --aig-tone-*-fg and --text-secondary are defined for
@@ -22,9 +23,10 @@ const SUGGESTION_FG = {
     system_issue: 'var(--text-secondary)',
 };
 
-// DefectSuggestionChip is an aid, not a nag: it renders only for untriaged FAILs that have a
-// suggestion, and Accept reuses the normal triage write, so the backend snapshot/calibration
-// path is identical to a human picking the value from the <select> beside it.
+// DefectSuggestionChip is an aid, not a nag: it renders only for untriaged failures (FAIL or
+// ERROR — see utils/resultStatus.js) that have a suggestion, and Accept reuses the normal triage
+// write, so the backend snapshot/calibration path is identical to a human picking the value from
+// the <select> beside it.
 //
 // Renders nothing when AI features are off. Every other AI surface on this page is gated the
 // same way (the analysis banner, the ai_verdict column) — without this, disabling AI would
@@ -181,7 +183,7 @@ export default function ResultsTab({
             if (idQ && !(r.id || '').toLowerCase().includes(idQ)) return false;
             if (f.status && r.status !== f.status) return false;
             if (f.defect_type) {
-                const isFailed = r.status === 'FAIL' || r.status === 'ERROR';
+                const isFailed = isFailureStatus(r.status);
                 const dt = isFailed ? (r.defect_type || 'to_investigate') : '';
                 if (dt !== f.defect_type) return false;
             }
@@ -748,7 +750,7 @@ export default function ResultsTab({
                             </td>
                             {isVisible('defect_type') && (
                                 <td onClick={e => e.stopPropagation()} style={{ overflow: 'hidden' }}>
-                                    {result.status === 'FAIL' ? (
+                                    {isFailureStatus(result.status) ? (
                                         <>
                                         <select
                                             value={result.defect_type || 'to_investigate'}
@@ -1031,7 +1033,7 @@ export default function ResultsTab({
 
 function AIVerdictCell({ result, analysis, onAnalyze }) {
     const [loading, setLoading] = useState(false);
-    const isFailure = result.status === 'FAIL' || result.status === 'ERROR';
+    const isFailure = isFailureStatus(result.status);
     if (!isFailure) {
         return <span style={{ color: 'var(--text-secondary)', fontSize: '0.75rem' }}>—</span>;
     }

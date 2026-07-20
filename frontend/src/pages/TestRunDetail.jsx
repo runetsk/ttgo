@@ -12,6 +12,7 @@ import { useColumnWidths } from '../hooks/useColumnWidths';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { latestAttempts, applyResultDelta } from '../utils/runResults';
+import { isFailureStatus } from '../utils/resultStatus';
 import DefectsTab from './testRunDetail/DefectsTab';
 import TimelineTab from './testRunDetail/TimelineTab';
 import CompareTab from './testRunDetail/CompareTab';
@@ -199,7 +200,7 @@ export default function TestRunDetail() {
     ).length;
     const passed = allPassed;
     const passedFirstTry = allPassed - passedAfterRetry;
-    const failed = latestResults.filter(r => r.status === 'FAIL' || r.status === 'ERROR').length;
+    const failed = latestResults.filter(r => isFailureStatus(r.status)).length;
     const skipped = latestResults.filter(r => r.status === 'SKIP').length;
     const pending = latestResults.filter(r => r.status === 'PENDING').length;
 

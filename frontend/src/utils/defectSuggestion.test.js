@@ -35,11 +35,30 @@ test('hides when there is no analysis or no suggestion', () => {
     assert.equal(shouldShowSuggestion(failResult(), { suggested_defect_type: 123 }), false);
 });
 
-test('hides for non-FAIL results', () => {
-    for (const status of ['PASS', 'ERROR', 'SKIP', 'PENDING', 'RUNNING']) {
+test('hides for non-failure results', () => {
+    for (const status of ['PASS', 'SKIP', 'PENDING', 'RUNNING']) {
         assert.equal(
             shouldShowSuggestion(failResult({ status, defect_type: '' }), analysis('product_bug')), false,
             `${status} has no defect_type control`,
+        );
+    }
+});
+
+// ERROR results are triageable too (the analyzer already produces verdicts for
+// them); the chip used to be FAIL-only, which is the gap these cover.
+test('shows for an untriaged ERROR with a suggestion', () => {
+    assert.equal(shouldShowSuggestion(failResult({ status: 'ERROR' }), analysis('system_issue')), true);
+    assert.equal(
+        shouldShowSuggestion(failResult({ status: 'ERROR', defect_type: '' }), analysis('system_issue')), true,
+        'an empty defect_type is untriaged for ERROR just as it is for FAIL',
+    );
+});
+
+test('hides once an ERROR row is triaged by a human', () => {
+    for (const decided of ['product_bug', 'automation_bug', 'system_issue']) {
+        assert.equal(
+            shouldShowSuggestion(failResult({ status: 'ERROR', defect_type: decided }), analysis('product_bug')), false,
+            `${decided} is a decision — the chip must not nag on ERROR rows either`,
         );
     }
 });

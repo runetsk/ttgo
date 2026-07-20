@@ -1,6 +1,7 @@
 import { latestAttempts } from './runResults.js';
+// Aliased to isFail so it stays symmetric with isPass in classify() below.
+import { isFailureStatus as isFail } from './resultStatus.js';
 
-const isFail = (s) => s === 'FAIL' || s === 'ERROR';
 const isPass = (s) => s === 'PASS';
 const matchKey = (r) => (r.test_case_id ? `tc:${r.test_case_id}` : `nm:${r.test_name_snapshot || ''}`);
 

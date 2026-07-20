@@ -7,6 +7,7 @@ import { analyzeRunResult, listRunResultAnalyses, uploadScreenshots } from '../a
 import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
 import { isManualStepResults } from '../utils/stepResults';
+import { isFailureStatus } from '../utils/resultStatus';
 import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
@@ -78,7 +79,7 @@ const RunResultDetail = ({ result, attempts }) => {
         attempt_number
     } = activeResult;
 
-    const isFailed = status === 'FAIL' || status === 'ERROR';
+    const isFailed = isFailureStatus(status);
 
     // Parse screenshots JSON array
     const screenshotUrls = (() => {

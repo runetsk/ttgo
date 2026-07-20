@@ -2,8 +2,9 @@
 // The backend owns the verdict -> defect_type mapping (models.SuggestedDefectType);
 // the frontend only decides whether to surface what it was handed.
 // Consumers: frontend/src/pages/testRunDetail/ResultsTab.jsx
+import { isFailureStatus } from './resultStatus.js';
 
-// A result is "untriaged" while its defect_type is still the FAIL auto-default
+// A result is "untriaged" while its defect_type is still the failure auto-default
 // (to_investigate) or empty — neither is a human decision, so a suggestion helps.
 const UNTRIAGED_DEFECT_TYPES = new Set(['', 'to_investigate']);
 
@@ -17,7 +18,7 @@ const SUGGESTION_LABELS = {
 // showing for a row. Deliberately narrow: the chip is an aid for undecided
 // failures, not a nag — it disappears the moment a human triages the row.
 export function shouldShowSuggestion(result, analysis) {
-    if (!result || result.status !== 'FAIL') return false;
+    if (!result || !isFailureStatus(result.status)) return false;
     if (!UNTRIAGED_DEFECT_TYPES.has(result.defect_type || '')) return false;
     const suggested = analysis?.suggested_defect_type;
     return typeof suggested === 'string' && suggested.trim() !== '';
