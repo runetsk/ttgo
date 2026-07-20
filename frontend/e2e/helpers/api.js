@@ -246,6 +246,29 @@ async function seedRunWithResult(request, { status = 'FAIL', label = 'Seed' } = 
     return { folder, tc, run, result };
 }
 
+// The multi-result sibling of seedRunWithResult: one folder, one run, and one
+// test case + result per requested status, in order. seedRunWithResult creates a
+// run PER result, so it cannot express the thing selection specs need — several
+// rows with DIFFERENT statuses on the SAME run (a mixed bulk selection).
+//
+// Returns { folder, run, rows } with rows[i] = { tc, result, status } matching the
+// `statuses` order, so callers can destructure positionally:
+//   const [failRow, errorRow, passRow] = seed.rows;
+async function seedRunWithResults(request, { statuses = ['FAIL'], label = 'Seed' } = {}) {
+    const ts = Date.now();
+    const folder = await createFolderAPI(request, `${label} Folder ${ts}`);
+    const run = await createRunAPI(request, `${label} Run ${ts}`);
+    const rows = [];
+    for (const [i, status] of statuses.entries()) {
+        // The index keeps names unique when the same status appears twice.
+        const tc = await createTestAPI(request, `${label} ${status} ${i + 1} ${ts}`, folder.id);
+        const result = await addRunResultAPI(request, run.id, tc.id);
+        if (status) await updateRunResultAPI(request, run.id, result.id, { status });
+        rows.push({ tc, result, status });
+    }
+    return { folder, run, rows };
+}
+
 // Category with one linked test case, each in its own new folder. `tag` keeps
 // the generated names unique.
 async function setupCategoryWithTest(request, tag) {
@@ -393,6 +416,7 @@ class ApiClient {
 
     // seed helpers
     seedRunWithResult(opts) { return seedRunWithResult(this.request, opts); }
+    seedRunWithResults(opts) { return seedRunWithResults(this.request, opts); }
     setupCategoryWithTest(tag) { return setupCategoryWithTest(this.request, tag); }
 }
 
@@ -401,6 +425,7 @@ export {
     MOCK_URL,
     ApiClient,
     seedRunWithResult,
+    seedRunWithResults,
     setupCategoryWithTest,
     createRequirementAPI,
     configureJiraAPI,

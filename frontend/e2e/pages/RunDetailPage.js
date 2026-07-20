@@ -112,6 +112,22 @@ export class RunDetailPage extends BasePage {
         return this.page.getByTestId(`select-result-${testCaseId}`);
     }
 
+    // ── Bulk action bar ──
+    // Renders only while at least one row is selected, so assert on it after
+    // selecting rather than before.
+    get bulkActionBar() {
+        return this.page.getByTestId('bulk-action-bar');
+    }
+
+    // Bulk "Set defect type" picker — a plain <select>, so drive it with
+    // .selectOption('product_bug'). Triage-only: it sends no status, and the
+    // backend applies the defect type to the selected FAIL/ERROR rows only. It
+    // resets to its placeholder after each pick, so don't assert its value —
+    // the toast reports the outcome.
+    get bulkDefectTypeSelect() {
+        return this.page.getByTestId('bulk-defect-type-select');
+    }
+
     // ── Add-tests-to-run modal (embeds the shared tree picker) ──
     async openAddTests() {
         await this.page.getByTestId('add-test-to-run-button').click();
