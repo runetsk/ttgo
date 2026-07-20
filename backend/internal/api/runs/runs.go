@@ -261,6 +261,13 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if req.DefectType != nil {
+		// Validated against the same canonical set the bulk endpoint uses. Without this the two
+		// endpoints would disagree about what is acceptable: bulk would 400 on garbage while this
+		// path silently persisted it into a column every calibration query then groups by.
+		if !models.IsValidDefectType(*req.DefectType) {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid defect_type"})
+			return
+		}
 		updateMap["defect_type"] = *req.DefectType
 		// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
 		// suggested at this exact moment. Deliberately NOT done for the "to_investigate"
@@ -1025,14 +1032,14 @@ func (h *Handler) AssignRun(w http.ResponseWriter, r *http.Request) {
 // BulkUpdateRunResults godoc
 //
 // @Summary      Bulk update run results
-// @Description  Applies the same status (and, for FAIL, a defect_type — defaulting to "to_investigate" when not given) to multiple results within a run.
+// @Description  Applies the same status and/or defect_type to multiple results within a run. At least one of the two is required. For a failure status (FAIL or ERROR) defect_type defaults to "to_investigate" when not given; every other status clears it.
 // @Tags         runs
 // @Accept       json
 // @Produce      json
 // @Param        id    path  string                                                       true  "Test run ID"
 // @Param        body  body  object{result_ids=[]string,status=string,defect_type=string}  true  "Result IDs and the status/defect_type to apply"
 // @Security     BearerAuth
-// @Success      200  {object}  object{status=string,updated=int}
+// @Success      200  {object}  object{status=string,updated=int,skipped=int}
 // @Failure      400  {object}  object{error=string}
 // @Failure      500  {object}  object{error=string}
 // @Router       /runs/{id}/results/bulk-update [post]
@@ -1056,37 +1063,59 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "too many result_ids (max 500 per request)"})
 		return
 	}
-	if req.Status == "" {
-		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "status is required"})
+	// Either field alone is a complete request: status-only is a plain status change, defect_type-only
+	// is a triage decision that leaves status untouched. Requiring at least one stops an empty body
+	// from reporting rows "updated" after a no-op UPDATE.
+	if req.Status == "" && req.DefectType == "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "at least one of status or defect_type is required"})
 		return
 	}
-	if !models.IsValidExecutionStatus(req.Status) {
+	if req.Status != "" && !models.IsValidExecutionStatus(req.Status) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid status"})
+		return
+	}
+	// IsValidDefectType accepts "", so this also covers the status-only shape.
+	if !models.IsValidDefectType(req.DefectType) {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid defect_type"})
 		return
 	}
 
 	now := time.Now()
 
-	// An explicitly supplied defect_type on a FAIL is a human triage decision; the
+	// An explicitly supplied defect_type on a failure is a human triage decision; the
 	// "to_investigate" auto-default (empty req.DefectType) means "not triaged yet" and is
-	// deliberately not one. This single gate drives BOTH the clearing folded into the main
-	// statement below and the snapshot pass after it, so the two can never disagree about what
-	// counts as a decision. It matches the single-result path, which touches these columns only
+	// deliberately not one. It matches the single-result path, which touches these columns only
 	// when the caller explicitly supplied a defect_type.
-	isTriage := models.ExecutionStatus(req.Status) == models.StatusFail && req.DefectType != ""
+	//
+	// This gate drives the CLEARING folded into the main statement below. The snapshot pass after
+	// it uses a narrower gate; clearing on the wider one is what keeps the pair fail-closed, since
+	// clearing without snapshotting leaves the columns blank and blank is excluded from the
+	// calibration set. The reverse pairing would be the bug.
+	isTriage := req.DefectType != "" &&
+		(req.Status == "" || models.IsFailureStatus(models.ExecutionStatus(req.Status)))
 
 	updateMap := map[string]interface{}{
-		"status":     req.Status,
 		"updated_at": now,
 	}
-	switch status := models.ExecutionStatus(req.Status); status {
-	case models.StatusFail:
+	switch {
+	case req.Status == "":
+		// Triage-only: apply the defect_type and leave status alone. Narrowing this to rows whose
+		// STORED status is a failure, and snapshotting them, is Mode 2 — see the snapshot gate below.
+		updateMap["defect_type"] = req.DefectType
+	case models.IsFailureStatus(models.ExecutionStatus(req.Status)):
+		// FAIL and ERROR are both failures and both triageable, exactly as the single-result path
+		// treats them — gating on FAIL alone here would force defect_type="" on an ERROR that the
+		// single-result endpoint triages, so the same request would mean two different things
+		// depending on which endpoint received it.
+		updateMap["status"] = req.Status
 		if req.DefectType != "" {
 			updateMap["defect_type"] = req.DefectType
 		} else {
 			updateMap["defect_type"] = "to_investigate"
 		}
 	default:
+		// PASS/SKIP/PENDING/RUNNING have nothing to triage.
+		updateMap["status"] = req.Status
 		updateMap["defect_type"] = ""
 	}
 	if isTriage {
@@ -1105,10 +1134,13 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Snapshot what the AI suggested for each result. The gate is uniform because one
-	// status/defect_type applies to every ID in the request; only the snapshot VALUES vary per
-	// row, which is why they need the separate grouped pass.
-	if isTriage {
+	// Snapshot what the AI suggested for each result. snapshotAISuggestionsBulk has no status gate
+	// of its own — it snapshots every id handed to it — so it may only run when a supplied failure
+	// status makes EVERY selected row a failure. The status-absent shape needs a partition on the
+	// STORED status first; until that lands it triages fail-closed instead: defect_type is written,
+	// the snapshot columns are cleared above and stay blank, and blank is excluded from
+	// accuracyCalibrationFilter. Only the snapshot is deferred, never the correctness.
+	if isTriage && req.Status != "" {
 		h.snapshotAISuggestionsBulk(r.Context(), runID, req.ResultIDs, now)
 	}
 

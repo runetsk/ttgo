@@ -710,6 +710,126 @@ func TestBulkUpdateNoSnapshotForNonFailStatus(t *testing.T) {
 	assert.Empty(t, got.SuggestedConfidence)
 }
 
+// THE parity guard between the two endpoints. Gating the bulk switch on FAIL alone left
+// {status:"ERROR", defect_type:"X"} forcing defect_type blank here while PUT /results/{result_id}
+// triaged and snapshotted the very same request — one decision meaning two different things
+// depending on which endpoint the caller happened to reach for.
+func TestBulkUpdateTriagesErrorStatusLikeSingleResult(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusError, 1)
+	rr := results[0]
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: rr.ID, Verdict: models.VerdictEnvironment, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": []string{rr.ID}, "status": "ERROR", "defect_type": "system_issue",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(rr.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.StatusError, got.Status)
+	assert.Equal(t, "system_issue", got.DefectType, "ERROR is a failure - the human's decision must survive")
+	assert.Equal(t, models.VerdictEnvironment, got.SuggestedVerdict)
+	assert.Equal(t, "system_issue", got.SuggestedDefectType)
+	assert.Equal(t, models.ConfidenceHigh, got.SuggestedConfidence)
+	assert.NotNil(t, got.DecidedAt, "a blank decided_at keeps the row out of the calibration window")
+}
+
+// The auto-default branch of the same switch: an ERROR with no explicit defect_type lands on
+// "not triaged yet" like a FAIL does, rather than being cleared like a PASS.
+func TestBulkUpdateErrorStatusDefaultsToInvestigate(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusPending, 1)
+	_, err := s.CreateAnalysis(&models.RunResultAnalysis{
+		RunResultID: results[0].ID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, ModelName: "m",
+	})
+	require.NoError(t, err)
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": []string{results[0].ID}, "status": "ERROR",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got, err := s.GetRunResultByID(results[0].ID)
+	require.NoError(t, err)
+	assert.Equal(t, "to_investigate", got.DefectType, "ERROR must default like FAIL, not clear like PASS")
+	assert.Empty(t, got.SuggestedVerdict, "the auto-default is not a human decision")
+	assert.Empty(t, got.SuggestedDefectType)
+	assert.Empty(t, got.SuggestedConfidence)
+}
+
+// status is no longer unconditionally required, but a request carrying NEITHER field would report
+// rows "updated" after a no-op UPDATE. defect_type is validated here for the first time: it feeds
+// a column that every calibration and counter query groups by, so garbage in it is not inert.
+func TestBulkUpdateValidatesStatusAndDefectType(t *testing.T) {
+	tests := []struct {
+		name      string
+		body      map[string]any
+		wantError string
+	}{
+		{"neither field", map[string]any{}, "at least one of status or defect_type is required"},
+		{"both blank", map[string]any{"status": "", "defect_type": ""}, "at least one of status or defect_type is required"},
+		{"invalid status", map[string]any{"status": "BOGUS"}, "invalid status"},
+		{"invalid defect_type", map[string]any{"status": "FAIL", "defect_type": "not_a_defect"}, "invalid defect_type"},
+		{"invalid defect_type, no status", map[string]any{"defect_type": "not_a_defect"}, "invalid defect_type"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, srv := newSnapshotEnv(t)
+			run, results := seedRunWithResults(t, s, models.StatusFail, 1)
+
+			body := map[string]any{"result_ids": []string{results[0].ID}}
+			for k, v := range tt.body {
+				body[k] = v
+			}
+			w := postBulkUpdate(t, s, srv, run.ID, body)
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
+			var resp map[string]string
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Equal(t, tt.wantError, resp["error"])
+
+			got, err := s.GetRunResultByID(results[0].ID)
+			require.NoError(t, err)
+			assert.Equal(t, models.StatusFail, got.Status, "a rejected request must write nothing")
+			assert.Empty(t, got.DefectType)
+		})
+	}
+}
+
+// The single-result path validates defect_type against the SAME canonical set, so the two
+// endpoints agree on what is acceptable. Without this, bulk would 400 on garbage while this
+// endpoint silently persisted it.
+func TestUpdateRunResultRejectsInvalidDefectType(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]any
+	}{
+		{"defect_type alone", map[string]any{"defect_type": "not_a_defect"}},
+		{"status and defect_type together", map[string]any{"status": "FAIL", "defect_type": "not_a_defect"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, srv := newSnapshotEnv(t)
+			rr := seedResultWithStatus(t, s, models.StatusFail)
+
+			w := putRunResult(t, s, srv, rr, tt.body)
+			require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+
+			var resp map[string]string
+			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+			assert.Equal(t, "invalid defect_type", resp["error"])
+
+			got, err := s.GetRunResultByID(rr.ID)
+			require.NoError(t, err)
+			assert.Empty(t, got.DefectType, "a rejected request must write nothing")
+		})
+	}
+}
+
 func TestLinkExistingDefectToResult(t *testing.T) {
 	s, err := newTestStore(t)
 	require.NoError(t, err)
