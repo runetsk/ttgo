@@ -3,7 +3,25 @@ package failureanalysis
 import (
 	"strings"
 	"testing"
+	"ttgo/pkg/tracker/models"
 )
+
+// Real models drift to invented labels ("environment_or_infrastructure",
+// "flaky") or borrow the defect-type vocabulary the historical "human:" lines
+// inject ("automation_bug") unless the template spells out the allowed values —
+// observed live: 47/63 analyses fell back to unknown before the enum line.
+func TestDefaultPromptTemplateEnumeratesVerdictAndConfidenceVocabulary(t *testing.T) {
+	for v := range models.ValidVerdicts {
+		if !strings.Contains(DefaultPromptTemplate, v) {
+			t.Errorf("default template does not list verdict %q", v)
+		}
+	}
+	for c := range models.ValidConfidences {
+		if !strings.Contains(DefaultPromptTemplate, c) {
+			t.Errorf("default template does not list confidence %q", c)
+		}
+	}
+}
 
 func TestBuildPromptIncludesAllSectionsForSmallInput(t *testing.T) {
 	in := PromptInput{

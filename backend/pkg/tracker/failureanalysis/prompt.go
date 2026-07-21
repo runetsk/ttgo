@@ -55,6 +55,9 @@ DATA>>>
 ### Linked requirements
 {{range .LinkedRequirements}}- {{.Key}}: {{.Title}}
 {{end}}
+verdict MUST be exactly one of: product_bug | flaky_test | environment | test_data | infrastructure | unknown.
+(The historical "human:" labels above use the separate defect-type vocabulary — product_bug | automation_bug | system_issue | to_investigate — never copy those as the verdict.)
+confidence MUST be one of: low | medium | high.
 Return JSON: {"verdict": "...", "confidence": "...", "summary": "...", "next_action": "...", "rationale": "..."}
 `
 
