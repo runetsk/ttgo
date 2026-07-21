@@ -6,8 +6,8 @@
       "runtimeExecutable": "go",
       "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server/main.go"],
       "cwd": "backend",
-      "port": 8080,
-      "env": { "ADMIN_EMAIL": "admin@example.com", "ADMIN_PASSWORD": "changeme123" }
+      "port": 8090,
+      "env": { "ADMIN_EMAIL": "admin@example.com", "ADMIN_PASSWORD": "changeme123", "LISTEN_ADDR": ":8090" }
     },
     {
       "name": "frontend",
@@ -15,7 +15,8 @@
       "runtimeArgs": ["run", "dev"],
       "cwd": "frontend",
       "port": 5173,
-      "autoPort": false
+      "autoPort": false,
+      "env": { "TTGO_DEV_API_TARGET": "http://localhost:8090" }
     },
     {
       "name": "frontend-preview",

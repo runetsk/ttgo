@@ -259,6 +259,7 @@ export default function AIGenerateStudio() {
                 style={{
                     '--aig-left': `${leftWidth}px`,
                     '--aig-right': `${rightWidth}px`,
+                    flex: 1, minHeight: 0,
                 }}
             >
                 {/* LEFT */}

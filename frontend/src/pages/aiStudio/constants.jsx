@@ -142,8 +142,15 @@ export function readStoredWidth(key, def, lo, hi) {
 export const pageStyles = {
     root: { padding: '24px 28px', minHeight: '100%' },
     container: { maxWidth: 860, margin: '0 auto' },
-    studioWrap: { margin: '4px -28px 0', '--aig-studio-h': 'calc(100vh - 220px)' },
-    studioOnlyWrap: { '--aig-studio-h': 'calc(100vh - 64px)' },
+    // Fill the content area instead of hardcoding a viewport calc: banners above
+    // the grid vary in count, and overshooting the available height stacks an
+    // outer scrollbar next to the panes' own ones. Panes size via --aig-studio-h,
+    // which resolves against the grid's flexed height.
+    studioOnlyWrap: {
+        flex: 1, minHeight: 0,
+        display: 'flex', flexDirection: 'column',
+        '--aig-studio-h': '100%',
+    },
 
     pageHeader: {
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',

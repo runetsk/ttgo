@@ -109,7 +109,7 @@ export default function SettingsPage() {
     ];
 
     return (
-        <div style={{ display: 'flex', gap: 0, width: '100%', padding: '24px 24px 24px 0', minHeight: 'calc(100vh - 80px)' }}>
+        <div style={{ display: 'flex', gap: 0, width: '100%', padding: '24px 24px 24px 0', minHeight: '100%' }}>
             {/* Sidebar nav */}
             <nav style={{
                 width: 200, flexShrink: 0,

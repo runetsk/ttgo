@@ -148,6 +148,10 @@ function App() {
 
   const isThreePane = /^\/library\/folders\/[^/]+\/tests\/[^/]+/.test(location.pathname);
 
+  // Routes that manage their own scrolling get the flush (no padding, no outer
+  // scroll) content area, so they don't stack a second scrollbar next to it.
+  const isFlushRoute = isThreePane || location.pathname === '/help';
+
   const showRunSidebar = !isLoginPage && location.pathname.startsWith('/runs');
 
   // Runs sidebar state — lifted here so RunFolderSidebar lives at app-container level
@@ -187,7 +191,7 @@ function App() {
         )}
 
         <main className="main-content">
-          <div className={`content-area${isThreePane ? ' content-area-flush' : ''}`}>
+          <div className={`content-area${isFlushRoute ? ' content-area-flush' : ''}`}>
             <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/login" element={<LoginPage />} />

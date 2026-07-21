@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Double scrollbars on pages that sized themselves with viewport math inside the app's own scroll container. The Help page now renders in the flush (unpadded, non-scrolling) content area and its two columns flex-fill and scroll independently; the AI Generation studio's panes flex-fill the space left after any warning banners instead of assuming a fixed banner-less height; and the Settings page no longer forces a phantom ~32px of overflow via an oversized `min-height`, so its outer scrollbar only appears when content actually needs it.
+
 ## [0.4.0] - 2026-07-20
 
 ### Added

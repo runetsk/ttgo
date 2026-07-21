@@ -862,9 +862,12 @@ function UL({ items }) {
 /* ── STYLES ── */
 
 const styles = {
+    /* The page renders in the flush content area (no padding, overflow hidden),
+       so it fills the space below the header and each column scrolls itself. */
     page: {
         display: 'flex',
-        minHeight: 'calc(100vh - 56px)',
+        flex: 1,
+        minHeight: 0,
         width: '100%',
     },
 
@@ -876,9 +879,6 @@ const styles = {
         flexDirection: 'column',
         borderRight: '1px solid var(--border-color)',
         background: 'var(--bg-secondary)',
-        position: 'sticky',
-        top: 56,
-        height: 'calc(100vh - 56px)',
         overflowY: 'auto',
     },
     sidebarTop: {
@@ -943,7 +943,7 @@ const styles = {
 
     /* Content */
     content: {
-        flex: 1, overflowY: 'auto', height: 'calc(100vh - 56px)',
+        flex: 1, minWidth: 0, overflowY: 'auto',
     },
     contentInner: {
         maxWidth: 780, padding: '32px 44px 80px', margin: '0 auto',
