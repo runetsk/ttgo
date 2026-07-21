@@ -468,7 +468,7 @@ function AIFailureAnalysisSection() {
             <SectionHeader>Starting an analysis</SectionHeader>
             <Card>
                 <DL items={[
-                    ['Automatically when a run finishes', 'Turn on "Analyze on run completion" in Settings. The provider you use must also be allowed to run automatic analysis — until you opt it in, nothing is sent on its own.'],
+                    ['Automatically when a run finishes', 'Turn on "Auto-analyze on run completion" under Settings → AI Failure Analysis, and tick "Auto failure analysis" on the provider itself (Add/Edit Provider dialog). The provider checkbox is off by default — until you opt the provider in, nothing is sent on its own.'],
                     ['On demand for a whole run', 'Open a run and click "Analyze failures". A banner shows progress across the failure groups, and you can cancel part-way through.'],
                     ['On demand for one result', 'Open a failing result and analyze just that one — useful when you only care about a single failure, or want to re-analyze after the error changed.'],
                 ]} />
@@ -528,7 +528,7 @@ function AIFailureAnalysisSection() {
                 <UL items={[
                     'Failure text goes to the LLM provider you configure, and nowhere else.',
                     'Secrets are stripped first — API keys, bearer tokens, JWTs, private keys, passwords and email addresses are replaced before anything is sent.',
-                    'Automatic analysis needs the provider opted in explicitly, on top of the global setting.',
+                    'Automatic analysis needs the provider opted in explicitly ("Auto failure analysis" in the provider dialog), on top of the global setting.',
                     'You control the cap on analyses per run, whether identical failures are grouped, whether redaction runs, and the prompt itself — which you can edit and reset to default.',
                 ]} />
             </Card>
