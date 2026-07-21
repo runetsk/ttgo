@@ -357,7 +357,7 @@ func TestUpdateRunResultErrorStatusDefaultsToInvestigate(t *testing.T) {
 
 // REGRESSION for the ERROR extension: widening "is a failure" must not widen it past FAIL/ERROR.
 // Both halves are asserted per status, because they are driven by different branches: a bare
-// status change still FORCES defect_type to '', and a status change carrying an explicit
+// status change still FORCES defect_type to "", and a status change carrying an explicit
 // defect_type still records NO snapshot (the explicit value wins on the column, but a non-failure
 // row must never enter the calibration set).
 func TestUpdateRunResultNonFailureStatusesStillClearDefectType(t *testing.T) {

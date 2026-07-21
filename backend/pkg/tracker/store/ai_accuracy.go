@@ -60,7 +60,7 @@ type AIFailureAnalysisAccuracy struct {
 //
 // ERROR results belong to the set on the same terms as FAIL: the analyzer produces verdicts for
 // both, and both expose the defect_type control that records a human decision. Pre-existing ERROR
-// rows contribute nothing until genuinely triaged — they carry defect_type = '' (or the untriaged
+// rows contribute nothing until genuinely triaged — they carry defect_type = "" (or the untriaged
 // 'to_investigate'), which the last predicate excludes — so no backfill is needed.
 const accuracyCalibrationFilter = `
 	WHERE decided_at >= ?
