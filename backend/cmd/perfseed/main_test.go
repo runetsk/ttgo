@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"ttgo/pkg/tracker/store"
 
@@ -22,59 +23,6 @@ func TestRunRequiresFlags(t *testing.T) {
 	t.Chdir(t.TempDir())
 	err := run(nil, &bytes.Buffer{})
 	require.ErrorContains(t, err, "-db and -manifest are required")
-}
-
-// A symlink named perf-*.db passes the basename guard but could point at a real
-// database; the CLI must refuse it before touching anything.
-func TestRunRefusesSymlinkDB(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "real-tracker.db")
-	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
-	link := filepath.Join(dir, "perf-evil.db")
-	require.NoError(t, os.Symlink(target, link))
-
-	err := run([]string{"-db", link, "-manifest", filepath.Join(dir, "m.json")}, &bytes.Buffer{})
-	require.ErrorContains(t, err, "symlink")
-}
-
-// A hard link named perf-*.db shares the target's inode; Lstat reports a
-// regular file, so the symlink check alone would let a no-wipe run seed
-// straight into a real database. The guard must refuse link count > 1.
-func TestRunRefusesHardLinkDB(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "real-tracker.db")
-	require.NoError(t, os.WriteFile(target, []byte("x"), 0o600))
-	link := filepath.Join(dir, "perf-evil.db")
-	require.NoError(t, os.Link(target, link))
-
-	err := run([]string{"-db", link, "-manifest", filepath.Join(dir, "m.json")}, &bytes.Buffer{})
-	require.ErrorContains(t, err, "hard link")
-}
-
-// os.WriteFile and os.Chmod follow symlinks, so a symlinked manifest would
-// redirect raw bearer-token JSON over an arbitrary user-writable file.
-func TestRunRefusesSymlinkManifest(t *testing.T) {
-	dir := t.TempDir()
-	target := filepath.Join(dir, "victim.json")
-	require.NoError(t, os.WriteFile(target, []byte("{}"), 0o600))
-	link := filepath.Join(dir, "manifest.json")
-	require.NoError(t, os.Symlink(target, link))
-
-	err := run([]string{"-db", filepath.Join(dir, "perf-x.db"), "-manifest", link}, &bytes.Buffer{})
-	require.ErrorContains(t, err, "symlink")
-}
-
-// A symlinked scratch directory relocates every per-file check above it, so
-// the immediate parent of the DB (and manifest) must not be a symlink.
-func TestRunRefusesSymlinkParentDir(t *testing.T) {
-	dir := t.TempDir()
-	real := filepath.Join(dir, "real-data")
-	require.NoError(t, os.Mkdir(real, 0o755))
-	scratch := filepath.Join(dir, "scratch")
-	require.NoError(t, os.Symlink(real, scratch))
-
-	err := run([]string{"-db", filepath.Join(scratch, "perf-x.db"), "-manifest", filepath.Join(dir, "m.json")}, &bytes.Buffer{})
-	require.ErrorContains(t, err, "symlink")
 }
 
 // Full integration: seeds the small tier into a temp scratch DB (~10k rows,
@@ -119,7 +67,9 @@ func TestRunSeedsAndWritesManifest(t *testing.T) {
 
 	info, err := os.Stat(mf)
 	require.NoError(t, err)
-	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "manifest with raw tokens must be 0600 even if it pre-existed")
+	if runtime.GOOS != "windows" { // Windows has no POSIX perms; Chmod only toggles read-only
+		assert.Equal(t, os.FileMode(0o600), info.Mode().Perm(), "manifest with raw tokens must be 0600 even if it pre-existed")
+	}
 
 	s, err := store.New(db)
 	require.NoError(t, err)

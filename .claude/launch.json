@@ -10,6 +10,19 @@
       "env": { "ADMIN_EMAIL": "admin@example.com", "ADMIN_PASSWORD": "changeme123", "LISTEN_ADDR": ":8090" }
     },
     {
+      "name": "backend-ai",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server/main.go"],
+      "cwd": "backend",
+      "port": 8090,
+      "env": {
+        "DB_PATH": "../perf/.scratch/perf-ai.db",
+        "ADMIN_EMAIL": "admin@example.com",
+        "ADMIN_PASSWORD": "changeme123",
+        "LISTEN_ADDR": ":8090"
+      }
+    },
+    {
       "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],

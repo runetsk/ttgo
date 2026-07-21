@@ -13,20 +13,26 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 	"ttgo/pkg/tracker/store"
 )
 
 type manifest struct {
-	Tier             string           `json:"tier"`
+	Profile          string           `json:"profile"`
+	Tier             string           `json:"tier,omitempty"`
 	DB               string           `json:"db"`
 	SeededAt         time.Time        `json:"seeded_at"`
 	Tokens           []string         `json:"tokens"`
 	UserEmails       []string         `json:"user_emails"`
 	UserPassword     string           `json:"user_password"`
-	IngestTestCases  []store.PerfCase `json:"ingest_test_cases"`
-	HistoricalRunIDs []string         `json:"historical_run_ids"`
+	IngestTestCases  []store.PerfCase `json:"ingest_test_cases,omitempty"`
+	HistoricalRunIDs []string         `json:"historical_run_ids,omitempty"`
+
+	// ai profile only: newest-first run ids plus the planted-failure answer key
+	// for grading real-LLM verdicts against known root causes.
+	LatestRunID string                    `json:"latest_run_id,omitempty"`
+	RunIDs      []string                  `json:"run_ids,omitempty"`
+	GroundTruth []store.AISeedGroundTruth `json:"ground_truth,omitempty"`
 }
 
 func main() {
@@ -38,7 +44,11 @@ func main() {
 func run(args []string, out io.Writer) error {
 	fs := flag.NewFlagSet("perfseed", flag.ContinueOnError)
 	dbPath := fs.String("db", "", "path to the perf scratch database (basename must match perf-*.db)")
-	tier := fs.String("tier", "small", "dataset tier: small (~10k results), medium (~100k), large (~1M)")
+	profile := fs.String("profile", "perf", "dataset profile: perf (k6 load-test dataset) or ai (AI failure-analysis demo dataset with realistic failures + ground truth)")
+	tier := fs.String("tier", "small", "perf profile only — dataset tier: small (~10k results), medium (~100k), large (~1M)")
+	days := fs.Int("days", 30, "ai profile only — daily runs to generate (newest = today)")
+	perRun := fs.Int("per-run", 500, "ai profile only — results per run")
+	nCases := fs.Int("cases", 600, "ai profile only — test-case catalog size")
 	seed := fs.Uint64("seed", 1, "seed for deterministic data generation")
 	users := fs.Int("users", 10, "number of perf users to create")
 	tokens := fs.Int("tokens", 100, "number of write-scoped API tokens (keep >= peak VUs so ingest load spreads across token rows rather than hammering last_used_at on a few)")
@@ -50,6 +60,9 @@ func run(args []string, out io.Writer) error {
 	}
 	if *dbPath == "" || *manifestPath == "" {
 		return fmt.Errorf("-db and -manifest are required")
+	}
+	if *profile != "perf" && *profile != "ai" {
+		return fmt.Errorf("unknown profile %q (perf, ai)", *profile)
 	}
 	if !store.IsPerfDBPath(*dbPath) {
 		return fmt.Errorf("refusing to touch %q: perfseed only operates on databases named perf-*.db", *dbPath)
@@ -79,8 +92,8 @@ func run(args []string, out io.Writer) error {
 		if fi.Mode()&os.ModeSymlink != 0 {
 			return fmt.Errorf("refusing to touch %q: it is a symlink; perfseed only operates on regular scratch files", p)
 		}
-		if st, ok := fi.Sys().(*syscall.Stat_t); ok && st.Nlink > 1 {
-			return fmt.Errorf("refusing to touch %q: it is a hard link (%d links); perfseed only operates on regular scratch files", p, st.Nlink)
+		if n := hardLinkCount(fi); n > 1 {
+			return fmt.Errorf("refusing to touch %q: it is a hard link (%d links); perfseed only operates on regular scratch files", p, n)
 		}
 	}
 	for _, d := range []string{filepath.Dir(absDB), filepath.Dir(absManifest)} {
@@ -106,34 +119,61 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 
-	cfg, err := store.PerfTier(*tier)
-	if err != nil {
-		return err
-	}
-	cfg.Seed = *seed
-
 	s, err := store.New(absDB)
 	if err != nil {
 		return err
 	}
 	defer s.Close()
 
-	res, err := s.SeedPerfDataset(cfg)
-	if err != nil {
-		return fmt.Errorf("seed dataset: %w", err)
+	var m manifest
+	var summary string
+	switch *profile {
+	case "perf":
+		cfg, err := store.PerfTier(*tier)
+		if err != nil {
+			return err
+		}
+		cfg.Seed = *seed
+		res, err := s.SeedPerfDataset(cfg)
+		if err != nil {
+			return fmt.Errorf("seed dataset: %w", err)
+		}
+		m = manifest{
+			Profile: "perf", Tier: *tier,
+			IngestTestCases:  res.IngestPool,
+			HistoricalRunIDs: res.HistoricalRunIDs,
+		}
+		summary = fmt.Sprintf(
+			"seeded %s tier=%s: folders=%d categories=%d cases=%d (+%d ingest-pool) runs=%d results=%d",
+			absDB, *tier, res.Folders, res.Categories, res.TestCases,
+			len(res.IngestPool), res.TestRuns, res.RunResults)
+	case "ai":
+		cfg := store.DefaultAISeedConfig()
+		cfg.Seed, cfg.Days, cfg.ResultsPerRun, cfg.TestCases = *seed, *days, *perRun, *nCases
+		res, err := s.SeedAIFailureDataset(cfg)
+		if err != nil {
+			return fmt.Errorf("seed ai dataset: %w", err)
+		}
+		m = manifest{
+			Profile: "ai", LatestRunID: res.LatestRunID,
+			RunIDs: res.RunIDs, GroundTruth: res.GroundTruth,
+		}
+		summary = fmt.Sprintf(
+			"seeded %s profile=ai: runs=%d results=%d failing=%d human-labeled=%d cases=%d\nlatest run (analyze this one): %s\nplanted failure groups:",
+			absDB, res.TestRuns, res.RunResults, res.FailingRows, res.LabeledRows, res.TestCases, res.LatestRunID)
+		for _, g := range res.GroundTruth {
+			summary += fmt.Sprintf(
+				"\n  %-26s %-15s expect %s/%s  rows=%d (latest run %d)",
+				g.TemplateKey, "["+g.Scenario+"]", g.ExpectedVerdict, g.ExpectedDefect, g.TotalRows, g.LatestRunRows)
+		}
 	}
+
 	principals, err := s.SeedPerfPrincipals(*users, *tokens, *password)
 	if err != nil {
 		return fmt.Errorf("seed principals: %w", err)
 	}
-
-	m := manifest{
-		Tier: *tier, DB: absDB, SeededAt: time.Now(),
-		Tokens: principals.Tokens, UserEmails: principals.UserEmails,
-		UserPassword:     *password,
-		IngestTestCases:  res.IngestPool,
-		HistoricalRunIDs: res.HistoricalRunIDs,
-	}
+	m.DB, m.SeededAt = absDB, time.Now()
+	m.Tokens, m.UserEmails, m.UserPassword = principals.Tokens, principals.UserEmails, *password
 	data, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return err
@@ -148,10 +188,7 @@ func run(args []string, out io.Writer) error {
 		return err
 	}
 
-	fmt.Fprintf(out,
-		"seeded %s tier=%s: folders=%d categories=%d cases=%d (+%d ingest-pool) runs=%d results=%d users=%d tokens=%d\nmanifest: %s\n",
-		absDB, *tier, res.Folders, res.Categories, res.TestCases,
-		len(res.IngestPool), res.TestRuns, res.RunResults,
-		len(principals.UserEmails), len(principals.Tokens), absManifest)
+	fmt.Fprintf(out, "%s\nusers=%d tokens=%d\nmanifest: %s\n",
+		summary, len(principals.UserEmails), len(principals.Tokens), absManifest)
 	return nil
 }
