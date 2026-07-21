@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="google-site-verification" content="iEzCg_s5hicGzAriyMO001iDdV7NE1FjylythMOMuc8" />
   <title>TTGO — Free self-hosted test management &amp; TestRail alternative</title>
-  <meta name="description" content="TTGO is a free, self-hosted, source-available test management platform — a modern alternative to TestRail, Xray and qTest. Rich test cases, run execution, analytics with flaky-test detection, requirements traceability, AI test generation and a first-class CLI, all from a single Go binary and one SQLite file." />
+  <meta name="description" content="TTGO is a free, self-hosted, source-available test management platform — a modern alternative to TestRail, Xray and qTest. Rich test cases, run execution, analytics with flaky-test detection, requirements traceability, AI test generation, AI failure triage that measures its own accuracy, and a first-class CLI, all from a single Go binary and one SQLite file." />
   <meta name="theme-color" content="#0b0b12" />
   <link rel="canonical" href="https://runetsk.github.io/ttgo/" />
 
@@ -40,7 +40,7 @@
     "operatingSystem": "Linux, macOS, Windows, Docker",
     "url": "https://runetsk.github.io/ttgo/",
     "downloadUrl": "https://github.com/runetsk/ttgo",
-    "description": "TTGO is a free, self-hosted, source-available test management platform — a modern alternative to TestRail, Xray and qTest. Rich test cases with version history, run execution with defect tracking, analytics with flaky-test detection, requirements traceability, AI test generation and a first-class CLI, all from a single Go binary and one SQLite file.",
+    "description": "TTGO is a free, self-hosted, source-available test management platform — a modern alternative to TestRail, Xray and qTest. Rich test cases with version history, run execution with defect tracking, analytics with flaky-test detection, requirements traceability, AI test generation, AI failure triage that measures its own accuracy, and a first-class CLI, all from a single Go binary and one SQLite file.",
     "license": "https://polyformproject.org/licenses/shield/1.0.0",
     "screenshot": "https://runetsk.github.io/ttgo/images/01-test-library.png",
     "softwareHelp": "https://github.com/runetsk/ttgo#readme",
@@ -50,6 +50,7 @@
       "Analytics with flaky-test detection and run comparison",
       "Requirements traceability matrix",
       "AI test generation with your own LLM provider",
+      "AI failure analysis that classifies failing results, suggests a defect type and measures its own accuracy",
       "First-class CLI and documented REST API",
       "Real-time collaboration over WebSocket"
     ],
@@ -96,6 +97,14 @@
           "@type": "Answer",
           "text": "Yes. TTGO can draft test cases from your requirements using your own LLM provider (bring your own key), with a review-and-approve flow so nothing is saved until you accept it."
         }
+      },
+      {
+        "@type": "Question",
+        "name": "Can TTGO triage test failures automatically?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. TTGO can classify each failing result with your own LLM — product bug, flaky test, environment, test data or infrastructure — grounded in that test's own recent failure history, its linked defects and how your team triaged it before. The verdict is offered as a suggested defect type you accept with one click or override; nothing is written automatically. TTGO then reports how often its suggestions matched your actual decisions, broken down by confidence, so you can judge whether to trust it."
+        }
       }
     ]
   }
@@ -135,8 +144,8 @@
         <h1 class="hero__title reveal">Self-hosted test management<br />that's <span class="grad">actually yours.</span></h1>
         <p class="hero__sub reveal">
           TTGO is a modern, self-hosted test management platform — rich test cases, run
-          execution, analytics, AI test generation and a first-class CLI, all running as a
-          single Go binary against one SQLite file. <strong>Own your data, automate everything.</strong>
+          execution, analytics, AI test generation and failure triage, and a first-class CLI,
+          all running as a single Go binary against one SQLite file. <strong>Own your data, automate everything.</strong>
         </p>
         <div class="hero__cta reveal">
           <a class="btn btn--primary" href="https://github.com/runetsk/ttgo" target="_blank" rel="noopener">View on GitHub →</a>
@@ -198,7 +207,7 @@
         <div class="feature feature--rev reveal">
           <div class="feature__text">
             <h3>Run execution</h3>
-            <p>Snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. Group results live by status, AI verdict or error signature.</p>
+            <p>Snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. AI classifies each failure and suggests the defect type for one-click acceptance — never writing it for you — then reports how often its suggestions matched your decisions. Group results live by status, AI verdict or error signature.</p>
           </div>
           <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/03-test-run-execution.png" alt="TTGO run execution — per-result pass/fail, defect classification and durations" loading="lazy" /></div></div>
         </div>
