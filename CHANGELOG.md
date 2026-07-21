@@ -5,7 +5,7 @@ All notable changes to TTGO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.5.0] - 2026-07-21
 
 ### Added
 - **`perfseed -profile ai`: a realistic demo dataset for exercising AI failure analysis at scale.** Seeds 30 daily "Nightly Regression" runs of 500 results each (all knobs flaggable: `-days` / `-per-run` / `-cases` / `-seed`) into a `perf-*.db` scratch database, with failure *content* built for the analyzer rather than for load: 14 planted failure templates (persistent product bugs, stale-selector/fixture automation bugs, an infrastructure incident day of mass `ERROR`s, a latest-run staging outage, three flaky signatures, rare background noise, and a singleton) whose volatile parts (ids, timestamps) normalize away under the dedup signature, so the newest run lands ~63 failures in ~11 realistic groups instead of shattering or collapsing. Failing rows older than three days carry mostly-conclusive human `defect_type` labels and the planted bugs link to seeded defects, so the prompt enrichment (history, label rollup, linked defects) has real signal. The seed manifest gains a per-template **ground-truth answer key** (`expected_verdict` / `expected_defect_type` / planted row counts) for grading real-LLM verdicts against known root causes.
