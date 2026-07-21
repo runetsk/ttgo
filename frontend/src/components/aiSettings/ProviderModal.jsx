@@ -19,6 +19,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
     const [timeoutSeconds, setTimeoutSeconds] = useState(defaultTimeout);
     const [isDefault, setIsDefault]         = useState(provider?.is_default || false);
     const [enabled, setEnabled]             = useState(provider?.enabled !== false);
+    const [allowAutoFA, setAllowAutoFA]     = useState(provider?.allow_auto_failure_analysis || false);
     const [promptPrice, setPromptPrice]         = useState(provider?.prompt_price_per_mtok ?? '');
     const [completionPrice, setCompletionPrice] = useState(provider?.completion_price_per_mtok ?? '');
     const [saving, setSaving]               = useState(false);
@@ -48,6 +49,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                 api_key: apiKey, model_name: modelName,
                 timeout_seconds: parseInt(timeoutSeconds, 10) || 90,
                 is_default: isDefault, enabled,
+                allow_auto_failure_analysis: allowAutoFA,
                 prompt_price_per_mtok: promptPrice === '' ? null : parseFloat(promptPrice),
                 completion_price_per_mtok: completionPrice === '' ? null : parseFloat(completionPrice),
             };
@@ -232,6 +234,10 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                         <label style={m.toggle}>
                             <input type="checkbox" checked={isDefault} onChange={e => setIsDefault(e.target.checked)} style={m.checkbox} />
                             <span style={m.toggleLabel}>Set as default</span>
+                        </label>
+                        <label style={m.toggle} title="Let run completion automatically send failure data to this provider for AI failure analysis. Manually triggered analysis is unaffected.">
+                            <input type="checkbox" checked={allowAutoFA} onChange={e => setAllowAutoFA(e.target.checked)} style={m.checkbox} />
+                            <span style={m.toggleLabel}>Auto failure analysis</span>
                         </label>
                     </div>
 
