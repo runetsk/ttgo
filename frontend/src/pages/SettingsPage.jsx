@@ -756,6 +756,7 @@ function DemoDataSettings() {
     const [confirmModal, setConfirmModal] = useState(null);
     const [showEraseModal, setShowEraseModal] = useState(false);
     const [eraseInput, setEraseInput] = useState('');
+    const [aiResult, setAiResult] = useState(null);
     const navigate = useNavigate();
 
     const loadStatus = useCallback(() => {
@@ -779,6 +780,35 @@ function DemoDataSettings() {
             // Global interceptor already shows a toast for errors; nothing extra needed.
         } finally {
             setOperating(false);
+        }
+    };
+
+    const doLoadAI = async () => {
+        setConfirmModal(null);
+        setOperating(true);
+        try {
+            const res = await seedApi.loadAI();
+            setAiResult(res);
+            toast.success(res.replaced_existing ? 'AI demo data replaced' : 'AI demo data loaded');
+            loadStatus();
+        } catch {
+            // Global interceptor already shows a toast for errors.
+        } finally {
+            setOperating(false);
+        }
+    };
+
+    const handleLoadAI = () => {
+        if (seedStatus?.has_ai_demo_data) {
+            setConfirmModal({
+                action: 'load-ai',
+                title: 'Replace AI Demo Data',
+                message: 'This will replace the existing AI demo dataset, including any analyses and triage decisions made on it. Your own content will not be affected.',
+                confirmText: 'Replace',
+                confirmStyle: 'danger',
+            });
+        } else {
+            doLoadAI();
         }
     };
 
@@ -888,6 +918,86 @@ function DemoDataSettings() {
                 </div>
             </div>
 
+            {/* ── AI Failure Analysis demo dataset ─────────────────────── */}
+            <div className="glass-panel" style={{ padding: 24, marginBottom: 24 }}>
+                <h4 style={{ marginTop: 0, marginBottom: 4 }}>AI Failure Analysis Demo</h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: 0, marginBottom: 16 }}>
+                    30 nightly runs × 500 results with realistic failure groups, per-test failure history,
+                    triage labels, and linked defects — built for exercising AI failure analysis at real scale.
+                    Configure an AI provider, open the latest run, and hit “Analyze failures”.
+                    “Remove Demo Data” above clears this dataset too.
+                </p>
+
+                {!loading && (
+                    <div style={{ marginBottom: 16, fontSize: '0.9rem' }}>
+                        {seedStatus?.has_ai_demo_data ? (
+                            <span style={{ color: 'var(--accent-green, #22c55e)' }}>
+                                ✓ AI demo data loaded
+                                {seedStatus.ai_latest_run_id && (
+                                    <button
+                                        className="action-btn"
+                                        style={{ marginLeft: 12, padding: '2px 10px', fontSize: '0.85rem' }}
+                                        onClick={() => navigate(`/runs/run/${seedStatus.ai_latest_run_id}`)}
+                                        data-testid="ai-demo-open-latest-run"
+                                    >
+                                        Open latest run →
+                                    </button>
+                                )}
+                            </span>
+                        ) : (
+                            <span style={{ color: 'var(--text-secondary)' }}>No AI demo data loaded</span>
+                        )}
+                    </div>
+                )}
+
+                <button
+                    className="primary-btn"
+                    onClick={handleLoadAI}
+                    disabled={operating || loading}
+                    data-testid="load-ai-demo-button"
+                >
+                    {operating ? 'Working…' : (seedStatus?.has_ai_demo_data ? 'Reload AI Demo Data' : 'Load AI Demo Data')}
+                </button>
+
+                {aiResult && (
+                    <div style={{ marginTop: 16, fontSize: '0.85rem' }} data-testid="ai-demo-result">
+                        <div style={{ marginBottom: 8, color: 'var(--text-secondary)' }}>
+                            Seeded {aiResult.created.test_runs} runs · {aiResult.created.run_results} results
+                            · {aiResult.failing_rows} failures ({aiResult.labeled_rows} human-labeled)
+                        </div>
+                        <details>
+                            <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', marginBottom: 8 }}>
+                                Planted failure groups (answer key for grading AI verdicts)
+                            </summary>
+                            <div style={{ overflowX: 'auto', marginTop: 8 }}>
+                                <table style={{ borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: 520 }}>
+                                    <thead>
+                                        <tr style={{ textAlign: 'left', color: 'var(--text-secondary)' }}>
+                                            <th style={{ padding: '4px 12px 4px 0' }}>Template</th>
+                                            <th style={{ padding: '4px 12px 4px 0' }}>Scenario</th>
+                                            <th style={{ padding: '4px 12px 4px 0' }}>Expected verdict</th>
+                                            <th style={{ padding: '4px 12px 4px 0' }}>Expected defect type</th>
+                                            <th style={{ padding: '4px 0' }}>Rows (latest run)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {aiResult.ground_truth.map(g => (
+                                            <tr key={g.template_key} style={{ borderTop: '1px solid var(--border-color)' }}>
+                                                <td style={{ padding: '4px 12px 4px 0', fontFamily: 'monospace' }}>{g.template_key}</td>
+                                                <td style={{ padding: '4px 12px 4px 0' }}>{g.scenario}</td>
+                                                <td style={{ padding: '4px 12px 4px 0' }}>{g.expected_verdict}</td>
+                                                <td style={{ padding: '4px 12px 4px 0' }}>{g.expected_defect_type}</td>
+                                                <td style={{ padding: '4px 0' }}>{g.total_rows} ({g.latest_run_rows})</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    </div>
+                )}
+            </div>
+
             {confirmModal && (
                 <Modal
                     type="confirm"
@@ -895,7 +1005,7 @@ function DemoDataSettings() {
                     message={confirmModal.message}
                     confirmText={confirmModal.confirmText}
                     confirmStyle={confirmModal.confirmStyle}
-                    onConfirm={confirmModal.action === 'load' ? doLoad : doRemove}
+                    onConfirm={confirmModal.action === 'load' ? doLoad : confirmModal.action === 'load-ai' ? doLoadAI : doRemove}
                     onCancel={() => setConfirmModal(null)}
                 />
             )}

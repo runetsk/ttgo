@@ -74,6 +74,7 @@ func mountAPIRoutes(s *Server, api *routegroup.Bundle) {
 	// Seed / demo data
 	api.HandleFunc("GET /seed", s.requireAdmin(s.handleGetSeedStatus))
 	api.HandleFunc("POST /seed", s.requireAdmin(s.handleCreateSeed))
+	api.HandleFunc("POST /seed/ai", s.requireAdmin(s.handleCreateAISeed))
 	api.HandleFunc("DELETE /seed", s.requireAdmin(s.handleDeleteSeed))
 	api.HandleFunc("DELETE /admin/reset", s.requireAdmin(s.handleResetAllData))
 

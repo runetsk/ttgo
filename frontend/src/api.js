@@ -260,6 +260,7 @@ export const auth = {
 export const seed = {
     status: () => api.get('/seed').then(res => res.data),
     load: () => api.post('/seed').then(res => res.data),
+    loadAI: () => api.post('/seed/ai').then(res => res.data),
     remove: () => api.delete('/seed').then(res => res.data),
     // The backend requires this exact confirmation string in the body (a
     // server-side guard, separate from the UI's "type ERASE" gate); without it

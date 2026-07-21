@@ -83,6 +83,60 @@ func (s *Server) handleCreateSeed(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, result)
 }
 
+// handleCreateAISeed loads the AI failure-analysis demo dataset.
+//
+// @Summary      Seed AI failure-analysis demo data
+// @Description  Load the AI failure-analysis demo dataset (30 daily runs x 500 results with planted failure groups, triage history, and a ground-truth answer key). Replaces a previously loaded AI demo dataset. Admin only.
+// @Tags         seed
+// @Produce      json
+// @Success      201  {object}  object
+// @Failure      409  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /seed/ai [post]
+// @Security     BearerAuth
+func (s *Server) handleCreateAISeed(w http.ResponseWriter, r *http.Request) {
+	if !s.seedMu.TryLock() {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "seed operation already in progress"})
+		return
+	}
+	defer s.seedMu.Unlock()
+
+	user := userFromContext(r)
+	userID := ""
+	if user != nil {
+		userID = user.ID
+	}
+
+	start := time.Now()
+	slog.InfoContext(r.Context(), "seed: ai demo operation started", "user_id", userID)
+
+	replaced, err := s.store.HasAIDemoData()
+	if err != nil {
+		slog.ErrorContext(r.Context(), "seed: HasAIDemoData failed", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	result, err := s.store.SeedAIDemoTx()
+	if err != nil {
+		slog.ErrorContext(r.Context(), "seed: ai demo operation failed", "duration", time.Since(start), "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	result.ReplacedExisting = replaced
+
+	slog.InfoContext(r.Context(), "seed: ai demo completed",
+		"duration", time.Since(start),
+		"runs", result.Created.TestRuns,
+		"results", result.Created.RunResults,
+		"failing", result.FailingRows,
+		"labeled", result.LabeledRows,
+		"replaced", result.ReplacedExisting,
+	)
+
+	httpx.JSON(w, http.StatusCreated, result)
+}
+
 // handleDeleteSeed removes all demo-seeded entities.
 //
 // @Summary      Remove demo data

@@ -5434,6 +5434,35 @@ paths:
       summary: Seed demo data
       tags:
       - seed
+  /seed/ai:
+    post:
+      description: Load the AI failure-analysis demo dataset (30 daily runs x 500
+        results with planted failure groups, triage history, and a ground-truth answer
+        key). Replaces a previously loaded AI demo dataset. Admin only.
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Seed AI failure-analysis demo data
+      tags:
+      - seed
   /settings/ai-budgets:
     get:
       produces:

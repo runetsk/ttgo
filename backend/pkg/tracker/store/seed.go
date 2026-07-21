@@ -23,6 +23,11 @@ type SeedStatus struct {
 	HasDemoData bool        `json:"has_demo_data"`
 	SeededAt    *time.Time  `json:"seeded_at,omitempty"`
 	Counts      *SeedCounts `json:"counts,omitempty"`
+
+	// AI failure-analysis demo dataset (loaded via POST /seed/ai; its rows are
+	// demo_seeds-tracked too, so HasDemoData/Counts include them).
+	HasAIDemoData bool   `json:"has_ai_demo_data"`
+	AILatestRunID string `json:"ai_latest_run_id,omitempty"`
 }
 
 // SeedResult is returned by SeedDemo.

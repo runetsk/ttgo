@@ -289,17 +289,31 @@ func aiLogText(msg, ts1, ts2 string) string {
 	return fmt.Sprintf("[%s] [info] scenario started (worker 3, shard 2/4)\n[%s] [warn] retrying request once after transient 502 from cdn-edge\n[%s] [error] %s", ts1, ts1, ts2, msg)
 }
 
-// SeedAIFailureDataset generates the AI failure-analysis demo dataset. Row
+// aiDataset holds the fully-generated AI demo entities before insertion, so
+// the perfseed CLI path and the in-app demo path can share one generator but
+// insert (and track) rows their own way.
+type aiDataset struct {
+	folders     []models.Folder
+	categories  []models.Category
+	cases       []models.TestCase
+	assignments []models.CategoryTestCase
+	runs        []models.TestRun
+	results     []models.RunResult
+	defects     []models.Defect
+	links       []models.DefectLink
+}
+
+// buildAIFailureDataset generates the AI failure-analysis demo dataset. Row
 // volume matches a real mid-size project while failure content is drawn from
 // aiTemplates so the newest run contains a realistic spread of dedup groups,
 // per-test-case history repeats across the trailing enrichment window, and
 // older failing rows carry human triage labels for prompt grounding.
-func (s *Store) SeedAIFailureDataset(cfg AISeedConfig) (AISeedResult, error) {
+func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 	if cfg.Days < 7 || cfg.ResultsPerRun <= 0 || cfg.TestCases <= 0 {
-		return AISeedResult{}, fmt.Errorf("days must be >= 7 and results-per-run/test-cases positive")
+		return aiDataset{}, AISeedResult{}, fmt.Errorf("days must be >= 7 and results-per-run/test-cases positive")
 	}
 	if cfg.ResultsPerRun > cfg.TestCases {
-		return AISeedResult{}, fmt.Errorf(
+		return aiDataset{}, AISeedResult{}, fmt.Errorf(
 			"results per run (%d) exceeds distinct test cases (%d): results must be unique per (run, case)",
 			cfg.ResultsPerRun, cfg.TestCases)
 	}
@@ -313,7 +327,7 @@ func (s *Store) SeedAIFailureDataset(cfg AISeedConfig) (AISeedResult, error) {
 	for ti := range aiTemplates {
 		for k := 0; k < aiTemplates[ti].cases; k++ {
 			if next >= cfg.TestCases {
-				return AISeedResult{}, fmt.Errorf("test cases (%d) too few for the template role map (%d needed)", cfg.TestCases, next+1)
+				return aiDataset{}, AISeedResult{}, fmt.Errorf("test cases (%d) too few for the template role map (%d needed)", cfg.TestCases, next+1)
 			}
 			roles[next] = ti
 			next++
@@ -324,7 +338,7 @@ func (s *Store) SeedAIFailureDataset(cfg AISeedConfig) (AISeedResult, error) {
 	latestIncLo, latestIncHi := cfg.ResultsPerRun-100, cfg.ResultsPerRun-75
 	singletonCase := cfg.ResultsPerRun - 70
 	if latestIncLo <= next {
-		return AISeedResult{}, fmt.Errorf("results per run (%d) too small: latest-run incident slice would overlap the %d dedicated role cases", cfg.ResultsPerRun, next)
+		return aiDataset{}, AISeedResult{}, fmt.Errorf("results per run (%d) too small: latest-run incident slice would overlap the %d dedicated role cases", cfg.ResultsPerRun, next)
 	}
 	incidentIdx, latestIncidentIdx, singletonIdx := -1, -1, -1
 	backgroundIdx := []int{}
@@ -551,42 +565,12 @@ func (s *Store) SeedAIFailureDataset(cfg AISeedConfig) (AISeedResult, error) {
 		})
 	}
 
-	// --- Insert ------------------------------------------------------------
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Ordered: parents before children so FK enforcement can never trip.
-		if err := tx.CreateInBatches(&folders, 200).Error; err != nil {
-			return fmt.Errorf("insert folders: %w", err)
-		}
-		if err := tx.CreateInBatches(&categories, 200).Error; err != nil {
-			return fmt.Errorf("insert categories: %w", err)
-		}
-		if err := tx.CreateInBatches(&cases, 200).Error; err != nil {
-			return fmt.Errorf("insert test cases: %w", err)
-		}
-		if err := tx.CreateInBatches(&assignments, 500).Error; err != nil {
-			return fmt.Errorf("insert category assignments: %w", err)
-		}
-		if err := tx.CreateInBatches(&runs, 200).Error; err != nil {
-			return fmt.Errorf("insert runs: %w", err)
-		}
-		if err := tx.CreateInBatches(&results, 500).Error; err != nil {
-			return fmt.Errorf("insert results: %w", err)
-		}
-		if len(defects) > 0 {
-			if err := tx.CreateInBatches(&defects, 50).Error; err != nil {
-				return fmt.Errorf("insert defects: %w", err)
-			}
-			if err := tx.CreateInBatches(&links, 50).Error; err != nil {
-				return fmt.Errorf("insert defect links: %w", err)
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return AISeedResult{}, err
+	ds := aiDataset{
+		folders: folders, categories: categories, cases: cases,
+		assignments: assignments, runs: runs, results: results,
+		defects: defects, links: links,
 	}
-
-	return AISeedResult{
+	return ds, AISeedResult{
 		Folders:     len(folders),
 		Categories:  len(categories),
 		TestCases:   cfg.TestCases,
@@ -595,4 +579,51 @@ func (s *Store) SeedAIFailureDataset(cfg AISeedConfig) (AISeedResult, error) {
 		FailingRows: failingRows, LabeledRows: labeledRows,
 		LatestRunID: runIDs[0], RunIDs: runIDs, GroundTruth: gt,
 	}, nil
+}
+
+// insertAIDataset writes a built dataset inside tx, parents before children so
+// FK enforcement can never trip.
+func insertAIDataset(tx *gorm.DB, ds aiDataset) error {
+	if err := tx.CreateInBatches(&ds.folders, 200).Error; err != nil {
+		return fmt.Errorf("insert folders: %w", err)
+	}
+	if err := tx.CreateInBatches(&ds.categories, 200).Error; err != nil {
+		return fmt.Errorf("insert categories: %w", err)
+	}
+	if err := tx.CreateInBatches(&ds.cases, 200).Error; err != nil {
+		return fmt.Errorf("insert test cases: %w", err)
+	}
+	if err := tx.CreateInBatches(&ds.assignments, 500).Error; err != nil {
+		return fmt.Errorf("insert category assignments: %w", err)
+	}
+	if err := tx.CreateInBatches(&ds.runs, 200).Error; err != nil {
+		return fmt.Errorf("insert runs: %w", err)
+	}
+	if err := tx.CreateInBatches(&ds.results, 500).Error; err != nil {
+		return fmt.Errorf("insert results: %w", err)
+	}
+	if len(ds.defects) > 0 {
+		if err := tx.CreateInBatches(&ds.defects, 50).Error; err != nil {
+			return fmt.Errorf("insert defects: %w", err)
+		}
+		if err := tx.CreateInBatches(&ds.links, 50).Error; err != nil {
+			return fmt.Errorf("insert defect links: %w", err)
+		}
+	}
+	return nil
+}
+
+// SeedAIFailureDataset builds and inserts the AI failure-analysis dataset in
+// one transaction — the perfseed CLI path (scratch DBs, no demo-seed tracking).
+func (s *Store) SeedAIFailureDataset(cfg AISeedConfig) (AISeedResult, error) {
+	ds, res, err := buildAIFailureDataset(cfg)
+	if err != nil {
+		return AISeedResult{}, err
+	}
+	if err := s.db.Transaction(func(tx *gorm.DB) error {
+		return insertAIDataset(tx, ds)
+	}); err != nil {
+		return AISeedResult{}, err
+	}
+	return res, nil
 }

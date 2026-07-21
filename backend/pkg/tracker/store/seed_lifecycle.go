@@ -217,13 +217,22 @@ func (s *Store) RemoveSeedTx() (SeedDeleteResult, error) {
 
 // GetSeedStatus queries the demo_seeds table and returns summary information.
 func (s *Store) GetSeedStatus() (SeedStatus, error) {
+	hasAI, err := s.HasAIDemoData()
+	if err != nil {
+		return SeedStatus{}, err
+	}
+	aiLatestRunID := ""
+	if hasAI {
+		aiLatestRunID = AIDemoLatestRunID()
+	}
+
 	var count int64
 	if err := s.db.Model(&models.DemoSeed{}).Count(&count).Error; err != nil {
 		return SeedStatus{}, err
 	}
 
 	if count == 0 {
-		return SeedStatus{HasDemoData: false}, nil
+		return SeedStatus{HasDemoData: false, HasAIDemoData: hasAI, AILatestRunID: aiLatestRunID}, nil
 	}
 
 	var earliest models.DemoSeed
@@ -237,9 +246,11 @@ func (s *Store) GetSeedStatus() (SeedStatus, error) {
 	}
 
 	return SeedStatus{
-		HasDemoData: true,
-		SeededAt:    &earliest.SeededAt,
-		Counts:      &counts,
+		HasDemoData:   true,
+		SeededAt:      &earliest.SeededAt,
+		Counts:        &counts,
+		HasAIDemoData: hasAI,
+		AILatestRunID: aiLatestRunID,
 	}, nil
 }
 
