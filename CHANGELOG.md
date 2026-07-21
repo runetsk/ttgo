@@ -5,6 +5,11 @@ All notable changes to TTGO are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Self-service password change.** Settings gains an **Account** tab (visible to every signed-in user, not just admins) with a Change Password form — current password, new password, and confirmation — wired to the existing `POST /api/auth/change-password` endpoint. Until now that endpoint had no UI at all: a non-admin user's only route to a new password was asking an admin for a reset in the Users tab. The form mirrors the server's rules up front (minimum 8 characters, maximum 72 bytes, must differ from the current password, confirmation must match) and surfaces the server's verdict inline, e.g. "current password is incorrect".
+
 ## [0.5.0] - 2026-07-21
 
 ### Added

@@ -8,14 +8,16 @@ const api = axios.create({
 
 // Global response interceptor — shows a toast for every failed request
 // unless the caller sets config._silent = true.
-// A 401 on any route other than /auth/login and /auth/me triggers a redirect to /login.
+// A 401 on any route other than /auth/login, /auth/me, and /auth/change-password
+// triggers a redirect to /login.
 api.interceptors.response.use(
     response => response,
     error => {
         const url = error.config?.url ?? '';
         const status = error?.response?.status;
 
-        if (status === 401 && !url.includes('/auth/login') && !url.includes('/auth/me')) {
+        // /auth/change-password 401s mean "wrong current password", not an expired session.
+        if (status === 401 && !url.includes('/auth/login') && !url.includes('/auth/me') && !url.includes('/auth/change-password')) {
             window.dispatchEvent(new CustomEvent('auth:require-login'));
             return Promise.reject(error);
         }
@@ -247,7 +249,7 @@ export const auth = {
         api.post('/auth/change-password', {
             current_password: currentPw,
             new_password: newPw,
-        }).then(res => res.data),
+        }, { _silent: true }).then(res => res.data),
     needsSetup: () =>
         api.get('/auth/needs-setup', { _silent: true }).then(res => res.data),
     setup: (email, password) =>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getCustomFields, createCustomField, deleteCustomField, users as usersApi, seed as seedApi, jira as jiraApi, confluence as confApi } from '../api';
+import { getCustomFields, createCustomField, deleteCustomField, auth as authApi, users as usersApi, seed as seedApi, jira as jiraApi, confluence as confApi } from '../api';
 import { toast } from '../toast';
 import Modal from '../components/Modal';
 import TokenSettings from '../components/TokenSettings';
@@ -85,6 +85,7 @@ export default function SettingsPage() {
         {
             label: 'General',
             tabs: [
+                { id: 'account', label: 'Account', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg> },
                 { id: 'custom-fields', label: 'Custom Fields', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg> },
                 { id: 'api-tokens', label: 'API Tokens', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> },
                 { id: 'webhooks', label: 'Webhooks', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> },
@@ -236,6 +237,7 @@ export default function SettingsPage() {
                 </>
             )}
 
+            {activeTab === 'account' && <AccountSettings />}
             {activeTab === 'api-tokens' && <TokenSettings />}
             {activeTab === 'webhooks' && <WebhookSettings />}
             {activeTab === 'jira' && (
@@ -390,6 +392,98 @@ function ConfluenceTestConnection() {
                     )}
                 </div>
             )}
+        </div>
+    );
+}
+
+// ─────────────────────────────────────────────
+// AccountSettings — change the signed-in user's password
+// ─────────────────────────────────────────────
+function AccountSettings() {
+    const { user } = useAuth();
+    const [currentPw, setCurrentPw] = useState('');
+    const [newPw, setNewPw] = useState('');
+    const [confirmPw, setConfirmPw] = useState('');
+    const [error, setError] = useState('');
+    const [success, setSuccess] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+
+    const handleSubmit = async (e) => {
+        e.preventDefault();
+        setError('');
+        setSuccess(false);
+        if (newPw !== confirmPw) {
+            setError('New passwords do not match');
+            return;
+        }
+        if (newPw === currentPw) {
+            setError('New password must differ from the current password');
+            return;
+        }
+        setSubmitting(true);
+        try {
+            await authApi.changePassword(currentPw, newPw);
+            setCurrentPw('');
+            setNewPw('');
+            setConfirmPw('');
+            setSuccess(true);
+            setTimeout(() => setSuccess(false), 4000);
+        } catch (err) {
+            setError(err?.response?.data?.error || 'Failed to change password');
+        } finally {
+            setSubmitting(false);
+        }
+    };
+
+    const labelStyle = { display: 'block', marginBottom: 6, fontSize: '0.875rem', fontWeight: 500, color: 'var(--text-primary)' };
+
+    return (
+        <div>
+            <h3 style={{ marginTop: 0, marginBottom: 16 }}>Account</h3>
+            <div className="glass-panel" style={{ padding: 24, maxWidth: 440 }}>
+                <h4 style={{ marginTop: 0, marginBottom: 4 }}>Change Password</h4>
+                <p style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginTop: 0, marginBottom: 20 }}>
+                    Signed in as <strong style={{ color: 'var(--text-primary)' }}>{user?.email}</strong>
+                </p>
+                <form onSubmit={handleSubmit}>
+                    <div style={{ marginBottom: 16 }}>
+                        <label style={labelStyle}>Current Password</label>
+                        <input className="modern-input" type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)} required autoComplete="current-password" data-testid="account-current-password" placeholder="••••••••" style={{ width: '100%' }} />
+                    </div>
+                    <div style={{ marginBottom: 16 }}>
+                        <label style={labelStyle}>
+                            New Password
+                            <span style={{ fontSize: '0.8rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: 6 }}>min 8 characters</span>
+                        </label>
+                        <input className="modern-input" type="password" value={newPw} onChange={e => setNewPw(e.target.value)} required minLength={8} maxLength={72} autoComplete="new-password" data-testid="account-new-password" placeholder="••••••••" style={{ width: '100%' }} />
+                    </div>
+                    <div style={{ marginBottom: 20 }}>
+                        <label style={labelStyle}>Confirm New Password</label>
+                        <input className="modern-input" type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} required minLength={8} maxLength={72} autoComplete="new-password" data-testid="account-confirm-password" placeholder="••••••••" style={{ width: '100%' }} />
+                    </div>
+                    {error && (
+                        <div style={{
+                            marginBottom: 16, padding: '10px 14px', borderRadius: 6,
+                            background: 'rgba(239,68,68,0.1)', color: 'var(--accent-red, #ef4444)', fontSize: '0.875rem',
+                        }} data-testid="account-password-error">
+                            {error}
+                        </div>
+                    )}
+                    {success && (
+                        <div style={{
+                            marginBottom: 16, padding: '10px 14px', borderRadius: 6,
+                            background: 'rgba(34,197,94,0.15)', color: 'var(--accent-green, #22c55e)', fontSize: '0.875rem',
+                        }} data-testid="account-password-success">
+                            Password changed
+                        </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                        <button type="submit" className="primary-btn" disabled={submitting} data-testid="account-change-password-submit">
+                            {submitting ? 'Saving…' : 'Change Password'}
+                        </button>
+                    </div>
+                </form>
+            </div>
         </div>
     );
 }
