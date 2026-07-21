@@ -8,7 +8,10 @@ const WebSocketContext = createContext(null);
  * WebSocketProvider manages a single persistent WebSocket connection to /api/ws.
  * The connection is gated on the authenticated user from AuthContext: it opens
  * only when a user is present and is torn down on logout/session expiry, so
- * unauthenticated tabs don't loop on 401 handshakes.
+ * unauthenticated tabs don't loop on 401 handshakes. On every close it probes
+ * /auth/me before retrying — a 401 fires 'auth:require-login' (the session was
+ * revoked, e.g. by a password change in another tab) instead of reconnecting
+ * forever; anything else keeps the normal backoff.
  */
 export function WebSocketProvider({ children }) {
   const { user } = useAuth();
@@ -72,6 +75,21 @@ export function WebSocketProvider({ children }) {
   const connect = useCallback(function connect() {
     if (!mountedRef.current || !enabledRef.current) return;
 
+    // Shared by onclose and the constructor catch: bump the retry counter,
+    // enter degraded mode past the threshold, and schedule the next attempt.
+    const scheduleReconnect = () => {
+      if (!mountedRef.current || !enabledRef.current) return;
+      retryCountRef.current += 1;
+      if (retryCountRef.current >= DEGRADED_THRESHOLD) {
+        updateStatus('degraded');
+        startDegradedPolling();
+      } else {
+        updateStatus('reconnecting');
+      }
+      const delay = getRetryDelay();
+      retryTimeoutRef.current = setTimeout(connect, delay);
+    };
+
     // Build ws:// or wss:// URL from current location
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${window.location.host}/api/ws`;
@@ -122,19 +140,24 @@ export function WebSocketProvider({ children }) {
           return;
         }
 
-        retryCountRef.current += 1;
-
-        // After threshold retries, enter degraded mode with polling fallback
-        if (retryCountRef.current >= DEGRADED_THRESHOLD) {
-          updateStatus('degraded');
-          startDegradedPolling();
-        } else {
-          updateStatus('reconnecting');
-        }
-
-        // Schedule reconnect with exponential backoff
-        const delay = getRetryDelay();
-        retryTimeoutRef.current = setTimeout(connect, delay);
+        // The WebSocket API hides the handshake's HTTP status, so a session
+        // revoked server-side (password change, admin reset — handshake 401s
+        // or the server closes with "session invalid") is indistinguishable
+        // from a network blip here. Probe /auth/me before retrying: a 401
+        // means the session is gone — hand off to the login flow instead of
+        // reconnecting (and 401ing) forever. Network errors and 5xx keep the
+        // normal backoff: only an explicit 401 ends the session client-side.
+        fetch('/api/auth/me', { credentials: 'include' })
+          .then((res) => {
+            if (!mountedRef.current || !enabledRef.current) return;
+            if (res.status === 401) {
+              updateStatus('disconnected');
+              window.dispatchEvent(new CustomEvent('auth:require-login'));
+              return;
+            }
+            scheduleReconnect();
+          })
+          .catch(() => scheduleReconnect());
       };
 
       ws.onerror = () => {
@@ -142,18 +165,7 @@ export function WebSocketProvider({ children }) {
       };
     } catch (e) {
       console.error('WebSocket connection error:', e);
-      if (!enabledRef.current) return;
-      retryCountRef.current += 1;
-
-      if (retryCountRef.current >= DEGRADED_THRESHOLD) {
-        updateStatus('degraded');
-        startDegradedPolling();
-      } else {
-        updateStatus('reconnecting');
-      }
-
-      const delay = getRetryDelay();
-      retryTimeoutRef.current = setTimeout(connect, delay);
+      scheduleReconnect();
     }
   }, [sendJSON, getRetryDelay, startDegradedPolling, stopDegradedPolling, updateStatus]);
 

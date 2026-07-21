@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Self-service password change.** Settings gains an **Account** tab (visible to every signed-in user, not just admins) with a Change Password form — current password, new password, and confirmation — wired to the existing `POST /api/auth/change-password` endpoint. Until now that endpoint had no UI at all: a non-admin user's only route to a new password was asking an admin for a reset in the Users tab. The form mirrors the server's rules up front (minimum 8 characters, maximum 72 bytes, must differ from the current password, confirmation must match) and surfaces the server's verdict inline, e.g. "current password is incorrect".
 
+### Fixed
+- **A tab whose session was revoked no longer hangs half-dead retrying its WebSocket forever.** A password change (or admin reset) deliberately invalidates every other session for that user, and the server closes their live WebSockets — but the browser WebSocket API hides the handshake's HTTP status, so the client treated the rejection like a network blip and reconnected on backoff indefinitely: the tab looked signed in, got no live updates, and hammered the server with 401 handshakes every few seconds (observed live during Account-tab testing). The reconnect path now probes `GET /api/auth/me` before each retry — a 401 fires the existing `auth:require-login` flow, landing the tab on the sign-in screen and stopping the loop; network errors and 5xx keep the normal backoff so a flaky network still reconnects. The tab that changed the password itself is unaffected (its cookie is rotated in the 204 response and its reconnect succeeds).
+
 ## [0.5.0] - 2026-07-21
 
 ### Added
