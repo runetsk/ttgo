@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`GET /api/settings/confluence` no longer 404s when the integration is simply not configured.** Pages probing integration availability (Requirements — mounted alongside Analytics under Quality) logged a red 404 in the browser console on every fresh install, because "not configured yet" was reported as an error while the equivalent Jira endpoint already answered `200 {"enabled": false}`. Confluence now mirrors the Jira shape; the Jira handler's stale doc comment (still describing the old 404 behavior) is corrected too. No functional change for configured installs.
 - **"Latest Executions" on a test case now orders by when the execution ran, not when its row was last written.** The panel sorted on `updated_at`, which drifts from execution time in both directions: any later edit (a triage decision, a screenshot upload) bubbled an old execution to the top, and seeded history — written newest-run-first — came out fully inverted, oldest day on top. The query now orders by `start_time`, falling back to `updated_at` only for results recorded without timing so a freshly added manual result still surfaces sensibly. The AI demo generator also stamps each seeded result's `created_at`/`updated_at` with its execution end time instead of the insert moment, so every timestamp-ordered view treats demo history like organically recorded data.
 
 ### Added

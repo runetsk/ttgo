@@ -32,11 +32,10 @@ func ValidJiraKey(s string) bool { return jiraKeyRe.MatchString(s) }
 
 // handleGetJiraConfig godoc
 // @Summary      Get Jira integration configuration
-// @Description  Returns the masked Jira configuration. Returns 404 if not yet configured.
+// @Description  Returns the masked Jira configuration. Returns {"enabled": false} when not yet configured.
 // @Tags         jira
 // @Produce      json
 // @Success      200  {object}  models.JiraConfigResponse
-// @Failure      404  {object}  map[string]string
 // @Router       /settings/jira [get]
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.store.GetJiraConfig()

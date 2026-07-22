@@ -5501,19 +5501,14 @@ paths:
       - ai-settings
   /settings/confluence:
     get:
-      description: Return the current Confluence integration configuration.
+      description: 'Return the current Confluence integration configuration. Returns
+        {"enabled": false} when not yet configured.'
       produces:
       - application/json
       responses:
         "200":
           description: OK
           schema:
-            type: object
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
             type: object
         "500":
           description: Internal Server Error
@@ -5573,7 +5568,8 @@ paths:
       - confluence
   /settings/jira:
     get:
-      description: Returns the masked Jira configuration. Returns 404 if not yet configured.
+      description: 'Returns the masked Jira configuration. Returns {"enabled": false}
+        when not yet configured.'
       produces:
       - application/json
       responses:
@@ -5581,12 +5577,6 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/ttgo_pkg_tracker_models.JiraConfigResponse'
-        "404":
-          description: Not Found
-          schema:
-            additionalProperties:
-              type: string
-            type: object
       summary: Get Jira integration configuration
       tags:
       - jira

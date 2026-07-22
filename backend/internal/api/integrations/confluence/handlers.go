@@ -342,11 +342,10 @@ func FetchConfluencePage(cfg *models.ConfluenceConfig, pageID string, sanitizer 
 // handleGetConfluenceConfig returns the current Confluence integration configuration.
 //
 // @Summary      Get Confluence config
-// @Description  Return the current Confluence integration configuration.
+// @Description  Return the current Confluence integration configuration. Returns {"enabled": false} when not yet configured.
 // @Tags         confluence
 // @Produce      json
 // @Success      200  {object}  object
-// @Failure      404  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Router       /settings/confluence [get]
 // @Security     BearerAuth
@@ -357,7 +356,11 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if cfg == nil {
-		httpx.JSON(w, http.StatusNotFound, map[string]string{"error": "Confluence integration is not configured"})
+		// "Not configured yet" is a normal state of the settings resource, not
+		// an error: every page probing integration availability would otherwise
+		// log a 404 in the browser console on fresh installs. Mirrors the Jira
+		// handler's shape.
+		httpx.JSON(w, http.StatusOK, map[string]interface{}{"enabled": false})
 		return
 	}
 	httpx.JSON(w, http.StatusOK, cfg.ToResponse())

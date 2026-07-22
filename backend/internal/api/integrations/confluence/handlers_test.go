@@ -48,10 +48,13 @@ func do(t *testing.T, st *store.Store, method, path string, body interface{}) *h
 	return w
 }
 
+// Unconfigured is a normal state, not an error: pages probe this endpoint on
+// mount, and a 404 would log console noise on every fresh install.
 func TestGetConfig_NotConfigured(t *testing.T) {
 	st := newStore(t)
 	w := do(t, st, "GET", "/api/settings/confluence", nil)
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.JSONEq(t, `{"enabled": false}`, w.Body.String())
 }
 
 func TestGetConfig_Configured(t *testing.T) {

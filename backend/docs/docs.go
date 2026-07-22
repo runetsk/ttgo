@@ -7064,7 +7064,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Return the current Confluence integration configuration.",
+                "description": "Return the current Confluence integration configuration. Returns {\"enabled\": false} when not yet configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -7077,15 +7077,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "type": "object"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
                         }
                     },
                     "500": {
@@ -7171,7 +7162,7 @@ const docTemplate = `{
         },
         "/settings/jira": {
             "get": {
-                "description": "Returns the masked Jira configuration. Returns 404 if not yet configured.",
+                "description": "Returns the masked Jira configuration. Returns {\"enabled\": false} when not yet configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -7184,15 +7175,6 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.JiraConfigResponse"
-                        }
-                    },
-                    "404": {
-                        "description": "Not Found",
-                        "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
                         }
                     }
                 }
