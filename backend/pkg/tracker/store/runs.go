@@ -609,6 +609,13 @@ func (s *Store) ListRecentResultsForTestCase(testCaseID string, limit int) ([]mo
 		limit = 10
 	}
 	var rows []models.TestCaseExecution
+	// "Latest" means when the execution RAN, not when the row was last touched:
+	// updated_at is re-stamped by unrelated writes (a triage decision or a
+	// screenshot edit would bubble an old execution to the top), and seeded
+	// history carries insert-time updated_at in whatever order the seeder
+	// wrote it. Results recorded without timing (start_time at the zero value,
+	// which SQLite stores as text sorting before '0002') fall back to
+	// updated_at so a freshly added manual result still surfaces sensibly.
 	err := s.db.Raw(`
 		SELECT rr.id, rr.status, rr.defect_type, rr.duration_ms, rr.error_message,
 		       rr.environment, rr.browser, rr.attempt_number, rr.updated_at AS created_at,
@@ -616,7 +623,7 @@ func (s *Store) ListRecentResultsForTestCase(testCaseID string, limit int) ([]mo
 		FROM run_results rr
 		JOIN test_runs tr ON tr.id = rr.test_run_id
 		WHERE rr.test_case_id = ?
-		ORDER BY rr.updated_at DESC
+		ORDER BY CASE WHEN rr.start_time > '0002-01-01' THEN rr.start_time ELSE rr.updated_at END DESC
 		LIMIT ?
 	`, testCaseID, limit).Scan(&rows).Error
 	return rows, err

@@ -510,7 +510,11 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 			} else {
 				res.DurationMs = 40 + rng.Int64N(2400)
 			}
+			// Rows are "recorded" when the execution finished — without this,
+			// GORM stamps insert-time timestamps in generator order (newest run
+			// first), inverting every created_at/updated_at-ordered view.
 			res.EndTime = start.Add(time.Duration(res.DurationMs) * time.Millisecond)
+			res.CreatedAt, res.UpdatedAt = res.EndTime, res.EndTime
 			results = append(results, res)
 		}
 

@@ -128,6 +128,30 @@ func TestSeedAIFailureDatasetIncidentDay(t *testing.T) {
 	assert.GreaterOrEqual(t, errRows, int64(30), "incident day should mass-ERROR")
 }
 
+// The test-case "Latest Executions" panel must list newest execution first.
+// Seeded history is written newest-run-first, so ordering by row insert
+// timestamps (updated_at) inverts the list — the query must order by when the
+// execution ran (REGRESSION: reported live from the Settings-seeded dataset).
+func TestSeedAIListRecentResultsNewestExecutionFirst(t *testing.T) {
+	s := newTestStore(t)
+	res, err := s.SeedAIFailureDataset(aiTestCfg())
+	require.NoError(t, err)
+
+	// Case 0 is a persistent-template role case: present in the newest run and
+	// in most historical runs.
+	caseID := perfID(aiTestCfg().Seed, "ai-case", 0)
+	rows, err := s.ListRecentResultsForTestCase(caseID, 10)
+	require.NoError(t, err)
+	require.Greater(t, len(rows), 3)
+
+	assert.Equal(t, res.LatestRunID, rows[0].RunID, "newest execution first")
+	for i := 1; i < len(rows); i++ {
+		assert.False(t, rows[i].CreatedAt.After(rows[i-1].CreatedAt),
+			"executions must be non-increasing in time: row %d (%s) after row %d (%s)",
+			i, rows[i].CreatedAt, i-1, rows[i-1].CreatedAt)
+	}
+}
+
 func TestSeedAIFailureDatasetDeterministic(t *testing.T) {
 	s1, s2 := newTestStore(t), newTestStore(t)
 	cfg := aiTestCfg()
