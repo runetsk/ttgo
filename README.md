@@ -239,6 +239,24 @@ The backend is configured via environment variables (or a `.env` file in the `ba
 | `LISTEN_ADDR` | `:8080` | Address the server listens on |
 | `TTGO_ENCRYPTION_KEY` | — | Optional. At-rest encryption key for stored secrets (LLM/integration API keys). Auto-generated and persisted beside the database if unset; set a 32-byte value (hex, base64, or a 32-char string) to manage it yourself |
 
+### Password recovery
+
+Any administrator can reset another user's password from **Settings → Users → Reset Password**, and every signed-in user can change their own in **Settings → Account**.
+
+If nobody who could do that can sign in — typically a sole-admin instance — use the break-glass command on the server host. The server binary doubles as the recovery tool: it opens the database directly (honouring `DB_PATH` and `.env` exactly like the server), so no login is required; shell access to the host is the authorization.
+
+```bash
+# Docker
+docker compose exec backend ./ttgo reset-password admin@example.com
+```
+
+```bash
+# Bare metal — from the server's working directory, or with DB_PATH set
+./server reset-password admin@example.com
+```
+
+It prints a generated temporary password, re-enables the account if it was deactivated, and signs out all of the account's existing sessions. The server can keep running — the new password works immediately. Sign in with it, then change it in **Settings → Account**.
+
 <a id="deployment-docker"></a>
 
 ## Deployment (Docker)

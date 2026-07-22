@@ -134,6 +134,32 @@ func (s *Store) UpdateUser(id string, updates map[string]interface{}) (*models.U
 	return s.GetUser(id)
 }
 
+// RecoverUserAccess is the break-glass primitive behind `server reset-password`:
+// it sets a new password hash and, so the owner can actually get back in,
+// re-enables a deactivated account, restores a soft-deleted one, and revokes
+// every live session for it — all in one transaction. Returns
+// gorm.ErrRecordNotFound if no user has that id.
+func (s *Store) RecoverUserAccess(id, hashedPw string) (*models.User, error) {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&models.User{}).Where("id = ?", id).Updates(map[string]interface{}{
+			"hashed_password": hashedPw,
+			"active":          true,
+			"deleted":         false,
+		})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return tx.Delete(&models.UserSession{}, "user_id = ?", id).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return s.GetUser(id)
+}
+
 // CountActiveAdmins returns the number of active users with role "admin".
 func (s *Store) CountActiveAdmins() (int64, error) {
 	var count int64

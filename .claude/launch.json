@@ -4,7 +4,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "go",
-      "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server/main.go"],
+      "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server"],
       "cwd": "backend",
       "port": 8090,
       "env": { "ADMIN_EMAIL": "admin@example.com", "ADMIN_PASSWORD": "changeme123", "LISTEN_ADDR": ":8090" }
@@ -12,7 +12,7 @@
     {
       "name": "backend-ai",
       "runtimeExecutable": "go",
-      "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server/main.go"],
+      "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server"],
       "cwd": "backend",
       "port": 8090,
       "env": {

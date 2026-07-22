@@ -20,6 +20,12 @@ func main() {
 		log.Println("No .env file found, using environment variables")
 	}
 
+	// Maintenance subcommand: break-glass password recovery, run on the server
+	// host against the same DB_PATH/.env the server itself uses.
+	if len(os.Args) > 1 && os.Args[1] == "reset-password" {
+		os.Exit(runResetPassword(os.Args[2:], os.Stdout, os.Stderr))
+	}
+
 	cfg := config.Load()
 
 	s, err := store.New(cfg.DBPath)

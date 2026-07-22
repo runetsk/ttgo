@@ -16,6 +16,7 @@ export default function LoginPage() {
     // null = probe in flight; render nothing until we know which form to show
     // so a fresh instance doesn't flash "Sign In" before switching to setup.
     const [needsSetup, setNeedsSetup] = useState(null);
+    const [showRecovery, setShowRecovery] = useState(false);
     // Where to go after auth. AuthGate stashes where the visitor was headed
     // before bouncing them here; default to the library. Captured once, before
     // login flips `user`, so both the already-signed-in guard and the
@@ -198,6 +199,67 @@ export default function LoginPage() {
                             : (submitting ? 'Signing in…' : 'Sign In')}
                     </button>
                 </form>
+
+                {!needsSetup && (
+                    <div style={{ marginTop: 16, textAlign: 'center' }}>
+                        <button
+                            type="button"
+                            onClick={() => setShowRecovery(v => !v)}
+                            data-testid="forgot-password-toggle"
+                            style={{
+                                background: 'none',
+                                border: 'none',
+                                padding: 0,
+                                color: 'var(--text-secondary)',
+                                fontSize: '0.85rem',
+                                cursor: 'pointer',
+                                textDecoration: 'underline',
+                            }}
+                        >
+                            Forgot password?
+                        </button>
+                        {showRecovery && (
+                            <div
+                                data-testid="forgot-password-help"
+                                style={{
+                                    marginTop: 12,
+                                    padding: '12px 14px',
+                                    borderRadius: 6,
+                                    background: 'var(--bg-secondary, #161618)',
+                                    textAlign: 'left',
+                                    fontSize: '0.85rem',
+                                    color: 'var(--text-secondary)',
+                                    lineHeight: 1.5,
+                                }}
+                            >
+                                <p style={{ margin: 0 }}>
+                                    Any administrator can set you a new password in{' '}
+                                    <strong style={{ color: 'var(--text-primary)' }}>Settings → Users → Reset Password</strong>.
+                                </p>
+                                <p style={{ margin: '10px 0 6px' }}>
+                                    If no administrator can sign in, run this on the server host
+                                    (the server binary doubles as the recovery tool):
+                                </p>
+                                <code style={{
+                                    display: 'block',
+                                    padding: '8px 10px',
+                                    borderRadius: 4,
+                                    background: 'var(--bg-primary, #0f1117)',
+                                    fontFamily: 'monospace',
+                                    fontSize: '0.8rem',
+                                    overflowX: 'auto',
+                                    whiteSpace: 'nowrap',
+                                }}>
+                                    {`ttgo reset-password ${email.trim() || 'you@example.com'}`}
+                                </code>
+                                <p style={{ margin: '8px 0 0' }}>
+                                    It prints a temporary password — sign in with it, then change it
+                                    in Settings → Account.
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
         </div>
     );
