@@ -2,6 +2,8 @@ package store
 
 import (
 	"encoding/json"
+	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 	"ttgo/pkg/tracker/models"
@@ -471,6 +473,67 @@ func TestAddRunResultExplicitAttemptConflict(t *testing.T) {
 	}
 	err := s.AddRunResult(r2)
 	assert.Error(t, err)
+}
+
+// TestAddRunResultConcurrentAttemptsNoRace covers parallel CI shards and retries
+// reporting the SAME test case at once: every write must land with its own
+// sequential attempt_number. Before AddRunResult became transactional, writers
+// read the same MAX(attempt_number) and raced to insert it, so all but one lost
+// the UNIQUE index and the API answered 500.
+//
+// Uses a file-backed database on purpose: with ":memory:" every pooled
+// connection gets its own private database, so concurrent writers would never
+// contend and the test could not fail.
+func TestAddRunResultConcurrentAttemptsNoRace(t *testing.T) {
+	t.Chdir(t.TempDir()) // bootstrap creates backups/ in cwd
+	s, err := New(filepath.Join(t.TempDir(), "concurrent.db"))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	folder, _ := s.CreateFolder("Root", nil)
+	tc := &models.TestCase{Name: "Flaky login", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc))
+	run := &models.TestRun{Name: "Parallel CI Run"}
+	require.NoError(t, s.CreateTestRun(run))
+
+	const writers = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	start := make(chan struct{})
+
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start // release together, to maximize overlap
+			errs <- s.AddRunResult(&models.RunResult{
+				TestRunID:  run.ID,
+				TestCaseID: &tc.ID,
+				Status:     models.StatusPass,
+			})
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		require.NoError(t, err, "every concurrent write must succeed")
+	}
+
+	fetched, err := s.GetTestRun(run.ID)
+	require.NoError(t, err)
+	require.Len(t, fetched.RunResults, writers)
+
+	// Attempt numbers must be exactly 1..writers with no gaps or duplicates.
+	seen := make(map[int]bool, writers)
+	for _, rr := range fetched.RunResults {
+		require.False(t, seen[rr.AttemptNumber], "duplicate attempt_number %d", rr.AttemptNumber)
+		seen[rr.AttemptNumber] = true
+	}
+	for i := 1; i <= writers; i++ {
+		require.True(t, seen[i], "missing attempt_number %d", i)
+	}
 }
 
 func TestGetTestRunsAggregationLatestAttemptOnly(t *testing.T) {

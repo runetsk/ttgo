@@ -848,20 +848,13 @@ func (s *Store) AddRunResult(result *models.RunResult) error {
 	if result.Status == "" {
 		result.Status = models.StatusPending
 	}
-	// The parent run must exist, else we create an orphan result (F-046).
-	var runCount int64
-	if err := s.db.Model(&models.TestRun{}).Where("id = ?", result.TestRunID).Count(&runCount).Error; err != nil {
-		return err
-	}
-	if runCount == 0 {
-		return fmt.Errorf("test run not found")
-	}
 
 	now := time.Now()
 	result.CreatedAt = now
 	result.UpdatedAt = now
 
-	// Snapshot name if missing and TestCaseID provided
+	// Snapshot name if missing and TestCaseID provided. A plain lookup, kept
+	// outside the transaction below so it doesn't extend the write lock.
 	if result.TestNameSnapshot == "" && result.TestCaseID != nil {
 		var tc models.TestCase
 		if err := s.db.First(&tc, "id = ?", *result.TestCaseID).Error; err == nil {
@@ -869,31 +862,54 @@ func (s *Store) AddRunResult(result *models.RunResult) error {
 		}
 	}
 
-	// Handle attempt_number
-	if result.TestCaseID != nil {
-		var maxAttempt int
-		s.db.Model(&models.RunResult{}).
-			Select("COALESCE(MAX(attempt_number), 0)").
-			Where("test_run_id = ? AND test_case_id = ?", result.TestRunID, *result.TestCaseID).
-			Scan(&maxAttempt)
-
-		if result.AttemptNumber > 0 {
-			// Explicit attempt_number — validate no conflict
-			if result.AttemptNumber <= maxAttempt {
-				return fmt.Errorf("attempt_number %d already exists for this test case in this run", result.AttemptNumber)
-			}
-		} else {
-			// Auto-increment
-			result.AttemptNumber = maxAttempt + 1
+	// Reading the highest attempt_number and inserting the next one must be
+	// atomic: parallel CI shards and retries report the same test case
+	// concurrently, and an unsynchronized read-then-insert let two writers pick
+	// the same attempt number, so one lost the UNIQUE index race and the caller
+	// got an opaque 500.
+	//
+	// The bump of the parent run's updated_at deliberately goes FIRST: it makes
+	// this a write transaction from its opening statement, so a concurrent
+	// caller waits on the write lock (honouring _busy_timeout) instead of
+	// reading first and then deadlocking on the upgrade, which SQLite reports
+	// immediately as SQLITE_BUSY without consulting the busy timeout at all.
+	// Its RowsAffected also tells us the parent run exists, which both replaces
+	// the separate existence check and closes the window where the run was
+	// deleted between that check and the insert (F-046).
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		bump := tx.Model(&models.TestRun{}).Where("id = ?", result.TestRunID).Update("updated_at", now)
+		if bump.Error != nil {
+			return bump.Error
 		}
-	} else if result.AttemptNumber == 0 {
-		result.AttemptNumber = 1
-	}
+		if bump.RowsAffected == 0 {
+			return fmt.Errorf("test run not found")
+		}
 
-	// Bump parent run's updated_at
-	s.db.Model(&models.TestRun{}).Where("id = ?", result.TestRunID).Update("updated_at", now)
+		// Handle attempt_number
+		if result.TestCaseID != nil {
+			var maxAttempt int
+			if err := tx.Model(&models.RunResult{}).
+				Select("COALESCE(MAX(attempt_number), 0)").
+				Where("test_run_id = ? AND test_case_id = ?", result.TestRunID, *result.TestCaseID).
+				Scan(&maxAttempt).Error; err != nil {
+				return err
+			}
 
-	return s.db.Create(result).Error
+			if result.AttemptNumber > 0 {
+				// Explicit attempt_number — validate no conflict
+				if result.AttemptNumber <= maxAttempt {
+					return fmt.Errorf("attempt_number %d already exists for this test case in this run", result.AttemptNumber)
+				}
+			} else {
+				// Auto-increment
+				result.AttemptNumber = maxAttempt + 1
+			}
+		} else if result.AttemptNumber == 0 {
+			result.AttemptNumber = 1
+		}
+
+		return tx.Create(result).Error
+	})
 }
 
 // RunResultExists returns true if a run result with the given ID exists.
