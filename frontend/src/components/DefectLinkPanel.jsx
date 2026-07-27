@@ -3,6 +3,10 @@ import { resultDefects, defects as defectsApi } from '../api';
 import CreateDefectModal from './CreateDefectModal';
 import { useNavigate } from 'react-router-dom';
 
+// Two-tone on purpose: green for closed, amber for everything still outstanding.
+// `fixed` deliberately shares the amber pill — the pill prints the literal status
+// text, so it reads "fixed" and nothing is mislabelled, and inside a run the only
+// question this panel answers is "is this defect still live?".
 const statusStyle = (status) => status === 'closed'
     ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }
     : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)' };

@@ -38,6 +38,9 @@ export default function DefectsTab({ runDefectLinks, defectsLoading }) {
                 return (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {Array.from(grouped.values()).map(defect => {
+                            // Two-tone on purpose (same call as DefectLinkPanel):
+                            // `fixed` shares the amber "still outstanding" badge and
+                            // prints its own literal status text, so it is not mislabelled.
                             const badgeStyle = defect.status === 'closed'
                                 ? { background: 'rgba(52,211,153,0.15)', color: '#34d399', border: '1px solid rgba(52,211,153,0.35)' }
                                 : { background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.35)' };

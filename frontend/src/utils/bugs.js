@@ -23,9 +23,12 @@ export function severityChipStyle(severity) {
     };
 }
 
-// Keep only active (open) bugs.
+// Keep only active bugs. "Active" is everything that is not closed — the same
+// "closed vs. everything else" bucketing the backend counters use — so `fixed`
+// (awaiting retest) stays visible, and an unrecognised status can never quietly
+// drop a live defect off the panel.
 export function activeBugs(defects) {
-    return (defects || []).filter(d => d && d.status === 'open');
+    return (defects || []).filter(d => d && d.status !== 'closed');
 }
 
 // Where "open this bug" should point. External bugs (with an external_url)

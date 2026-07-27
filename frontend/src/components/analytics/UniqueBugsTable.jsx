@@ -8,8 +8,11 @@ const SEVERITY_CONFIG = {
     trivial:  { color: '#6b7280', bg: 'rgba(107,114,128,0.08)' },
 };
 
+// `fixed` needs its own entry: without it the `|| STATUS_CONFIG.open` fallback
+// below labels a fixed defect "Open", which is a lie the user can act on.
 const STATUS_CONFIG = {
     closed: { label: 'Closed', color: '#22c55e', icon: '●' },
+    fixed:  { label: 'Fixed',  color: '#6366f1', icon: '◐' },
     open:   { label: 'Open',   color: '#f97316', icon: '○' },
 };
 
@@ -101,9 +104,10 @@ export default function UniqueBugsTable({ data }) {
         </th>
     );
 
-    // Summary stats
-    const totalOpen   = bugs.filter(b => b.status === 'open').length;
+    // Summary stats. "Open" is everything not closed, so `fixed` (awaiting
+    // retest) counts as outstanding work — matching the backend counters.
     const totalClosed = bugs.filter(b => b.status === 'closed').length;
+    const totalOpen   = bugs.length - totalClosed;
 
     return (
         <div>

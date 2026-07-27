@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { testCaseDefects } from '../api';
 import { activeBugs, bugHref, severityChipStyle } from '../utils/bugs';
 
-// Read-only panel listing the test case's linked ACTIVE (open) bugs, each
-// navigable. Renders nothing when there are no active bugs.
+// Read-only panel listing the test case's linked ACTIVE bugs — anything not
+// closed, so `fixed` (awaiting retest) still shows here. Each row is navigable;
+// renders nothing when there are no active bugs.
 export default function LinkedBugsPanel({ testCaseId }) {
     const [bugs, setBugs] = useState([]);
 
