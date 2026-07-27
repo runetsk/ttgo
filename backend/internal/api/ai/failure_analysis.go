@@ -174,16 +174,23 @@ func (h *Handler) EnqueueRunAnalysis(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, job)
 }
 
-// GetRunAnalysisJob returns the most recent job for a run.
+// GetRunAnalysisJob returns the most recent job for a run, or null if the run has
+// never been analyzed. 404 means the run itself is missing — a run with no job yet
+// is a 200, matching ListCurrentAnalysesForRun.
 func (h *Handler) GetRunAnalysisJob(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
-	job, err := h.store.GetLatestAnalysisJobForRun(runID)
+	run, err := h.store.GetTestRun(runID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	if job == nil {
-		httpx.Error(w, http.StatusNotFound, fmt.Errorf("no analysis job for this run"))
+	if run == nil {
+		httpx.Error(w, http.StatusNotFound, fmt.Errorf("test run not found"))
+		return
+	}
+	job, err := h.store.GetLatestAnalysisJobForRun(runID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
 	httpx.JSON(w, http.StatusOK, job)

@@ -169,14 +169,33 @@ func TestEnqueueRunAnalysis_404WhenRunMissing(t *testing.T) {
 	}
 }
 
-func TestGetRunAnalysisJob_404WhenNone(t *testing.T) {
+func TestGetRunAnalysisJob_404WhenRunMissing(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	rr := doRequest(env, "GET", "/api/runs/does-not-exist/analysis-job", nil)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
+// A run that has simply never been analyzed is not an error — 404 is reserved for
+// a missing run, so the client can tell "bad run id" from "nothing yet".
+func TestGetRunAnalysisJob_200NullWhenNone(t *testing.T) {
 	env, cleanup := testServer(t)
 	defer cleanup()
 
 	run := createTestRun(t, env, "Empty Run")
 	rr := doRequest(env, "GET", "/api/runs/"+run+"/analysis-job", nil)
-	if rr.Code != http.StatusNotFound {
-		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	var job *models.RunAnalysisJob
+	if err := json.NewDecoder(rr.Body).Decode(&job); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if job != nil {
+		t.Fatalf("expected null job, got %+v", job)
 	}
 }
 
