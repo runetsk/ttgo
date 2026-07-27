@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"ttgo/pkg/tracker/store"
 )
 
 var validSeverity = map[string]bool{"critical": true, "major": true, "minor": true, "trivial": true}
@@ -29,4 +31,33 @@ func ValidExternalURL(raw string) error {
 		return fmt.Errorf("external_url must be an absolute http or https URL")
 	}
 	return nil
+}
+
+// ValidateAssignee returns a validation message when assigneeID names a user that cannot
+// own a defect, or "" when the value is acceptable. nil and "" both mean "unassigned" and
+// are always accepted. Mirrors the run-assignee rule in runs.AssignRun: a non-empty id must
+// reference an existing, active, non-deleted user.
+//
+// Exported and store-backed on purpose: ValidateCreate calls it, so the create-and-link path
+// in the runs package (CreateAndLinkResultDefect) inherits the same check for free.
+func ValidateAssignee(s *store.Store, assigneeID *string) string {
+	if normalizeAssignee(assigneeID) == nil {
+		return ""
+	}
+	u, err := s.GetUser(*assigneeID)
+	if err != nil || u == nil || !u.Active || u.Deleted {
+		return "assignee_id must reference an active user"
+	}
+	return ""
+}
+
+// normalizeAssignee collapses the two "unassigned" spellings — nil and "" — to nil.
+// Used on create, where both mean the same thing. Update deliberately does not normalize:
+// there "" clears an existing assignee while nil leaves it unchanged, so the store needs
+// to see the difference.
+func normalizeAssignee(assigneeID *string) *string {
+	if assigneeID == nil || *assigneeID == "" {
+		return nil
+	}
+	return assigneeID
 }

@@ -53,7 +53,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if msg := ValidateCreate(req); msg != "" {
+	if msg := ValidateCreate(h.store, req); msg != "" {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
@@ -89,6 +89,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
+	// assignee_id is passed to the store as sent: "" clears, nil leaves it unchanged.
+	if msg := ValidateAssignee(h.store, req.AssigneeID); msg != "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
 	d, err := h.store.UpdateDefect(r.PathValue("id"), req)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
@@ -119,7 +124,9 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 // ValidateCreate / DefectFromCreate are exported so the runs package (create-and-link) reuses them.
-func ValidateCreate(req models.CreateDefectRequest) string {
+// The assignee check lives here rather than in the handler so CreateAndLinkResultDefect cannot
+// bypass it.
+func ValidateCreate(s *store.Store, req models.CreateDefectRequest) string {
 	if strings.TrimSpace(req.Title) == "" {
 		return "title is required"
 	}
@@ -135,12 +142,13 @@ func ValidateCreate(req models.CreateDefectRequest) string {
 	if err := ValidExternalURL(req.ExternalURL); err != nil {
 		return err.Error()
 	}
-	return ""
+	return ValidateAssignee(s, req.AssigneeID)
 }
 
 func DefectFromCreate(req models.CreateDefectRequest) *models.Defect {
 	return &models.Defect{
 		Title: strings.TrimSpace(req.Title), Description: req.Description, Severity: req.Severity, Status: req.Status,
+		AssigneeID:       normalizeAssignee(req.AssigneeID),
 		ExternalProvider: req.ExternalProvider, ExternalKey: req.ExternalKey, ExternalURL: strings.TrimSpace(req.ExternalURL),
 	}
 }
