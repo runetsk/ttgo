@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { getTestRuns, getCategories, getRunFolders, getAssignableUsers } from '../api';
+import { getTestRuns, getRunFolders, getAssignableUsers } from '../api';
+import { useCategories } from '../contexts/CategoriesContext';
 import CreateRunModal from '../components/CreateRunModal';
 import Modal from '../components/Modal';
 import DateRangeFilter from '../components/filters/DateRangeFilter';
@@ -35,7 +36,7 @@ const COLUMN_DEFS = [
 export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
     const navigate = useNavigate();
     const [runs, setRuns] = useState([]);
-    const [categories, setCategories] = useState([]); // For filter + modal
+    const { categories } = useCategories(); // For filter + modal
     const [folders, setFolders] = useState([]); // For folder name column
     const [showModal, setShowModal] = useState(false);
     const [modal, setModal] = useState(null);
@@ -89,9 +90,6 @@ export default function TestRunList({ selectedFolderId = null, onRunsLoaded }) {
     }, [filterCategoryIds, filterStatus, sortBy, sortOrder, page, pageSize, selectedFolderId, filterCreated, filterUpdated, filterAssignee, onRunsLoaded]);
 
     useEffect(() => {
-        getCategories()
-            .then(data => setCategories(Array.isArray(data.categories) ? data.categories : []))
-            .catch(() => setCategories([]));
         getRunFolders()
             .then(data => setFolders(data.run_folders || []))
             .catch(() => setFolders([]));

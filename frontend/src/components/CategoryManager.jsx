@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { getCategories, createCategory, deleteCategories } from '../api';
+import { useCategories } from '../contexts/CategoriesContext';
 
 /**
  * CategoryManager — /categories
@@ -29,6 +30,11 @@ export default function CategoryManager({ onUpdate }) {
     const [formSaving, setFormSaving] = useState(false);
 
     const searchTimer = useRef(null);
+
+    // Keeps the app-wide picker list (CategoriesContext) in step with edits made
+    // here. This screen keeps its own paginated fetch — the shared cache holds
+    // every category at once and can't serve page/search queries.
+    const { refresh: refreshSharedCategories } = useCategories();
 
     // ── Data loading ──────────────────────────────────────────────────────────
 
@@ -85,6 +91,7 @@ export default function CategoryManager({ onUpdate }) {
                 closeModal();
                 setPage(1);
                 load();
+                refreshSharedCategories();
                 if (onUpdate) onUpdate();
             })
             .catch(err => setFormError(err.response?.data?.error || err.message || 'Failed to create category.'))
@@ -101,6 +108,7 @@ export default function CategoryManager({ onUpdate }) {
             .then(() => {
                 setSelectedIds([]);
                 load();
+                refreshSharedCategories();
                 if (onUpdate) onUpdate();
             })
             .catch(() => {});

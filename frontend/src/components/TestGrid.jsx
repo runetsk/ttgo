@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getTests, createTest, getCategories, assignCategory, deleteTest, deleteTests, updateFolder, exportTests } from '../api';
+import { getTests, createTest, assignCategory, deleteTest, deleteTests, updateFolder, exportTests } from '../api';
+import { useCategories } from '../contexts/CategoriesContext';
 import { toast } from '../toast';
 import Modal from './Modal';
 import ColumnPicker from './ColumnPicker';
@@ -30,7 +31,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
     const [folderEditName, setFolderEditName] = useState(null); // null = not editing, string = draft value
     const folderNameInputRef = useRef(null);
     const [tests, setTests] = useState([]);
-    const [categories, setCategories] = useState([]);
+    const { categories } = useCategories();
     const [selectedCategoryId, setSelectedCategoryId] = useState("");
     const [modal, setModal] = useState(null);
     const [filterText, setFilterText] = useState("");
@@ -88,8 +89,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         return Promise.resolve();
     }, [selectedFolders]);
 
-    // Dedup refs to prevent StrictMode double-fire
-    const categoriesLoadedRef = useRef(false);
+    // Dedup ref to prevent StrictMode double-fire
     const testsLoadingRef = useRef('');
     const handleExport = useCallback(() => {
         const fields = ['name', ...Object.entries(exportFields).filter(([, v]) => v).map(([k]) => k)];
@@ -115,12 +115,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         document.addEventListener('mousedown', handleClick);
         return () => document.removeEventListener('mousedown', handleClick);
     }, [showExportDropdown]);
-
-    useEffect(() => {
-        if (categoriesLoadedRef.current) return;
-        categoriesLoadedRef.current = true;
-        getCategories().then(data => setCategories(data.categories || []));
-    }, []);
 
     // Reset filter/selection state synchronously when folder selection changes.
     // Using the "store previous value" pattern so we don't trigger setState in an

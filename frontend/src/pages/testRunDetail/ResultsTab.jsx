@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { deleteRunResult, updateRunResult, retryRunResult, bulkUpdateRunResults, listRunComments, getCategories } from '../../api';
+import { deleteRunResult, updateRunResult, retryRunResult, bulkUpdateRunResults, listRunComments } from '../../api';
+import { useCategories } from '../../contexts/CategoriesContext';
 import DateRangeFilter from '../../components/filters/DateRangeFilter';
 import CategoryFilter from '../../components/filters/CategoryFilter';
 import { inDateRange } from '../../utils/dateFilter';
@@ -100,7 +101,7 @@ export default function ResultsTab({
     const [latestCommentTime, setLatestCommentTime] = useState(null);
     const { view, groupBy, setView, setGroupBy } = useRunViewPreference();
     const [collapsedGroups, setCollapsedGroups] = useState(new Set());
-    const [resultCategories, setResultCategories] = useState([]);
+    const { categories: resultCategories } = useCategories();
     const [resultFilters, setResultFilters] = useState({
         test_case: '', status: '', defect_type: '', result_id: '',
         categories: [],
@@ -123,10 +124,6 @@ export default function ResultsTab({
             }).catch(() => {});
         }
     }, [runId]);
-
-    React.useEffect(() => {
-        getCategories(1, 200).then(d => setResultCategories(d.categories || [])).catch(() => setResultCategories([]));
-    }, []);
 
     const relativeTime = (isoStr) => {
         if (!isoStr) return '';

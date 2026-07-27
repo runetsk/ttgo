@@ -5,7 +5,8 @@ import RichTextField from './RichTextField';
 import HistorySidebar from './HistorySidebar';
 import RequirementLinkPanel from './RequirementLinkPanel';
 import LinkedBugsPanel from './LinkedBugsPanel';
-import { updateTest, getCustomFields, getTest, getCategories, getFolderTree, listTestExecutions, versions as versionsApi, requirements as requirementsApi, testCaseDefects } from '../api';
+import { updateTest, getCustomFields, getTest, getFolderTree, listTestExecutions, versions as versionsApi, requirements as requirementsApi, testCaseDefects } from '../api';
+import { useCategories } from '../contexts/CategoriesContext';
 import { isFailureStatus } from '../utils/resultStatus';
 import { useAbortController } from '../hooks/useAbortController';
 
@@ -61,7 +62,7 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     const [steps, setSteps] = useState([]);
     const [customValues, setCustomValues] = useState([]);
     const [fieldDefs, setFieldDefs] = useState([]);
-    const [allCategories, setAllCategories] = useState([]);
+    const { categories: allCategories } = useCategories();
     const [assignedCategories, setAssignedCategories] = useState([]);
     const [selectedCategoryId, setSelectedCategoryId] = useState("");
 
@@ -129,7 +130,6 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     // Initial Load
     useEffect(() => {
         getCustomFields().then(setFieldDefs);
-        getCategories().then(data => setAllCategories(data.categories || []));
     }, []);
 
     // Load test data if ID is present and no initialTest is provided

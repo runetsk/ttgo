@@ -4,6 +4,7 @@ import { getFolder } from './api'
 import { useAbortController } from './hooks/useAbortController'
 import { ToastProvider } from './components/Toast'
 import { AuthProvider } from './contexts/AuthContext'
+import { CategoriesProvider } from './contexts/CategoriesContext'
 import { AIGenerationProvider, useAIGeneration } from './contexts/AIGenerationContext'
 import AIDisabledNotice from './components/AIDisabledNotice'
 import { WebSocketProvider } from './hooks/useWebSocket'
@@ -470,13 +471,15 @@ function RunFolderViewWrapper({ onRunsLoaded, runListKey }) {
 function AppWithProviders() {
   return (
     <AuthProvider>
-      <WebSocketProvider>
-        <AIGenerationProvider>
-          <AuthGate />
-          <App />
-          <ConnectionStatus />
-        </AIGenerationProvider>
-      </WebSocketProvider>
+      <CategoriesProvider>
+        <WebSocketProvider>
+          <AIGenerationProvider>
+            <AuthGate />
+            <App />
+            <ConnectionStatus />
+          </AIGenerationProvider>
+        </WebSocketProvider>
+      </CategoriesProvider>
     </AuthProvider>
   );
 }

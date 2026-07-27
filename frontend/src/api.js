@@ -58,6 +58,11 @@ export const getCategories = (page = 1, pageSize = 10, search = '') => {
     const q = search ? `&q=${encodeURIComponent(search)}` : '';
     return api.get(`/categories?limit=${pageSize}&offset=${offset}${q}`).then(res => res.data);
 };
+// Every category, unpaginated — the store skips LIMIT/OFFSET when limit <= 0.
+// Pickers and filters need the whole list; paginating them would silently hide
+// categories past the first page. Read it through CategoriesContext rather than
+// calling this directly, so one copy is shared across the app.
+export const getAllCategories = () => api.get('/categories?limit=0').then(res => res.data);
 export const createCategory = (name, description) => api.post('/categories', { name, description }).then(res => res.data);
 export const deleteCategory = (id) => api.delete(`/categories/${id}`);
 export const deleteCategories = (ids) => api.post('/categories/bulk-delete', { ids });
