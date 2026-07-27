@@ -7,7 +7,10 @@ import (
 )
 
 var validSeverity = map[string]bool{"critical": true, "major": true, "minor": true, "trivial": true}
-var validStatus = map[string]bool{"open": true, "closed": true}
+
+// validStatus — "fixed" means fixed but awaiting retest; "open" stays valid for
+// backward compatibility with the CLI, seed data and external scripts.
+var validStatus = map[string]bool{"open": true, "fixed": true, "closed": true}
 
 // ValidExternalURL accepts "" or an absolute http/https URL (length-capped). XSS guard.
 func ValidExternalURL(raw string) error {

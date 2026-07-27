@@ -35,7 +35,7 @@ func newDefectsListCmd() *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&status, "status", "", "filter by status (open|closed)")
+	cmd.Flags().StringVar(&status, "status", "", "filter by status (open|fixed|closed)")
 	cmd.Flags().StringVar(&severity, "severity", "", "filter by severity")
 	cmd.Flags().StringVar(&q, "q", "", "search title/external key")
 	return cmd

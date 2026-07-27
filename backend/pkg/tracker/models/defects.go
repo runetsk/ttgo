@@ -15,8 +15,10 @@ type Defect struct {
 	ID          string `json:"id"          gorm:"primaryKey"`
 	Title       string `json:"title"       gorm:"not null"`
 	Description string `json:"description" gorm:"type:text"`
-	Status      string `json:"status"      gorm:"not null;default:'open';index"`  // "open" | "closed"
+	Status      string `json:"status"      gorm:"not null;default:'open';index"`  // "open" | "fixed" | "closed"
 	Severity    string `json:"severity"    gorm:"not null;default:'minor';index"` // critical|major|minor|trivial
+
+	AssigneeID *string `json:"assignee_id" gorm:"index"` // nullable, app-validated ref to users.id
 
 	ExternalProvider string `json:"external_provider"`
 	ExternalKey      string `json:"external_key"`
@@ -24,6 +26,9 @@ type Defect struct {
 
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// Assignee display name (not persisted, populated by ListDefects/GetDefect)
+	AssigneeName string `json:"assignee_name" gorm:"-"`
 
 	LinkedTestCount int `json:"linked_test_count" gorm:"-"` // computed: distinct test cases
 }
@@ -40,13 +45,14 @@ type DefectLink struct {
 }
 
 type CreateDefectRequest struct {
-	Title            string `json:"title"`
-	Description      string `json:"description"`
-	Severity         string `json:"severity"`
-	Status           string `json:"status"`
-	ExternalProvider string `json:"external_provider"`
-	ExternalKey      string `json:"external_key"`
-	ExternalURL      string `json:"external_url"`
+	Title            string  `json:"title"`
+	Description      string  `json:"description"`
+	Severity         string  `json:"severity"`
+	Status           string  `json:"status"`
+	AssigneeID       *string `json:"assignee_id"` // nil or "" leaves the defect unassigned
+	ExternalProvider string  `json:"external_provider"`
+	ExternalKey      string  `json:"external_key"`
+	ExternalURL      string  `json:"external_url"`
 }
 
 // UpdateDefectRequest — nil fields are left unchanged.
@@ -55,6 +61,7 @@ type UpdateDefectRequest struct {
 	Description      *string `json:"description"`
 	Severity         *string `json:"severity"`
 	Status           *string `json:"status"`
+	AssigneeID       *string `json:"assignee_id"` // "" clears the assignee, nil leaves it unchanged
 	ExternalProvider *string `json:"external_provider"`
 	ExternalKey      *string `json:"external_key"`
 	ExternalURL      *string `json:"external_url"`

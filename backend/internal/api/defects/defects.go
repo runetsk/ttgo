@@ -16,7 +16,7 @@ import (
 // @Description  Returns native defects with optional filtering by status, severity, or search query.
 // @Tags         defects
 // @Produce      json
-// @Param        status    query     string  false  "Filter by status: open | closed"
+// @Param        status    query     string  false  "Filter by status: open | fixed | closed"
 // @Param        severity  query     string  false  "Filter by severity: critical | major | minor | trivial"
 // @Param        q         query     string  false  "Full-text search query"
 // @Success      200  {array}   models.Defect
