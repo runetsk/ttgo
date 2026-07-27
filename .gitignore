@@ -4,6 +4,8 @@ frontend/dist/
 frontend/.vite/
 frontend/playwright-report/
 frontend/test-results/
+# Playwright also drops this at the repo root when run from here rather than frontend/.
+/test-results/
 frontend/e2e/.auth-state.json
 frontend/test_output.log
 
@@ -49,11 +51,15 @@ backend/.env
 frontend/debug_*
 frontend/*.log
 frontend/multi_select_verification.png
+/shot-check.png
 
 # Tool internals
 .superpowers/
 .specify/
 .worktrees/
+.codex/
+# Console/page dumps written by the Playwright MCP server.
+.playwright-mcp/
 
 # Claude Code local state & local-only commands (keep launch.json + skills/ tracked)
 .claude/scheduled_tasks.lock
