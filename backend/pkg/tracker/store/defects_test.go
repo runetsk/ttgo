@@ -148,6 +148,137 @@ func TestListAffectedTestCases(t *testing.T) {
 	assert.Equal(t, "tc1", after[0].ID)
 }
 
+// insertTestCaseRow / insertRunRow / insertResultRow build affected-test-case fixtures directly in
+// SQL so start_time and attempt_number can be set explicitly — the "last failing run" ordering must
+// be pinned by the recorded execution time, never by insert order.
+func insertTestCaseRow(t *testing.T, s *Store, id, name string) {
+	t.Helper()
+	require.NoError(t, s.db.Exec(
+		`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES (?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+		id, name).Error)
+}
+
+func insertRunRow(t *testing.T, s *Store, id, name string) {
+	t.Helper()
+	require.NoError(t, s.db.Exec(`INSERT INTO test_runs (id,name) VALUES (?,?)`, id, name).Error)
+}
+
+func insertResultRow(t *testing.T, s *Store, id, runID, tcID, status, startTime string, attempt int) {
+	t.Helper()
+	require.NoError(t, s.db.Exec(
+		`INSERT INTO run_results (id,test_run_id,test_case_id,status,start_time,attempt_number) VALUES (?,?,?,?,?,?)`,
+		id, runID, tcID, status, startTime, attempt).Error)
+}
+
+// TestListAffectedTestCasesLastFailingRun covers the run enrichment on AffectedTestCase. The run
+// reported is the one the TEST CASE last failed in, which is a property of its execution history
+// and not of the defect link — case-scoped links carry no run result at all.
+func TestListAffectedTestCasesLastFailingRun(t *testing.T) {
+	t.Run("populated from the test case's failing result", func(t *testing.T) {
+		s := newTestStore(t)
+		insertTestCaseRow(t, s, "tc1", "Login works")
+		insertRunRow(t, s, "run1", "Nightly regression")
+		insertResultRow(t, s, "rr1", "run1", "tc1", "FAIL", "2026-01-01 10:00:00", 1)
+
+		d := &models.Defect{Title: "bug"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToResult(d.ID, "rr1", "tc1")
+		require.NoError(t, err)
+
+		got, err := s.ListAffectedTestCases(d.ID)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "run1", got[0].LastRunID)
+		assert.Equal(t, "Nightly regression", got[0].LastRunName)
+		assert.Equal(t, "FAIL", got[0].LastResultStatus)
+	})
+
+	t.Run("most recent failure wins across runs", func(t *testing.T) {
+		s := newTestStore(t)
+		insertTestCaseRow(t, s, "tc1", "Login works")
+		insertRunRow(t, s, "run-old", "January run")
+		insertRunRow(t, s, "run-new", "March run")
+		insertRunRow(t, s, "run-pass", "April run")
+		insertResultRow(t, s, "rr-old", "run-old", "tc1", "FAIL", "2026-01-01 10:00:00", 1)
+		insertResultRow(t, s, "rr-new", "run-new", "tc1", "ERROR", "2026-03-01 10:00:00", 1)
+		// a later PASS is not a failure and must not become the "last failing run"
+		insertResultRow(t, s, "rr-pass", "run-pass", "tc1", "PASS", "2026-04-01 10:00:00", 1)
+
+		d := &models.Defect{Title: "bug"}
+		require.NoError(t, s.CreateDefect(d))
+		// linked from the OLDEST result on purpose: the answer must not be the linked result
+		_, err := s.LinkDefectToResult(d.ID, "rr-old", "tc1")
+		require.NoError(t, err)
+
+		got, err := s.ListAffectedTestCases(d.ID)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "run-new", got[0].LastRunID)
+		assert.Equal(t, "March run", got[0].LastRunName)
+		assert.Equal(t, "ERROR", got[0].LastResultStatus, "ERROR is a failure status too")
+	})
+
+	t.Run("the later attempt wins inside one run", func(t *testing.T) {
+		s := newTestStore(t)
+		insertTestCaseRow(t, s, "tc1", "Login works")
+		insertRunRow(t, s, "run1", "Retried run")
+		insertResultRow(t, s, "rr-a1", "run1", "tc1", "FAIL", "2026-01-01 10:00:00", 1)
+		insertResultRow(t, s, "rr-a2", "run1", "tc1", "ERROR", "2026-01-01 10:00:00", 2)
+
+		d := &models.Defect{Title: "bug"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToResult(d.ID, "rr-a1", "tc1")
+		require.NoError(t, err)
+
+		got, err := s.ListAffectedTestCases(d.ID)
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "ERROR", got[0].LastResultStatus, "attempt 2 outranks attempt 1 at the same start_time")
+	})
+
+	t.Run("a case-scoped link with no failing result still appears, with empty run fields", func(t *testing.T) {
+		s := newTestStore(t)
+		insertTestCaseRow(t, s, "tc1", "Never run")
+
+		d := &models.Defect{Title: "filed against the case"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToTestCase(d.ID, "tc1")
+		require.NoError(t, err)
+
+		got, err := s.ListAffectedTestCases(d.ID)
+		require.NoError(t, err)
+		require.Len(t, got, 1, "a test case that never failed must not be dropped")
+		assert.Equal(t, "tc1", got[0].ID)
+		assert.Empty(t, got[0].LastRunID)
+		assert.Empty(t, got[0].LastRunName)
+		assert.Empty(t, got[0].LastResultStatus)
+	})
+
+	t.Run("a test case linked through several results appears once", func(t *testing.T) {
+		s := newTestStore(t)
+		insertTestCaseRow(t, s, "tc1", "Login works")
+		insertRunRow(t, s, "run1", "January run")
+		insertRunRow(t, s, "run2", "March run")
+		insertResultRow(t, s, "rr1", "run1", "tc1", "FAIL", "2026-01-01 10:00:00", 1)
+		insertResultRow(t, s, "rr2", "run2", "tc1", "FAIL", "2026-03-01 10:00:00", 1)
+
+		d := &models.Defect{Title: "recurring bug"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToResult(d.ID, "rr1", "tc1")
+		require.NoError(t, err)
+		_, err = s.LinkDefectToResult(d.ID, "rr2", "tc1")
+		require.NoError(t, err)
+		// plus a third, case-scoped link to the very same test case
+		_, err = s.LinkDefectToTestCase(d.ID, "tc1")
+		require.NoError(t, err)
+
+		got, err := s.ListAffectedTestCases(d.ID)
+		require.NoError(t, err)
+		require.Len(t, got, 1, "three links to one test case must still list it once")
+		assert.Equal(t, "run2", got[0].LastRunID)
+	})
+}
+
 func TestDefectCRUD(t *testing.T) {
 	s := newTestStore(t)
 

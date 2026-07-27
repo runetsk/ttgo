@@ -378,24 +378,61 @@ func (s *Store) UnlinkDefectFromTestCase(defectID, testCaseID string) error {
 	})
 }
 
-// AffectedTestCase is a distinct test case linked to a defect.
+// AffectedTestCase is a distinct test case linked to a defect, together with the run in which that
+// test case last failed.
+//
+// LastRunID / LastRunName / LastResultStatus describe the MOST RECENT FAILING RUN RESULT FOR THE
+// TEST CASE — deliberately not "the run result the defect was linked from". Two reasons: a
+// test-case-scoped link carries no run_result_id at all (models.DefectLink), so a link-scoped
+// answer would be empty for every defect filed against a test case rather than a result; and the
+// question the triage queue asks is "where do I go to see this failing / retest it?", which is
+// about the test's latest failure, not about whichever historical result someone happened to file
+// the defect against. "Failing" is models.FailureStatuses (FAIL and ERROR).
+//
+// All three are empty strings when the test case has no failing result — such test cases are still
+// returned, they simply carry no run.
 type AffectedTestCase struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID               string `json:"id"`
+	Name             string `json:"name"`
+	LastRunID        string `json:"last_run_id"`
+	LastRunName      string `json:"last_run_name"`
+	LastResultStatus string `json:"last_result_status"`
 }
 
-// ListAffectedTestCases returns the distinct test cases a defect affects,
-// ordered by name. Both link kinds (result-scoped and test-case-scoped) carry
-// test_case_id, so this matches the LinkedTestCount basis. Links whose test
-// case has been deleted are excluded by the JOIN.
+// ListAffectedTestCases returns the distinct test cases a defect affects, ordered by name, each
+// carrying the run it last failed in (see AffectedTestCase). Both link kinds (result-scoped and
+// test-case-scoped) carry test_case_id, so this matches the LinkedTestCount basis. Links whose
+// test case has been deleted are excluded.
 func (s *Store) ListAffectedTestCases(defectID string) ([]AffectedTestCase, error) {
 	var out []AffectedTestCase
+	// The link set is collapsed to one row per test case by `tc.id IN (…)` rather than by
+	// SELECT DISTINCT: a test case linked through several run results used to be deduped by the
+	// DISTINCT, but per-run columns differ between those rows, so DISTINCT would stop collapsing
+	// them and the defect would list the same test twice.
+	//
+	// "Last failed" is ordered by when the result RAN (start_time), falling back to updated_at for
+	// results recorded without timing — the same rule, and the same '0002-01-01' sentinel, as
+	// ListRecentResultsForTestCase (runs.go) — with attempt_number breaking ties between retries
+	// recorded inside one run at the same instant.
 	err := s.db.Raw(`
-		SELECT DISTINCT tc.id, tc.name
-		FROM defect_links dl
-		JOIN test_cases tc ON tc.id = dl.test_case_id
-		WHERE dl.defect_id = ? AND dl.test_case_id IS NOT NULL
-		ORDER BY tc.name`, defectID).Scan(&out).Error
+		SELECT t.id, t.name,
+		       COALESCE(tr.id, '')     AS last_run_id,
+		       COALESCE(tr.name, '')   AS last_run_name,
+		       COALESCE(rr.status, '') AS last_result_status
+		FROM (
+			SELECT tc.id AS id, tc.name AS name,
+			       (SELECT r2.id FROM run_results r2
+			        WHERE r2.test_case_id = tc.id AND r2.status IN ?
+			        ORDER BY CASE WHEN r2.start_time > '0002-01-01' THEN r2.start_time ELSE r2.updated_at END DESC,
+			                 r2.attempt_number DESC
+			        LIMIT 1) AS last_result_id
+			FROM test_cases tc
+			WHERE tc.id IN (SELECT dl.test_case_id FROM defect_links dl
+			                WHERE dl.defect_id = ? AND dl.test_case_id IS NOT NULL)
+		) t
+		LEFT JOIN run_results rr ON rr.id = t.last_result_id
+		LEFT JOIN test_runs tr ON tr.id = rr.test_run_id
+		ORDER BY t.name`, models.FailureStatuses, defectID).Scan(&out).Error
 	return out, err
 }
 
