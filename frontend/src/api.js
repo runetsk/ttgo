@@ -389,9 +389,17 @@ export const listTestExecutions = (testCaseId) =>
 
 // ── Native defects ──
 export const defects = {
+    // The Defects register calls list() with no params: it fetches the whole set once and
+    // filters/sorts/counts client-side. `params` stays supported because DefectLinkPanel
+    // still searches server-side with { q }.
     list: (params = {}) => api.get('/defects', { params }).then(res => res.data),
     create: (data) => api.post('/defects', data).then(res => res.data),
     update: (id, data) => api.patch(`/defects/${id}`, data).then(res => res.data),
+    // `fields` carries any of { status, severity, assignee_id }; an omitted field is left
+    // unchanged on every selected defect and assignee_id: '' unassigns. The explicit `ids`
+    // argument always wins, so a full payload from buildBulkPayload can be passed as `fields`.
+    // Cap is 500 ids per call (httpx.MaxBulkIDs); the server 400s beyond that.
+    bulkUpdate: (ids, fields = {}) => api.post('/defects/bulk-update', { ...fields, ids }).then(res => res.data),
     remove: (id) => api.delete(`/defects/${id}`),
     affectedTests: (id) => api.get(`/defects/${id}/tests`).then(res => res.data),
 };
