@@ -91,6 +91,96 @@ func TestDefectCRUD(t *testing.T) {
 	assert.Nil(t, gone)
 }
 
+// TestReverificationCountsFixedAsResolved covers the widened recomputeReverification predicate:
+// the flag means "every linked defect is fixed-or-closed", so "fixed" resolves a test case just
+// like "closed" does.
+func TestReverificationCountsFixedAsResolved(t *testing.T) {
+	t.Run("marking the only linked defect fixed raises the flag", func(t *testing.T) {
+		s := newTestStore(t)
+		require.NoError(t, s.db.Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','Login',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+
+		d := &models.Defect{Title: "bug"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToTestCase(d.ID, "tc1")
+		require.NoError(t, err)
+		require.False(t, reverFlag(t, s, "tc1"))
+
+		_, err = s.UpdateDefect(d.ID, models.UpdateDefectRequest{Status: strPtr("fixed")})
+		require.NoError(t, err)
+		assert.True(t, reverFlag(t, s, "tc1"), "a fixed defect leaves the test ready to retest")
+	})
+
+	t.Run("one fixed plus one open defect stays unflagged", func(t *testing.T) {
+		s := newTestStore(t)
+		require.NoError(t, s.db.Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','Login',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+
+		fixed := &models.Defect{Title: "fixed one"}
+		stillOpen := &models.Defect{Title: "open one"}
+		require.NoError(t, s.CreateDefect(fixed))
+		require.NoError(t, s.CreateDefect(stillOpen))
+		_, err := s.LinkDefectToTestCase(fixed.ID, "tc1")
+		require.NoError(t, err)
+		_, err = s.LinkDefectToTestCase(stillOpen.ID, "tc1")
+		require.NoError(t, err)
+
+		_, err = s.UpdateDefect(fixed.ID, models.UpdateDefectRequest{Status: strPtr("fixed")})
+		require.NoError(t, err)
+		assert.False(t, reverFlag(t, s, "tc1"), "an unresolved defect keeps the test out of the retest queue")
+
+		// closing the remaining open defect resolves the last one -> flag raised
+		_, err = s.UpdateDefect(stillOpen.ID, models.UpdateDefectRequest{Status: strPtr("closed")})
+		require.NoError(t, err)
+		assert.True(t, reverFlag(t, s, "tc1"))
+	})
+
+	t.Run("reopening a fixed defect clears the flag again", func(t *testing.T) {
+		s := newTestStore(t)
+		require.NoError(t, s.db.Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','Login',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+
+		d := &models.Defect{Title: "bug"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToTestCase(d.ID, "tc1")
+		require.NoError(t, err)
+
+		_, err = s.UpdateDefect(d.ID, models.UpdateDefectRequest{Status: strPtr("fixed")})
+		require.NoError(t, err)
+		require.True(t, reverFlag(t, s, "tc1"))
+
+		_, err = s.UpdateDefect(d.ID, models.UpdateDefectRequest{Status: strPtr("open")})
+		require.NoError(t, err)
+		assert.False(t, reverFlag(t, s, "tc1"))
+	})
+
+	t.Run("closed still resolves a test case", func(t *testing.T) {
+		s := newTestStore(t)
+		require.NoError(t, s.db.Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','Login',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+
+		d := &models.Defect{Title: "bug"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToTestCase(d.ID, "tc1")
+		require.NoError(t, err)
+
+		_, err = s.UpdateDefect(d.ID, models.UpdateDefectRequest{Status: strPtr("closed")})
+		require.NoError(t, err)
+		assert.True(t, reverFlag(t, s, "tc1"))
+	})
+}
+
+// TestSeedDemoReverificationFlags pins the demo dataset's reverification outcome across the
+// widened predicate: no seeded defect is "fixed", so only the closed-defect test case is flagged.
+func TestSeedDemoReverificationFlags(t *testing.T) {
+	s := newTestStore(t)
+	_, err := s.SeedDemoTx(false)
+	require.NoError(t, err)
+
+	assert.True(t, reverFlag(t, s, demoID("tc:category-filter")),
+		"the only linked defect is closed -> ready to retest")
+	assert.False(t, reverFlag(t, s, demoID("tc:session-expires")),
+		"linked defect is still open")
+	assert.False(t, reverFlag(t, s, demoID("tc:checkout-valid-payment")),
+		"linked defect is still open")
+}
+
 // newDefectUser inserts a user and forces the active/deleted flags CreateUser does not expose.
 func newDefectUser(t *testing.T, s *Store, email, displayName string, active bool) *models.User {
 	t.Helper()

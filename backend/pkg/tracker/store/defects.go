@@ -356,7 +356,10 @@ func affectedTestCaseIDs(tx *gorm.DB, defectID string) []string {
 	return ids
 }
 
-// recomputeReverification sets reverification_flagged = (>=1 linked defect AND all closed) per test case.
+// recomputeReverification sets reverification_flagged per test case: it raises the flag when a
+// test case has at least one linked defect and every one of them is fixed-or-closed, i.e. the
+// test is ready to be retested. "fixed" counts as resolved alongside "closed" so the signal
+// fires when QA actually wants it — before the defect is closed, not after.
 func recomputeReverification(tx *gorm.DB, testCaseIDs []string) error {
 	for _, tcID := range testCaseIDs {
 		if tcID == "" {
@@ -368,7 +371,8 @@ func recomputeReverification(tx *gorm.DB, testCaseIDs []string) error {
 			return err
 		}
 		if err := tx.Model(&models.DefectLink{}).Joins("JOIN defects d ON d.id = defect_links.defect_id").
-			Where("defect_links.test_case_id = ? AND d.status != ?", tcID, "closed").Distinct("d.id").Count(&open).Error; err != nil {
+			Where("defect_links.test_case_id = ? AND d.status NOT IN ?", tcID, []string{"closed", "fixed"}).
+			Distinct("d.id").Count(&open).Error; err != nil {
 			return err
 		}
 		flagged := total > 0 && open == 0
