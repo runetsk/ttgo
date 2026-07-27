@@ -27,6 +27,90 @@ func TestCountDefectLinksByRunResults(t *testing.T) {
 	assert.Equal(t, 1, closed["rr1"])
 }
 
+// defectCounterFixture builds one folder / test case / run / run result and links three defects to
+// it — one "open", one "fixed", one "closed". Shared setup for the four open/closed defect counters.
+func defectCounterFixture(t *testing.T, s *Store) (folderID, tcID, runID, resultID string) {
+	t.Helper()
+	folder, err := s.CreateFolder("Counters", nil)
+	require.NoError(t, err)
+	tc := &models.TestCase{Name: "Counter Test", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc))
+
+	runID, resultID = "run-counters", "rr-counters"
+	require.NoError(t, s.db.Exec(`INSERT INTO test_runs (id,name) VALUES (?,?)`, runID, "Counters Run").Error)
+	require.NoError(t, s.db.Exec(`INSERT INTO run_results (id,test_run_id,test_case_id,status) VALUES (?,?,?,'FAIL')`,
+		resultID, runID, tc.ID).Error)
+
+	for _, status := range []string{"open", "fixed", "closed"} {
+		d := &models.Defect{Title: status + " defect", Status: status}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToResult(d.ID, resultID, tc.ID)
+		require.NoError(t, err)
+	}
+	return folder.ID, tc.ID, runID, resultID
+}
+
+// TestFixedDefectCountsAsOpenInAllCounters pins the four open/closed defect counters against the
+// new "fixed" status. Every one of them buckets `closed` vs. everything else rather than comparing
+// against "open", so a fixed defect lands in the open bucket and none needed a code change.
+func TestFixedDefectCountsAsOpenInAllCounters(t *testing.T) {
+	t.Run("CountDefectLinksByRunResults", func(t *testing.T) {
+		s := newTestStore(t)
+		_, _, _, resultID := defectCounterFixture(t, s)
+
+		open, closed, err := s.CountDefectLinksByRunResults([]string{resultID})
+		require.NoError(t, err)
+		assert.Equal(t, 2, open[resultID], "open and fixed both count as open")
+		assert.Equal(t, 1, closed[resultID])
+	})
+
+	// CountDefectLinksByRuns lives in comments.go, not defects.go, and had no test anywhere
+	// before this one.
+	t.Run("CountDefectLinksByRuns", func(t *testing.T) {
+		s := newTestStore(t)
+		_, _, runID, _ := defectCounterFixture(t, s)
+
+		open, closed, err := s.CountDefectLinksByRuns([]string{runID})
+		require.NoError(t, err)
+		assert.Equal(t, 2, open[runID], "open and fixed both count as open")
+		assert.Equal(t, 1, closed[runID])
+	})
+
+	t.Run("per-test-case counters in ListTestCases", func(t *testing.T) {
+		s := newTestStore(t)
+		folderID, tcID, _, _ := defectCounterFixture(t, s)
+
+		tests, err := s.ListTestCases(TestCaseFilter{FolderIDs: []string{folderID}})
+		require.NoError(t, err)
+		require.Len(t, tests, 1)
+		require.Equal(t, tcID, tests[0].ID)
+		assert.Equal(t, 2, tests[0].OpenDefectCount, "open and fixed both count as open")
+		assert.Equal(t, 1, tests[0].ClosedDefectCount)
+	})
+
+	t.Run("per-folder counters in GetFolderTree", func(t *testing.T) {
+		s := newTestStore(t)
+		folderID, tcID, _, _ := defectCounterFixture(t, s)
+
+		tree, err := s.GetFolderTree()
+		require.NoError(t, err)
+		var found *models.TestCase
+		for _, f := range tree {
+			if f.ID != folderID {
+				continue
+			}
+			for _, tc := range f.TestCases {
+				if tc.ID == tcID {
+					found = tc
+				}
+			}
+		}
+		require.NotNil(t, found, "the seeded test case must appear in its folder")
+		assert.Equal(t, 2, found.OpenDefectCount, "open and fixed both count as open")
+		assert.Equal(t, 1, found.ClosedDefectCount)
+	})
+}
+
 func TestListAffectedTestCases(t *testing.T) {
 	s := newTestStore(t)
 	require.NoError(t, s.db.Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','Login works',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
