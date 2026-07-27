@@ -91,6 +91,20 @@ definitions:
       updated_at:
         type: string
     type: object
+  ttgo_pkg_tracker_models.BulkUpdateDefectsRequest:
+    properties:
+      assignee_id:
+        description: '"" clears the assignee, nil leaves it unchanged'
+        type: string
+      ids:
+        items:
+          type: string
+        type: array
+      severity:
+        type: string
+      status:
+        type: string
+    type: object
   ttgo_pkg_tracker_models.Category:
     properties:
       created_at:
@@ -124,6 +138,9 @@ definitions:
     type: object
   ttgo_pkg_tracker_models.CreateDefectRequest:
     properties:
+      assignee_id:
+        description: nil or "" leaves the defect unassigned
+        type: string
       description:
         type: string
       external_key:
@@ -238,6 +255,12 @@ definitions:
     type: object
   ttgo_pkg_tracker_models.Defect:
     properties:
+      assignee_id:
+        description: nullable, app-validated ref to users.id
+        type: string
+      assignee_name:
+        description: Assignee display name (not persisted, populated by ListDefects/GetDefect)
+        type: string
       created_at:
         type: string
       description:
@@ -257,7 +280,7 @@ definitions:
         description: critical|major|minor|trivial
         type: string
       status:
-        description: '"open" | "closed"'
+        description: '"open" | "fixed" | "closed"'
         type: string
       title:
         type: string
@@ -478,6 +501,12 @@ definitions:
     type: object
   ttgo_pkg_tracker_models.RunDefectRow:
     properties:
+      assignee_id:
+        description: nullable, app-validated ref to users.id
+        type: string
+      assignee_name:
+        description: Assignee display name (not persisted, populated by ListDefects/GetDefect)
+        type: string
       created_at:
         type: string
       description:
@@ -499,7 +528,7 @@ definitions:
         description: critical|major|minor|trivial
         type: string
       status:
-        description: '"open" | "closed"'
+        description: '"open" | "fixed" | "closed"'
         type: string
       test_case_id:
         type: string
@@ -796,6 +825,9 @@ definitions:
     type: object
   ttgo_pkg_tracker_models.UpdateDefectRequest:
     properties:
+      assignee_id:
+        description: '"" clears the assignee, nil leaves it unchanged'
+        type: string
       description:
         type: string
       external_key:
@@ -849,6 +881,12 @@ definitions:
   ttgo_pkg_tracker_store.AffectedTestCase:
     properties:
       id:
+        type: string
+      last_result_status:
+        type: string
+      last_run_id:
+        type: string
+      last_run_name:
         type: string
       name:
         type: string
@@ -2518,7 +2556,7 @@ paths:
       description: Returns native defects with optional filtering by status, severity,
         or search query.
       parameters:
-      - description: 'Filter by status: open | closed'
+      - description: 'Filter by status: open | fixed | closed'
         in: query
         name: status
         type: string
@@ -2680,6 +2718,52 @@ paths:
                 type: string
             type: object
       summary: List a defect's affected test cases
+      tags:
+      - defects
+  /defects/bulk-update:
+    post:
+      consumes:
+      - application/json
+      description: 'Applies the same status, severity and/or assignee to many defects
+        in one call. Omitted (null) fields are left unchanged; assignee_id "" clears
+        the assignee across the whole selection. Unknown ids are tolerated — they
+        simply match nothing — and the response carries the defects that exist, enriched
+        with assignee_name and linked_test_count exactly like GET /defects. A request
+        that sets no field at all is a read-back: nothing is written and updated_at
+        is left alone, because that column is the staleness signal.'
+      parameters:
+      - description: Defect IDs and the fields to apply
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_pkg_tracker_models.BulkUpdateDefectsRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/ttgo_pkg_tracker_models.Defect'
+            type: array
+        "400":
+          description: Bad Request
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Bulk update defects
       tags:
       - defects
   /folders:

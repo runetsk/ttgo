@@ -2533,7 +2533,7 @@ const docTemplate = `{
                 "parameters": [
                     {
                         "type": "string",
-                        "description": "Filter by status: open | closed",
+                        "description": "Filter by status: open | fixed | closed",
                         "name": "status",
                         "in": "query"
                     },
@@ -2601,6 +2601,70 @@ const docTemplate = `{
                         "description": "Created",
                         "schema": {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        "/defects/bulk-update": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Applies the same status, severity and/or assignee to many defects in one call. Omitted (null) fields are left unchanged; assignee_id \"\" clears the assignee across the whole selection. Unknown ids are tolerated — they simply match nothing — and the response carries the defects that exist, enriched with assignee_name and linked_test_count exactly like GET /defects. A request that sets no field at all is a read-back: nothing is written and updated_at is left alone, because that column is the staleness signal.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "defects"
+                ],
+                "summary": "Bulk update defects",
+                "parameters": [
+                    {
+                        "description": "Defect IDs and the fields to apply",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.BulkUpdateDefectsRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "$ref": "#/definitions/ttgo_pkg_tracker_models.Defect"
+                            }
                         }
                     },
                     "400": {
@@ -8976,6 +9040,27 @@ const docTemplate = `{
                 }
             }
         },
+        "ttgo_pkg_tracker_models.BulkUpdateDefectsRequest": {
+            "type": "object",
+            "properties": {
+                "assignee_id": {
+                    "description": "\"\" clears the assignee, nil leaves it unchanged",
+                    "type": "string"
+                },
+                "ids": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                }
+            }
+        },
         "ttgo_pkg_tracker_models.Category": {
             "type": "object",
             "properties": {
@@ -9026,6 +9111,10 @@ const docTemplate = `{
         "ttgo_pkg_tracker_models.CreateDefectRequest": {
             "type": "object",
             "properties": {
+                "assignee_id": {
+                    "description": "nil or \"\" leaves the defect unassigned",
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -9194,6 +9283,14 @@ const docTemplate = `{
         "ttgo_pkg_tracker_models.Defect": {
             "type": "object",
             "properties": {
+                "assignee_id": {
+                    "description": "nullable, app-validated ref to users.id",
+                    "type": "string"
+                },
+                "assignee_name": {
+                    "description": "Assignee display name (not persisted, populated by ListDefects/GetDefect)",
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -9221,7 +9318,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "description": "\"open\" | \"closed\"",
+                    "description": "\"open\" | \"fixed\" | \"closed\"",
                     "type": "string"
                 },
                 "title": {
@@ -9543,6 +9640,14 @@ const docTemplate = `{
         "ttgo_pkg_tracker_models.RunDefectRow": {
             "type": "object",
             "properties": {
+                "assignee_id": {
+                    "description": "nullable, app-validated ref to users.id",
+                    "type": "string"
+                },
+                "assignee_name": {
+                    "description": "Assignee display name (not persisted, populated by ListDefects/GetDefect)",
+                    "type": "string"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -9573,7 +9678,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "status": {
-                    "description": "\"open\" | \"closed\"",
+                    "description": "\"open\" | \"fixed\" | \"closed\"",
                     "type": "string"
                 },
                 "test_case_id": {
@@ -9950,6 +10055,10 @@ const docTemplate = `{
         "ttgo_pkg_tracker_models.UpdateDefectRequest": {
             "type": "object",
             "properties": {
+                "assignee_id": {
+                    "description": "\"\" clears the assignee, nil leaves it unchanged",
+                    "type": "string"
+                },
                 "description": {
                     "type": "string"
                 },
@@ -10030,6 +10139,15 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "id": {
+                    "type": "string"
+                },
+                "last_result_status": {
+                    "type": "string"
+                },
+                "last_run_id": {
+                    "type": "string"
+                },
+                "last_run_name": {
                     "type": "string"
                 },
                 "name": {
