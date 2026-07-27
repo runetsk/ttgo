@@ -2408,3 +2408,825 @@
     background: rgba(99, 102, 241, 0.2);
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+   Defects triage queue (/defects)
+   Every colour below resolves through a theme token from index.css. The light
+   palette is a paired token override, so a literal colour value would keep its
+   dark reading when the theme flips — that is the exact bug the undefined
+   accent-purple / surface-bg tokens caused on this page before. Both are
+   still undefined; never reach for either one here.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* One tone per severity / derived status, set by a modifier class and read back
+   by the dot, the pill text and the row edge bar. Declaring it once beats
+   repeating the same token across six selectors per value.
+   Severity follows the tiering already used by .detail-pane-defect-severity
+   (red / amber / purple), with a neutral bottom rung for trivial. */
+.defects-sev--critical { --defects-tone: var(--aig-tone-red-fg); }
+.defects-sev--major    { --defects-tone: var(--aig-tone-amber-fg); }
+.defects-sev--minor    { --defects-tone: var(--aig-tone-purple-fg); }
+.defects-sev--trivial  { --defects-tone: var(--text-secondary); }
+
+.defects-status--triage   { --defects-tone: var(--aig-tone-red-fg); }
+.defects-status--progress { --defects-tone: var(--aig-tone-amber-fg); }
+.defects-status--fixed    { --defects-tone: var(--aig-tone-teal-fg); }
+.defects-status--closed   { --defects-tone: var(--aig-tone-green-fg); }
+
+/* ── Page shell ── */
+.defects-page {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    height: 100%;
+    min-height: 0;
+}
+
+/* ── Title bar ── */
+.defects-titlebar {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.defects-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+}
+
+.defects-title-meta {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.defects-titlebar-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.defects-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 260px;
+    height: 34px;
+    padding: 0 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.defects-search:focus-within {
+    border-color: var(--accent-indigo);
+}
+
+.defects-search-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.defects-search-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+}
+
+.defects-search-hint {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    padding: 1px 4px;
+    flex-shrink: 0;
+}
+
+/* ── Triage strip ── */
+.defects-triage-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.defects-tile {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    text-align: left;
+    padding: 11px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.defects-tile:hover {
+    background: var(--aig-surface-hover);
+}
+
+.defects-tile[aria-pressed='true'] {
+    border-color: var(--aig-accent-soft-border);
+    background: var(--aig-accent-soft-bg);
+}
+
+/* Active tiles brighten their label as well as their surface, so the filter in
+   force is not signalled by a tint alone. */
+.defects-tile[aria-pressed='true'] .defects-tile-label {
+    color: var(--text-primary);
+}
+
+/* Only the triage tile is coloured — it is the one queue that means "act now". */
+.defects-tile--alert {
+    border-color: var(--aig-danger-border);
+    background: var(--aig-danger-bg);
+}
+
+.defects-tile-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.defects-tile--alert .defects-tile-label {
+    color: var(--aig-danger-fg);
+}
+
+.defects-tile-value {
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+}
+
+.defects-tile-count {
+    font-size: 26px;
+    font-weight: 600;
+    line-height: 1;
+    color: var(--text-primary);
+}
+
+.defects-tile-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* ── Filter bar ── */
+.defects-filterbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+}
+
+.defects-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 9px;
+}
+
+.defects-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+.defects-tab:hover {
+    color: var(--text-primary);
+}
+
+.defects-tab[aria-pressed='true'] {
+    background: var(--aig-accent-soft-bg);
+    border-color: var(--aig-accent-soft-border);
+    color: var(--aig-indigo-soft);
+    font-weight: 600;
+}
+
+.defects-tab-count {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    opacity: 0.75;
+}
+
+.defects-filter-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border-color);
+    flex-shrink: 0;
+}
+
+.defects-sev-chips {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.defects-sev-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 11px;
+    border: 1px solid var(--border-color);
+    border-radius: 99px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: capitalize;
+    cursor: pointer;
+}
+
+.defects-sev-chip:hover {
+    background: var(--aig-surface-hover);
+}
+
+/* Pressed chips carry their own severity tone, so the active set stays legible
+   without relying on colour alone (aria-pressed drives the styling). */
+.defects-sev-chip[aria-pressed='true'] {
+    background: var(--aig-surface-tint-strong);
+    border-color: var(--defects-tone, var(--border-color));
+    color: var(--defects-tone, var(--text-primary));
+}
+
+.defects-sev-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--defects-tone, var(--text-secondary));
+    flex-shrink: 0;
+}
+
+.defects-sort {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.defects-sort-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.defects-sort-select {
+    height: 30px;
+    padding: 0 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12.5px;
+    outline: none;
+    cursor: pointer;
+}
+
+/* ── Bulk bar ── */
+.defects-bulkbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    padding: 8px 12px;
+    border: 1px solid var(--aig-accent-soft-border);
+    border-radius: var(--radius-lg);
+    background: var(--aig-accent-soft-bg);
+    flex-shrink: 0;
+}
+
+.defects-bulkbar-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--aig-indigo-soft);
+}
+
+.defects-bulkbar-divider {
+    width: 1px;
+    height: 18px;
+    background: var(--aig-accent-soft-border);
+    flex-shrink: 0;
+}
+
+.defects-bulkbar-error {
+    font-size: 12.5px;
+    color: var(--aig-danger-fg);
+}
+
+.defects-bulkbar-spacer {
+    margin-left: auto;
+}
+
+.defects-bulk-clear {
+    border: none;
+    background: transparent;
+    color: var(--aig-indigo-soft);
+    font-family: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+/* Shared secondary button — bulk bar, expand actions, empty-state reset. */
+.defects-ghost-btn {
+    padding: 4px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 7px;
+    background: var(--aig-surface-tint);
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12.5px;
+    cursor: pointer;
+}
+
+.defects-ghost-btn:hover:not(:disabled) {
+    background: var(--aig-surface-hover);
+}
+
+.defects-ghost-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* The success tint is layered over an opaque surface: the bulk bar behind it is
+   itself a translucent indigo, and letting that bleed through washes the green
+   out badly in light theme. */
+.defects-ghost-btn--confirm {
+    border-color: var(--aig-success-border);
+    background-color: var(--bg-secondary);
+    background-image: linear-gradient(var(--aig-success-bg), var(--aig-success-bg));
+    color: var(--aig-success-fg);
+    font-weight: 600;
+}
+
+/* Dropdown used by "Assign…" and "Set severity…". --bg-secondary is the only
+   opaque surface token that flips with the theme, so popovers must use it. */
+.defects-menu-wrap {
+    position: relative;
+}
+
+.defects-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    min-width: 190px;
+    max-height: 260px;
+    overflow-y: auto;
+    padding: 4px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+
+.defects-menu-item {
+    display: block;
+    width: 100%;
+    padding: 6px 10px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 12.5px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.defects-menu-item:hover {
+    background: var(--aig-surface-hover);
+}
+
+.defects-menu-note {
+    padding: 4px 10px 6px;
+    font-size: 11.5px;
+    line-height: 1.4;
+    color: var(--aig-tone-amber-fg);
+}
+
+.defects-menu-divider {
+    height: 1px;
+    margin: 4px 0;
+    background: var(--border-color);
+}
+
+/* ── Table ── */
+.defects-table-wrap {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    background: var(--bg-secondary);
+}
+
+.defects-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+    color: var(--text-primary);
+}
+
+.defects-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 8px 10px;
+    text-align: left;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    white-space: nowrap;
+}
+
+.defects-table th:first-child,
+.defects-table td:first-child {
+    padding-left: 14px;
+}
+
+.defects-table th:last-child,
+.defects-table td:last-child {
+    padding-right: 14px;
+}
+
+.defects-col-select { width: 34px; }
+.defects-col-status { width: 132px; }
+.defects-col-owner  { width: 120px; }
+.defects-col-impact { width: 104px; }
+.defects-col-age    { width: 106px; }
+
+/* 36px hairline rows: the whole point of the redesign is fitting 20+ rows on
+   one screen instead of the 9 the old card rows allowed. */
+.defects-row {
+    height: 36px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--glass-border);
+    transition: background 0.15s ease;
+}
+
+.defects-row:hover {
+    background: var(--aig-surface-hover);
+}
+
+.defects-row--selected,
+.defects-row--selected:hover {
+    background: var(--aig-accent-soft-bg);
+}
+
+/* Landing target for ?focus=<id>; fades out once the user starts working. */
+.defects-row--focused {
+    background: var(--aig-accent-soft-bg);
+    transition: background 0.8s ease;
+}
+
+.defects-table td {
+    padding: 0 10px;
+    vertical-align: middle;
+}
+
+.defects-cell-select {
+    position: relative;
+    padding-left: 14px;
+}
+
+/* 3px severity edge bar — severity readable from the corner of the eye. */
+.defects-sev-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--defects-tone, transparent);
+}
+
+.defects-checkbox {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent-indigo);
+    cursor: pointer;
+}
+
+.defects-title-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.defects-defect-title {
+    font-weight: 500;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 400px;
+}
+
+.defects-sev-pill {
+    padding: 1px 7px;
+    border: 1px solid var(--border-color);
+    border-radius: 99px;
+    background: var(--aig-surface-tint);
+    color: var(--defects-tone, var(--text-secondary));
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.defects-key-chip {
+    padding: 1px 5px;
+    border: 1px solid var(--aig-accent-soft-border);
+    border-radius: 5px;
+    background: var(--aig-accent-soft-bg);
+    color: var(--aig-indigo-soft);
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    text-decoration: none;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Static text, never a button: mis-clicking the old pill silently closed a
+   live defect with no undo. Status is changed from the modal or the bulk bar. */
+.defects-status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px;
+    border: 1px solid var(--border-color);
+    border-radius: 99px;
+    background: var(--aig-surface-tint);
+    color: var(--defects-tone, var(--text-secondary));
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.defects-status-pill.defects-status--triage {
+    background: var(--aig-danger-bg);
+    border-color: var(--aig-danger-border);
+}
+
+.defects-status-pill.defects-status--closed {
+    background: var(--aig-success-bg);
+    border-color: var(--aig-success-border);
+}
+
+.defects-status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--defects-tone, var(--text-secondary));
+    flex-shrink: 0;
+}
+
+.defects-owner {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    font-size: 12.5px;
+    color: var(--text-primary);
+}
+
+.defects-owner--empty {
+    color: var(--text-secondary);
+}
+
+.defects-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--aig-accent-soft-border);
+    background: var(--aig-accent-soft-bg);
+    color: var(--aig-indigo-soft);
+    font-size: 9.5px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.defects-avatar--empty {
+    border-color: var(--border-color);
+    background: var(--aig-surface-tint);
+    color: var(--text-secondary);
+}
+
+.defects-impact {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12.5px;
+    color: var(--text-primary);
+}
+
+.defects-impact-icon {
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.defects-age {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+/* Stale is neglect, not age: nothing has happened to this defect in 7+ days. */
+.defects-age--stale {
+    color: var(--aig-tone-amber-fg);
+    font-weight: 600;
+}
+
+/* ── Row expand ── */
+.defects-expand-cell {
+    padding: 12px 16px 14px 17px;
+    background: var(--aig-surface-sunken);
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.defects-expand {
+    display: flex;
+    align-items: flex-start;
+    gap: 26px;
+    flex-wrap: wrap;
+}
+
+.defects-expand-col {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+}
+
+.defects-expand-col--tests { min-width: 340px; }
+.defects-expand-col--summary { max-width: 420px; }
+.defects-expand-col--actions { margin-left: auto; }
+
+.defects-expand-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+}
+
+.defects-affected-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.defects-affected-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--aig-tone-red-fg);
+    flex-shrink: 0;
+}
+
+.defects-affected-link {
+    font-size: 12.5px;
+    color: var(--aig-indigo-soft);
+    text-decoration: none;
+}
+
+.defects-affected-link:hover {
+    text-decoration: underline;
+}
+
+.defects-affected-run {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11.5px;
+    color: var(--text-secondary);
+}
+
+.defects-affected-empty {
+    font-size: 12.5px;
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+.defects-expand-summary {
+    font-size: 12.5px;
+    line-height: 1.55;
+    color: var(--text-secondary);
+    text-wrap: pretty;
+}
+
+.defects-expand-actions {
+    display: flex;
+    gap: 6px;
+}
+
+/* ── Empty state ── */
+.defects-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 70px 20px;
+}
+
+.defects-empty-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--aig-success-border);
+    background: var(--aig-success-bg);
+    color: var(--aig-success-fg);
+}
+
+.defects-empty-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.defects-empty-text {
+    font-size: 12.5px;
+    color: var(--text-secondary);
+}
+
+/* ── Focus ring — every interactive control on the page is keyboard-reachable
+   and must say so; colour alone is never the only active signal. ── */
+.defects-tile:focus-visible,
+.defects-tab:focus-visible,
+.defects-sev-chip:focus-visible,
+.defects-sort-select:focus-visible,
+.defects-ghost-btn:focus-visible,
+.defects-bulk-clear:focus-visible,
+.defects-menu-item:focus-visible,
+.defects-checkbox:focus-visible,
+.defects-key-chip:focus-visible,
+.defects-affected-link:focus-visible,
+.defects-row:focus-visible,
+.defects-search-input:focus-visible {
+    outline: 2px solid var(--accent-indigo);
+    outline-offset: 2px;
+}
+
+/* ── Narrow viewports — the mockup is drawn at 1280px ── */
+@media (max-width: 1000px) {
+    .defects-triage-strip {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .defects-sort {
+        margin-left: 0;
+    }
+}
+
+@media (max-width: 640px) {
+    .defects-triage-strip {
+        grid-template-columns: 1fr;
+    }
+
+    .defects-search {
+        width: 100%;
+    }
+
+    .defects-expand-col--actions {
+        margin-left: 0;
+    }
+}
+
