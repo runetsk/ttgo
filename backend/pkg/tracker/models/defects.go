@@ -67,6 +67,15 @@ type UpdateDefectRequest struct {
 	ExternalURL      *string `json:"external_url"`
 }
 
+// BulkUpdateDefectsRequest applies one set of field values across many defects at once.
+// Nil fields are left unchanged; AssigneeID "" clears the assignee on every selected defect.
+type BulkUpdateDefectsRequest struct {
+	IDs        []string `json:"ids"`
+	Status     *string  `json:"status"`
+	Severity   *string  `json:"severity"`
+	AssigneeID *string  `json:"assignee_id"` // "" clears the assignee, nil leaves it unchanged
+}
+
 type LinkDefectRequest struct {
 	DefectID string `json:"defect_id"`
 }

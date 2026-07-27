@@ -147,8 +147,19 @@ func (s *Store) ListDefects(status, severity, q string) ([]models.Defect, error)
 	if err := tx.Order("created_at DESC").Find(&defects).Error; err != nil {
 		return nil, err
 	}
+	if err := s.enrichDefects(defects); err != nil {
+		return nil, err
+	}
+	return defects, nil
+}
+
+// enrichDefects fills the computed, non-persisted fields on a defect slice: LinkedTestCount from
+// one grouped defect_links query and AssigneeName from one batch users lookup. Shared by
+// ListDefects and BulkUpdateDefects so both hand back identically shaped rows — a caller that
+// patches a list in place from a bulk response must not have to re-merge either field by hand.
+func (s *Store) enrichDefects(defects []models.Defect) error {
 	if len(defects) == 0 {
-		return defects, nil
+		return nil
 	}
 	ids := make([]string, len(defects))
 	for i := range defects {
@@ -163,7 +174,7 @@ func (s *Store) ListDefects(status, severity, q string) ([]models.Defect, error)
 		Select("defect_id, COUNT(DISTINCT test_case_id) as n").
 		Where("defect_id IN ? AND test_case_id IS NOT NULL", ids).
 		Group("defect_id").Scan(&counts).Error; err != nil {
-		return nil, err
+		return err
 	}
 	byID := make(map[string]int, len(counts))
 	for _, c := range counts {
@@ -175,7 +186,7 @@ func (s *Store) ListDefects(status, severity, q string) ([]models.Defect, error)
 		ptrs[i] = &defects[i]
 	}
 	s.populateDefectAssigneeNames(ptrs)
-	return defects, nil
+	return nil
 }
 
 func (s *Store) UpdateDefect(id string, req models.UpdateDefectRequest) (*models.Defect, error) {
@@ -222,6 +233,62 @@ func (s *Store) UpdateDefect(id string, req models.UpdateDefectRequest) (*models
 		}
 	}
 	return d, nil
+}
+
+// BulkUpdateDefects applies the non-nil fields of req to every defect in ids with one grouped
+// UPDATE inside a transaction, and returns the resulting rows enriched exactly like ListDefects'.
+//
+// Unknown ids are tolerated rather than rejected: the UPDATE simply matches fewer rows, and the
+// returned slice reports the defects that really exist. An empty id list, or a request that sets
+// no field at all, is a no-op — notably it does NOT bump updated_at, since that column is the
+// staleness signal and a write with nothing to write would silently reset it.
+//
+// A status change recomputes reverification over the union of affected test cases, mirroring
+// UpdateDefect (:181). "Mark verified & close" is the primary path to closed, so skipping it here
+// would let bulk and single update diverge on reverification_flagged without any visible error.
+func (s *Store) BulkUpdateDefects(ids []string, req models.BulkUpdateDefectsRequest) ([]models.Defect, error) {
+	if len(ids) == 0 {
+		return []models.Defect{}, nil
+	}
+	updates := map[string]interface{}{}
+	if req.Status != nil {
+		updates["status"] = *req.Status
+	}
+	if req.Severity != nil {
+		updates["severity"] = *req.Severity
+	}
+	if req.AssigneeID != nil {
+		// "" clears the assignee across the selection; an absent (nil) field leaves it unchanged.
+		if *req.AssigneeID == "" {
+			updates["assignee_id"] = nil
+		} else {
+			updates["assignee_id"] = *req.AssigneeID
+		}
+	}
+	if len(updates) > 0 {
+		updates["updated_at"] = time.Now()
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if err := tx.Model(&models.Defect{}).Where("id IN ?", ids).Updates(updates).Error; err != nil {
+				return err
+			}
+			if req.Status == nil {
+				return nil
+			}
+			return recomputeReverification(tx, affectedTestCaseIDs(tx, ids...))
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var updated []models.Defect
+	if err := s.db.Where("id IN ?", ids).Order("created_at DESC").Find(&updated).Error; err != nil {
+		return nil, err
+	}
+	if err := s.enrichDefects(updated); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 func (s *Store) DeleteDefect(id string) error {
@@ -348,10 +415,15 @@ func (s *Store) ListDefectsByTestCase(testCaseID string) ([]models.Defect, error
 	return defects, err
 }
 
-func affectedTestCaseIDs(tx *gorm.DB, defectID string) []string {
+// affectedTestCaseIDs returns the distinct test cases linked to the given defects — the union, when
+// several are passed, so a bulk status change recomputes each test case exactly once.
+func affectedTestCaseIDs(tx *gorm.DB, defectIDs ...string) []string {
+	if len(defectIDs) == 0 {
+		return nil
+	}
 	var ids []string
 	_ = tx.Model(&models.DefectLink{}).
-		Where("defect_id = ? AND test_case_id IS NOT NULL", defectID).
+		Where("defect_id IN ? AND test_case_id IS NOT NULL", defectIDs).
 		Distinct().Pluck("test_case_id", &ids).Error
 	return ids
 }

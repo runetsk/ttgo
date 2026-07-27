@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -334,6 +335,237 @@ func TestDefectAssigneePersistence(t *testing.T) {
 		got, err := s.GetDefect(d.ID)
 		require.NoError(t, err)
 		assert.Nil(t, got.AssigneeID)
+	})
+}
+
+// byDefectID indexes a returned defect slice, whose order (created_at DESC) is not meaningful when
+// every row is created in the same instant.
+func byDefectID(defects []models.Defect) map[string]models.Defect {
+	out := make(map[string]models.Defect, len(defects))
+	for _, d := range defects {
+		out[d.ID] = d
+	}
+	return out
+}
+
+func TestBulkUpdateDefects(t *testing.T) {
+	t.Run("applies several fields at once and touches only the selection", func(t *testing.T) {
+		s := newTestStore(t)
+		owner := newDefectUser(t, s, "owner@example.com", "Owner One", true)
+
+		a := &models.Defect{Title: "aaa", Severity: "minor"}
+		b := &models.Defect{Title: "bbb", Severity: "minor"}
+		untouched := &models.Defect{Title: "ccc", Severity: "minor"}
+		for _, d := range []*models.Defect{a, b, untouched} {
+			require.NoError(t, s.CreateDefect(d))
+		}
+
+		got, err := s.BulkUpdateDefects([]string{a.ID, b.ID}, models.BulkUpdateDefectsRequest{
+			Status:     strPtr("fixed"),
+			Severity:   strPtr("critical"),
+			AssigneeID: &owner.ID,
+		})
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		for _, d := range got {
+			assert.Equal(t, "fixed", d.Status)
+			assert.Equal(t, "critical", d.Severity)
+			require.NotNil(t, d.AssigneeID)
+			assert.Equal(t, owner.ID, *d.AssigneeID)
+			assert.Equal(t, "Owner One", d.AssigneeName, "returned rows carry the resolved name")
+		}
+
+		still, err := s.GetDefect(untouched.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "open", still.Status)
+		assert.Equal(t, "minor", still.Severity)
+		assert.Nil(t, still.AssigneeID)
+	})
+
+	t.Run("unknown ids are skipped without an error", func(t *testing.T) {
+		s := newTestStore(t)
+		d := &models.Defect{Title: "real one"}
+		require.NoError(t, s.CreateDefect(d))
+
+		got, err := s.BulkUpdateDefects([]string{d.ID, "no-such-defect"},
+			models.BulkUpdateDefectsRequest{Status: strPtr("closed")})
+		require.NoError(t, err)
+		require.Len(t, got, 1, "only the defects that exist come back")
+		assert.Equal(t, d.ID, got[0].ID)
+		assert.Equal(t, "closed", got[0].Status)
+	})
+
+	t.Run("an empty id list is a no-op", func(t *testing.T) {
+		s := newTestStore(t)
+		d := &models.Defect{Title: "leave me alone"}
+		require.NoError(t, s.CreateDefect(d))
+
+		got, err := s.BulkUpdateDefects(nil, models.BulkUpdateDefectsRequest{Status: strPtr("closed")})
+		require.NoError(t, err)
+		assert.Empty(t, got)
+
+		after, err := s.GetDefect(d.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "open", after.Status, "an empty selection must not become a global update")
+	})
+
+	t.Run("an empty assignee clears the owner across the selection", func(t *testing.T) {
+		s := newTestStore(t)
+		owner := newDefectUser(t, s, "owner@example.com", "Owner One", true)
+
+		a := &models.Defect{Title: "aaa", AssigneeID: &owner.ID}
+		b := &models.Defect{Title: "bbb", AssigneeID: &owner.ID}
+		require.NoError(t, s.CreateDefect(a))
+		require.NoError(t, s.CreateDefect(b))
+
+		got, err := s.BulkUpdateDefects([]string{a.ID, b.ID},
+			models.BulkUpdateDefectsRequest{AssigneeID: strPtr("")})
+		require.NoError(t, err)
+		require.Len(t, got, 2)
+		for _, d := range got {
+			assert.Nil(t, d.AssigneeID)
+			assert.Empty(t, d.AssigneeName)
+		}
+	})
+
+	t.Run("an absent field leaves the stored value unchanged", func(t *testing.T) {
+		s := newTestStore(t)
+		owner := newDefectUser(t, s, "owner@example.com", "Owner One", true)
+		d := &models.Defect{Title: "keep my owner", Severity: "major", AssigneeID: &owner.ID}
+		require.NoError(t, s.CreateDefect(d))
+
+		got, err := s.BulkUpdateDefects([]string{d.ID},
+			models.BulkUpdateDefectsRequest{Status: strPtr("closed")})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.Equal(t, "closed", got[0].Status)
+		assert.Equal(t, "major", got[0].Severity)
+		require.NotNil(t, got[0].AssigneeID, "a nil assignee_id means unchanged, not unassign")
+		assert.Equal(t, owner.ID, *got[0].AssigneeID)
+	})
+
+	t.Run("a request setting no field does not bump updated_at", func(t *testing.T) {
+		s := newTestStore(t)
+		stale := &models.Defect{Title: "nothing to do"}
+		fresh := &models.Defect{Title: "really changed"}
+		require.NoError(t, s.CreateDefect(stale))
+		require.NoError(t, s.CreateDefect(fresh))
+		// back-date both so "was it bumped?" does not depend on clock resolution
+		old := time.Now().Add(-30 * 24 * time.Hour)
+		require.NoError(t, s.db.Model(&models.Defect{}).Where("id IN ?", []string{stale.ID, fresh.ID}).
+			Update("updated_at", old).Error)
+
+		got, err := s.BulkUpdateDefects([]string{stale.ID}, models.BulkUpdateDefectsRequest{})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.WithinDuration(t, old, got[0].UpdatedAt, time.Second,
+			"updated_at is the staleness signal — a request with nothing to write must not reset it")
+
+		// a request that does write a field bumps it, so the guard above is not vacuous
+		got, err = s.BulkUpdateDefects([]string{fresh.ID},
+			models.BulkUpdateDefectsRequest{Severity: strPtr("critical")})
+		require.NoError(t, err)
+		require.Len(t, got, 1)
+		assert.WithinDuration(t, time.Now(), got[0].UpdatedAt, time.Minute)
+	})
+
+	t.Run("returned rows carry a correct linked_test_count", func(t *testing.T) {
+		s := newTestStore(t)
+		require.NoError(t, s.db.Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','Login',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+		require.NoError(t, s.db.Exec(`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc2','Checkout',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+
+		two := &models.Defect{Title: "hits two tests"}
+		one := &models.Defect{Title: "hits one test"}
+		none := &models.Defect{Title: "hits nothing"}
+		for _, d := range []*models.Defect{two, one, none} {
+			require.NoError(t, s.CreateDefect(d))
+		}
+		for _, tc := range []string{"tc1", "tc2"} {
+			_, err := s.LinkDefectToTestCase(two.ID, tc)
+			require.NoError(t, err)
+		}
+		_, err := s.LinkDefectToTestCase(one.ID, "tc1")
+		require.NoError(t, err)
+
+		got, err := s.BulkUpdateDefects([]string{two.ID, one.ID, none.ID},
+			models.BulkUpdateDefectsRequest{Severity: strPtr("major")})
+		require.NoError(t, err)
+		require.Len(t, got, 3)
+		rows := byDefectID(got)
+		assert.Equal(t, 2, rows[two.ID].LinkedTestCount)
+		assert.Equal(t, 1, rows[one.ID].LinkedTestCount)
+		assert.Equal(t, 0, rows[none.ID].LinkedTestCount)
+	})
+}
+
+// TestBulkUpdateDefectsReverificationParity pins the requirement that closing N defects in one bulk
+// call leaves exactly the reverification state that closing them one at a time through UpdateDefect
+// would. "Mark verified & close" is the main path to closed, so a divergence here would be silent.
+func TestBulkUpdateDefectsReverificationParity(t *testing.T) {
+	// seedReverificationFixture builds two test cases that each have one linked defect plus a third
+	// test case whose second defect stays open, and returns the defect ids in a stable order.
+	seedReverificationFixture := func(t *testing.T, s *Store) []string {
+		t.Helper()
+		for _, tc := range []string{"tc1", "tc2", "tc3"} {
+			require.NoError(t, s.db.Exec(
+				`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES (?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`,
+				tc, tc).Error)
+		}
+		var ids []string
+		for i, tc := range []string{"tc1", "tc2", "tc3"} {
+			d := &models.Defect{Title: "bug " + tc}
+			require.NoError(t, s.CreateDefect(d))
+			_, err := s.LinkDefectToTestCase(d.ID, tc)
+			require.NoError(t, err)
+			ids = append(ids, d.ID)
+			if i == 2 {
+				// tc3 keeps a second, untouched defect so it must stay unflagged
+				extra := &models.Defect{Title: "still open on " + tc}
+				require.NoError(t, s.CreateDefect(extra))
+				_, err := s.LinkDefectToTestCase(extra.ID, tc)
+				require.NoError(t, err)
+			}
+		}
+		return ids
+	}
+
+	bulk := newTestStore(t)
+	bulkIDs := seedReverificationFixture(t, bulk)
+	_, err := bulk.BulkUpdateDefects(bulkIDs, models.BulkUpdateDefectsRequest{Status: strPtr("closed")})
+	require.NoError(t, err)
+
+	single := newTestStore(t)
+	singleIDs := seedReverificationFixture(t, single)
+	for _, id := range singleIDs {
+		_, err := single.UpdateDefect(id, models.UpdateDefectRequest{Status: strPtr("closed")})
+		require.NoError(t, err)
+	}
+
+	for _, tc := range []string{"tc1", "tc2", "tc3"} {
+		assert.Equal(t, reverFlag(t, single, tc), reverFlag(t, bulk, tc),
+			"bulk close must flag %s exactly as N single closes do", tc)
+	}
+	assert.True(t, reverFlag(t, bulk, "tc1"))
+	assert.True(t, reverFlag(t, bulk, "tc2"))
+	assert.False(t, reverFlag(t, bulk, "tc3"), "tc3 still has an open defect")
+
+	// marking fixed rather than closed is equally a status change, so it recomputes too
+	t.Run("a bulk fixed also raises the flag", func(t *testing.T) {
+		s := newTestStore(t)
+		ids := seedReverificationFixture(t, s)
+		_, err := s.BulkUpdateDefects(ids, models.BulkUpdateDefectsRequest{Status: strPtr("fixed")})
+		require.NoError(t, err)
+		assert.True(t, reverFlag(t, s, "tc1"))
+		assert.False(t, reverFlag(t, s, "tc3"))
+	})
+
+	// a bulk call that changes no status must not recompute anything
+	t.Run("a severity-only bulk leaves the flags alone", func(t *testing.T) {
+		s := newTestStore(t)
+		ids := seedReverificationFixture(t, s)
+		_, err := s.BulkUpdateDefects(ids, models.BulkUpdateDefectsRequest{Severity: strPtr("critical")})
+		require.NoError(t, err)
+		assert.False(t, reverFlag(t, s, "tc1"))
 	})
 }
 
