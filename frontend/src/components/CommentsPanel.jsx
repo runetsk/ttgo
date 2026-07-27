@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import {
     listRunComments, addRunComment,
@@ -19,19 +19,27 @@ const CommentsPanel = ({ targetType, runId, resultId, compact, onCountChange }) 
     // list itself — and therefore the labels — actually change.
     const [now, setNow] = useState(() => Date.now());
 
+    // Retires responses that a newer fetch has superseded. Both entry points can
+    // overlap: switching results reuses this panel in place (the effect below
+    // refires), and add/edit/delete refetch imperatively. Without the guard an
+    // older response can land last and show the wrong result's comments.
+    const seqRef = useRef(0);
+
     const fetchComments = useCallback(() => {
+        const seq = ++seqRef.current;
         setLoading(true);
         setComments([]);
         const fetcher = targetType === 'run'
             ? listRunComments(runId)
             : listResultComments(runId, resultId);
         fetcher.then(data => {
+            if (seq !== seqRef.current) return;
             const list = data || [];
             setComments(list);
             setNow(Date.now());
             if (onCountChange) onCountChange(list.length);
         }).catch(() => {})
-          .finally(() => setLoading(false));
+          .finally(() => { if (seq === seqRef.current) setLoading(false); });
     }, [targetType, runId, resultId, onCountChange]);
 
     useEffect(() => {

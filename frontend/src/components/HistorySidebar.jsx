@@ -216,19 +216,26 @@ export default function HistorySidebar({ testCaseId, onClose, onTestCaseRestored
     // successful load and re-trigger the mount effect, causing a fetch loop.
     const hasLoadedRef = useRef(false);
 
+    // Retires responses that a newer fetch has superseded — the retry button and
+    // the post-restore refetch can both overlap an in-flight load, and a stale
+    // response landing last would show an outdated version list.
+    const seqRef = useRef(0);
+
     const fetchVersions = useCallback(async () => {
+        const seq = ++seqRef.current;
         if (!hasLoadedRef.current) setLoading(true);
         setError(null);
         try {
             const data = await versionsApi.list(testCaseId);
+            if (seq !== seqRef.current) return;
             hasLoadedRef.current = true;
             setVersionList(data);
             // auto-select newest version
             if (data.length > 0) setSelectedId(id => id ?? data[0].id);
         } catch {
-            setError('Failed to load history. Please try again.');
+            if (seq === seqRef.current) setError('Failed to load history. Please try again.');
         } finally {
-            setLoading(false);
+            if (seq === seqRef.current) setLoading(false);
         }
     }, [testCaseId]);
 

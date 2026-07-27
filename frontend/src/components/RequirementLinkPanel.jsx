@@ -74,6 +74,10 @@ export default function RequirementLinkPanel({ testCaseId }) {
     // Load linked requirements and all requirements on mount / testCaseId change.
     useEffect(() => {
         if (!testCaseId) return;
+        // This panel is reused in place when the surrounding detail view switches
+        // test cases, so a slow response for the previous id can outlive its own
+        // effect. Retire it rather than letting it overwrite the current one.
+        let cancelled = false;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: only shows the spinner on first load, before fetching linked/all requirements
         if (!hasLoadedRef.current) setLoading(true);
         Promise.all([
@@ -81,12 +85,14 @@ export default function RequirementLinkPanel({ testCaseId }) {
             reqApi.list(),
         ])
             .then(([linkedData, all]) => {
+                if (cancelled) return;
                 hasLoadedRef.current = true;
                 setLinked(linkedData || []);
                 setAllReqs(all || []);
             })
             .catch(() => {})
-            .finally(() => setLoading(false));
+            .finally(() => { if (!cancelled) setLoading(false); });
+        return () => { cancelled = true; };
     }, [testCaseId]);
 
     // Close dropdown when clicking outside.

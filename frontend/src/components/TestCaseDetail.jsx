@@ -87,36 +87,44 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     // its deps — `test` is set inside this same effect, so including it would loop.
     const hasLoadedTestRef = useRef(false);
 
+    // The id of the test being shown. `test` is fetched below, so `test?.id` only
+    // catches up to `testId` one render later — depending on both would re-fire the
+    // side-panel loads a second time with the very same id (visible as a double
+    // "Loading…" flash). Derive one value and depend on that instead.
+    const detailId = test?.id || testId;
+
     // Load execution history when test is available
     useEffect(() => {
-        const id = test?.id || testId;
-        if (!id) return;
+        if (!detailId) return;
+        let cancelled = false;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: fetches this test's execution history
         setExecLoading(true);
-        listTestExecutions(id)
-            .then(data => setExecutions(Array.isArray(data) ? data : []))
-            .catch(() => setExecutions([]))
-            .finally(() => setExecLoading(false));
-    }, [test?.id, testId]);
+        listTestExecutions(detailId)
+            .then(data => { if (!cancelled) setExecutions(Array.isArray(data) ? data : []); })
+            .catch(() => { if (!cancelled) setExecutions([]); })
+            .finally(() => { if (!cancelled) setExecLoading(false); });
+        return () => { cancelled = true; };
+    }, [detailId]);
 
     // Load version history (for Activity timeline + footer author) and linked requirements (count)
     useEffect(() => {
-        const id = test?.id || testId;
-        if (!id || !inlinePane) return;
+        if (!detailId || !inlinePane) return;
+        let cancelled = false;
         // eslint-disable-next-line react-hooks/set-state-in-effect -- resets stale data before starting async version/requirement/defect fetches for the new test id
         setVersionHistory([]);
         setLinkedReqs([]);
         setLinkedDefects([]);
-        versionsApi.list(id)
-            .then(data => setVersionHistory(Array.isArray(data) ? data : []))
-            .catch(() => setVersionHistory([]));
-        requirementsApi.listByTestCase(id)
-            .then(data => setLinkedReqs(Array.isArray(data) ? data : (data?.requirements || [])))
-            .catch(() => setLinkedReqs([]));
-        testCaseDefects.list(id)
-            .then(data => setLinkedDefects(Array.isArray(data) ? data : []))
-            .catch(() => setLinkedDefects([]));
-    }, [test?.id, testId, inlinePane]);
+        versionsApi.list(detailId)
+            .then(data => { if (!cancelled) setVersionHistory(Array.isArray(data) ? data : []); })
+            .catch(() => { if (!cancelled) setVersionHistory([]); });
+        requirementsApi.listByTestCase(detailId)
+            .then(data => { if (!cancelled) setLinkedReqs(Array.isArray(data) ? data : (data?.requirements || [])); })
+            .catch(() => { if (!cancelled) setLinkedReqs([]); });
+        testCaseDefects.list(detailId)
+            .then(data => { if (!cancelled) setLinkedDefects(Array.isArray(data) ? data : []); })
+            .catch(() => { if (!cancelled) setLinkedDefects([]); });
+        return () => { cancelled = true; };
+    }, [detailId, inlinePane]);
 
     // Initial Load
     useEffect(() => {
