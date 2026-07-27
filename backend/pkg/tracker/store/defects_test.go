@@ -90,3 +90,138 @@ func TestDefectCRUD(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, gone)
 }
+
+// newDefectUser inserts a user and forces the active/deleted flags CreateUser does not expose.
+func newDefectUser(t *testing.T, s *Store, email, displayName string, active bool) *models.User {
+	t.Helper()
+	u, err := s.CreateUser(email, displayName, "hash", "member")
+	require.NoError(t, err)
+	if !active {
+		_, err = s.UpdateUser(u.ID, map[string]interface{}{"active": false})
+		require.NoError(t, err)
+	}
+	return u
+}
+
+func TestDefectAssigneePersistence(t *testing.T) {
+	s := newTestStore(t)
+	owner := newDefectUser(t, s, "owner@example.com", "Owner One", true)
+	other := newDefectUser(t, s, "other@example.com", "Other Two", true)
+
+	t.Run("create persists an assignee", func(t *testing.T) {
+		d := &models.Defect{Title: "assigned on create", AssigneeID: &owner.ID}
+		require.NoError(t, s.CreateDefect(d))
+		got, err := s.GetDefect(d.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got.AssigneeID)
+		assert.Equal(t, owner.ID, *got.AssigneeID)
+	})
+
+	t.Run("create normalises an empty assignee to NULL", func(t *testing.T) {
+		d := &models.Defect{Title: "unassigned on create", AssigneeID: strPtr("")}
+		require.NoError(t, s.CreateDefect(d))
+		assert.Nil(t, d.AssigneeID)
+		got, err := s.GetDefect(d.ID)
+		require.NoError(t, err)
+		assert.Nil(t, got.AssigneeID)
+	})
+
+	t.Run("update assigns, reassigns and leaves absent fields unchanged", func(t *testing.T) {
+		d := &models.Defect{Title: "reassign me"}
+		require.NoError(t, s.CreateDefect(d))
+
+		upd, err := s.UpdateDefect(d.ID, models.UpdateDefectRequest{AssigneeID: &owner.ID})
+		require.NoError(t, err)
+		require.NotNil(t, upd.AssigneeID)
+		assert.Equal(t, owner.ID, *upd.AssigneeID)
+
+		upd, err = s.UpdateDefect(d.ID, models.UpdateDefectRequest{AssigneeID: &other.ID})
+		require.NoError(t, err)
+		require.NotNil(t, upd.AssigneeID)
+		assert.Equal(t, other.ID, *upd.AssigneeID)
+
+		// an absent assignee_id must not disturb the current owner
+		upd, err = s.UpdateDefect(d.ID, models.UpdateDefectRequest{Title: strPtr("renamed")})
+		require.NoError(t, err)
+		assert.Equal(t, "renamed", upd.Title)
+		require.NotNil(t, upd.AssigneeID)
+		assert.Equal(t, other.ID, *upd.AssigneeID)
+	})
+
+	t.Run("update with an empty string clears the assignee", func(t *testing.T) {
+		d := &models.Defect{Title: "unassign me", AssigneeID: &owner.ID}
+		require.NoError(t, s.CreateDefect(d))
+
+		upd, err := s.UpdateDefect(d.ID, models.UpdateDefectRequest{AssigneeID: strPtr("")})
+		require.NoError(t, err)
+		assert.Nil(t, upd.AssigneeID)
+		assert.Empty(t, upd.AssigneeName)
+
+		got, err := s.GetDefect(d.ID)
+		require.NoError(t, err)
+		assert.Nil(t, got.AssigneeID)
+	})
+}
+
+func TestDefectAssigneeNamePopulation(t *testing.T) {
+	s := newTestStore(t)
+	active := newDefectUser(t, s, "active@example.com", "Active Ann", true)
+	inactive := newDefectUser(t, s, "gone@example.com", "Inactive Ivan", false)
+	nameless := newDefectUser(t, s, "nameless@example.com", "", true)
+
+	assigned := &models.Defect{Title: "aaa active owner", AssigneeID: &active.ID}
+	deactivated := &models.Defect{Title: "bbb inactive owner", AssigneeID: &inactive.ID}
+	fallback := &models.Defect{Title: "ccc nameless owner", AssigneeID: &nameless.ID}
+	unassigned := &models.Defect{Title: "ddd no owner"}
+	for _, d := range []*models.Defect{assigned, deactivated, fallback, unassigned} {
+		require.NoError(t, s.CreateDefect(d))
+	}
+
+	t.Run("GetDefect resolves the display name", func(t *testing.T) {
+		got, err := s.GetDefect(assigned.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "Active Ann", got.AssigneeName)
+	})
+
+	t.Run("a deactivated user still resolves", func(t *testing.T) {
+		got, err := s.GetDefect(deactivated.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "Inactive Ivan", got.AssigneeName)
+	})
+
+	t.Run("a blank display name falls back to email", func(t *testing.T) {
+		got, err := s.GetDefect(fallback.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "nameless@example.com", got.AssigneeName)
+	})
+
+	t.Run("an unassigned defect has an empty name", func(t *testing.T) {
+		got, err := s.GetDefect(unassigned.ID)
+		require.NoError(t, err)
+		assert.Nil(t, got.AssigneeID)
+		assert.Empty(t, got.AssigneeName)
+	})
+
+	t.Run("ListDefects populates every row in one batch", func(t *testing.T) {
+		list, err := s.ListDefects("", "", "")
+		require.NoError(t, err)
+		byID := make(map[string]models.Defect, len(list))
+		for _, d := range list {
+			byID[d.ID] = d
+		}
+		require.Len(t, byID, 4)
+		assert.Equal(t, "Active Ann", byID[assigned.ID].AssigneeName)
+		assert.Equal(t, "Inactive Ivan", byID[deactivated.ID].AssigneeName)
+		assert.Equal(t, "nameless@example.com", byID[fallback.ID].AssigneeName)
+		assert.Empty(t, byID[unassigned.ID].AssigneeName)
+	})
+
+	t.Run("a dangling assignee id yields an empty name rather than an error", func(t *testing.T) {
+		orphan := &models.Defect{Title: "eee ghost owner", AssigneeID: strPtr("does-not-exist")}
+		require.NoError(t, s.CreateDefect(orphan))
+		got, err := s.GetDefect(orphan.ID)
+		require.NoError(t, err)
+		require.NotNil(t, got.AssigneeID)
+		assert.Empty(t, got.AssigneeName)
+	})
+}

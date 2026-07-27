@@ -68,6 +68,9 @@ func (s *Store) CreateDefect(d *models.Defect) error {
 	if d.Severity == "" {
 		d.Severity = "minor"
 	}
+	if d.AssigneeID != nil && *d.AssigneeID == "" {
+		d.AssigneeID = nil // on create "" and nil both mean unassigned -> store NULL
+	}
 	now := time.Now()
 	d.CreatedAt = now
 	d.UpdatedAt = now
@@ -83,7 +86,49 @@ func (s *Store) GetDefect(id string) (*models.Defect, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.populateDefectAssigneeNames([]*models.Defect{&d})
 	return &d, nil
+}
+
+// populateDefectAssigneeNames fills AssigneeName on defects that carry an AssigneeID via a
+// single batch users lookup, mirroring populateAssigneeNames for runs (runs.go). DisplayName
+// falls back to Email, and names resolve even for users who are no longer active.
+//
+// Deliberately a second query rather than a LEFT JOIN in the row scan: AssigneeName is
+// gorm:"-", so a joined column would be silently discarded, and joining users also makes
+// ListDefects' ORDER BY created_at ambiguous.
+func (s *Store) populateDefectAssigneeNames(defects []*models.Defect) {
+	seen := map[string]bool{}
+	var ids []string
+	for _, d := range defects {
+		if d.AssigneeID != nil && *d.AssigneeID != "" && !seen[*d.AssigneeID] {
+			seen[*d.AssigneeID] = true
+			ids = append(ids, *d.AssigneeID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+	type urow struct {
+		ID          string
+		DisplayName string
+		Email       string
+	}
+	var rows []urow
+	s.db.Model(&models.User{}).Select("id, display_name, email").Where("id IN ?", ids).Scan(&rows)
+	name := make(map[string]string, len(rows))
+	for _, u := range rows {
+		if u.DisplayName != "" {
+			name[u.ID] = u.DisplayName
+		} else {
+			name[u.ID] = u.Email
+		}
+	}
+	for _, d := range defects {
+		if d.AssigneeID != nil {
+			d.AssigneeName = name[*d.AssigneeID]
+		}
+	}
 }
 
 func (s *Store) ListDefects(status, severity, q string) ([]models.Defect, error) {
@@ -124,9 +169,12 @@ func (s *Store) ListDefects(status, severity, q string) ([]models.Defect, error)
 	for _, c := range counts {
 		byID[c.DefectID] = c.N
 	}
+	ptrs := make([]*models.Defect, len(defects))
 	for i := range defects {
 		defects[i].LinkedTestCount = byID[defects[i].ID]
+		ptrs[i] = &defects[i]
 	}
+	s.populateDefectAssigneeNames(ptrs)
 	return defects, nil
 }
 
@@ -143,6 +191,14 @@ func (s *Store) UpdateDefect(id string, req models.UpdateDefectRequest) (*models
 	}
 	if req.Status != nil {
 		updates["status"] = *req.Status
+	}
+	if req.AssigneeID != nil {
+		// "" clears the assignee; an absent (nil) field leaves it unchanged.
+		if *req.AssigneeID == "" {
+			updates["assignee_id"] = nil
+		} else {
+			updates["assignee_id"] = *req.AssigneeID
+		}
 	}
 	if req.ExternalProvider != nil {
 		updates["external_provider"] = *req.ExternalProvider
