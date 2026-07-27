@@ -106,6 +106,53 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, d)
 }
 
+// BulkUpdate godoc
+//
+// @Summary      Bulk update defects
+// @Description  Applies the same status, severity and/or assignee to many defects in one call. Omitted (null) fields are left unchanged; assignee_id "" clears the assignee across the whole selection. Unknown ids are tolerated — they simply match nothing — and the response carries the defects that exist, enriched with assignee_name and linked_test_count exactly like GET /defects. A request that sets no field at all is a read-back: nothing is written and updated_at is left alone, because that column is the staleness signal.
+// @Tags         defects
+// @Accept       json
+// @Produce      json
+// @Param        body  body      models.BulkUpdateDefectsRequest  true  "Defect IDs and the fields to apply"
+// @Security     BearerAuth
+// @Success      200  {array}   models.Defect
+// @Failure      400  {object}  object{error=string}
+// @Failure      500  {object}  object{error=string}
+// @Router       /defects/bulk-update [post]
+func (h *Handler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
+	var req models.BulkUpdateDefectsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
+		return
+	}
+	if len(req.IDs) == 0 {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "ids are required"})
+		return
+	}
+	if len(req.IDs) > httpx.MaxBulkIDs {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "too many ids (max 500 per request)"})
+		return
+	}
+	if msg := validateBulkUpdate(req); msg != "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	// same rule as Update: "" is a valid unassign, a non-empty id must name an active user.
+	if msg := ValidateAssignee(h.store, req.AssigneeID); msg != "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
+		return
+	}
+	updated, err := h.store.BulkUpdateDefects(req.IDs, req)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if updated == nil {
+		updated = []models.Defect{}
+	}
+	httpx.JSON(w, http.StatusOK, updated)
+}
+
 // Delete godoc
 //
 // @Summary      Delete a defect
@@ -189,6 +236,19 @@ func validateUpdate(req models.UpdateDefectRequest) string {
 		if err := ValidExternalURL(*req.ExternalURL); err != nil {
 			return err.Error()
 		}
+	}
+	return ""
+}
+
+// validateBulkUpdate checks the value fields of a bulk request against the same tables as the
+// single-defect update, so a selection can never be moved to a status or severity that PATCH
+// would refuse. The assignee is validated separately, against the store.
+func validateBulkUpdate(req models.BulkUpdateDefectsRequest) string {
+	if req.Severity != nil && !validSeverity[*req.Severity] {
+		return "invalid severity"
+	}
+	if req.Status != nil && !validStatus[*req.Status] {
+		return "invalid status"
 	}
 	return ""
 }
