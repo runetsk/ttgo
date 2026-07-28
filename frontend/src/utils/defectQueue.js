@@ -93,6 +93,35 @@ export function deriveStatus(defect) {
     return defect && defect.assignee_id ? 'progress' : 'triage';
 }
 
+// statusLabel names a derived status for the row pill. It reads STATUS_TABS
+// rather than a second table, so the pill and the tab that filters to it can
+// never disagree about what a bucket is called. An unrecognised key prints
+// itself — deriveStatus cannot produce one, so this only ever guards a caller.
+const STATUS_LABELS = STATUS_TABS.reduce((acc, tab) => { acc[tab.key] = tab.label; return acc; }, {});
+
+export function statusLabel(status) {
+    return STATUS_LABELS[status] || String(status || '');
+}
+
+// ownerLabel is what the Owner cell prints. assignee_name is resolved server-side
+// (display name, else email) and survives deactivation, so a defect that has an
+// assignee_id but no name has lost its user row entirely — say so rather than
+// printing an empty cell that reads as unassigned.
+export function ownerLabel(defect) {
+    if (!defect || !defect.assignee_id) return 'Unassigned';
+    return defect.assignee_name || 'Unknown user';
+}
+
+// ownerInitials is the avatar's two characters: one per word for a real name,
+// the first two for a single word. Emails split on their punctuation, so
+// "mara.reyes@example.com" reads MR like the display name would.
+export function ownerInitials(name) {
+    const words = String(name || '').trim().split(/[\s@._-]+/).filter(Boolean);
+    if (words.length === 0) return '';
+    const joined = words.length > 1 ? words[0][0] + words[1][0] : words[0].slice(0, 2);
+    return joined.toUpperCase();
+}
+
 // isStale is about neglect, not age: nothing has happened to this defect in
 // STALE_DAYS, and it is not closed (a closed defect is supposed to sit still).
 export function isStale(defect, now) {

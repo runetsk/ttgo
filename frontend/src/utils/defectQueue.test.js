@@ -9,6 +9,9 @@ import {
     deriveStatus,
     isStale,
     ageLabel,
+    ownerInitials,
+    ownerLabel,
+    statusLabel,
     filterDefects,
     sortDefects,
     queueCounts,
@@ -60,6 +63,51 @@ test('deriveStatus: an unknown or missing status buckets as open, never vanishes
     assert.equal(deriveStatus({ status: 'wontfix', assignee_id: 'u1' }), 'progress');
     assert.equal(deriveStatus({}), 'triage');
     assert.equal(deriveStatus(null), 'triage');
+});
+
+test('statusLabel names every derived status the same way its tab does', () => {
+    const byKey = Object.fromEntries(STATUS_TABS.map(t => [t.key, t.label]));
+    for (const status of ['triage', 'progress', 'fixed', 'closed']) {
+        assert.equal(statusLabel(status), byKey[status], `${status} pill must read like its tab`);
+    }
+    // Every status deriveStatus can produce has a label — the pill can never be blank.
+    for (const row of [{ status: 'open' }, { status: 'open', assignee_id: 'u1' }, { status: 'fixed' }, { status: 'closed' }, { status: 'wontfix' }]) {
+        assert.ok(statusLabel(deriveStatus(row)).length > 0);
+    }
+});
+
+test('statusLabel prints an unrecognised key rather than nothing', () => {
+    assert.equal(statusLabel('nonsense'), 'nonsense');
+    assert.equal(statusLabel(''), '');
+    assert.equal(statusLabel(undefined), '');
+});
+
+test('ownerLabel: unassigned, named, and an assignee whose user row is gone', () => {
+    assert.equal(ownerLabel(defect({ assignee_id: null })), 'Unassigned');
+    assert.equal(ownerLabel(defect({ assignee_id: '' })), 'Unassigned');
+    assert.equal(ownerLabel(defect({ assignee_id: 'u1', assignee_name: 'Mara Reyes' })), 'Mara Reyes');
+    // assignee_name is resolved server-side and survives deactivation, so blank
+    // means the user is gone — that must not read as "nobody owns this".
+    assert.equal(ownerLabel(defect({ assignee_id: 'u1', assignee_name: '' })), 'Unknown user');
+    assert.equal(ownerLabel(null), 'Unassigned');
+});
+
+test('ownerInitials: names, single words and email fallbacks', () => {
+    assert.equal(ownerInitials('Mara Reyes'), 'MR');
+    assert.equal(ownerInitials('  mara   reyes  '), 'MR');
+    assert.equal(ownerInitials('Mara Jane Reyes'), 'MJ');
+    assert.equal(ownerInitials('admin'), 'AD');
+    assert.equal(ownerInitials('mara.reyes@example.com'), 'MR');
+    assert.equal(ownerInitials('admin@example.com'), 'AE');
+    assert.equal(ownerInitials('a'), 'A');
+});
+
+test('ownerInitials returns nothing rather than throwing on empty input', () => {
+    assert.equal(ownerInitials(''), '');
+    assert.equal(ownerInitials(null), '');
+    assert.equal(ownerInitials(undefined), '');
+    assert.equal(ownerInitials('   '), '');
+    assert.equal(ownerInitials('@.-_'), '');
 });
 
 test('isStale: the boundary is inclusive at exactly 7 days', () => {
