@@ -5,6 +5,7 @@ import {
     STALE_DAYS,
     STATUS_TABS,
     SORT_OPTIONS,
+    TRIAGE_TILES,
     deriveStatus,
     isStale,
     ageLabel,
@@ -264,4 +265,40 @@ test('the tab and sort option tables match the derived statuses', () => {
         );
     }
     assert.deepEqual(SORT_OPTIONS.map(o => o.value), ['priority', 'updated', 'tests']);
+});
+
+test('every triage tile names a real count and a real filter dimension', () => {
+    assert.deepEqual(TRIAGE_TILES.map(t => t.key), ['triage', 'critical', 'stale', 'fixed']);
+    const rows = corpus();
+    const counts = queueCounts(rows, NOW);
+    const tabKeys = STATUS_TABS.map(t => t.key);
+    const sortValues = SORT_OPTIONS.map(o => o.value);
+
+    for (const tile of TRIAGE_TILES) {
+        assert.equal(typeof counts[tile.countKey], 'number', `${tile.key} must read a real queueCounts field`);
+        assert.ok(tabKeys.includes(tile.filters.status), `${tile.key} must select a real status tab`);
+        for (const sev of tile.filters.severities) {
+            assert.ok(SEVERITY_ORDER.includes(sev), `${tile.key} must select a real severity chip`);
+        }
+        if (tile.filters.sort) {
+            assert.ok(sortValues.includes(tile.filters.sort), `${tile.key} must select a real sort`);
+        }
+    }
+});
+
+test('the Needs triage and Fixed tiles land on exactly the rows they count', () => {
+    const rows = corpus();
+    const counts = queueCounts(rows, NOW);
+    const byKey = Object.fromEntries(TRIAGE_TILES.map(t => [t.key, t]));
+
+    // Critical open and Stale are deliberately looser than their number: neither
+    // "not closed" nor "not updated in 7 days" is a filter dimension, so those
+    // two tiles open a wider view than the count they advertise.
+    assert.equal(filterDefects(rows, byKey.triage.filters).length, counts.needsTriage);
+    assert.equal(filterDefects(rows, byKey.fixed.filters).length, counts.fixed);
+});
+
+test('only Needs triage is toned, and only Stale has no pressed state', () => {
+    assert.deepEqual(TRIAGE_TILES.filter(t => t.tone).map(t => t.key), ['triage']);
+    assert.deepEqual(TRIAGE_TILES.filter(t => t.pressable === false).map(t => t.key), ['stale']);
 });

@@ -23,6 +23,26 @@ export const SORT_OPTIONS = [
     { value: 'tests', label: 'Tests affected' },
 ];
 
+// The four triage tiles, in strip order. Each one doubles as a filter preset —
+// clicking a tile is how you enter that queue — so the presets live here beside
+// the dimensions they set, for the same reason STATUS_TABS does: a tile can
+// never name a status deriveStatus does not produce, or a severity that is not
+// a real chip.
+//
+// `countKey` names a queueCounts() field. `tone` is set on the one tile that
+// means "act now"; the rest are neutral surfaces.
+//
+// The Stale tile carries `pressable: false`: filterDefects has no staleness
+// dimension (age and neglect are row-level facts, not filter axes), so all the
+// tile can do is clear the filters and sort worst-first — a preset identical to
+// the neutral view, with no state for an aria-pressed to honestly reflect.
+export const TRIAGE_TILES = [
+    { key: 'triage', label: 'Needs triage', countKey: 'needsTriage', tone: 'alert', filters: { status: 'triage', severities: [] } },
+    { key: 'critical', label: 'Critical open', countKey: 'criticalOpen', filters: { status: 'all', severities: ['critical'] } },
+    { key: 'stale', label: 'Stale · 7d+', countKey: 'stale', pressable: false, filters: { status: 'all', severities: [], sort: 'priority' } },
+    { key: 'fixed', label: 'Fixed, awaiting retest', countKey: 'fixed', filters: { status: 'fixed', severities: [] } },
+];
+
 // A defect nobody has touched in this many days is stale. Inclusive: exactly 7
 // days counts, which is what the "Stale · 7d+" tile promises.
 export const STALE_DAYS = 7;
