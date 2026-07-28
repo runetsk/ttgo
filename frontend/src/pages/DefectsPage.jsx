@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { createTestRun, defects as defectsApi } from '../api';
 import DefectModal from '../components/DefectModal';
+import Modal from '../components/Modal';
 import BulkBar from './defects/BulkBar';
 import DefectRow from './defects/DefectRow';
 import FilterBar from './defects/FilterBar';
@@ -45,6 +46,7 @@ export default function DefectsPage() {
     const [expandedId, setExpandedId] = useState(null);
     const [focusId, setFocusId] = useState(null);
     const [modal, setModal] = useState(null); // { mode:'create'|'edit', defect } | null
+    const [pendingDelete, setPendingDelete] = useState(null); // defect awaiting confirmation | null
     const [retestError, setRetestError] = useState(null); // { id, message } | null
 
     const searchRef = useRef(null);
@@ -201,8 +203,14 @@ export default function DefectsPage() {
             : [saved, ...prev]));
     };
 
-    const handleDelete = (defect) => {
-        if (!window.confirm(`Delete defect "${defect.title}"?`)) return;
+    // Delete is confirmed through components/Modal, not window.confirm: the native dialog
+    // is unstyled, unthemed and unreachable from an e2e run, and it was the last one on
+    // this page. The defect is named in the body so a mis-aimed Delete is visible before
+    // it fires.
+    const confirmDelete = () => {
+        const defect = pendingDelete;
+        setPendingDelete(null);
+        if (!defect) return;
         defectsApi.remove(defect.id).then(() => {
             setRows(prev => prev.filter(r => r.id !== defect.id));
             setSelected(prev => {
@@ -335,7 +343,7 @@ export default function DefectsPage() {
                                 onToggleExpand={toggleExpand}
                                 onOpenDetail={target => setModal({ mode: 'edit', defect: target })}
                                 onRetest={handleRetest}
-                                onDelete={handleDelete}
+                                onDelete={setPendingDelete}
                             />
                         ))}
                     </tbody>
@@ -391,6 +399,7 @@ export default function DefectsPage() {
                 )}
             </div>
 
+            {/* Opened by "+ New defect" and by a row expand's "Open detail". */}
             {modal && (
                 <DefectModal
                     key={modal.defect?.id || 'create'}
@@ -398,6 +407,18 @@ export default function DefectsPage() {
                     defect={modal.defect}
                     onClose={() => setModal(null)}
                     onSaved={handleSaved}
+                />
+            )}
+
+            {pendingDelete && (
+                <Modal
+                    type="confirm"
+                    title="Delete Defect"
+                    message={`Delete "${pendingDelete.title}"? Its links to test results and test cases go with it. This cannot be undone.`}
+                    confirmText="Delete"
+                    confirmStyle="danger"
+                    onConfirm={confirmDelete}
+                    onCancel={() => setPendingDelete(null)}
                 />
             )}
         </div>

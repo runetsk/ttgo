@@ -23,6 +23,17 @@ export const SORT_OPTIONS = [
     { value: 'tests', label: 'Tests affected' },
 ];
 
+// The three STORED statuses, in workflow order, with the labels the edit modal
+// offers. Deliberately not STATUS_TABS: those are the four DERIVED buckets the
+// queue filters by, and "Needs triage" vs "In progress" is not something anyone
+// picks here — it follows from whether the defect has an owner. Kept beside
+// STATUS_TABS so the two can be cross-checked against deriveStatus in one place.
+export const DEFECT_STATUS_OPTIONS = [
+    { value: 'open', label: 'Open' },
+    { value: 'fixed', label: 'Fixed (awaiting retest)' },
+    { value: 'closed', label: 'Closed' },
+];
+
 // The four triage tiles, in strip order. Each one doubles as a filter preset —
 // clicking a tile is how you enter that queue — so the presets live here beside
 // the dimensions they set, for the same reason STATUS_TABS does: a tile can

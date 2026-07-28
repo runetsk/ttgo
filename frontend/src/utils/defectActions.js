@@ -1,6 +1,7 @@
-// Pure action layer for the Defects triage queue: the three decisions the page's write
-// paths make before they touch the network — what a bulk update sends, what happens to a
-// selection when the view changes, and what a Retest run is made of.
+// Pure action layer for the Defects triage queue: the decisions the page's write paths
+// make before they touch the network — what a bulk update sends, what the edit modal
+// sends, who its assignee picker can offer, what happens to a selection when the view
+// changes, and what a Retest run is made of.
 //
 // Kept DOM-free and dependency-free, like utils/defectQueue.js and utils/bulkTriage.js:
 // this repo has no component-render test infrastructure, so a pure helper is the only
@@ -39,6 +40,59 @@ export function buildBulkPayload(selectedIds, fields) {
         if (source[key]) payload[key] = source[key];
     }
     return payload;
+}
+
+// assigneeOptions is the list an assignee picker offers below its static "Unassigned"
+// entry: the assignable users, labelled display-name-else-email the way AssigneePicker
+// labels them.
+//
+// The one non-obvious part is the first entry. A defect can be owned by someone who has
+// since been deactivated or deleted, and /users/assignable will not return them — so a
+// picker built from that list alone would show the current owner as "Unassigned" and
+// silently drop them on the next save. Their resolved assignee_name (which survives
+// deactivation, see store.populateDefectAssigneeNames) is prepended instead, so saving an
+// unrelated field cannot un-assign a defect behind the user's back.
+export function assigneeOptions(users, defect) {
+    const options = [];
+    const seen = new Set();
+    for (const user of users || []) {
+        if (!user || !user.id || seen.has(user.id)) continue;
+        seen.add(user.id);
+        options.push({ id: user.id, label: user.display_name || user.email || user.id });
+    }
+
+    const current = defect && defect.assignee_id;
+    if (current && !seen.has(current)) {
+        options.unshift({ id: current, label: (defect.assignee_name || current), inactive: true });
+    }
+    return options;
+}
+
+// buildDefectPayload shapes DefectModal's body for POST /defects and PATCH /defects/{id},
+// or null when the title is blank — the one required field, and the same condition that
+// disables the Save button.
+//
+// Unlike buildBulkPayload, EVERY key is always present: the modal is a full-record editor,
+// so clearing the external key has to be sent as "" to actually clear it. PATCH's "an
+// absent field is left unchanged" semantics are therefore never exercised from this form —
+// only from the bulk bar and the API itself. assignee_id follows the same rule as the bulk
+// payload: UNASSIGNED ("") clears, because null would decode to nil and change nothing.
+export function buildDefectPayload(form) {
+    const source = form || {};
+    const title = String(source.title || '').trim();
+    if (!title) return null;
+
+    const text = (value) => String(value || '').trim();
+    return {
+        title,
+        description: text(source.description),
+        severity: source.severity || '',
+        status: source.status || '',
+        assignee_id: source.assignee_id ? String(source.assignee_id) : UNASSIGNED,
+        external_provider: text(source.external_provider),
+        external_key: text(source.external_key),
+        external_url: text(source.external_url),
+    };
 }
 
 // Page state changes that leave a selection valid. Everything else clears it.

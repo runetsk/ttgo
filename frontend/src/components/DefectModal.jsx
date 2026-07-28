@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
-import { defects as defectsApi } from '../api';
+import React, { useEffect, useState } from 'react';
+import { defects as defectsApi, getAssignableUsers } from '../api';
+import { assigneeOptions, buildDefectPayload } from '../utils/defectActions';
+import { DEFECT_STATUS_OPTIONS } from '../utils/defectQueue';
 
 const SEVERITIES = ['critical', 'major', 'minor', 'trivial'];
 
 /**
- * DefectModal — create or edit a native defect.
+ * DefectModal — create or edit a native defect. Reached from the Defects register's
+ * "+ New defect" and from a row expand's "Open detail".
  * Props: mode ('create'|'edit'), defect (object, edit only), onClose(), onSaved(saved).
  * Render with a `key` (e.g. defect id or 'create') so state re-initializes per target.
  */
@@ -13,19 +16,34 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
     const [description, setDescription] = useState(defect?.description || '');
     const [severity, setSeverity] = useState(defect?.severity || 'minor');
     const [status, setStatus] = useState(defect?.status || 'open');
+    const [assigneeId, setAssigneeId] = useState(defect?.assignee_id || '');
+    const [users, setUsers] = useState(null); // null until the assignable list has loaded
     const [provider, setProvider] = useState(defect?.external_provider || '');
     const [extKey, setExtKey] = useState(defect?.external_key || '');
     const [extUrl, setExtUrl] = useState(defect?.external_url || '');
     const [submitting, setSubmitting] = useState(false);
 
+    // Loaded on mount rather than on first open, unlike BulkBar's menu: this modal only
+    // exists while someone is editing one defect, and the picker is on screen the whole time.
+    useEffect(() => {
+        let cancelled = false;
+        getAssignableUsers()
+            .then(list => { if (!cancelled) setUsers(list || []); })
+            .catch(() => { if (!cancelled) setUsers([]); }); // api.js has already toasted
+        return () => { cancelled = true; };
+    }, []);
+
     const submit = (e) => {
         e.preventDefault();
-        if (!title.trim()) return;
+        // buildDefectPayload always sends every field, assignee_id included — this form is a
+        // full-record editor. PATCH's "an absent field is left unchanged" semantics are
+        // therefore never exercised from here, only from the bulk bar and the API.
+        const payload = buildDefectPayload({
+            title, description, severity, status, assignee_id: assigneeId,
+            external_provider: provider, external_key: extKey, external_url: extUrl,
+        });
+        if (!payload) return;
         setSubmitting(true);
-        const payload = {
-            title: title.trim(), description: description.trim(), severity, status,
-            external_provider: provider.trim(), external_key: extKey.trim(), external_url: extUrl.trim(),
-        };
         const req = mode === 'edit' ? defectsApi.update(defect.id, payload) : defectsApi.create(payload);
         req.then(saved => { onSaved?.(saved); onClose(); })
             .catch(() => {})
@@ -54,12 +72,30 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
                         </div>
                         <div style={{ flex: 1 }}>
                             <label style={lbl}>Status</label>
+                            {/* Stored statuses, not the queue's four derived ones: Needs triage
+                                vs In progress follows from ownership, so it is the Assignee
+                                field below that moves a defect between those two. */}
                             <select className="modern-input" style={inp} value={status} onChange={e => setStatus(e.target.value)} disabled={submitting}>
-                                <option value="open">open</option>
-                                <option value="closed">closed</option>
+                                {DEFECT_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                             </select>
                         </div>
                     </div>
+
+                    <label style={lbl} htmlFor="defect-assignee">Assignee</label>
+                    <select
+                        id="defect-assignee"
+                        className="modern-input"
+                        style={inp}
+                        value={assigneeId}
+                        onChange={e => setAssigneeId(e.target.value)}
+                        disabled={submitting || users === null}
+                        data-testid="defect-assignee"
+                    >
+                        <option value="">Unassigned</option>
+                        {assigneeOptions(users, defect).map(o => (
+                            <option key={o.id} value={o.id}>{o.label}</option>
+                        ))}
+                    </select>
 
                     <label style={lbl}>External link <span style={{ color: 'var(--text-secondary)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>(optional)</span></label>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
