@@ -2439,6 +2439,10 @@
     gap: 14px;
     height: 100%;
     min-height: 0;
+    /* The Quality pages sit inside QualityLayout's outlet, hard against the nav's
+       right border, so each one carries its own gutter — same 24/28 as
+       RequirementsPage and TraceabilityMatrix. */
+    padding: 24px 28px;
 }
 
 /* ── Title bar ── */
@@ -2782,6 +2786,15 @@
     background-image: linear-gradient(var(--aig-success-bg), var(--aig-success-bg));
     color: var(--aig-success-fg);
     font-weight: 600;
+}
+
+/* Destructive variant — Delete in the row expand. Tinted the same way --confirm
+   is, over an opaque surface, so the red does not wash out in light theme. */
+.defects-ghost-btn--danger {
+    border-color: var(--aig-danger-border);
+    background-color: var(--bg-secondary);
+    background-image: linear-gradient(var(--aig-danger-bg), var(--aig-danger-bg));
+    color: var(--aig-danger-fg);
 }
 
 /* Dropdown used by "Assign…" and "Set severity…". --bg-secondary is the only

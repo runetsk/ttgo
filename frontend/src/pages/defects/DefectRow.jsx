@@ -41,6 +41,7 @@ export default function DefectRow({
     onToggleExpand,
     onOpenDetail,
     onRetest,
+    onDelete,
 }) {
     const [affected, setAffected] = useState(null); // null until the expand has loaded them
     const [affectedFailed, setAffectedFailed] = useState(false);
@@ -238,6 +239,19 @@ export default function DefectRow({
                                     >
                                         Retest
                                     </button>
+                                    {/* The table itself has no destructive control — deleting is
+                                        deliberately two steps now (expand, then confirm), where the
+                                        old page put a × on every row next to a status toggle. */}
+                                    {onDelete && (
+                                        <button
+                                            type="button"
+                                            className="defects-ghost-btn defects-ghost-btn--danger"
+                                            onClick={() => onDelete(defect)}
+                                            data-testid="defects-delete"
+                                        >
+                                            Delete
+                                        </button>
+                                    )}
                                 </div>
                                 {retestError && <span className="defects-bulkbar-error" role="alert">{retestError}</span>}
                             </div>
