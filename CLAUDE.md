@@ -1,6 +1,6 @@
 # TTGO Development Guidelines
 
-Last updated: 2026-07-02
+Last updated: 2026-07-28
 
 ## Project Structure
 
@@ -83,6 +83,18 @@ npm run lint   # ESLint
 - Go: standard conventions (`gofmt`, idiomatic error handling)
 - JavaScript/JSX: ESLint enforced; functional React components only
 - No new Go modules or npm packages without a clear need
+
+## Domain Conventions
+
+**Defect status: three values stored, four displayed.** `Defect.Status` is `open | fixed | closed`.
+"Needs triage" and "In progress" are *not* stored — both are `open`, split on whether `assignee_id`
+is null, because assignment is the triage action. Do not add a fourth stored value to express them.
+`"open"` must stay writable (CLI, seed data and external scripts depend on it), and every defect
+counter buckets `closed` against everything else, so `fixed` counts as open everywhere. The
+derivation lives in `frontend/src/utils/defectQueue.js` (`deriveStatus`).
+
+`test_cases.reverification_flagged` means *every linked defect is fixed-or-closed* — the test is
+ready to be retested (`store/defects.go`, `recomputeReverification`).
 
 ## Versioning
 
