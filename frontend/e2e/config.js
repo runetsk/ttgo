@@ -23,6 +23,7 @@ export const ROUTES = {
     REQUIREMENTS: '/requirements',
     SETTINGS: '/settings',
     ANALYTICS: '/analytics',
+    DEFECTS: '/defects',
 };
 
 export const runDetail = (runId) => `/runs/run/${runId}`;
@@ -32,6 +33,10 @@ export const testCase = (testId) => `/library/tests/${testId}`;
 export const requirement = (reqId) => `/requirements/${reqId}`;
 export const runFolder = (runFolderId) => `/runs/folders/${runFolderId}`;
 export const libraryFolder = (folderId) => `/library/folders/${folderId}`;
+// The register's only URL param — the deep link a test case's linked-bugs panel
+// builds (utils/bugs.js bugHref). It is a landing instruction, not a filter, and
+// the page deliberately leaves it in the URL.
+export const defectsFocus = (defectId) => `/defects?focus=${defectId}`;
 
 // ── Timeouts ──────────────────────────────────────────────────────────────────
 // Named buckets so a spec picks intent, not a magic number. The suite-wide

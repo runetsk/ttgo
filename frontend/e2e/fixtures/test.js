@@ -8,6 +8,7 @@ import { AiStudioPage } from '../pages/AiStudioPage.js';
 import { RunExecutePage } from '../pages/RunExecutePage.js';
 import { TestCaseDetailPage } from '../pages/TestCaseDetailPage.js';
 import { SettingsPage } from '../pages/SettingsPage.js';
+import { DefectsPage } from '../pages/DefectsPage.js';
 import { ApiClient } from '../helpers/api.js';
 import { startFakeLLM } from '../helpers/fake-llm.js';
 import { attachConsoleLogging } from '../helpers/diagnostics.js';
@@ -26,6 +27,7 @@ export const test = base.extend({
     runExecutePage: async ({ page }, use) => use(new RunExecutePage(page)),
     testCaseDetailPage: async ({ page }, use) => use(new TestCaseDetailPage(page)),
     settingsPage: async ({ page }, use) => use(new SettingsPage(page)),
+    defectsPage: async ({ page }, use) => use(new DefectsPage(page)),
 
     // API client bound to this test's request context: `await api.createRun(...)`.
     api: async ({ request }, use) => use(new ApiClient(request)),
