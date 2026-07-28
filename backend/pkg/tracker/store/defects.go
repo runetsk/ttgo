@@ -3,6 +3,7 @@ package store
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -74,7 +75,16 @@ func (s *Store) CreateDefect(d *models.Defect) error {
 	now := time.Now()
 	d.CreatedAt = now
 	d.UpdatedAt = now
-	return s.db.Create(d).Error
+	if err := s.db.Create(d).Error; err != nil {
+		return err
+	}
+	// Resolved here rather than in the handlers so BOTH create paths (POST /defects and
+	// the runs package's create-and-link) hand back the same shape ListDefects and
+	// GetDefect do. Without it a freshly created defect carries assignee_id with an empty
+	// assignee_name, which the register renders as "Unknown user" — the label reserved
+	// for an owner whose account is actually gone.
+	s.populateDefectAssigneeNames([]*models.Defect{d})
+	return nil
 }
 
 func (s *Store) GetDefect(id string) (*models.Defect, error) {
@@ -115,7 +125,13 @@ func (s *Store) populateDefectAssigneeNames(defects []*models.Defect) {
 		Email       string
 	}
 	var rows []urow
-	s.db.Model(&models.User{}).Select("id, display_name, email").Where("id IN ?", ids).Scan(&rows)
+	if err := s.db.Model(&models.User{}).Select("id, display_name, email").Where("id IN ?", ids).Scan(&rows).Error; err != nil {
+		// Best-effort by design — a name is decoration, and failing a whole defect list
+		// over it would be worse. But it must not be silent: every row would come back
+		// with a blank assignee_name, which the register displays as "Unknown user".
+		slog.Warn("defects: could not resolve assignee names", "err", err, "ids", len(ids))
+		return
+	}
 	name := make(map[string]string, len(rows))
 	for _, u := range rows {
 		if u.DisplayName != "" {
@@ -469,24 +485,70 @@ func affectedTestCaseIDs(tx *gorm.DB, defectIDs ...string) []string {
 // test case has at least one linked defect and every one of them is fixed-or-closed, i.e. the
 // test is ready to be retested. "fixed" counts as resolved alongside "closed" so the signal
 // fires when QA actually wants it — before the defect is closed, not after.
+//
+// Grouped, not per test case: bulk-closing 500 defects runs this inside ONE SQLite write
+// transaction, and three statements per affected test case meant holding the database's single
+// write lock for 3N round-trips while every other writer queued behind it. It is now three
+// statements total, whatever N is. A test case with no linked defects left (the delete and
+// unlink paths reach here with exactly that) simply misses the grouped count and lands in
+// `cleared`, which is what the per-row loop's total == 0 case did.
 func recomputeReverification(tx *gorm.DB, testCaseIDs []string) error {
-	for _, tcID := range testCaseIDs {
-		if tcID == "" {
+	ids := make([]string, 0, len(testCaseIDs))
+	seen := make(map[string]bool, len(testCaseIDs))
+	for _, id := range testCaseIDs {
+		if id == "" || seen[id] {
 			continue
 		}
-		var total, open int64
-		if err := tx.Model(&models.DefectLink{}).Joins("JOIN defects d ON d.id = defect_links.defect_id").
-			Where("defect_links.test_case_id = ?", tcID).Distinct("d.id").Count(&total).Error; err != nil {
+		seen[id] = true
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	type tally struct {
+		TestCaseID string
+		Unresolved int64
+	}
+	var rows []tally
+	// The statuses are compile-time constants, so they are inlined rather than bound: a
+	// placeholder inside a CASE expression in a SELECT list is where GORM's arg handling
+	// is least predictable, and there is no user input here to protect.
+	if err := tx.Model(&models.DefectLink{}).
+		Select("defect_links.test_case_id AS test_case_id, "+
+			"COUNT(DISTINCT CASE WHEN d.status NOT IN ('closed','fixed') THEN d.id END) AS unresolved").
+		Joins("JOIN defects d ON d.id = defect_links.defect_id").
+		Where("defect_links.test_case_id IN ?", ids).
+		Group("defect_links.test_case_id").Scan(&rows).Error; err != nil {
+		return err
+	}
+
+	flagged := make([]string, 0, len(ids))
+	ready := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		// A row exists only when the test case has at least one linked defect, so the
+		// "total > 0" half of the old condition is implied by being here at all.
+		ready[r.TestCaseID] = r.Unresolved == 0
+		if r.Unresolved == 0 {
+			flagged = append(flagged, r.TestCaseID)
+		}
+	}
+	cleared := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if !ready[id] {
+			cleared = append(cleared, id)
+		}
+	}
+
+	if len(flagged) > 0 {
+		if err := tx.Model(&models.TestCase{}).Where("id IN ?", flagged).
+			Update("reverification_flagged", true).Error; err != nil {
 			return err
 		}
-		if err := tx.Model(&models.DefectLink{}).Joins("JOIN defects d ON d.id = defect_links.defect_id").
-			Where("defect_links.test_case_id = ? AND d.status NOT IN ?", tcID, []string{"closed", "fixed"}).
-			Distinct("d.id").Count(&open).Error; err != nil {
-			return err
-		}
-		flagged := total > 0 && open == 0
-		if err := tx.Model(&models.TestCase{}).Where("id = ?", tcID).
-			Update("reverification_flagged", flagged).Error; err != nil {
+	}
+	if len(cleared) > 0 {
+		if err := tx.Model(&models.TestCase{}).Where("id IN ?", cleared).
+			Update("reverification_flagged", false).Error; err != nil {
 			return err
 		}
 	}

@@ -58,6 +58,569 @@ test.describe('Defects register — triage queue', () => {
         });
     });
 
+    test('the Critical open tile shows the criticals that are still open, not every critical', async ({ api, defectsPage }) => {
+        const stamp = `Critical-${Date.now()}`;
+
+        await test.step('Seed an open critical, a closed critical and an open major', async () => {
+            await api.createDefect({ title: `Live crit ${stamp}`, severity: 'critical' });
+            const done = await api.createDefect({ title: `Done crit ${stamp}`, severity: 'critical' });
+            await api.updateDefect(done.id, { status: 'closed' });
+            await api.createDefect({ title: `Lesser ${stamp}`, severity: 'major' });
+        });
+
+        // The tile counts criticals that are NOT closed. Before "openOnly" existed as a
+        // filter dimension it navigated to every critical, so a tile reading 1 landed
+        // the user on 2 rows — the number on its face was wrong the moment it was used.
+        await test.step('The tile drops the table to the open critical alone', async () => {
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(3, { timeout: TIMEOUTS.ELEMENT });
+
+            await defectsPage.tile('Critical open').click();
+            await expect(defectsPage.rows).toHaveCount(1);
+            await expect(defectsPage.row(`Live crit ${stamp}`)).toBeVisible();
+            await expect(defectsPage.row(`Done crit ${stamp}`)).toHaveCount(0);
+        });
+
+        await test.step('And it says so: a tile whose filters are in force reads as pressed', async () => {
+            await expect(defectsPage.tile('Critical open')).toHaveAttribute('aria-pressed', 'true');
+            await expect(defectsPage.tile('Needs triage')).toHaveAttribute('aria-pressed', 'false');
+        });
+
+        // aria-pressed promises a toggle, so the tile has to honour it — and for the
+        // tiles whose preset is invisible in the filter bar it is the only on-screen
+        // way back out: "Reset filters" exists only inside the empty state, so a tile
+        // that returns rows used to leave a narrowed queue with nothing to clear it.
+        await test.step('Clicking the pressed tile again releases it', async () => {
+            await defectsPage.tile('Critical open').click();
+            await expect(defectsPage.tile('Critical open')).toHaveAttribute('aria-pressed', 'false');
+            await expect(defectsPage.severityChip('critical')).toHaveAttribute('aria-pressed', 'false');
+            await expect(defectsPage.rows).toHaveCount(3);
+
+            // Back into the tile's queue for the step below.
+            await defectsPage.tile('Critical open').click();
+            await expect(defectsPage.rows).toHaveCount(1);
+        });
+
+        // "not closed" has no control in the filter bar, so it must not survive a manual
+        // filter — otherwise the table stays narrower than every count on the page while
+        // nothing on screen says why. The severity chip DOES have a control, so it stays
+        // (and says so with its own aria-pressed): both criticals come back, not all three.
+        await test.step('Touching a status tab releases it — the invisible dimension goes with it', async () => {
+            await defectsPage.tab('All').click();
+            await expect(defectsPage.tile('Critical open')).toHaveAttribute('aria-pressed', 'false');
+            await expect(defectsPage.severityChip('critical')).toHaveAttribute('aria-pressed', 'true');
+            await expect(defectsPage.rows).toHaveCount(2);
+            await expect(defectsPage.row(`Done crit ${stamp}`)).toHaveCount(1);
+        });
+    });
+
+    test('the Stale tile is a real filter, not a button that resets the page', async ({ api, defectsPage }) => {
+        const stamp = `Stale-${Date.now()}`;
+
+        // updated_at is set by the server, so a freshly seeded defect can never be
+        // stale. What is assertable — and what actually broke — is that the tile
+        // NARROWS: its preset used to be byte-identical to a fresh page load, so
+        // clicking a tile reading "9" left every defect on screen.
+        await test.step('Seed two defects that were touched a moment ago', async () => {
+            await api.createDefect({ title: `Recent one ${stamp}`, severity: 'major' });
+            await api.createDefect({ title: `Recent two ${stamp}`, severity: 'minor' });
+        });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(2, { timeout: TIMEOUTS.ELEMENT });
+
+        await test.step('Nothing seeded this second is 7 days old, so the queue is empty', async () => {
+            await defectsPage.tile('Stale').click();
+            await expect(defectsPage.rows).toHaveCount(0);
+            await expect(defectsPage.emptyState).toBeVisible();
+            await expect(defectsPage.tile('Stale')).toHaveAttribute('aria-pressed', 'true');
+        });
+
+        // Stale is the tile with no counterpart in the filter bar at all — its preset
+        // sets only "not closed" and "untouched for 7 days", so nothing else on the
+        // page reflects it. The tile itself has to be the way out.
+        await test.step('The tile is a toggle: clicking it again releases the filter', async () => {
+            await defectsPage.tile('Stale').click();
+            await expect(defectsPage.tile('Stale')).toHaveAttribute('aria-pressed', 'false');
+            await expect(defectsPage.rows).toHaveCount(2);
+
+            // Re-applied, so the Reset step below still starts from the empty state.
+            await defectsPage.tile('Stale').click();
+            await expect(defectsPage.rows).toHaveCount(0);
+        });
+
+        await test.step('Reset filters brings them back and releases the tile', async () => {
+            await defectsPage.resetFiltersButton.click();
+            await expect(defectsPage.tile('Stale')).toHaveAttribute('aria-pressed', 'false');
+            // Reset clears the search too, so this is the whole register again.
+            await expect(defectsPage.rows.first()).toBeVisible();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(2);
+        });
+    });
+
+    test('the whole list is fetched once, and no filter refetches it', async ({ page, api, defectsPage }) => {
+        const stamp = `Once-${Date.now()}`;
+        await api.createDefect({ title: `Counted ${stamp}`, severity: 'major' });
+
+        // The redesign's load-bearing claim: one request on mount, everything else
+        // derived in memory. A filter-driven refetch would regress the thing the page
+        // was rebuilt for and nothing else in the suite would notice.
+        let listCalls = 0;
+        await page.route('**/api/defects', (route) => {
+            if (route.request().method() === 'GET') listCalls += 1;
+            return route.continue();
+        });
+
+        await defectsPage.open();
+        await expect(defectsPage.rows.first()).toBeVisible({ timeout: TIMEOUTS.ELEMENT });
+        // Baselined rather than asserted as exactly 1: against the Vite dev server
+        // StrictMode double-invokes the mount effect, which is a dev-only artefact. What
+        // matters — and what a regression would break — is that the number stops moving.
+        const afterMount = listCalls;
+        expect(afterMount).toBeGreaterThan(0);
+
+        await test.step('Search, tab, tile, chip and sort all derive from that one response', async () => {
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(1);
+            await defectsPage.tab('Needs triage').click();
+            await defectsPage.tile('Critical open').click();
+            await defectsPage.severityChip('major').click();
+            await defectsPage.sortSelect.selectOption('updated');
+            await expect(defectsPage.rows).toHaveCount(1);
+            expect(listCalls).toBe(afterMount);
+        });
+    });
+
+    test('deleting a defect asks first, and a failed delete leaves the row alone', async ({ page, api, defectsPage }) => {
+        const stamp = `Delete-${Date.now()}`;
+        let target;
+
+        await test.step('Seed one defect to delete and one bystander', async () => {
+            target = await api.createDefect({ title: `Doomed ${stamp}`, severity: 'minor' });
+            await api.createDefect({ title: `Bystander ${stamp}`, severity: 'minor' });
+        });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(2, { timeout: TIMEOUTS.ELEMENT });
+
+        await test.step('Cancel keeps the row — the dialog names the defect first', async () => {
+            await defectsPage.expandRow(`Doomed ${stamp}`);
+            await defectsPage.deleteButton.click();
+            await expect(defectsPage.deleteDialog).toContainText(`Doomed ${stamp}`);
+            await defectsPage.deleteCancel.click();
+            await expect(defectsPage.deleteDialog).toHaveCount(0);
+            await expect(defectsPage.rows).toHaveCount(2);
+        });
+
+        await test.step('A rejected DELETE keeps the row too — nothing is removed optimistically', async () => {
+            await page.route(`**/api/defects/${target.id}`, (route) => (
+                route.request().method() === 'DELETE'
+                    ? route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"boom"}' })
+                    : route.continue()
+            ));
+            await defectsPage.deleteButton.click();
+            await defectsPage.confirmModal();
+            await expect(defectsPage.deleteDialog).toHaveCount(0);
+            await expect(defectsPage.row(`Doomed ${stamp}`)).toHaveCount(1);
+            await page.unroute(`**/api/defects/${target.id}`);
+        });
+
+        await test.step('Confirming removes exactly that row, and the server agrees', async () => {
+            await defectsPage.deleteButton.click();
+            await defectsPage.confirmModal();
+            await expect(defectsPage.row(`Doomed ${stamp}`)).toHaveCount(0);
+            await expect(defectsPage.row(`Bystander ${stamp}`)).toHaveCount(1);
+
+            const all = await api.listDefects();
+            expect(all.find(d => d.id === target.id)).toBeUndefined();
+        });
+    });
+
+    test('?focus= on a defect that no longer exists says so instead of looking normal', async ({ api, defectsPage }) => {
+        const stamp = `Gone-${Date.now()}`;
+        const doomed = await api.createDefect({ title: `Vanishing ${stamp}`, severity: 'minor' });
+        await api.delete(`/defects/${doomed.id}`);
+
+        // utils/bugs.js bugHref makes this link load-bearing from every test case's
+        // linked-bugs panel, so a dead one has to be legible as a dead one.
+        await defectsPage.openFocused(doomed.id);
+        await expect(defectsPage.focusMissingNotice).toBeVisible({ timeout: TIMEOUTS.ELEMENT });
+        await expect(defectsPage.expandPanel).toHaveCount(0);
+    });
+
+    test('Retest builds a run from the defect\'s tests and opens it', async ({ page, api, defectsPage }) => {
+        const stamp = `Retest-${Date.now()}`;
+        let seed;
+
+        await test.step('Seed a failing result with a defect hung off it', async () => {
+            seed = await api.seedRunWithResult({ label: `Retest ${stamp}` });
+            await api.createAndLinkResultDefect(seed.run.id, seed.result.id, {
+                title: `Retestable ${stamp}`,
+                severity: 'major',
+            });
+        });
+
+        // buildRetestRun is unit-tested to death, but nothing checked that its output
+        // reaches createTestRun with the right argument order, or that the navigation
+        // happens — a run created with no test cases would have looked identical here.
+        let posted = null;
+        await page.route('**/api/runs', (route) => {
+            const req = route.request();
+            if (req.method() === 'POST') posted = req.postDataJSON();
+            return route.continue();
+        });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+        await defectsPage.expandRow(`Retestable ${stamp}`);
+        await expect(defectsPage.retestButton).toBeEnabled();
+        await defectsPage.retestButton.click();
+
+        await test.step('It lands on the new run, carrying exactly the affected test', async () => {
+            await expect(page).toHaveURL(/\/runs\/run\/[^/]+$/, { timeout: TIMEOUTS.ELEMENT });
+            expect(posted).toBeTruthy();
+            expect(posted.name).toBe(`Retest: Retestable ${stamp}`);
+            expect(posted.test_case_ids).toEqual([seed.tc.id]);
+            // POST /runs rejects a body carrying both, so the retest never sends one.
+            expect(posted.category_id ?? null).toBeNull();
+        });
+    });
+
+    test('creating a defect from a filtered queue shows the row it just made', async ({ api, defectsPage }) => {
+        const stamp = `Created-${Date.now()}`;
+        await api.createDefect({ title: `Existing ${stamp}`, severity: 'minor' });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+
+        // A new defect is unowned and open, so it lands in Needs triage — never in
+        // the Closed queue someone might be standing in. The modal used to close
+        // onto an unchanged table, which reads as a failed save and invites a
+        // duplicate; the page drops back to the unfiltered view instead.
+        await test.step('Create while filtered to Closed', async () => {
+            await defectsPage.tab('Closed').click();
+            await expect(defectsPage.rows).toHaveCount(0);
+
+            await defectsPage.newDefectButton.click();
+            await defectsPage.modalTitle.fill(`Brand new ${stamp}`);
+            await defectsPage.modalSeverity.selectOption('major');
+            await defectsPage.modalSave.click();
+        });
+
+        await test.step('The filters step aside and the new row is on screen', async () => {
+            await expect(defectsPage.modalSave).toHaveCount(0, { timeout: TIMEOUTS.ELEMENT });
+            await expect(defectsPage.row(`Brand new ${stamp}`)).toBeVisible();
+            await expect(defectsPage.tab('Closed')).toHaveAttribute('aria-pressed', 'false');
+        });
+    });
+
+    // The selection rule is "a bulk action can only ever land on rows in this queue",
+    // which every filter control upholds by dropping the selection. An edit is the one
+    // way a row leaves the queue without a filter being touched — so it has to uphold it
+    // too, or "Mark verified & close" writes to a defect that is not on screen.
+    test('editing a defect out of the queue takes it out of the selection', async ({ api, defectsPage }) => {
+        const stamp = `EditOut-${Date.now()}`;
+        const defect = await api.createDefect({ title: `Movable ${stamp}`, severity: 'major' });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+        await defectsPage.selectAll.check();
+        await expect(defectsPage.bulkBar).toContainText('1 selected');
+
+        await test.step('Rename it so it no longer matches the search it was ticked in', async () => {
+            await defectsPage.expandRow(`Movable ${stamp}`);
+            await defectsPage.openDetailButton.click();
+            await defectsPage.modalTitle.fill(`Renamed out of ${Date.now()}`);
+            await defectsPage.modalSave.click();
+            await expect(defectsPage.modalSave).toHaveCount(0, { timeout: TIMEOUTS.ELEMENT });
+        });
+
+        await test.step('The row is gone from the queue, and so is the bulk bar', async () => {
+            await expect(defectsPage.rows).toHaveCount(0);
+            await expect(defectsPage.emptyState).toBeVisible();
+            await expect(defectsPage.bulkBar).toHaveCount(0);
+        });
+
+        await test.step('The defect itself is untouched apart from the rename', async () => {
+            const stored = (await api.listDefects()).find(d => d.id === defect.id);
+            expect(stored.status).toBe('open');
+        });
+    });
+
+    test('a defect owned by a deactivated user is still editable', async ({ api, defectsPage }) => {
+        const stamp = `Deactivated-${Date.now()}`;
+        let defect;
+
+        await test.step('Seed a defect, then deactivate its owner', async () => {
+            const created = await api.post('/users', {
+                email: `leaver-${Date.now()}@example.com`,
+                display_name: `Leaver ${stamp}`,
+                password: 'changeme123',
+                role: 'member',
+            });
+            expect(created.status()).toBe(201);
+            const owner = await created.json();
+
+            defect = await api.createDefect({ title: `Orphaned ${stamp}`, severity: 'minor', assignee_id: owner.id });
+            const patched = await api.patch(`/users/${owner.id}`, { active: false });
+            expect(patched.status()).toBe(200);
+        });
+
+        // The owner is gone from /users/assignable but is kept in the picker so an
+        // unrelated save cannot silently unassign them. That guard used to make the
+        // form unusable: the payload echoed the id back, the server rejected any
+        // assignee that is not an active user, and the modal swallowed the 400 —
+        // the dialog just sat there. An untouched assignee is now simply not sent.
+        await test.step('Editing another field saves instead of failing with a swallowed 400', async () => {
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+
+            await defectsPage.expandRow(`Orphaned ${stamp}`);
+            await defectsPage.openDetailButton.click();
+            // The owner is offered, and marked so nobody picks them on purpose.
+            await expect(defectsPage.modalAssignee).toHaveValue(defect.assignee_id);
+            await expect(defectsPage.modalAssignee).toContainText('(inactive)');
+
+            await defectsPage.modalSeverity.selectOption('critical');
+            await defectsPage.modalSave.click();
+            await expect(defectsPage.modalSave).toHaveCount(0, { timeout: TIMEOUTS.ELEMENT });
+        });
+
+        await test.step('The change landed and the owner is still there', async () => {
+            const stored = (await api.listDefects()).find(d => d.id === defect.id);
+            expect(stored.severity).toBe('critical');
+            expect(stored.assignee_id).toBe(defect.assignee_id);
+        });
+    });
+
+    test('a failed bulk update explains itself and keeps the selection', async ({ page, api, defectsPage }) => {
+        const stamp = `BulkFail-${Date.now()}`;
+        await api.createDefect({ title: `Stubborn ${stamp}`, severity: 'major' });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+        await defectsPage.selectAll.check();
+        await expect(defectsPage.bulkBar).toContainText('1 selected');
+
+        await test.step('The server\'s own reason is shown, not a generic failure', async () => {
+            await page.route('**/api/defects/bulk-update', route => route.fulfill({
+                status: 400,
+                contentType: 'application/json',
+                body: '{"error":"too many ids (max 500 per request)"}',
+            }));
+            await defectsPage.bulkClose.click();
+            await expect(defectsPage.bulkError).toContainText('too many ids');
+        });
+
+        await test.step('The selection survives, so the action can just be retried', async () => {
+            await expect(defectsPage.bulkBar).toContainText('1 selected');
+            await expect(defectsPage.statusPill(`Stubborn ${stamp}`)).toHaveText('Needs triage');
+        });
+
+        await test.step('The failure does not follow the next selection around', async () => {
+            // The bar never unmounts — the page renders it always and it hides itself on
+            // an empty selection — so without retiring the message it would still be
+            // there over the next set of rows ticked, which nothing has been tried on.
+            await defectsPage.bulkClear.click();
+            await expect(defectsPage.bulkBar).toHaveCount(0);
+            await defectsPage.selectAll.check();
+            await expect(defectsPage.bulkBar).toContainText('1 selected');
+            await expect(defectsPage.bulkError).toHaveCount(0);
+        });
+
+        await test.step('Retrying against a working server applies it', async () => {
+            await page.unroute('**/api/defects/bulk-update');
+            await defectsPage.bulkClose.click();
+            await expect(defectsPage.statusPill(`Stubborn ${stamp}`)).toHaveText('Closed');
+        });
+    });
+
+    // The bulk call captures its ids at click time, so a selection that moves while the
+    // request is in flight is one the reply no longer describes: on success the page clears
+    // whatever is ticked, silently discarding rows added since, and on failure the message
+    // lands over a set nothing was ever tried on. The bar therefore locks the selection for
+    // the round-trip, and stamps each failure with the selection it was fired on so a late
+    // one cannot be shown against a different one.
+    test('a bulk apply in flight locks the selection, and a late failure cannot land on another', async ({ page, api, defectsPage }) => {
+        const stamp = `Race-${Date.now()}`;
+
+        await test.step('Seed three defects and tick them all', async () => {
+            await api.createDefect({ title: `Race one ${stamp}`, severity: 'major' });
+            await api.createDefect({ title: `Race two ${stamp}`, severity: 'major' });
+            await api.createDefect({ title: `Race three ${stamp}`, severity: 'minor' });
+
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(3, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.selectAll.check();
+            await expect(defectsPage.bulkBar).toContainText('3 selected');
+        });
+
+        // The reply is held open inside the route handler, so "in flight" is a state the
+        // test opens and closes rather than a window it has to race.
+        let release;
+        const held = new Promise(resolve => { release = resolve; });
+        await page.route('**/api/defects/bulk-update', async (route) => {
+            await held;
+            await route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: '{"error":"held while the selection moved"}',
+            });
+        });
+
+        await test.step('While it is in flight, nothing that ticks a row is live', async () => {
+            await defectsPage.bulkClose.click();
+            await expect(defectsPage.selectAll).toBeDisabled();
+            await expect(defectsPage.row(`Race three ${stamp}`).getByTestId('defects-row-select')).toBeDisabled();
+            // Clear is the one bar control that was never given the busy flag, and it is
+            // the one that empties the selection outright.
+            await expect(defectsPage.bulkClear).toBeDisabled();
+            await expect(defectsPage.bulkClose).toBeDisabled();
+
+            // Forced past the actionability check, because refusing the click IS the fix:
+            // a disabled checkbox takes no input, so the count cannot move.
+            await defectsPage.row(`Race three ${stamp}`).getByTestId('defects-row-select')
+                .click({ force: true });
+            await expect(defectsPage.bulkBar).toContainText('3 selected');
+        });
+
+        await test.step('Released, the failure lands on exactly the selection it was fired on', async () => {
+            release();
+            await expect(defectsPage.bulkError).toContainText('held while the selection moved', {
+                timeout: TIMEOUTS.ELEMENT,
+            });
+            await expect(defectsPage.bulkBar).toContainText('3 selected');
+            await expect(defectsPage.selectAll).toBeEnabled();
+            await expect(defectsPage.bulkClear).toBeEnabled();
+        });
+
+        await page.unroute('**/api/defects/bulk-update');
+
+        // No filter control is locked — every one of them drops the selection instead, so
+        // this is the one way left for a reply to come back to a selection that is gone.
+        // It has to be retired rather than shown against whatever is ticked by then.
+        await test.step('A filter change mid-flight retires that apply\'s failure for good', async () => {
+            let releaseSecond;
+            const heldSecond = new Promise(resolve => { releaseSecond = resolve; });
+            await page.route('**/api/defects/bulk-update', async (route) => {
+                await heldSecond;
+                await route.fulfill({
+                    status: 500,
+                    contentType: 'application/json',
+                    body: '{"error":"reply to a selection that is gone"}',
+                });
+            });
+
+            await defectsPage.bulkClose.click();
+            await defectsPage.sortSelect.selectOption('updated');
+            await expect(defectsPage.bulkBar).toHaveCount(0);
+
+            const landed = page.waitForResponse(r => r.url().includes('/api/defects/bulk-update'));
+            releaseSecond();
+            await landed;
+
+            // And re-ticking byte-for-byte the same three rows starts clean: the failure
+            // belonged to that one visit to the selection, not to the id set.
+            await defectsPage.selectAll.check();
+            await expect(defectsPage.bulkBar).toContainText('3 selected');
+            await expect(defectsPage.bulkError).toHaveCount(0);
+            await page.unroute('**/api/defects/bulk-update');
+        });
+
+        await test.step('Nothing was written — both applies failed', async () => {
+            const mine = (await api.listDefects()).filter(d => d.title.includes(stamp));
+            expect(mine).toHaveLength(3);
+            expect(mine.every(d => d.status === 'open')).toBe(true);
+        });
+    });
+
+    test('bulk assign gives a selection an owner, and unassign sends it back to triage', async ({ page, api, defectsPage }) => {
+        const stamp = `Assign-${Date.now()}`;
+        let owner;
+
+        await test.step('Seed two unowned defects', async () => {
+            const { users } = await (await api.get('/users/assignable')).json();
+            owner = users[0];
+            expect(owner?.id).toBeTruthy();
+            await api.createDefect({ title: `Orphan one ${stamp}`, severity: 'major' });
+            await api.createDefect({ title: `Orphan two ${stamp}`, severity: 'minor' });
+        });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(2, { timeout: TIMEOUTS.ELEMENT });
+        await defectsPage.selectAll.check();
+
+        // A failed load used to be terminal: the catch pinned the list to [], and an
+        // empty list is indistinguishable from a loaded one to the "have they been
+        // fetched yet" guard — so one flaky response left the menu reading "No
+        // assignable users." for the life of the page, with bulk assign dead until a
+        // reload. It stays unloaded and retryable instead, like a row's affected tests.
+        await test.step('A failed user load offers a Retry, not a permanent "no users"', async () => {
+            await page.route('**/api/users/assignable', route => route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: '{"error":"users are unavailable"}',
+            }));
+            await defectsPage.bulkAssign.click();
+            await expect(defectsPage.bulkUsersRetry).toBeVisible({ timeout: TIMEOUTS.ELEMENT });
+
+            await page.unroute('**/api/users/assignable');
+            await defectsPage.bulkUsersRetry.click();
+            await expect(defectsPage.bulkAssignee(owner.display_name || owner.email)).toBeVisible({
+                timeout: TIMEOUTS.ELEMENT,
+            });
+            await page.keyboard.press('Escape');
+        });
+
+        await test.step('The user list loads when the menu is first opened', async () => {
+            await defectsPage.bulkAssign.click();
+            await expect(defectsPage.bulkAssignee(owner.display_name || owner.email)).toBeVisible({
+                timeout: TIMEOUTS.ELEMENT,
+            });
+        });
+
+        // Assignment IS the triage action here, so both pills must move.
+        await test.step('Assigning moves both rows out of Needs triage', async () => {
+            await defectsPage.bulkAssignee(owner.display_name || owner.email).click();
+            await expect(defectsPage.statusPill(`Orphan one ${stamp}`)).toHaveText('In progress');
+            await expect(defectsPage.statusPill(`Orphan two ${stamp}`)).toHaveText('In progress');
+        });
+
+        await test.step('Set severity applies across the whole selection too', async () => {
+            await defectsPage.selectAll.check();
+            await defectsPage.bulkSeverity.click();
+            await defectsPage.page.locator('.defects-menu').getByRole('button', { name: 'Trivial' }).click();
+            await expect(defectsPage.row(`Orphan one ${stamp}`).locator('.defects-sev-pill')).toHaveText('trivial');
+            await expect(defectsPage.row(`Orphan two ${stamp}`).locator('.defects-sev-pill')).toHaveText('trivial');
+        });
+
+        await test.step('Unassigning sends them straight back', async () => {
+            await defectsPage.selectAll.check();
+            await defectsPage.bulkAssign.click();
+            await defectsPage.bulkUnassign.click();
+            await expect(defectsPage.statusPill(`Orphan one ${stamp}`)).toHaveText('Needs triage');
+            await expect(defectsPage.statusPill(`Orphan two ${stamp}`)).toHaveText('Needs triage');
+        });
+
+        await test.step('The server agrees — the owner really was cleared', async () => {
+            const all = await api.listDefects();
+            const mine = all.filter(d => d.title.includes(stamp));
+            expect(mine).toHaveLength(2);
+            expect(mine.every(d => !d.assignee_id)).toBe(true);
+        });
+    });
+
     test('selecting rows reveals the bulk bar and "Mark verified & close" closes them', async ({ page, api, defectsPage }) => {
         const stamp = `Bulk-${Date.now()}`;
         let first, second;
@@ -105,6 +668,141 @@ test.describe('Defects register — triage queue', () => {
         });
     });
 
+    // Geometry, deliberately — not visibility. toBeVisible() ignores where in the
+    // viewport an element sits and .click() auto-scrolls to it, so an element parked
+    // under the floating bar or below the fold passes every ordinary assertion. Both
+    // regressions this pins did exactly that: the bar covered the last row of the
+    // queue with nowhere left to scroll, and the bulk menus opened downward off a bar
+    // pinned to the bottom of the page.
+    test('the floating bulk bar never covers the queue, and its menus open on screen', async ({ page, api, defectsPage }) => {
+        const stamp = `Geometry-${Date.now()}`;
+        const SEEDS = 14;
+
+        // A short viewport plus more rows than fit: the last row can only land under
+        // the bar when the queue has something to scroll in the first place.
+        await page.setViewportSize({ width: 1280, height: 620 });
+
+        await test.step(`Seed ${SEEDS} defects, enough to overflow the queue`, async () => {
+            for (let i = 0; i < SEEDS; i++) {
+                await api.createDefect({ title: `Row ${String(i).padStart(2, '0')} ${stamp}`, severity: 'major' });
+            }
+        });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(SEEDS, { timeout: TIMEOUTS.ELEMENT });
+        await defectsPage.selectAll.check();
+        await expect(defectsPage.bulkBar).toContainText(`${SEEDS} selected`);
+
+        await test.step('Scrolled all the way down, the last row is still clear of the bar', async () => {
+            const geo = await page.evaluate(() => {
+                const wrap = document.querySelector('.defects-table-wrap');
+                wrap.scrollTop = wrap.scrollHeight;
+                const rows = [...document.querySelectorAll('[data-testid="defects-row"]')];
+                const last = rows[rows.length - 1];
+                const bar = document.querySelector('.defects-bulkbar').getBoundingClientRect();
+                const box = last.querySelector('[data-testid="defects-row-select"]').getBoundingClientRect();
+                const onTop = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+                return {
+                    scrollable: Math.round(wrap.scrollHeight - wrap.clientHeight),
+                    clearance: Math.round(bar.top - last.getBoundingClientRect().bottom),
+                    checkboxReachable: onTop ? onTop.getAttribute('data-testid') === 'defects-row-select' : false,
+                };
+            });
+            // Without this the rest is vacuous: with nothing to scroll, the last row
+            // sits nowhere near the bar and would clear it by accident.
+            expect(geo.scrollable).toBeGreaterThan(0);
+            expect(geo.clearance).toBeGreaterThanOrEqual(0);
+            expect(geo.checkboxReachable).toBe(true);
+        });
+
+        await test.step('The Assign menu opens upward, entirely inside the viewport', async () => {
+            await defectsPage.bulkAssign.click();
+            await expect(defectsPage.bulkUnassign).toBeVisible({ timeout: TIMEOUTS.ELEMENT });
+
+            const viewport = page.viewportSize();
+            const menu = await page.locator('.defects-menu').boundingBox();
+            expect(menu.y).toBeGreaterThanOrEqual(0);
+            expect(menu.y + menu.height).toBeLessThanOrEqual(viewport.height);
+
+            // Unassign and its warning are the LAST things in the menu, so a menu
+            // that opens downward loses exactly the two the design calls for.
+            const unassign = await defectsPage.bulkUnassign.boundingBox();
+            expect(unassign.y + unassign.height).toBeLessThanOrEqual(viewport.height);
+            const note = await page.locator('.defects-menu-note').last().boundingBox();
+            expect(note.y + note.height).toBeLessThanOrEqual(viewport.height);
+        });
+    });
+
+    // The companion to the test above, at the width where the bar STOPS being one row.
+    // The wide case is the easy one: a 44px bar clears the queue under any spacer big
+    // enough to notice. The bar wraps, though — narrow the viewport and put its inline
+    // failure message on it and it becomes three rows and ~130px, taller than any
+    // constant that was ever measured against the unwrapped bar. That is why the
+    // scroller's clearance is driven by the bar's MEASURED height (BulkBar's
+    // ResizeObserver → --defects-bulkbar-h): pinned at 84px, this exact case leaves the
+    // last row 32px BEHIND the bar with no scroll range left to reach it.
+    test('the bulk bar still clears the queue once it wraps at a narrow width', async ({ page, api, defectsPage }) => {
+        const stamp = `Wrapped-${Date.now()}`;
+        const SEEDS = 10;
+
+        // 680px is inside the page's declared support range (the stylesheet carries a
+        // max-width:640px block), and it is where the controls stop fitting on one line.
+        await page.setViewportSize({ width: 680, height: 900 });
+
+        await test.step(`Seed ${SEEDS} defects and tick them all`, async () => {
+            for (let i = 0; i < SEEDS; i++) {
+                await api.createDefect({ title: `Row ${String(i).padStart(2, '0')} ${stamp}`, severity: 'major' });
+            }
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(SEEDS, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.selectAll.check();
+        });
+
+        await test.step('A failed apply puts the inline error on the bar, which wraps it', async () => {
+            await page.route('**/api/defects/bulk-update', route => route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: JSON.stringify({ error: 'bulk update is temporarily unavailable' }),
+            }));
+            await defectsPage.bulkClose.click();
+            await expect(defectsPage.bulkError).toBeVisible({ timeout: TIMEOUTS.ELEMENT });
+
+            // The clearance is measured, so wait for the measurement rather than for a
+            // frame count: the spacer must end up TALLER than the bar it is clearing.
+            await expect.poll(async () => page.evaluate(() => {
+                const bar = document.querySelector('.defects-bulkbar').getBoundingClientRect().height;
+                const spacer = document.querySelector('.defects-bulk-spacer').getBoundingClientRect().height;
+                return Math.round(spacer - bar);
+            }), { timeout: TIMEOUTS.ELEMENT }).toBeGreaterThan(0);
+        });
+
+        await test.step('Scrolled all the way down, the last row is still clear of the wrapped bar', async () => {
+            const geo = await page.evaluate(() => {
+                const wrap = document.querySelector('.defects-table-wrap');
+                wrap.scrollTop = wrap.scrollHeight;
+                const rows = [...document.querySelectorAll('[data-testid="defects-row"]')];
+                const last = rows[rows.length - 1];
+                const bar = document.querySelector('.defects-bulkbar').getBoundingClientRect();
+                const box = last.querySelector('[data-testid="defects-row-select"]').getBoundingClientRect();
+                const onTop = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+                return {
+                    barHeight: Math.round(bar.height),
+                    scrollable: Math.round(wrap.scrollHeight - wrap.clientHeight),
+                    clearance: Math.round(bar.top - last.getBoundingClientRect().bottom),
+                    checkboxReachable: onTop ? onTop.getAttribute('data-testid') === 'defects-row-select' : false,
+                };
+            });
+            // Without this the case is not the one being pinned: a bar that fits on one
+            // line (44px at 1280px) is already covered by the test above.
+            expect(geo.barHeight).toBeGreaterThan(60);
+            expect(geo.scrollable).toBeGreaterThan(0);
+            expect(geo.clearance).toBeGreaterThanOrEqual(0);
+            expect(geo.checkboxReachable).toBe(true);
+        });
+    });
+
     test('expanding a row shows its affected tests and the run each last failed in', async ({ api, defectsPage }) => {
         const stamp = `Expand-${Date.now()}`;
         let seed;
@@ -140,6 +838,20 @@ test.describe('Defects register — triage queue', () => {
             await expect(defectsPage.retestButton).toBeEnabled();
         });
 
+        // Measured, not eyeballed: the panel's padding rule is a bare class, and
+        // `.defects-table td { padding: 0 10px }` is the more specific selector — it won
+        // outright, and the panel shipped with the headings flush against the border of
+        // the row above and the last line of the description on its bottom edge. Nothing
+        // in a build, a lint or the rest of this suite noticed.
+        await test.step('The panel is padded off the rows it sits between', async () => {
+            const pad = await defectsPage.expandPanel.locator('.defects-expand-cell').evaluate((cell) => {
+                const cs = getComputedStyle(cell);
+                return { top: parseFloat(cs.paddingTop), bottom: parseFloat(cs.paddingBottom) };
+            });
+            expect(pad.top).toBeGreaterThan(0);
+            expect(pad.bottom).toBeGreaterThan(0);
+        });
+
         await test.step('A defect with no linked tests cannot be retested', async () => {
             await api.createDefect({ title: `Unlinked ${stamp}`, severity: 'minor' });
             await defectsPage.open();
@@ -150,6 +862,60 @@ test.describe('Defects register — triage queue', () => {
             await expect(defectsPage.expandPanel).toContainText('No linked tests.');
             await expect(defectsPage.retestButton).toBeDisabled();
         });
+    });
+
+    // The expand's affected-tests load is left retryable on failure (never pinned to an
+    // empty list), so Retry has to look like it did something — otherwise the only
+    // feedback a user gets from pressing it is a second failure that looks identical to
+    // the first, or, if it succeeds, a panel that changes for no visible reason.
+    test('Retry on the affected-tests panel visibly restarts the load', async ({ page, api, defectsPage }) => {
+        const stamp = `Affected-${Date.now()}`;
+        let seed;
+
+        await test.step('Seed a failed result with a defect on it, and break the tests call', async () => {
+            seed = await api.seedRunWithResult({ label: `Affected ${stamp}` });
+            await api.createAndLinkResultDefect(seed.run.id, seed.result.id, {
+                title: `Flaky load ${stamp}`,
+                severity: 'major',
+            });
+            await page.route('**/api/defects/*/tests', route => route.fulfill({
+                status: 500,
+                contentType: 'application/json',
+                body: '{"error":"tests are unavailable"}',
+            }));
+        });
+
+        await defectsPage.open();
+        await defectsPage.search(stamp);
+        await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+
+        await test.step('The failure offers a Retry rather than an empty panel', async () => {
+            await defectsPage.expandRow(`Flaky load ${stamp}`);
+            await expect(defectsPage.affectedRetry).toBeVisible({ timeout: TIMEOUTS.ELEMENT });
+            await expect(defectsPage.expandPanel).not.toContainText('No linked tests.');
+        });
+
+        // Held open, so "while the retry is in flight" is a state the test can assert in
+        // rather than a frame it has to catch.
+        let release;
+        const held = new Promise(resolve => { release = resolve; });
+        await page.unroute('**/api/defects/*/tests');
+        await page.route('**/api/defects/*/tests', async (route) => {
+            await held;
+            await route.continue();
+        });
+
+        await test.step('Pressing it puts the panel back to Loading…, then to the test', async () => {
+            await defectsPage.affectedRetry.click();
+            await expect(defectsPage.expandPanel).toContainText('Loading…');
+            await expect(defectsPage.affectedRetry).toHaveCount(0);
+
+            release();
+            await expect(defectsPage.affectedTest(seed.tc.name)).toBeVisible({ timeout: TIMEOUTS.ELEMENT });
+            await expect(defectsPage.retestButton).toBeEnabled();
+        });
+
+        await page.unroute('**/api/defects/*/tests');
     });
 
     test('changing a filter clears an existing selection', async ({ api, defectsPage }) => {

@@ -259,7 +259,11 @@ definitions:
         description: nullable, app-validated ref to users.id
         type: string
       assignee_name:
-        description: Assignee display name (not persisted, populated by ListDefects/GetDefect)
+        description: |-
+          Assignee display name (display name, else email; resolves even for a deactivated
+          user). Not persisted. Populated on the defect endpoints — list, get, create,
+          update and bulk-update. The run/test-case DEFECT-LINK listings do not resolve it,
+          so it is empty there; read the defect itself if the owner's name is needed.
         type: string
       created_at:
         type: string
@@ -505,7 +509,11 @@ definitions:
         description: nullable, app-validated ref to users.id
         type: string
       assignee_name:
-        description: Assignee display name (not persisted, populated by ListDefects/GetDefect)
+        description: |-
+          Assignee display name (display name, else email; resolves even for a deactivated
+          user). Not persisted. Populated on the defect endpoints — list, get, create,
+          update and bulk-update. The run/test-case DEFECT-LINK listings do not resolve it,
+          so it is empty there; read the defect itself if the owner's name is needed.
         type: string
       created_at:
         type: string
@@ -716,8 +724,12 @@ definitions:
         type: integer
       reverification_flagged:
         description: |-
-          008-jira-integration: set true when all linked defects reach statusCategory=="done".
-          Persists until manually dismissed via DELETE /api/tests/{id}/reverification-flag.
+          Set true when the test case has at least one linked defect and every one of them is
+          fixed-or-closed, i.e. the test is ready to be retested. "fixed" counts as resolved
+          alongside "closed" so the signal fires when QA wants it — before the defect is
+          closed, not after. Recomputed by store.recomputeReverification on every defect
+          status change, link and unlink; persists until manually dismissed via
+          DELETE /api/tests/{id}/reverification-flag.
         type: boolean
       steps:
         items:
@@ -2584,6 +2596,8 @@ paths:
               error:
                 type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List defects
       tags:
       - defects
@@ -2619,6 +2633,8 @@ paths:
               error:
                 type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Create a defect
       tags:
       - defects
@@ -2641,6 +2657,8 @@ paths:
               error:
                 type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Delete a defect
       tags:
       - defects
@@ -2688,13 +2706,20 @@ paths:
               error:
                 type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: Update a defect
       tags:
       - defects
   /defects/{id}/tests:
     get:
       description: Returns the distinct test cases linked to the defect (directly
-        or via a run result), ordered by name.
+        or via a run result), ordered by name. Each carries the run the TEST CASE
+        last failed in — the most recent FAIL/ERROR result for that test case, deliberately
+        not the result the defect happened to be filed against, since a test-case-scoped
+        link carries no result at all. `last_run_id` / `last_run_name` / `last_result_status`
+        are empty strings when the test case has no failing result; the test case
+        is still listed.
       parameters:
       - description: Defect ID
         in: path
@@ -2717,6 +2742,8 @@ paths:
               error:
                 type: string
             type: object
+      security:
+      - BearerAuth: []
       summary: List a defect's affected test cases
       tags:
       - defects

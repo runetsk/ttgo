@@ -73,9 +73,11 @@ Without `make setup` (or an explicit `-tags sqlite_fts5`), bare `go` commands st
 **Frontend**
 ```bash
 cd frontend
-npm run dev    # dev server
-npm run build  # production build
-npm run lint   # ESLint
+npm run dev       # dev server
+npm run build     # production build
+npm run lint      # ESLint
+npm run test:unit # node --test over e2e/reporters/*.test.js and src/**/*.test.js
+npm run test:e2e  # Playwright; needs a running stack (see e2e/config.js)
 ```
 
 ## Code Style
@@ -83,6 +85,14 @@ npm run lint   # ESLint
 - Go: standard conventions (`gofmt`, idiomatic error handling)
 - JavaScript/JSX: ESLint enforced; functional React components only
 - No new Go modules or npm packages without a clear need
+
+## Testing seams
+
+There is **no component-render harness** in the frontend (no jsdom, no Testing Library) —
+`npm run test:unit` is bare `node --test`. So page logic that needs covering goes in a
+DOM-free `src/utils/*.js` module with a sibling `*.test.js`, and the `.jsx` file only
+places what the helper derived. Anything that genuinely needs a rendered DOM is covered
+by Playwright instead.
 
 ## Domain Conventions
 

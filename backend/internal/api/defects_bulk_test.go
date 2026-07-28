@@ -138,6 +138,25 @@ func TestBulkUpdateDefects_Handler(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.Code)
 		assert.Equal(t, "[]", strings.TrimSpace(w.Body.String()))
 	})
+
+	// Ids but no fields is a documented READ-BACK, deliberately different from
+	// /runs/{id}/results/bulk-update, which 400s the same shape. It is load-bearing:
+	// updated_at is what the register reads as its staleness signal, so a write with
+	// nothing to write must not bump it.
+	t.Run("ids with no fields reads back without writing", func(t *testing.T) {
+		d := newDefect(t, s, srv, "Untouched")
+
+		w := doJSON(t, s, srv, http.MethodPost, bulkPath, `{"ids":["`+d.ID+`"]}`)
+		require.Equal(t, http.StatusOK, w.Code, "body: %s", w.Body.String())
+
+		rows := decodeDefects(t, w)
+		require.Len(t, rows, 1)
+		assert.Equal(t, d.ID, rows[0].ID)
+		assert.Equal(t, d.Status, rows[0].Status)
+		assert.Equal(t, d.Severity, rows[0].Severity)
+		assert.True(t, rows[0].UpdatedAt.Equal(d.UpdatedAt),
+			"a no-op read-back must not bump updated_at (%v -> %v)", d.UpdatedAt, rows[0].UpdatedAt)
+	})
 }
 
 func TestBulkUpdateDefects_Validation(t *testing.T) {

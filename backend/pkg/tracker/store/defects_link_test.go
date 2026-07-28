@@ -203,6 +203,13 @@ func TestRunResultDeletionReverification(t *testing.T) {
 
 func reverFlag(t *testing.T, s *Store, tcID string) bool {
 	t.Helper()
+	// The row's existence is asserted first: Scan into a bool leaves it false and
+	// returns no error when nothing matches, so an id that has drifted (a renamed
+	// seed test case, say) would silently turn every assert.False into a no-op.
+	var n int64
+	require.NoError(t, s.db.Raw(`SELECT COUNT(*) FROM test_cases WHERE id = ?`, tcID).Scan(&n).Error)
+	require.Equal(t, int64(1), n, "no test case %q — the flag assertion would pass vacuously", tcID)
+
 	var flagged bool
 	require.NoError(t, s.db.Raw(`SELECT reverification_flagged FROM test_cases WHERE id = ?`, tcID).Scan(&flagged).Error)
 	return flagged

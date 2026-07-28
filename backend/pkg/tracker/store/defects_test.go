@@ -746,6 +746,8 @@ func TestDefectAssigneeNamePopulation(t *testing.T) {
 		for _, d := range list {
 			byID[d.ID] = d
 		}
+		// The four seeded above, and no assertion on the total: a sibling subtest
+		// creating a fifth defect in this shared store must not fail this one.
 		require.Len(t, byID, 4)
 		assert.Equal(t, "Active Ann", byID[assigned.ID].AssigneeName)
 		assert.Equal(t, "Inactive Ivan", byID[deactivated.ID].AssigneeName)
@@ -753,12 +755,27 @@ func TestDefectAssigneeNamePopulation(t *testing.T) {
 		assert.Empty(t, byID[unassigned.ID].AssigneeName)
 	})
 
+	// Its own store: this one WRITES, and the subtest above hard-asserts the row count
+	// of the store it shares with its siblings.
 	t.Run("a dangling assignee id yields an empty name rather than an error", func(t *testing.T) {
+		own := newTestStore(t)
 		orphan := &models.Defect{Title: "eee ghost owner", AssigneeID: strPtr("does-not-exist")}
-		require.NoError(t, s.CreateDefect(orphan))
-		got, err := s.GetDefect(orphan.ID)
+		require.NoError(t, own.CreateDefect(orphan))
+		got, err := own.GetDefect(orphan.ID)
 		require.NoError(t, err)
 		require.NotNil(t, got.AssigneeID)
 		assert.Empty(t, got.AssigneeName)
+	})
+
+	// The gap that let POST /defects ship an empty assignee_name: only the read paths
+	// resolved it, so a defect created with an owner came back with assignee_id set and
+	// assignee_name blank — which the register renders as "Unknown user", the label that
+	// is supposed to mean the account is gone.
+	t.Run("CreateDefect resolves the name on the row it hands back", func(t *testing.T) {
+		own := newTestStore(t)
+		owner := newDefectUser(t, own, "fresh@example.com", "Fresh Owner", true)
+		d := &models.Defect{Title: "created with an owner", AssigneeID: &owner.ID}
+		require.NoError(t, own.CreateDefect(d))
+		assert.Equal(t, "Fresh Owner", d.AssigneeName)
 	})
 }

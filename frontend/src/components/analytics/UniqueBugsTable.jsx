@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { relativeTime } from './utils';
+import { bugStatusConfig, countOpen } from '../../utils/bugs';
 
 const SEVERITY_CONFIG = {
     critical: { color: '#ef4444', bg: 'rgba(239,68,68,0.08)' },
@@ -8,16 +9,10 @@ const SEVERITY_CONFIG = {
     trivial:  { color: '#6b7280', bg: 'rgba(107,114,128,0.08)' },
 };
 
-// `fixed` needs its own entry: without it the `|| STATUS_CONFIG.open` fallback
-// below labels a fixed defect "Open", which is a lie the user can act on.
-const STATUS_CONFIG = {
-    closed: { label: 'Closed', color: '#22c55e', icon: '●' },
-    fixed:  { label: 'Fixed',  color: '#6366f1', icon: '◐' },
-    open:   { label: 'Open',   color: '#f97316', icon: '○' },
-};
-
+// The status table lives in utils/bugs.js, where it is unit-tested beside
+// activeBugs — the two have to agree that `fixed` is outstanding work.
 function StatusBadge({ status }) {
-    const cfg = STATUS_CONFIG[status] || STATUS_CONFIG.open;
+    const cfg = bugStatusConfig(status);
     return (
         <span className="analytics-rate-badge" style={{
             backgroundColor: cfg.color + '18',
@@ -106,8 +101,8 @@ export default function UniqueBugsTable({ data }) {
 
     // Summary stats. "Open" is everything not closed, so `fixed` (awaiting
     // retest) counts as outstanding work — matching the backend counters.
-    const totalClosed = bugs.filter(b => b.status === 'closed').length;
-    const totalOpen   = bugs.length - totalClosed;
+    const totalOpen   = countOpen(bugs);
+    const totalClosed = bugs.length - totalOpen;
 
     return (
         <div>

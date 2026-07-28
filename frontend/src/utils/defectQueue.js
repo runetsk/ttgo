@@ -43,16 +43,49 @@ export const DEFECT_STATUS_OPTIONS = [
 // `countKey` names a queueCounts() field. `tone` is set on the one tile that
 // means "act now"; the rest are neutral surfaces.
 //
-// The Stale tile carries `pressable: false`: filterDefects has no staleness
-// dimension (age and neglect are row-level facts, not filter axes), so all the
-// tile can do is clear the filters and sort worst-first — a preset identical to
-// the neutral view, with no state for an aria-pressed to honestly reflect.
+// Every preset lands on EXACTLY the rows its count describes — that invariant is
+// asserted per tile in defectQueue.test.js. It is why filterDefects carries the
+// `openOnly` and `stale` dimensions: "critical open" counts criticals that are
+// not closed and "stale" counts neglect, so without those two axes those tiles
+// would open a wider view than the number on their face.
 export const TRIAGE_TILES = [
     { key: 'triage', label: 'Needs triage', countKey: 'needsTriage', tone: 'alert', filters: { status: 'triage', severities: [] } },
-    { key: 'critical', label: 'Critical open', countKey: 'criticalOpen', filters: { status: 'all', severities: ['critical'] } },
-    { key: 'stale', label: 'Stale · 7d+', countKey: 'stale', pressable: false, filters: { status: 'all', severities: [], sort: 'priority' } },
+    { key: 'critical', label: 'Critical open', countKey: 'criticalOpen', filters: { status: 'all', severities: ['critical'], openOnly: true } },
+    { key: 'stale', label: 'Stale · 7d+', countKey: 'stale', filters: { status: 'all', severities: [], stale: true, sort: 'priority' } },
     { key: 'fixed', label: 'Fixed, awaiting retest', countKey: 'fixed', filters: { status: 'fixed', severities: [] } },
 ];
+
+// Hint text under each tile's count. Only "Critical open" is dynamic: it reports
+// how much work the criticals are blocking, which is the reason to look at them
+// first. Lives here rather than in TriageStrip.jsx so it is testable — this repo
+// has no component-render harness.
+const TILE_HINTS = {
+    triage: 'unassigned · no owner yet',
+    stale: 'no update in 7 days',
+    fixed: 'ready to verify',
+};
+
+export function tileHint(tile, counts) {
+    if (!tile) return '';
+    if (tile.key !== 'critical') return TILE_HINTS[tile.key] || '';
+    const blocked = (counts && counts.blockingTests) || 0;
+    return `blocking ${blocked} test${blocked === 1 ? '' : 's'}`;
+}
+
+// tilePressed answers the aria-pressed a tile renders: true when the filters it
+// sets are exactly the ones in force. Every dimension a preset can carry is
+// compared, so a tile can never read as pressed while the table shows something
+// wider than the tile's own count.
+export function tilePressed(tile, view) {
+    if (!tile) return false;
+    const want = tile.filters;
+    const state = view || {};
+    if ((want.status || 'all') !== (state.status || 'all')) return false;
+    if (Boolean(want.stale) !== Boolean(state.stale)) return false;
+    if (Boolean(want.openOnly) !== Boolean(state.openOnly)) return false;
+    const have = state.severities || [];
+    return want.severities.length === have.length && want.severities.every(sev => have.includes(sev));
+}
 
 // A defect nobody has touched in this many days is stale. Inclusive: exactly 7
 // days counts, which is what the "Stale · 7d+" tile promises.
@@ -151,19 +184,33 @@ export function ageLabel(defect, now) {
     return `${Math.round(days / 30)} mo`;
 }
 
-// filterDefects applies the three filter dimensions the page owns. `status` is a
-// derived status (or 'all'), `severities` is a multi-select where empty means all,
-// and `query` matches the title or the external key — the two things a defect is
+// filterDefects applies the filter dimensions the page owns. `status` is a derived
+// status (or 'all'), `severities` is a multi-select where empty means all, and
+// `query` matches the title or the external key — the two things a defect is
 // searched by in practice.
+//
+// `openOnly` and `stale` are the two the filter bar has no control for: they exist
+// because the triage tiles count "critical and not closed" and "nothing has
+// happened here in a week", and a tile that opened a wider view than its own count
+// would be lying. Only a tile sets them, and touching a tab or a chip clears them
+// again (DefectsPage.afterFilterChange), so they can never linger invisibly.
+// `now` is threaded through for `stale`, so tests can pin the clock the same way
+// queueCounts lets them.
 export function filterDefects(rows, options) {
     const opts = options || {};
     const status = opts.status || 'all';
     const severities = opts.severities || [];
     const query = String(opts.query || '').trim().toLowerCase();
+    const openOnly = opts.openOnly === true;
+    const staleOnly = opts.stale === true;
+    const nowMs = toMillis(opts.now);
 
     return (rows || []).filter(defect => {
         if (!defect) return false;
-        if (status !== 'all' && deriveStatus(defect) !== status) return false;
+        const derived = deriveStatus(defect);
+        if (status !== 'all' && derived !== status) return false;
+        if (openOnly && derived === 'closed') return false;
+        if (staleOnly && !isStale(defect, nowMs)) return false;
         if (severities.length > 0 && !severities.includes(defect.severity)) return false;
         if (!query) return true;
         return String(defect.title || '').toLowerCase().includes(query)

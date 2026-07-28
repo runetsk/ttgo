@@ -31,10 +31,6 @@ export class DefectsPage extends BasePage {
         await this.searchInput.fill(text);
     }
 
-    get titleMeta() {
-        return this.page.locator('.defects-title-meta');
-    }
-
     get newDefectButton() {
         return this.page.getByTestId('defects-new');
     }
@@ -125,6 +121,21 @@ export class DefectsPage extends BasePage {
         return this.page.getByTestId('defects-delete');
     }
 
+    // Delete goes through components/Modal (BasePage's modalConfirm), not
+    // window.confirm — the point of the change, and the reason it is reachable here.
+    get deleteDialog() {
+        return this.page.locator('.modal-content').filter({ hasText: 'Delete Defect' });
+    }
+
+    get deleteCancel() {
+        return this.deleteDialog.getByRole('button', { name: 'Cancel' });
+    }
+
+    // "Couldn't load the affected tests." → Retry, inside the expand panel.
+    get affectedRetry() {
+        return this.page.getByTestId('defects-affected-retry');
+    }
+
     // ── Bulk bar ──
     // Renders only while at least one row is ticked, so assert on it after
     // selecting rather than before.
@@ -150,6 +161,49 @@ export class DefectsPage extends BasePage {
 
     get bulkClear() {
         return this.page.getByTestId('defects-bulk-clear');
+    }
+
+    // The inline failure notice; role=alert so it is announced, not just coloured.
+    get bulkError() {
+        return this.bulkBar.getByRole('alert');
+    }
+
+    // Shown in the Assign… menu when the user list could not be loaded. The load is
+    // retryable on purpose: a failure that pinned an empty list would read as "nobody
+    // can be assigned" and leave bulk assign dead until the page was reloaded.
+    get bulkUsersRetry() {
+        return this.page.getByTestId('defects-bulk-users-retry');
+    }
+
+    // A user row inside the open Assign… menu, by display name or email.
+    bulkAssignee(name) {
+        return this.page.locator('.defects-menu').getByRole('button', { name });
+    }
+
+    // ── Create/edit modal (components/DefectModal), reached from "+ New defect"
+    //    and from a row expand's "Open detail" ──
+    // The title input has no testid; it is the modal's only autofocused text box,
+    // so its required-field label is the stable handle.
+    get modalTitle() {
+        return this.page.locator('.glass-panel input.modern-input').first();
+    }
+
+    get modalSeverity() {
+        return this.page.getByTestId('defect-severity');
+    }
+
+    get modalAssignee() {
+        return this.page.getByTestId('defect-assignee');
+    }
+
+    get modalSave() {
+        return this.page.getByTestId('defect-save');
+    }
+
+    // ── Notices ──
+    // Shown when ?focus= names a defect that no longer exists.
+    get focusMissingNotice() {
+        return this.page.getByTestId('defects-focus-missing');
     }
 
     // ── Empty state ──

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { defects as defectsApi } from '../../api';
 import {
@@ -30,10 +30,19 @@ function formatDate(iso) {
     return Number.isNaN(parsed.getTime()) ? 'an unknown date' : parsed.toLocaleDateString();
 }
 
-export default function DefectRow({
+// ExecutionStatus is stored upper-case ("FAIL" / "ERROR"), which reads as shouting
+// in a sentence — the rest of the page lower-cases severity and status the same way.
+function resultWord(status) {
+    return status ? String(status).toLowerCase() : 'failed';
+}
+
+function DefectRow({
     defect,
     now,
     selected = false,
+    // True while a bulk apply is in flight: that call captured its ids at click time,
+    // so the selection it is writing to must not move under it.
+    selectionLocked = false,
     expanded = false,
     focused = false,
     retestError = '',
@@ -45,17 +54,40 @@ export default function DefectRow({
 }) {
     const [affected, setAffected] = useState(null); // null until the expand has loaded them
     const [affectedFailed, setAffectedFailed] = useState(false);
+    // The in-flight guard is a ref, not `affected`: `affected` stays null for the
+    // whole request, so it could never have stopped a collapse-and-re-expand from
+    // firing a second GET the way the old comment here claimed.
+    const inFlight = useRef(false);
 
-    // Fires once per row: the guard holds while the request is in flight, and the
-    // deps only change when the row is first expanded.
-    useEffect(() => {
-        if (!expanded || affected !== null) return undefined;
-        let cancelled = false;
+    const loadAffected = useCallback(() => {
+        if (inFlight.current) return;
+        inFlight.current = true;
         defectsApi.affectedTests(defect.id)
-            .then(rows => { if (!cancelled) setAffected(rows || []); })
-            .catch(() => { if (!cancelled) { setAffected([]); setAffectedFailed(true); } });
-        return () => { cancelled = true; };
-    }, [expanded, affected, defect.id]);
+            .then(rows => { setAffected(rows || []); setAffectedFailed(false); })
+            // Deliberately NOT setAffected([]): leaving it null is what lets a
+            // re-expand (or Retry) try again, instead of pinning "couldn't load"
+            // and a disabled Retest button for the life of the row.
+            .catch(() => setAffectedFailed(true))
+            .finally(() => { inFlight.current = false; });
+    }, [defect.id]);
+
+    // Retry clears the failure itself rather than loadAffected doing it on entry, the
+    // way BulkBar's loadUsers can: this loader is also called from the effect below, and
+    // `react-hooks/set-state-in-effect` forbids a setState reachable synchronously from
+    // an effect body. A click handler is not an effect, so the reset lives here — without
+    // it, pressing Retry left the same "Couldn't load…" on screen for the whole round-trip
+    // and produced no visible change at all when the retry failed too.
+    // Unguarded on purpose: if a load is already in flight, loadAffected self-guards and
+    // that request still resolves into the "Loading…" this just put back.
+    const retryAffected = () => {
+        setAffectedFailed(false);
+        loadAffected();
+    };
+
+    useEffect(() => {
+        if (!expanded || affected !== null) return;
+        loadAffected();
+    }, [expanded, affected, loadAffected]);
 
     const status = deriveStatus(defect);
     const severity = defect.severity || '';
@@ -96,6 +128,7 @@ export default function DefectRow({
                         type="checkbox"
                         className="defects-checkbox"
                         checked={selected}
+                        disabled={selectionLocked}
                         aria-label={`Select ${defect.title}`}
                         data-testid="defects-row-select"
                         // Ticking a row must not also expand it.
@@ -183,9 +216,21 @@ export default function DefectRow({
                         <div className="defects-expand">
                             <div className="defects-expand-col defects-expand-col--tests">
                                 <span className="defects-expand-label">Affected tests</span>
-                                {affected === null && <span className="defects-affected-empty">Loading…</span>}
+                                {affected === null && !affectedFailed && (
+                                    <span className="defects-affected-empty">Loading…</span>
+                                )}
                                 {affectedFailed && (
-                                    <span className="defects-affected-empty">Couldn&apos;t load the affected tests.</span>
+                                    <span className="defects-affected-empty">
+                                        Couldn&apos;t load the affected tests.{' '}
+                                        <button
+                                            type="button"
+                                            className="defects-inline-retry"
+                                            onClick={retryAffected}
+                                            data-testid="defects-affected-retry"
+                                        >
+                                            Retry
+                                        </button>
+                                    </span>
                                 )}
                                 {affected !== null && !affectedFailed && tests.length === 0 && (
                                     <span className="defects-affected-empty">No linked tests.</span>
@@ -202,7 +247,7 @@ export default function DefectRow({
                                             <Link
                                                 className="defects-affected-link defects-affected-run"
                                                 to={`/runs/run/${test.last_run_id}`}
-                                                title={`Last ${test.last_result_status || 'failed'} in ${test.last_run_name || 'this run'}`}
+                                                title={`Last ${resultWord(test.last_result_status)} in ${test.last_run_name || 'this run'}`}
                                             >
                                                 {test.last_run_name || 'run'}
                                             </Link>
@@ -262,3 +307,9 @@ export default function DefectRow({
         </>
     );
 }
+
+// Memoised because the page re-derives the whole visible list on every keystroke:
+// without this, typing in the search box re-renders every row still on screen.
+// Every handler the page passes down is a useCallback, so the props really are
+// stable between those renders.
+export default memo(DefectRow);

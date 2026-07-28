@@ -50,12 +50,20 @@ func TestValidateCreateStatus(t *testing.T) {
 	s := newTestStore(t)
 	// "" means "use the store default"; "open" must stay valid for the CLI, seed data and external scripts.
 	for _, st := range []string{"", "open", "fixed", "closed"} {
-		if msg := ValidateCreate(s, models.CreateDefectRequest{Title: "boom", Status: st}); msg != "" {
+		msg, err := ValidateCreate(s, models.CreateDefectRequest{Title: "boom", Status: st})
+		if err != nil {
+			t.Fatalf("status %q: unexpected lookup error: %v", st, err)
+		}
+		if msg != "" {
 			t.Errorf("status %q: expected accepted, got %q", st, msg)
 		}
 	}
 	for _, st := range []string{"Fixed", "fixed ", "reopened", "in_progress", "triage", "bogus"} {
-		if msg := ValidateCreate(s, models.CreateDefectRequest{Title: "boom", Status: st}); msg != "invalid status" {
+		msg, err := ValidateCreate(s, models.CreateDefectRequest{Title: "boom", Status: st})
+		if err != nil {
+			t.Fatalf("status %q: unexpected lookup error: %v", st, err)
+		}
+		if msg != "invalid status" {
 			t.Errorf("status %q: expected %q, got %q", st, "invalid status", msg)
 		}
 	}
@@ -67,16 +75,20 @@ func TestValidateAssignee(t *testing.T) {
 	inactive := mkUser(t, s, "inactive@example.com", false, false)
 	deleted := mkUser(t, s, "deleted@example.com", true, true)
 
+	accepted := func(label string, id *string) {
+		t.Helper()
+		msg, err := ValidateAssignee(s, id)
+		if err != nil {
+			t.Fatalf("%s: unexpected lookup error: %v", label, err)
+		}
+		if msg != "" {
+			t.Errorf("%s: expected accepted, got %q", label, msg)
+		}
+	}
 	// nil and "" both mean "unassigned" and are always accepted
-	if msg := ValidateAssignee(s, nil); msg != "" {
-		t.Errorf("nil assignee: expected accepted, got %q", msg)
-	}
-	if msg := ValidateAssignee(s, ptr("")); msg != "" {
-		t.Errorf("empty assignee: expected accepted, got %q", msg)
-	}
-	if msg := ValidateAssignee(s, &active.ID); msg != "" {
-		t.Errorf("active user: expected accepted, got %q", msg)
-	}
+	accepted("nil assignee", nil)
+	accepted("empty assignee", ptr(""))
+	accepted("active user", &active.ID)
 
 	const want = "assignee_id must reference an active user"
 	for name, id := range map[string]string{
@@ -84,7 +96,15 @@ func TestValidateAssignee(t *testing.T) {
 		"inactive": inactive.ID,
 		"deleted":  deleted.ID,
 	} {
-		if msg := ValidateAssignee(s, &id); msg != want {
+		msg, err := ValidateAssignee(s, &id)
+		// A user that does not exist, or exists but cannot own a defect, is a
+		// VALIDATION failure and must come back as a message with a nil error — a
+		// non-nil error is reserved for the lookup itself failing, which the handler
+		// answers 500 to rather than blaming the caller's input.
+		if err != nil {
+			t.Fatalf("%s user: expected a validation message, got lookup error %v", name, err)
+		}
+		if msg != want {
 			t.Errorf("%s user: expected %q, got %q", name, want, msg)
 		}
 	}
@@ -95,14 +115,22 @@ func TestValidateCreateAssignee(t *testing.T) {
 	s := newTestStore(t)
 	active := mkUser(t, s, "creator@example.com", true, false)
 
-	if msg := ValidateCreate(s, models.CreateDefectRequest{Title: "boom", AssigneeID: &active.ID}); msg != "" {
+	check := func(label string, req models.CreateDefectRequest) string {
+		t.Helper()
+		msg, err := ValidateCreate(s, req)
+		if err != nil {
+			t.Fatalf("%s: unexpected lookup error: %v", label, err)
+		}
+		return msg
+	}
+	if msg := check("active assignee", models.CreateDefectRequest{Title: "boom", AssigneeID: &active.ID}); msg != "" {
 		t.Errorf("active assignee: expected accepted, got %q", msg)
 	}
-	if msg := ValidateCreate(s, models.CreateDefectRequest{Title: "boom", AssigneeID: ptr("ghost")}); msg == "" {
+	if msg := check("unknown assignee", models.CreateDefectRequest{Title: "boom", AssigneeID: ptr("ghost")}); msg == "" {
 		t.Error("unknown assignee: expected rejection, got accepted")
 	}
 	// title validation still wins over the (more expensive) assignee lookup
-	if msg := ValidateCreate(s, models.CreateDefectRequest{Title: "  ", AssigneeID: ptr("ghost")}); msg != "title is required" {
+	if msg := check("blank title", models.CreateDefectRequest{Title: "  ", AssigneeID: ptr("ghost")}); msg != "title is required" {
 		t.Errorf("expected %q, got %q", "title is required", msg)
 	}
 }

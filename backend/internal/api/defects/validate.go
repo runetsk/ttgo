@@ -38,17 +38,26 @@ func ValidExternalURL(raw string) error {
 // are always accepted. Mirrors the run-assignee rule in runs.AssignRun: a non-empty id must
 // reference an existing, active, non-deleted user.
 //
+// The lookup error is returned SEPARATELY from the validation message on purpose: folding
+// the two together (as runs.AssignRun still does) reports a transient database failure to
+// the client as a 400 "assignee_id must reference an active user", which tells the caller
+// their input was wrong when it was not, and hides a server fault from every caller that
+// only logs 5xx.
+//
 // Exported and store-backed on purpose: ValidateCreate calls it, so the create-and-link path
 // in the runs package (CreateAndLinkResultDefect) inherits the same check for free.
-func ValidateAssignee(s *store.Store, assigneeID *string) string {
+func ValidateAssignee(s *store.Store, assigneeID *string) (string, error) {
 	if normalizeAssignee(assigneeID) == nil {
-		return ""
+		return "", nil
 	}
 	u, err := s.GetUser(*assigneeID)
-	if err != nil || u == nil || !u.Active || u.Deleted {
-		return "assignee_id must reference an active user"
+	if err != nil {
+		return "", err
 	}
-	return ""
+	if u == nil || !u.Active || u.Deleted {
+		return "assignee_id must reference an active user", nil
+	}
+	return "", nil
 }
 
 // normalizeAssignee collapses the two "unassigned" spellings — nil and "" — to nil.

@@ -47,8 +47,12 @@ type TestCase struct {
 	CreatedAt   time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
 
-	// 008-jira-integration: set true when all linked defects reach statusCategory=="done".
-	// Persists until manually dismissed via DELETE /api/tests/{id}/reverification-flag.
+	// Set true when the test case has at least one linked defect and every one of them is
+	// fixed-or-closed, i.e. the test is ready to be retested. "fixed" counts as resolved
+	// alongside "closed" so the signal fires when QA wants it — before the defect is
+	// closed, not after. Recomputed by store.recomputeReverification on every defect
+	// status change, link and unlink; persists until manually dismissed via
+	// DELETE /api/tests/{id}/reverification-flag.
 	ReverificationFlagged bool `json:"reverification_flagged" gorm:"default:false"`
 
 	// Associations

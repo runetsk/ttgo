@@ -19,6 +19,7 @@ import (
 // @Param        status    query     string  false  "Filter by status: open | fixed | closed"
 // @Param        severity  query     string  false  "Filter by severity: critical | major | minor | trivial"
 // @Param        q         query     string  false  "Full-text search query"
+// @Security     BearerAuth
 // @Success      200  {array}   models.Defect
 // @Failure      500  {object}  object{error=string}
 // @Router       /defects [get]
@@ -43,6 +44,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Produce      json
 // @Param        body  body      models.CreateDefectRequest  true  "Defect to create"
+// @Security     BearerAuth
 // @Success      201  {object}  models.Defect
 // @Failure      400  {object}  object{error=string}
 // @Failure      500  {object}  object{error=string}
@@ -53,7 +55,12 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if msg := ValidateCreate(h.store, req); msg != "" {
+	msg, err := ValidateCreate(h.store, req)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if msg != "" {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
@@ -74,6 +81,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 // @Produce      json
 // @Param        id    path      string                      true  "Defect ID"
 // @Param        body  body      models.UpdateDefectRequest  true  "Fields to update"
+// @Security     BearerAuth
 // @Success      200  {object}  models.Defect
 // @Failure      400  {object}  object{error=string}
 // @Failure      404  {object}  object{error=string}
@@ -90,7 +98,12 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// assignee_id is passed to the store as sent: "" clears, nil leaves it unchanged.
-	if msg := ValidateAssignee(h.store, req.AssigneeID); msg != "" {
+	msg, err := ValidateAssignee(h.store, req.AssigneeID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if msg != "" {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
@@ -138,7 +151,12 @@ func (h *Handler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// same rule as Update: "" is a valid unassign, a non-empty id must name an active user.
-	if msg := ValidateAssignee(h.store, req.AssigneeID); msg != "" {
+	msg, err := ValidateAssignee(h.store, req.AssigneeID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if msg != "" {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}
@@ -159,6 +177,7 @@ func (h *Handler) BulkUpdate(w http.ResponseWriter, r *http.Request) {
 // @Description  Permanently deletes a defect and all its links.
 // @Tags         defects
 // @Param        id  path  string  true  "Defect ID"
+// @Security     BearerAuth
 // @Success      204
 // @Failure      500  {object}  object{error=string}
 // @Router       /defects/{id} [delete]
@@ -173,21 +192,24 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 // ValidateCreate / DefectFromCreate are exported so the runs package (create-and-link) reuses them.
 // The assignee check lives here rather than in the handler so CreateAndLinkResultDefect cannot
 // bypass it.
-func ValidateCreate(s *store.Store, req models.CreateDefectRequest) string {
+//
+// Returns (validation message, lookup error). A non-empty message is a 400; a non-nil error is
+// a 500 — see ValidateAssignee for why the two are kept apart.
+func ValidateCreate(s *store.Store, req models.CreateDefectRequest) (string, error) {
 	if strings.TrimSpace(req.Title) == "" {
-		return "title is required"
+		return "title is required", nil
 	}
 	if len(req.Title) > 500 {
-		return "title too long"
+		return "title too long", nil
 	}
 	if req.Severity != "" && !validSeverity[req.Severity] {
-		return "invalid severity"
+		return "invalid severity", nil
 	}
 	if req.Status != "" && !validStatus[req.Status] {
-		return "invalid status"
+		return "invalid status", nil
 	}
 	if err := ValidExternalURL(req.ExternalURL); err != nil {
-		return err.Error()
+		return err.Error(), nil
 	}
 	return ValidateAssignee(s, req.AssigneeID)
 }
@@ -203,10 +225,11 @@ func DefectFromCreate(req models.CreateDefectRequest) *models.Defect {
 // AffectedTests godoc
 //
 // @Summary      List a defect's affected test cases
-// @Description  Returns the distinct test cases linked to the defect (directly or via a run result), ordered by name.
+// @Description  Returns the distinct test cases linked to the defect (directly or via a run result), ordered by name. Each carries the run the TEST CASE last failed in — the most recent FAIL/ERROR result for that test case, deliberately not the result the defect happened to be filed against, since a test-case-scoped link carries no result at all. `last_run_id` / `last_run_name` / `last_result_status` are empty strings when the test case has no failing result; the test case is still listed.
 // @Tags         defects
 // @Produce      json
 // @Param        id  path  string  true  "Defect ID"
+// @Security     BearerAuth
 // @Success      200  {array}   store.AffectedTestCase
 // @Failure      500  {object}  object{error=string}
 // @Router       /defects/{id}/tests [get]

@@ -27,7 +27,10 @@ type Defect struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Assignee display name (not persisted, populated by ListDefects/GetDefect)
+	// Assignee display name (display name, else email; resolves even for a deactivated
+	// user). Not persisted. Populated on the defect endpoints — list, get, create,
+	// update and bulk-update. The run/test-case DEFECT-LINK listings do not resolve it,
+	// so it is empty there; read the defect itself if the owner's name is needed.
 	AssigneeName string `json:"assignee_name" gorm:"-"`
 
 	LinkedTestCount int `json:"linked_test_count" gorm:"-"` // computed: distinct test cases

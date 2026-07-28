@@ -31,6 +31,27 @@ export function activeBugs(defects) {
     return (defects || []).filter(d => d && d.status !== 'closed');
 }
 
+// countOpen is activeBugs' number: every stored status except `closed`. Kept beside
+// it so the analytics summary strip and the panels can never disagree about what
+// "open" means.
+export function countOpen(defects) {
+    return activeBugs(defects).length;
+}
+
+// How a stored defect status is badged. `fixed` needs its own entry: without it the
+// fallback labels a fixed defect "Open", which is a lie the reader can act on — and
+// an unrecognised status falls back to the same badge, which is the honest direction
+// (it is not closed, so it is outstanding).
+const BUG_STATUS_CONFIG = {
+    closed: { label: 'Closed', color: '#22c55e', icon: '●' },
+    fixed: { label: 'Fixed', color: '#6366f1', icon: '◐' },
+    open: { label: 'Open', color: '#f97316', icon: '○' },
+};
+
+export function bugStatusConfig(status) {
+    return BUG_STATUS_CONFIG[status] || BUG_STATUS_CONFIG.open;
+}
+
 // Where "open this bug" should point. External bugs (with an external_url)
 // open their tracker in a new tab; native bugs deep-link into the Defects
 // register, which focuses that row (DefectsPage reads ?focus=).

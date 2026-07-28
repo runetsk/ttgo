@@ -35,13 +35,14 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
 
     const submit = (e) => {
         e.preventDefault();
-        // buildDefectPayload always sends every field, assignee_id included — this form is a
-        // full-record editor. PATCH's "an absent field is left unchanged" semantics are
-        // therefore never exercised from here, only from the bulk bar and the API.
+        // buildDefectPayload sends every field — this form is a full-record editor — with
+        // one exception: an assignee that has not been touched is omitted, so editing a
+        // defect owned by a since-deactivated user cannot be rejected for echoing that
+        // owner's id back. `defect` is what tells it "unchanged" from "cleared".
         const payload = buildDefectPayload({
             title, description, severity, status, assignee_id: assigneeId,
             external_provider: provider, external_key: extKey, external_url: extUrl,
-        });
+        }, mode === 'edit' ? defect : null);
         if (!payload) return;
         setSubmitting(true);
         const req = mode === 'edit' ? defectsApi.update(defect.id, payload) : defectsApi.create(payload);
@@ -66,7 +67,7 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
                     <div style={{ display: 'flex', gap: 12 }}>
                         <div style={{ flex: 1 }}>
                             <label style={lbl}>Severity</label>
-                            <select className="modern-input" style={inp} value={severity} onChange={e => setSeverity(e.target.value)} disabled={submitting}>
+                            <select className="modern-input" style={inp} value={severity} onChange={e => setSeverity(e.target.value)} disabled={submitting} data-testid="defect-severity">
                                 {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
                             </select>
                         </div>
@@ -92,8 +93,11 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
                         data-testid="defect-assignee"
                     >
                         <option value="">Unassigned</option>
+                        {/* An owner who is no longer assignable is kept in the list so an
+                            unrelated save cannot drop them, but they must not read as an
+                            ordinary colleague someone could pick on purpose. */}
                         {assigneeOptions(users, defect).map(o => (
-                            <option key={o.id} value={o.id}>{o.label}</option>
+                            <option key={o.id} value={o.id}>{o.inactive ? `${o.label} (inactive)` : o.label}</option>
                         ))}
                     </select>
 
@@ -106,7 +110,7 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--border-color)' }}>
                         <button type="button" className="action-btn" onClick={onClose} disabled={submitting}>Cancel</button>
-                        <button type="submit" className="primary-btn" disabled={submitting || !title.trim()} style={{ opacity: submitting ? 0.6 : 1 }}>
+                        <button type="submit" className="primary-btn" disabled={submitting || !title.trim()} style={{ opacity: submitting ? 0.6 : 1 }} data-testid="defect-save">
                             {submitting ? 'Saving…' : (mode === 'edit' ? 'Save' : 'Create')}
                         </button>
                     </div>

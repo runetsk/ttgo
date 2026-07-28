@@ -15,6 +15,8 @@ import {
     filterDefects,
     sortDefects,
     queueCounts,
+    tileHint,
+    tilePressed,
 } from './defectQueue.js';
 
 const NOW = Date.parse('2026-07-28T12:00:00Z');
@@ -98,8 +100,15 @@ test('ownerInitials: names, single words and email fallbacks', () => {
     assert.equal(ownerInitials('Mara Jane Reyes'), 'MJ');
     assert.equal(ownerInitials('admin'), 'AD');
     assert.equal(ownerInitials('mara.reyes@example.com'), 'MR');
-    assert.equal(ownerInitials('admin@example.com'), 'AE');
     assert.equal(ownerInitials('a'), 'A');
+});
+
+test('ownerInitials splits an email on @ too, so a one-word local part takes the domain', () => {
+    // Not a rule anyone would design, but a consequence of the split: the SAME user
+    // reads "AD" with a display name and "AE" when the label falls back to their
+    // email. Pinned so the quirk is visible rather than mistaken for intent.
+    assert.equal(ownerInitials('admin'), 'AD');
+    assert.equal(ownerInitials('admin@example.com'), 'AE');
 });
 
 test('ownerInitials returns nothing rather than throwing on empty input', () => {
@@ -158,31 +167,35 @@ test('ageLabel reads created_at and survives bad input', () => {
 });
 
 // Shared corpus for the filter/sort/count tests: one defect per derived status,
-// plus a second critical so the tiles have something to sum.
+// plus a second critical so the tiles have something to sum — and a CLOSED
+// critical, which is the row that tells "critical open" apart from "critical".
+// Without `f` the Critical tile's land-on-what-you-count assertion passes for the
+// wrong reason.
 const corpus = () => [
     defect({ id: 'a', title: 'Checkout payment step hangs', severity: 'critical', status: 'open', assignee_id: null, external_key: 'TT-1482', linked_test_count: 4, created_at: ago(1), updated_at: ago(1) }),
     defect({ id: 'b', title: 'Bulk import skips duplicate IDs', severity: 'critical', status: 'open', assignee_id: 'u1', external_key: 'TT-1477', linked_test_count: 3, created_at: ago(3), updated_at: ago(9) }),
     defect({ id: 'c', title: 'Login rate limit returns 500', severity: 'major', status: 'open', assignee_id: 'u2', external_key: '', linked_test_count: 2, created_at: ago(20), updated_at: ago(2) }),
     defect({ id: 'd', title: 'CSV export drops the last row', severity: 'major', status: 'fixed', assignee_id: 'u1', external_key: 'TT-1451', linked_test_count: 1, created_at: ago(12), updated_at: ago(8) }),
     defect({ id: 'e', title: 'Avatar initials wrong', severity: 'trivial', status: 'closed', assignee_id: 'u1', external_key: '', linked_test_count: 0, created_at: ago(40), updated_at: ago(30) }),
+    defect({ id: 'f', title: 'Password reset token leaks', severity: 'critical', status: 'closed', assignee_id: 'u2', external_key: 'TT-1400', linked_test_count: 6, created_at: ago(60), updated_at: ago(45) }),
 ];
 
 const ids = rows => rows.map(r => r.id);
 
 test('filterDefects filters on the DERIVED status, not the stored one', () => {
     const rows = corpus();
-    assert.deepEqual(ids(filterDefects(rows, { status: 'all' })), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(ids(filterDefects(rows, { status: 'all' })), ['a', 'b', 'c', 'd', 'e', 'f']);
     assert.deepEqual(ids(filterDefects(rows, { status: 'triage' })), ['a']);
     assert.deepEqual(ids(filterDefects(rows, { status: 'progress' })), ['b', 'c']);
     assert.deepEqual(ids(filterDefects(rows, { status: 'fixed' })), ['d']);
-    assert.deepEqual(ids(filterDefects(rows, { status: 'closed' })), ['e']);
+    assert.deepEqual(ids(filterDefects(rows, { status: 'closed' })), ['e', 'f']);
 });
 
 test('filterDefects severity chips are multi-select, empty means all', () => {
     const rows = corpus();
-    assert.deepEqual(ids(filterDefects(rows, { severities: [] })), ['a', 'b', 'c', 'd', 'e']);
-    assert.deepEqual(ids(filterDefects(rows, { severities: ['critical'] })), ['a', 'b']);
-    assert.deepEqual(ids(filterDefects(rows, { severities: ['critical', 'trivial'] })), ['a', 'b', 'e']);
+    assert.deepEqual(ids(filterDefects(rows, { severities: [] })), ['a', 'b', 'c', 'd', 'e', 'f']);
+    assert.deepEqual(ids(filterDefects(rows, { severities: ['critical'] })), ['a', 'b', 'f']);
+    assert.deepEqual(ids(filterDefects(rows, { severities: ['critical', 'trivial'] })), ['a', 'b', 'e', 'f']);
     assert.deepEqual(ids(filterDefects(rows, { severities: ['blocker'] })), []);
 });
 
@@ -190,31 +203,53 @@ test('filterDefects query matches title and external key, case- and space-insens
     const rows = corpus();
     assert.deepEqual(ids(filterDefects(rows, { query: 'checkout' })), ['a']);
     assert.deepEqual(ids(filterDefects(rows, { query: '  CHECKOUT  ' })), ['a']);
-    assert.deepEqual(ids(filterDefects(rows, { query: 'tt-14' })), ['a', 'b', 'd']);
+    assert.deepEqual(ids(filterDefects(rows, { query: 'tt-14' })), ['a', 'b', 'd', 'f']);
     assert.deepEqual(ids(filterDefects(rows, { query: 'TT-1451' })), ['d']);
     assert.deepEqual(ids(filterDefects(rows, { query: 'nothing here' })), []);
-    assert.deepEqual(ids(filterDefects(rows, { query: '   ' })), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(ids(filterDefects(rows, { query: '   ' })), ['a', 'b', 'c', 'd', 'e', 'f']);
 });
 
-test('filterDefects combines the three dimensions', () => {
+test('filterDefects openOnly drops closed rows without naming a status', () => {
+    const rows = corpus();
+    // The dimension the "Critical open" tile needs: severity plus not-closed, which
+    // no single status tab can express.
+    assert.deepEqual(ids(filterDefects(rows, { openOnly: true })), ['a', 'b', 'c', 'd']);
+    assert.deepEqual(ids(filterDefects(rows, { openOnly: true, severities: ['critical'] })), ['a', 'b']);
+    assert.deepEqual(ids(filterDefects(rows, { openOnly: false, severities: ['critical'] })), ['a', 'b', 'f']);
+    // Only a literal true opts in — an absent option must never narrow the queue.
+    assert.deepEqual(ids(filterDefects(rows, { openOnly: 'yes' })), ['a', 'b', 'c', 'd', 'e', 'f']);
+});
+
+test('filterDefects stale keeps exactly what isStale keeps, against the pinned clock', () => {
+    const rows = corpus();
+    assert.deepEqual(ids(filterDefects(rows, { stale: true, now: NOW })), ['b', 'd']);
+    assert.deepEqual(ids(rows.filter(r => isStale(r, NOW))), ['b', 'd'], 'the filter and the row badge agree');
+    // Closed rows are never stale, so `stale` implies not-closed.
+    assert.equal(filterDefects(rows, { stale: true, status: 'closed', now: NOW }).length, 0);
+    assert.deepEqual(ids(filterDefects(rows, { stale: false, now: NOW })), ['a', 'b', 'c', 'd', 'e', 'f']);
+});
+
+test('filterDefects combines every dimension', () => {
     const rows = corpus();
     assert.deepEqual(ids(filterDefects(rows, { status: 'progress', severities: ['critical'] })), ['b']);
     assert.deepEqual(ids(filterDefects(rows, { status: 'triage', severities: ['major'] })), []);
     assert.deepEqual(ids(filterDefects(rows, { status: 'progress', query: 'import' })), ['b']);
+    assert.deepEqual(ids(filterDefects(rows, { stale: true, severities: ['critical'], now: NOW })), ['b']);
+    assert.deepEqual(ids(filterDefects(rows, { openOnly: true, query: 'tt-14' })), ['a', 'b', 'd']);
 });
 
 test('filterDefects tolerates missing rows and options', () => {
     assert.deepEqual(filterDefects(null, {}), []);
     assert.deepEqual(filterDefects(undefined, undefined), []);
     assert.deepEqual(ids(filterDefects([null, defect({ id: 'a' })], {})), ['a']);
-    assert.deepEqual(ids(filterDefects(corpus())), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(ids(filterDefects(corpus())), ['a', 'b', 'c', 'd', 'e', 'f']);
 });
 
 test('sortDefects priority: worst severity first, then oldest of that severity', () => {
     const rows = corpus();
-    // criticals (a=1d, b=3d) → oldest first is b; majors (c=20d, d=12d) → c then d
-    assert.deepEqual(ids(sortDefects(rows, 'priority')), ['b', 'a', 'c', 'd', 'e']);
-    assert.deepEqual(ids(sortDefects(rows)), ['b', 'a', 'c', 'd', 'e'], 'priority is the default');
+    // criticals (a=1d, b=3d, f=60d) → oldest first is f; majors (c=20d, d=12d) → c then d
+    assert.deepEqual(ids(sortDefects(rows, 'priority')), ['f', 'b', 'a', 'c', 'd', 'e']);
+    assert.deepEqual(ids(sortDefects(rows)), ['f', 'b', 'a', 'c', 'd', 'e'], 'priority is the default');
     assert.deepEqual(SEVERITY_ORDER, ['critical', 'major', 'minor', 'trivial']);
 });
 
@@ -224,11 +259,11 @@ test('sortDefects priority puts an unknown severity last', () => {
 });
 
 test('sortDefects updated: most recently touched first', () => {
-    assert.deepEqual(ids(sortDefects(corpus(), 'updated')), ['a', 'c', 'd', 'b', 'e']);
+    assert.deepEqual(ids(sortDefects(corpus(), 'updated')), ['a', 'c', 'd', 'b', 'e', 'f']);
 });
 
 test('sortDefects tests: most affected tests first', () => {
-    assert.deepEqual(ids(sortDefects(corpus(), 'tests')), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(ids(sortDefects(corpus(), 'tests')), ['f', 'a', 'b', 'c', 'd', 'e']);
     const rows = [defect({ id: 'x', linked_test_count: 0 }), defect({ id: 'y', linked_test_count: 9 })];
     assert.deepEqual(ids(sortDefects(rows, 'tests')), ['y', 'x']);
 });
@@ -244,13 +279,13 @@ test('sortDefects returns a new array and never mutates the input', () => {
 test('sortDefects tolerates empty input and unknown sort keys', () => {
     assert.deepEqual(sortDefects(null, 'priority'), []);
     assert.deepEqual(sortDefects([], 'tests'), []);
-    assert.deepEqual(ids(sortDefects(corpus(), 'whatever')), ['b', 'a', 'c', 'd', 'e']);
+    assert.deepEqual(ids(sortDefects(corpus(), 'whatever')), ['f', 'b', 'a', 'c', 'd', 'e']);
     assert.deepEqual(ids(sortDefects([null, defect({ id: 'a' })], 'tests')), ['a']);
 });
 
 test('queueCounts fills the tabs from the derived statuses', () => {
     const counts = queueCounts(corpus(), NOW);
-    assert.deepEqual(counts.tabs, { all: 5, triage: 1, progress: 2, fixed: 1, closed: 1 });
+    assert.deepEqual(counts.tabs, { all: 6, triage: 1, progress: 2, fixed: 1, closed: 2 });
     assert.equal(counts.open, 4, 'everything that is not closed counts as open');
     assert.equal(counts.needsTriage, 1);
     assert.equal(counts.fixed, 1);
@@ -258,9 +293,9 @@ test('queueCounts fills the tabs from the derived statuses', () => {
 
 test('queueCounts tiles: critical open, blocking tests, stale', () => {
     const counts = queueCounts(corpus(), NOW);
-    assert.equal(counts.criticalOpen, 2, 'a and b; the closed trivial does not count');
-    assert.equal(counts.blockingTests, 7, '4 + 3 linked tests across the critical open defects');
-    assert.equal(counts.stale, 2, 'b (9d) and d (8d); e is closed so it is never stale');
+    assert.equal(counts.criticalOpen, 2, 'a and b; the CLOSED critical f does not count');
+    assert.equal(counts.blockingTests, 7, "4 + 3 linked tests; f's 6 are closed and excluded");
+    assert.equal(counts.stale, 2, 'b (9d) and d (8d); e and f are closed so are never stale');
 });
 
 test('queueCounts ignores closed defects in every tile', () => {
@@ -279,7 +314,7 @@ test('queueCounts counts the whole list, unaffected by any filter', () => {
     const rows = corpus();
     const filtered = filterDefects(rows, { status: 'triage' });
     assert.equal(filtered.length, 1);
-    assert.equal(queueCounts(rows, NOW).tabs.all, 5, 'tiles keep counting the unfiltered set');
+    assert.equal(queueCounts(rows, NOW).tabs.all, 6, 'tiles keep counting the unfiltered set');
 });
 
 test('queueCounts handles an empty or missing list', () => {
@@ -334,19 +369,70 @@ test('every triage tile names a real count and a real filter dimension', () => {
     }
 });
 
-test('the Needs triage and Fixed tiles land on exactly the rows they count', () => {
+// THE tile invariant, asserted for all four: a tile is a filter preset, so
+// clicking one must leave exactly the rows it just counted on screen. Anything
+// looser makes the number on the tile a lie the moment it is acted on.
+test('every triage tile lands on exactly the rows it counts', () => {
     const rows = corpus();
     const counts = queueCounts(rows, NOW);
-    const byKey = Object.fromEntries(TRIAGE_TILES.map(t => [t.key, t]));
 
-    // Critical open and Stale are deliberately looser than their number: neither
-    // "not closed" nor "not updated in 7 days" is a filter dimension, so those
-    // two tiles open a wider view than the count they advertise.
-    assert.equal(filterDefects(rows, byKey.triage.filters).length, counts.needsTriage);
-    assert.equal(filterDefects(rows, byKey.fixed.filters).length, counts.fixed);
+    for (const tile of TRIAGE_TILES) {
+        const landed = filterDefects(rows, { ...tile.filters, now: NOW });
+        assert.equal(landed.length, counts[tile.countKey],
+            `${tile.key} says ${counts[tile.countKey]} and lands on ${landed.length}`);
+        assert.ok(counts[tile.countKey] > 0, `${tile.key} needs a non-zero count to be a real assertion`);
+    }
 });
 
-test('only Needs triage is toned, and only Stale has no pressed state', () => {
+test('the tile presets pick out the right rows, not merely the right number', () => {
+    const rows = corpus();
+    const byKey = Object.fromEntries(TRIAGE_TILES.map(t => [t.key, t]));
+    const landed = key => ids(filterDefects(rows, { ...byKey[key].filters, now: NOW }));
+
+    assert.deepEqual(landed('triage'), ['a']);
+    assert.deepEqual(landed('critical'), ['a', 'b'], 'the closed critical f stays out');
+    assert.deepEqual(landed('stale'), ['b', 'd']);
+    assert.deepEqual(landed('fixed'), ['d']);
+});
+
+test('only Needs triage is toned', () => {
     assert.deepEqual(TRIAGE_TILES.filter(t => t.tone).map(t => t.key), ['triage']);
-    assert.deepEqual(TRIAGE_TILES.filter(t => t.pressable === false).map(t => t.key), ['stale']);
+});
+
+test('a tile reads as pressed only when its whole preset is the view in force', () => {
+    const byKey = Object.fromEntries(TRIAGE_TILES.map(t => [t.key, t]));
+    const view = tile => ({ status: 'all', severities: [], ...tile.filters });
+
+    for (const tile of TRIAGE_TILES) {
+        assert.equal(tilePressed(tile, view(tile)), true, `${tile.key} must be pressed in its own view`);
+    }
+    // The neutral view presses nothing — this is what the Stale tile used to fail:
+    // its preset was byte-identical to a fresh page load, so it was a button that
+    // changed nothing and could not honestly claim a pressed state.
+    const neutral = { status: 'all', severities: [], openOnly: false, stale: false };
+    for (const tile of TRIAGE_TILES) {
+        assert.equal(tilePressed(tile, neutral), false, `${tile.key} must not be pressed in the neutral view`);
+    }
+    // Every dimension counts, including the two the filter bar cannot reach.
+    assert.equal(tilePressed(byKey.critical, { status: 'all', severities: ['critical'] }), false,
+        'same severities but openOnly off is a WIDER view than the tile');
+    assert.equal(tilePressed(byKey.stale, { status: 'all', severities: [], stale: true }), true);
+    assert.equal(tilePressed(byKey.triage, { status: 'triage', severities: ['major'] }), false);
+    assert.equal(tilePressed(null, neutral), false);
+    assert.equal(tilePressed(byKey.triage, undefined), false);
+});
+
+test('tileHint names the tile, and Critical open reports what it blocks', () => {
+    const counts = queueCounts(corpus(), NOW);
+    const byKey = Object.fromEntries(TRIAGE_TILES.map(t => [t.key, t]));
+
+    assert.equal(tileHint(byKey.critical, counts), 'blocking 7 tests');
+    assert.equal(tileHint(byKey.critical, { blockingTests: 1 }), 'blocking 1 test');
+    assert.equal(tileHint(byKey.critical, {}), 'blocking 0 tests');
+    assert.equal(tileHint(byKey.stale, counts), 'no update in 7 days');
+    // Every tile says something — a blank line under a count reads as a missing value.
+    for (const tile of TRIAGE_TILES) {
+        assert.ok(tileHint(tile, counts).length > 0, `${tile.key} needs a hint`);
+    }
+    assert.equal(tileHint(null, counts), '');
 });

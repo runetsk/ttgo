@@ -148,7 +148,12 @@ func (h *Handler) CreateAndLinkResultDefect(w http.ResponseWriter, r *http.Reque
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
 		return
 	}
-	if msg := apidefects.ValidateCreate(h.store, req); msg != "" {
+	msg, err := apidefects.ValidateCreate(h.store, req)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if msg != "" {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": msg})
 		return
 	}

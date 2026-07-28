@@ -7,11 +7,6 @@
 // this repo has no component-render test infrastructure, so a pure helper is the only
 // testable seam for these decisions.
 
-// The only keys POST /defects/bulk-update understands (models.BulkUpdateDefectsRequest).
-// Anything else in `fields` is dropped rather than forwarded: Go ignores unknown JSON
-// keys, so a camelCase typo would otherwise ride along and silently write nothing.
-const BULK_FIELD_KEYS = ['status', 'severity', 'assignee_id'];
-
 // The wire value that clears an assignee. Absent means "leave it alone", so unassigning
 // has to be an explicit empty string — null would decode to nil and change nothing.
 export const UNASSIGNED = '';
@@ -19,25 +14,24 @@ export const UNASSIGNED = '';
 // buildBulkPayload returns the body for POST /defects/bulk-update, or null when the action
 // must not fire at all (nothing selected — the endpoint 400s on an empty id list).
 //
-// `fields` carries any of { status, severity, assignee_id }. Empty status/severity values
-// are dropped, because the endpoint has no concept of clearing them. The assignee is the
-// one field with a meaningful empty: a present-but-empty assignee_id (null or '') is
-// normalised to UNASSIGNED, so a picker's "Unassign" option cannot be mistaken for
-// "unchanged". To leave assignees alone, omit the key entirely.
+// `fields` carries any of { status, severity, assignee_id } — nothing else reaches the
+// wire, because Go ignores unknown JSON keys and a camelCase typo would otherwise ride
+// along and silently write nothing. Empty status/severity values are dropped, since the
+// endpoint has no concept of clearing them. The assignee is the one field with a
+// meaningful empty: a present-but-empty assignee_id (null or '') is normalised to
+// UNASSIGNED, so a picker's "Unassign" option cannot be mistaken for "unchanged". To
+// leave assignees alone, omit the key entirely.
 export function buildBulkPayload(selectedIds, fields) {
     const ids = Array.from(new Set(Array.from(selectedIds || []).filter(Boolean)));
     if (ids.length === 0) return null;
 
     const source = fields || {};
     const payload = { ids };
-    for (const key of BULK_FIELD_KEYS) {
-        if (key === 'assignee_id') {
-            // presence, not truthiness: '' and null both mean unassign here.
-            if (source.assignee_id === undefined) continue;
-            payload.assignee_id = source.assignee_id ? String(source.assignee_id) : UNASSIGNED;
-            continue;
-        }
-        if (source[key]) payload[key] = source[key];
+    if (source.status) payload.status = source.status;
+    if (source.severity) payload.severity = source.severity;
+    // presence, not truthiness: '' and null both mean unassign here.
+    if (source.assignee_id !== undefined) {
+        payload.assignee_id = source.assignee_id ? String(source.assignee_id) : UNASSIGNED;
     }
     return payload;
 }
@@ -72,48 +66,37 @@ export function assigneeOptions(users, defect) {
 // or null when the title is blank — the one required field, and the same condition that
 // disables the Save button.
 //
-// Unlike buildBulkPayload, EVERY key is always present: the modal is a full-record editor,
-// so clearing the external key has to be sent as "" to actually clear it. PATCH's "an
-// absent field is left unchanged" semantics are therefore never exercised from this form —
-// only from the bulk bar and the API itself. assignee_id follows the same rule as the bulk
-// payload: UNASSIGNED ("") clears, because null would decode to nil and change nothing.
-export function buildDefectPayload(form) {
+// Unlike buildBulkPayload, every text key is always present: the modal is a full-record
+// editor, so clearing the external key has to be sent as "" to actually clear it.
+//
+// assignee_id is the single exception, and `original` (the defect being edited, absent on
+// create) is what drives it. A defect can be owned by someone who has since been
+// deactivated; assigneeOptions keeps them in the picker so an unrelated save cannot
+// silently unassign them — but the server's ValidateAssignee rejects any non-empty id that
+// is not an active user, so echoing that id back turned every edit of such a defect into a
+// 400 the modal could not explain. An UNCHANGED assignee is therefore omitted, which is
+// exactly PATCH's "leave this field alone". Any real change is still sent, UNASSIGNED ("")
+// included, because null would decode to nil and change nothing.
+export function buildDefectPayload(form, original) {
     const source = form || {};
     const title = String(source.title || '').trim();
     if (!title) return null;
 
     const text = (value) => String(value || '').trim();
-    return {
+    const payload = {
         title,
         description: text(source.description),
         severity: source.severity || '',
         status: source.status || '',
-        assignee_id: source.assignee_id ? String(source.assignee_id) : UNASSIGNED,
         external_provider: text(source.external_provider),
         external_key: text(source.external_key),
         external_url: text(source.external_url),
     };
-}
 
-// Page state changes that leave a selection valid. Everything else clears it.
-//
-// The list is deliberately a safe-list rather than a list of clearing dimensions: an
-// unrecognised name then clears, which is the harmless direction. The failure this rule
-// exists to prevent is a bulk close landing on rows the user filtered away and can no
-// longer see, so guessing wrong must cost a re-tick, never a wrong write.
-export const SELECTION_SAFE_CHANGES = ['expanded', 'focus', 'selection'];
-
-// nextSelectionOnFilterChange returns the selection to keep after `changed` changed.
-// Every filter-bar control clears it — query, status tab, severity chips and Sort alike.
-// Sort is in there even though reordering hides nothing: "N selected" would otherwise
-// refer to rows that have just moved out from under the user mid-scan.
-//
-// The current selection is returned by identity when it survives (and when it is already
-// empty), so the page can assign the result back to state without forcing a re-render.
-export function nextSelectionOnFilterChange(selection, changed) {
-    const current = selection instanceof Set ? selection : new Set(selection || []);
-    if (SELECTION_SAFE_CHANGES.includes(changed)) return current;
-    return current.size === 0 ? current : new Set();
+    const assignee = source.assignee_id ? String(source.assignee_id) : UNASSIGNED;
+    const current = original && original.assignee_id ? String(original.assignee_id) : UNASSIGNED;
+    if (!original || assignee !== current) payload.assignee_id = assignee;
+    return payload;
 }
 
 // A defect title is allowed up to 500 chars; a run name that long would wreck the run

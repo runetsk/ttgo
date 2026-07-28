@@ -2,13 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
     RETEST_TITLE_MAX,
-    SELECTION_SAFE_CHANGES,
     UNASSIGNED,
     assigneeOptions,
     buildBulkPayload,
     buildDefectPayload,
     buildRetestRun,
-    nextSelectionOnFilterChange,
 } from './defectActions.js';
 import { DEFECT_STATUS_OPTIONS, deriveStatus } from './defectQueue.js';
 
@@ -178,6 +176,44 @@ test('unassigning sends "" — the same wire value the bulk bar uses', () => {
         assert.equal('assignee_id' in payload, true);
         assert.equal(payload.assignee_id, UNASSIGNED);
     }
+    // and clearing a real owner is still a change, so it is still sent
+    const cleared = buildDefectPayload(form({ assignee_id: '' }), { assignee_id: 'u1' });
+    assert.equal(cleared.assignee_id, UNASSIGNED);
+});
+
+// The 400 this guard exists to prevent: a defect owned by a since-deactivated user.
+// assigneeOptions keeps that owner in the picker so an unrelated save cannot drop
+// them — but the server rejects any non-empty assignee_id that is not an active
+// user, so echoing the id back made every edit of such a defect fail with a message
+// the modal swallowed. Unchanged means unsent, which is exactly PATCH's semantics.
+test('an unchanged assignee is omitted, so a deactivated owner cannot 400 the save', () => {
+    const original = { id: 'd1', assignee_id: 'deactivated-user', assignee_name: 'Gone Greg' };
+    const payload = buildDefectPayload(form({ assignee_id: 'deactivated-user', severity: 'critical' }), original);
+    assert.equal('assignee_id' in payload, false, 'the untouched owner must not be echoed back');
+    assert.equal(payload.severity, 'critical', 'the field actually being edited still goes');
+});
+
+test('an unchanged EMPTY assignee is omitted too', () => {
+    for (const empty of ['', null, undefined]) {
+        const payload = buildDefectPayload(form({ assignee_id: empty }), { id: 'd1', assignee_id: empty });
+        assert.equal('assignee_id' in payload, false);
+    }
+});
+
+test('any real assignee change is still sent, in both directions', () => {
+    const from = id => buildDefectPayload(form({ assignee_id: id }), { id: 'd1', assignee_id: 'u1' });
+    assert.equal(from('u2').assignee_id, 'u2', 'reassigning');
+    assert.equal(from('').assignee_id, UNASSIGNED, 'unassigning');
+    const assigning = buildDefectPayload(form({ assignee_id: 'u2' }), { id: 'd1', assignee_id: null });
+    assert.equal(assigning.assignee_id, 'u2', 'assigning an unowned defect');
+});
+
+test('with no original (create) the assignee is always sent', () => {
+    for (const original of [null, undefined]) {
+        const payload = buildDefectPayload(form({ assignee_id: 'u1' }), original);
+        assert.equal(payload.assignee_id, 'u1');
+        assert.equal('assignee_id' in buildDefectPayload(form({ assignee_id: '' }), original), true);
+    }
 });
 
 test('a blank title => null, the same condition that disables Save', () => {
@@ -208,41 +244,6 @@ test('every status the modal can save is one the queue can derive a bucket from'
     // open with no assignee derives as triage; assigning it is what makes it "in progress".
     assert.deepEqual(buckets, ['triage', 'fixed', 'closed']);
     assert.equal(deriveStatus({ status: 'open', assignee_id: 'u1' }), 'progress');
-});
-
-// ── nextSelectionOnFilterChange ──
-
-test('every filter-bar dimension clears the selection', () => {
-    for (const changed of ['query', 'status', 'sevs', 'severities', 'sort']) {
-        const next = nextSelectionOnFilterChange(new Set(['d1', 'd2']), changed);
-        assert.equal(next.size, 0, `${changed} must clear the selection`);
-    }
-});
-
-test('an unrecognised dimension clears too — guessing wrong must not enable a wrong write', () => {
-    assert.equal(nextSelectionOnFilterChange(new Set(['d1']), 'sevrity').size, 0);
-    assert.equal(nextSelectionOnFilterChange(new Set(['d1']), undefined).size, 0);
-});
-
-test('changes that do not touch the visible rows keep the selection, by identity', () => {
-    const selection = new Set(['d1', 'd2']);
-    for (const changed of SELECTION_SAFE_CHANGES) {
-        assert.equal(nextSelectionOnFilterChange(selection, changed), selection,
-            `${changed} must return the same Set, not a copy`);
-    }
-});
-
-test('an already-empty selection is returned unchanged, so no needless state write', () => {
-    const empty = new Set();
-    assert.equal(nextSelectionOnFilterChange(empty, 'status'), empty);
-});
-
-test('a non-Set selection is normalised to a Set', () => {
-    const next = nextSelectionOnFilterChange(['d1'], 'expanded');
-    assert.ok(next instanceof Set);
-    assert.deepEqual(Array.from(next), ['d1']);
-    assert.ok(nextSelectionOnFilterChange(null, 'status') instanceof Set);
-    assert.ok(nextSelectionOnFilterChange(undefined, 'status') instanceof Set);
 });
 
 // ── buildRetestRun ──

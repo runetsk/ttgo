@@ -2443,6 +2443,19 @@
        right border, so each one carries its own gutter — same 24/28 as
        RequirementsPage and TraceabilityMatrix. */
     padding: 24px 28px;
+    /* The containing block for the floating bulk bar. */
+    position: relative;
+}
+
+/* A one-off line above the strip — currently only "that ?focus= defect is gone". */
+.defects-notice {
+    padding: 8px 12px;
+    border: 1px solid var(--aig-danger-border);
+    border-radius: var(--radius-md);
+    background: var(--aig-danger-bg);
+    color: var(--aig-danger-fg);
+    font-size: 12.5px;
+    flex-shrink: 0;
 }
 
 /* ── Title bar ── */
@@ -2712,8 +2725,21 @@
     cursor: pointer;
 }
 
-/* ── Bulk bar ── */
+/* ── Bulk bar ──
+   Floated over the bottom of the queue rather than inserted above it: in flow it
+   is a ~37px block plus the column gap, so ticking the FIRST checkbox pushed every
+   row down ~51px and the next click landed on a different defect. Absolute keeps
+   the table exactly where it was. Opaque base + the accent tint on top, because a
+   translucent bar over scrolling rows is unreadable.
+
+   Its bottom edge lands exactly on the table's, so it covers the last ~42px of the
+   queue — .defects-bulk-spacer below buys that height back inside the scroller. */
 .defects-bulkbar {
+    position: absolute;
+    left: 28px;
+    right: 28px;
+    bottom: 24px;
+    z-index: 6;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -2721,8 +2747,31 @@
     padding: 8px 12px;
     border: 1px solid var(--aig-accent-soft-border);
     border-radius: var(--radius-lg);
-    background: var(--aig-accent-soft-bg);
+    background-color: var(--bg-secondary);
+    background-image: linear-gradient(var(--aig-accent-soft-bg), var(--aig-accent-soft-bg));
+    box-shadow: var(--shadow-md);
     flex-shrink: 0;
+}
+
+/* Scroll clearance for that bar, rendered as the last child of the scroller and
+   only while the bar is up (DefectsPage). The bar is out of flow, so it takes no
+   space of its own: without this the queue's scroll range ends level with the
+   bar's bottom edge, and the last row — sitting entirely behind it — can never be
+   scrolled clear, so it cannot be read, ticked or expanded while any selection
+   exists.
+
+   --defects-bulkbar-h is the bar's MEASURED height, set inline by DefectsPage from
+   BulkBar's ResizeObserver. It has to be measured, because the bar wraps: 43px on one
+   line, 71px once the inline failure message takes a row of its own, 132px at a 680px
+   viewport carrying that message, and past 350px at phone widths. No constant covers
+   that range, and a constant that is too small strands the last row behind the bar
+   exactly as having no spacer at all did — measured at 680×900 with a failure showing,
+   a fixed 84px left the last row 32px BEHIND the bar with no scroll range left to
+   reach it. The 44px fallback is the unwrapped bar, for the frame before the first
+   measurement lands (and any browser without ResizeObserver); the +16 is breathing
+   room between the last row and the bar's top edge. */
+.defects-bulk-spacer {
+    height: calc(var(--defects-bulkbar-h, 44px) + 16px);
 }
 
 .defects-bulkbar-label {
@@ -2743,17 +2792,22 @@
     color: var(--aig-danger-fg);
 }
 
-.defects-bulkbar-spacer {
-    margin-left: auto;
-}
-
 .defects-bulk-clear {
+    margin-left: auto;
     border: none;
     background: transparent;
     color: var(--aig-indigo-soft);
     font-family: inherit;
     font-size: 12.5px;
     cursor: pointer;
+}
+
+/* Clear goes dead for the length of a bulk apply, like the action buttons beside it —
+   emptying the selection under an in-flight call is exactly what it must not do. Same
+   treatment as .defects-ghost-btn:disabled so the whole bar dims together. */
+.defects-bulk-clear:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* Shared secondary button — bulk bar, expand actions, empty-state reset. */
@@ -2805,7 +2859,11 @@
 
 .defects-menu {
     position: absolute;
-    top: calc(100% + 4px);
+    /* Opens UPWARD. Its anchor is the bulk bar, which is pinned to the bottom of
+       the page, so a downward menu lands almost entirely below the fold — the
+       explicit Unassign item and its "back to Needs triage" warning come last in
+       the list, so those are exactly what falls off. */
+    bottom: calc(100% + 4px);
     left: 0;
     z-index: 20;
     min-width: 190px;
@@ -2950,6 +3008,14 @@
     cursor: pointer;
 }
 
+/* Rows and select-all are frozen while a bulk apply is in flight (it captured its ids
+   at click time), and an empty queue has nothing to select — either way the box takes
+   no input, so it must not still look like it does. */
+.defects-checkbox:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .defects-title-cell {
     display: flex;
     align-items: center;
@@ -3086,7 +3152,12 @@
 }
 
 /* ── Row expand ── */
-.defects-expand-cell {
+/* Qualified with `.defects-table td` deliberately: on its own the class is (0,1,0)
+   and loses the padding outright to `.defects-table td { padding: 0 10px }` above,
+   which is what shipped — the panel rendered with zero vertical padding, its headings
+   flush against the row's border. Matching that rule's specificity and coming later
+   in the file wins the tie against the :first-child / :last-child side padding too. */
+.defects-table td.defects-expand-cell {
     padding: 12px 16px 14px 17px;
     background: var(--aig-surface-sunken);
     border-bottom: 1px solid var(--glass-border);
@@ -3155,6 +3226,19 @@
     color: var(--text-secondary);
 }
 
+/* Sits inside .defects-affected-empty when the fetch failed — the re-expand also
+   retries, but a control that says so beats a user having to discover it. */
+.defects-inline-retry {
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--aig-indigo-soft);
+    font: inherit;
+    font-style: normal;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
 .defects-expand-summary {
     font-size: 12.5px;
     line-height: 1.55;
@@ -3209,6 +3293,7 @@
 .defects-ghost-btn:focus-visible,
 .defects-bulk-clear:focus-visible,
 .defects-menu-item:focus-visible,
+.defects-inline-retry:focus-visible,
 .defects-checkbox:focus-visible,
 .defects-key-chip:focus-visible,
 .defects-affected-link:focus-visible,

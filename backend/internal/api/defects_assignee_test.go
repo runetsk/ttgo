@@ -63,6 +63,9 @@ func TestCreateDefect_AssigneeValidation(t *testing.T) {
 		d := createDefectWithAssignee(t, s, srv, active.ID)
 		require.NotNil(t, d.AssigneeID)
 		assert.Equal(t, active.ID, *d.AssigneeID)
+		// The 201 must be shaped like GET /defects: the register prepends this row
+		// straight into its table, and an id with no name renders as "Unknown user".
+		assert.Equal(t, active.DisplayName, d.AssigneeName)
 
 		stored, err := s.GetDefect(d.ID)
 		require.NoError(t, err)
@@ -165,6 +168,7 @@ func TestCreateAndLinkResultDefect_Assignee(t *testing.T) {
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
 		require.NotNil(t, resp.Defect.AssigneeID)
 		assert.Equal(t, active.ID, *resp.Defect.AssigneeID)
+		assert.Equal(t, active.DisplayName, resp.Defect.AssigneeName, "create-and-link resolves the owner's name too")
 
 		stored, err := s.GetDefect(resp.Defect.ID)
 		require.NoError(t, err)

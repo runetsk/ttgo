@@ -7,7 +7,7 @@ import BulkBar from './defects/BulkBar';
 import DefectRow from './defects/DefectRow';
 import FilterBar from './defects/FilterBar';
 import TriageStrip from './defects/TriageStrip';
-import { buildRetestRun, nextSelectionOnFilterChange } from '../utils/defectActions';
+import { buildRetestRun } from '../utils/defectActions';
 import { filterDefects, queueCounts, sortDefects } from '../utils/defectQueue';
 
 // The Defects register, as a triage queue rather than a record table.
@@ -41,6 +41,15 @@ export default function DefectsPage() {
     const [status, setStatus] = useState('all');
     const [severities, setSeverities] = useState([]);
     const [sort, setSort] = useState(DEFAULT_SORT);
+    // The two dimensions only a tile can set (utils/defectQueue's TRIAGE_TILES):
+    // "not closed" and "nothing has happened in a week". They have no control in the
+    // filter bar, so the two controls that NARROW by hand — the status tabs and the
+    // severity chips — clear them again rather than leaving an invisible filter on the
+    // table (clearTileDimensions below). Search and Sort deliberately do not: neither
+    // one contradicts what a tile set, and dropping a tile's queue because someone
+    // typed in the search box would be its own surprise.
+    const [openOnly, setOpenOnly] = useState(false);
+    const [staleOnly, setStaleOnly] = useState(false);
 
     const [selected, setSelected] = useState(() => new Set());
     const [expandedId, setExpandedId] = useState(null);
@@ -48,6 +57,15 @@ export default function DefectsPage() {
     const [modal, setModal] = useState(null); // { mode:'create'|'edit', defect } | null
     const [pendingDelete, setPendingDelete] = useState(null); // defect awaiting confirmation | null
     const [retestError, setRetestError] = useState(null); // { id, message } | null
+    const [focusMissing, setFocusMissing] = useState(false); // ?focus named a defect that is gone
+    // Reported by BulkBar as it resizes; drives the scroll clearance under the bar.
+    const [barHeight, setBarHeight] = useState(0);
+    // Also reported by BulkBar: true while one of its applies is in flight. The call
+    // captures the ids at click time, so the selection has to hold still for the
+    // round-trip — otherwise the success handler below clears rows the user ticked
+    // after firing, and the failure message lands over a set nothing was tried on.
+    // The bar disables its own controls; these are the two it cannot reach.
+    const [selectionLocked, setSelectionLocked] = useState(false);
 
     const searchRef = useRef(null);
 
@@ -76,7 +94,8 @@ export default function DefectsPage() {
 
                 const target = pendingFocus.current;
                 pendingFocus.current = null;
-                if (target && loaded.some(d => d.id === target)) {
+                if (!target) return;
+                if (loaded.some(d => d.id === target)) {
                     // Land on the unfiltered view: a linked defect can be in any
                     // queue, and the caller asked for that row specifically.
                     setStatus('all');
@@ -84,7 +103,13 @@ export default function DefectsPage() {
                     setQuery('');
                     setExpandedId(target);
                     setFocusId(target);
+                    return;
                 }
+                // A deep link into a defect that has since been deleted otherwise
+                // renders as an ordinary unfiltered load, with nothing to say the
+                // link failed — and bugHref (utils/bugs.js) makes those links
+                // load-bearing from every test case's linked-bugs panel.
+                setFocusMissing(true);
             })
             .catch(() => {
                 if (cancelled) return;
@@ -101,7 +126,12 @@ export default function DefectsPage() {
         document.getElementById(`defect-row-${focusId}`)?.scrollIntoView({ block: 'center' });
     }, [focusId]);
 
+    // Scoped out while a dialog is open: the shortcut is document-wide, so without
+    // this it steals focus out of the edit modal or the delete confirmation while
+    // someone is typing in one of their fields.
+    const dialogOpen = Boolean(modal) || Boolean(pendingDelete);
     useEffect(() => {
+        if (dialogOpen) return undefined;
         const onKey = (event) => {
             if (event.key !== 'k' && event.key !== 'K') return;
             if (!event.metaKey && !event.ctrlKey) return;
@@ -111,42 +141,71 @@ export default function DefectsPage() {
         };
         document.addEventListener('keydown', onKey);
         return () => document.removeEventListener('keydown', onKey);
-    }, []);
+    }, [dialogOpen]);
 
     const counts = useMemo(() => queueCounts(rows, now), [rows, now]);
-    const visible = useMemo(
-        () => sortDefects(filterDefects(rows, { query, status, severities }), sort),
-        [rows, query, status, severities, sort],
+
+    // The whole filter state as one object: it is what filterDefects takes and what
+    // a tile's aria-pressed is compared against, so the two can never drift.
+    const view = useMemo(
+        () => ({ query, status, severities, openOnly, stale: staleOnly, now }),
+        [query, status, severities, openOnly, staleOnly, now],
     );
+    const visible = useMemo(() => sortDefects(filterDefects(rows, view), sort), [rows, view, sort]);
 
     // Every filter control funnels through here. The selection is dropped because a
     // bulk action must never land on rows the user has just filtered out of sight,
     // and the ?focus landing highlight goes with it — the user has started working.
-    const afterFilterChange = useCallback((changed) => {
-        setSelected(prev => nextSelectionOnFilterChange(prev, changed));
+    const afterFilterChange = useCallback(() => {
+        setSelected(prev => (prev.size === 0 ? prev : new Set()));
         setFocusId(null);
+        // The dead-deep-link notice is a landing message too, so it retires with the
+        // highlight rather than following the user around the queue.
+        setFocusMissing(false);
     }, []);
 
-    const changeQuery = (value) => { setQuery(value); afterFilterChange('query'); };
-    const changeStatus = (value) => { setStatus(value); afterFilterChange('status'); };
-    const changeSort = (value) => { setSort(value); afterFilterChange('sort'); };
+    // Clearing the two tile-only dimensions is what keeps them honest: they have no
+    // control in the filter bar, so the moment someone filters by hand they must go,
+    // or the table stays narrower than every count on the page claims.
+    const clearTileDimensions = () => { setOpenOnly(false); setStaleOnly(false); };
+
+    const changeQuery = (value) => { setQuery(value); afterFilterChange(); };
+    const changeStatus = (value) => { setStatus(value); clearTileDimensions(); afterFilterChange(); };
+    const changeSort = (value) => { setSort(value); afterFilterChange(); };
 
     const toggleSeverity = (severity) => {
         setSeverities(prev => (prev.includes(severity)
             ? prev.filter(s => s !== severity)
             : [...prev, severity]));
-        afterFilterChange('severities');
+        clearTileDimensions();
+        afterFilterChange();
     };
 
-    // A tile sets only the dimensions its preset names (utils/defectQueue's
-    // TRIAGE_TILES). A typed query is left alone on purpose: it is visible in the
-    // box, and silently discarding what someone typed is worse than showing them a
-    // narrower queue than the tile's count promised.
-    const pickTile = (preset) => {
+    // A tile sets every dimension its preset names (utils/defectQueue's
+    // TRIAGE_TILES), including the two the filter bar cannot reach, so the table
+    // lands on exactly the rows the tile counted. A typed query is left alone on
+    // purpose: it is visible in the box, and silently discarding what someone typed
+    // is worse than showing them a narrower queue than the tile's count promised.
+    //
+    // A pressed tile RELEASES instead — the tiles carry aria-pressed, so re-clicking
+    // one has to mean "off". It is also the only honest exit from the Stale tile:
+    // its preset sets nothing but the two invisible dimensions, so unlike Critical
+    // (which leaves its severity chip pressed) nothing in the filter bar reflects
+    // it, and the Reset button only exists inside the empty state.
+    const pickTile = (preset, pressed) => {
+        if (pressed) {
+            setStatus('all');
+            setSeverities([]);
+            clearTileDimensions();
+            afterFilterChange();
+            return;
+        }
         setStatus(preset.status);
         setSeverities(preset.severities);
+        setOpenOnly(preset.openOnly === true);
+        setStaleOnly(preset.stale === true);
         if (preset.sort) setSort(preset.sort);
-        afterFilterChange('tile');
+        afterFilterChange();
     };
 
     const resetFilters = () => {
@@ -154,7 +213,8 @@ export default function DefectsPage() {
         setStatus('all');
         setSeverities([]);
         setSort(DEFAULT_SORT);
-        afterFilterChange('reset');
+        clearTileDimensions();
+        afterFilterChange();
     };
 
     const toggleSelect = useCallback((id) => {
@@ -191,16 +251,46 @@ export default function DefectsPage() {
         }
         // Cleared even on success: a closed defect usually leaves the queue it was
         // ticked in, and a selection of rows nobody can see is the hazard this page
-        // clears selections to avoid in the first place.
-        setSelected(new Set());
+        // clears selections to avoid in the first place. This is only ever the
+        // selection the call was fired on — the bar locks it for the round-trip —
+        // so nothing built in the meantime is thrown away here.
+        setSelected(prev => (prev.size === 0 ? prev : new Set()));
     }, []);
 
     // PATCH /defects/{id} returns GetDefect, which resolves assignee_name but not
     // linked_test_count — carry the count over rather than blanking the Impact cell.
     const handleSaved = (saved) => {
-        setRows(prev => (modal?.mode === 'edit'
-            ? prev.map(r => (r.id === saved.id ? { ...saved, linked_test_count: r.linked_test_count } : r))
-            : [saved, ...prev]));
+        if (modal?.mode === 'edit') {
+            setRows(prev => prev.map(r => (r.id === saved.id ? { ...saved, linked_test_count: r.linked_test_count } : r)));
+            // An edit can push its own defect out of the queue on screen — closing it
+            // from a tab that is not Closed, renaming it out of the search term, dropping
+            // its severity below the pressed chip. A filter change drops the selection for
+            // exactly this reason (afterFilterChange), so a row that has just left the view
+            // leaves the selection with it: the bulk bar must never be able to write to a
+            // defect nobody can see. Only this row can have moved, so only this id is checked.
+            if (filterDefects([saved], view).length === 0) {
+                setSelected(prev => {
+                    if (!prev.has(saved.id)) return prev;
+                    const next = new Set(prev);
+                    next.delete(saved.id);
+                    return next;
+                });
+            }
+            return;
+        }
+        setRows(prev => [saved, ...prev]);
+        // A new defect lands in whatever queue it belongs to, which is often not the
+        // one on screen — creating from the Closed tab used to close the modal and
+        // show nothing, which reads as "the save failed" and invites a duplicate.
+        // Drop back to the unfiltered view instead, and highlight the new row.
+        if (filterDefects([saved], view).length === 0) {
+            setQuery('');
+            setStatus('all');
+            setSeverities([]);
+            clearTileDimensions();
+        }
+        setSelected(prev => (prev.size === 0 ? prev : new Set()));
+        setFocusId(saved.id);
     };
 
     // Delete is confirmed through components/Modal, not window.confirm: the native dialog
@@ -223,7 +313,9 @@ export default function DefectsPage() {
         }).catch(() => { /* api.js has already toasted */ });
     };
 
-    const handleRetest = (defect, tests) => {
+    // useCallback, like every other handler handed to DefectRow: the row is memoised,
+    // and a fresh closure per render would defeat that on every keystroke.
+    const handleRetest = useCallback((defect, tests) => {
         const body = buildRetestRun(defect, tests);
         if (!body) return;
         setRetestError(null);
@@ -235,7 +327,9 @@ export default function DefectsPage() {
                 // (store.ErrUnknownTestCases), so one deleted test case fails the run.
                 message: 'Could not start the retest run — one of the linked tests may no longer exist.',
             }));
-    };
+    }, [navigate]);
+
+    const openDetail = useCallback((target) => setModal({ mode: 'edit', defect: target }), []);
 
     return (
         <div className="defects-page">
@@ -283,12 +377,13 @@ export default function DefectsPage() {
                 </div>
             </div>
 
-            <TriageStrip
-                counts={counts}
-                status={status}
-                severities={severities}
-                onPick={pickTile}
-            />
+            {focusMissing && (
+                <div className="defects-notice" role="status" data-testid="defects-focus-missing">
+                    That defect no longer exists — it may have been deleted. The whole register is shown instead.
+                </div>
+            )}
+
+            <TriageStrip counts={counts} view={view} onPick={pickTile} />
 
             <FilterBar
                 counts={counts}
@@ -305,6 +400,8 @@ export default function DefectsPage() {
                 selectedIds={selected}
                 onApplied={handleBulkApplied}
                 onClear={() => setSelected(new Set())}
+                onHeightChange={setBarHeight}
+                onBusyChange={setSelectionLocked}
             />
 
             <div className="defects-table-wrap">
@@ -317,7 +414,7 @@ export default function DefectsPage() {
                                     className="defects-checkbox"
                                     aria-label="Select every defect in this queue"
                                     checked={allVisibleSelected}
-                                    disabled={visible.length === 0}
+                                    disabled={visible.length === 0 || selectionLocked}
                                     onChange={toggleSelectAll}
                                     data-testid="defects-select-all"
                                 />
@@ -336,12 +433,13 @@ export default function DefectsPage() {
                                 defect={defect}
                                 now={now}
                                 selected={selected.has(defect.id)}
+                                selectionLocked={selectionLocked}
                                 expanded={expandedId === defect.id}
                                 focused={focusId === defect.id}
                                 retestError={retestError?.id === defect.id ? retestError.message : ''}
                                 onToggleSelect={toggleSelect}
                                 onToggleExpand={toggleExpand}
-                                onOpenDetail={target => setModal({ mode: 'edit', defect: target })}
+                                onOpenDetail={openDetail}
                                 onRetest={handleRetest}
                                 onDelete={setPendingDelete}
                             />
@@ -396,6 +494,22 @@ export default function DefectsPage() {
                             </button>
                         )}
                     </div>
+                )}
+
+                {/* The bulk bar floats over the bottom of the queue, so while it is up
+                    the scroller carries its height as extra scroll range — without it the
+                    last row sits behind the bar with nowhere left to scroll. The height is
+                    whatever the bar just measured (BulkBar's ResizeObserver), because the
+                    bar wraps: a narrow viewport with an inline failure message on it is
+                    several times taller than the one-row bar, and a constant that clears
+                    one row leaves the last defect stranded behind the other. Until a
+                    measurement arrives the stylesheet's fallback stands. */}
+                {selected.size > 0 && (
+                    <div
+                        className="defects-bulk-spacer"
+                        aria-hidden="true"
+                        style={barHeight > 0 ? { '--defects-bulkbar-h': `${barHeight}px` } : undefined}
+                    />
                 )}
             </div>
 

@@ -2522,6 +2522,11 @@ const docTemplate = `{
         },
         "/defects": {
             "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Returns native defects with optional filtering by status, severity, or search query.",
                 "produces": [
                     "application/json"
@@ -2574,6 +2579,11 @@ const docTemplate = `{
                 }
             },
             "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Creates a new native defect.",
                 "consumes": [
                     "application/json"
@@ -2694,6 +2704,11 @@ const docTemplate = `{
         },
         "/defects/{id}": {
             "delete": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Permanently deletes a defect and all its links.",
                 "tags": [
                     "defects"
@@ -2726,6 +2741,11 @@ const docTemplate = `{
                 }
             },
             "patch": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
                 "description": "Partially updates a defect (nil fields are left unchanged).",
                 "consumes": [
                     "application/json"
@@ -2800,7 +2820,12 @@ const docTemplate = `{
         },
         "/defects/{id}/tests": {
             "get": {
-                "description": "Returns the distinct test cases linked to the defect (directly or via a run result), ordered by name.",
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Returns the distinct test cases linked to the defect (directly or via a run result), ordered by name. Each carries the run the TEST CASE last failed in — the most recent FAIL/ERROR result for that test case, deliberately not the result the defect happened to be filed against, since a test-case-scoped link carries no result at all. ` + "`" + `last_run_id` + "`" + ` / ` + "`" + `last_run_name` + "`" + ` / ` + "`" + `last_result_status` + "`" + ` are empty strings when the test case has no failing result; the test case is still listed.",
                 "produces": [
                     "application/json"
                 ],
@@ -9288,7 +9313,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "assignee_name": {
-                    "description": "Assignee display name (not persisted, populated by ListDefects/GetDefect)",
+                    "description": "Assignee display name (display name, else email; resolves even for a deactivated\nuser). Not persisted. Populated on the defect endpoints — list, get, create,\nupdate and bulk-update. The run/test-case DEFECT-LINK listings do not resolve it,\nso it is empty there; read the defect itself if the owner's name is needed.",
                     "type": "string"
                 },
                 "created_at": {
@@ -9645,7 +9670,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "assignee_name": {
-                    "description": "Assignee display name (not persisted, populated by ListDefects/GetDefect)",
+                    "description": "Assignee display name (display name, else email; resolves even for a deactivated\nuser). Not persisted. Populated on the defect endpoints — list, get, create,\nupdate and bulk-update. The run/test-case DEFECT-LINK listings do not resolve it,\nso it is empty there; read the defect itself if the owner's name is needed.",
                     "type": "string"
                 },
                 "created_at": {
@@ -9902,7 +9927,7 @@ const docTemplate = `{
                     "type": "integer"
                 },
                 "reverification_flagged": {
-                    "description": "008-jira-integration: set true when all linked defects reach statusCategory==\"done\".\nPersists until manually dismissed via DELETE /api/tests/{id}/reverification-flag.",
+                    "description": "Set true when the test case has at least one linked defect and every one of them is\nfixed-or-closed, i.e. the test is ready to be retested. \"fixed\" counts as resolved\nalongside \"closed\" so the signal fires when QA wants it — before the defect is\nclosed, not after. Recomputed by store.recomputeReverification on every defect\nstatus change, link and unlink; persists until manually dismissed via\nDELETE /api/tests/{id}/reverification-flag.",
                     "type": "boolean"
                 },
                 "steps": {

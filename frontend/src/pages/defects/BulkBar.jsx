@@ -18,11 +18,12 @@ function severityLabel(severity) {
     return severity.charAt(0).toUpperCase() + severity.slice(1);
 }
 
-export default function BulkBar({ selectedIds, onApplied, onClear }) {
+export default function BulkBar({ selectedIds, onApplied, onClear, onHeightChange, onBusyChange }) {
     const [menu, setMenu] = useState(null); // 'assign' | 'severity' | null
     const [users, setUsers] = useState(null); // null until the assign menu has loaded them
+    const [usersFailed, setUsersFailed] = useState(false);
     const [busy, setBusy] = useState(false);
-    const [error, setError] = useState('');
+    const [error, setError] = useState(null); // { epoch, message } | null — see below
     const barRef = useRef(null);
     const loadingUsers = useRef(false);
 
@@ -40,47 +41,109 @@ export default function BulkBar({ selectedIds, onApplied, onClear }) {
     }, [menu]);
 
     const ids = Array.from(selectedIds || []);
+    // Identifies WHICH rows are selected, not the order they were ticked in.
+    const selectionKey = ids.slice().sort().join(',');
+
+    // A failure belongs to the selection it happened on, and to that one visit to it.
+    // The page renders this bar unconditionally and it only returns null on an empty
+    // selection, so the component never unmounts and the message would otherwise outlive
+    // that selection: press Clear after a failed apply, tick a different set of rows, and
+    // the old failure would be sitting over a selection nothing has been tried on.
+    //
+    // Hence an EPOCH rather than a comparison against the id set: every change to the
+    // selection mints a new one, including the trip through empty that Clear makes, so
+    // re-ticking byte-for-byte the same rows is still a new selection and not the one the
+    // failure happened on. The bump is React's adjust-state-during-render pattern rather
+    // than an effect: it re-renders before the browser paints, so a stale message is never
+    // on screen for a frame.
+    const [mark, setMark] = useState({ key: selectionKey, epoch: 0 });
+    if (mark.key !== selectionKey) setMark(prev => ({ key: selectionKey, epoch: prev.epoch + 1 }));
+
+    // Rendering off the epoch is also what makes a LATE failure safe: an apply that is
+    // still in flight when the selection moves resolves against an epoch that has already
+    // been retired, so its message is simply never shown. A guard on the write could not
+    // do this — by then the closure only knows the selection it was fired on.
+    const shownError = error && error.epoch === mark.epoch ? error.message : '';
+
+    // The bar is out of flow (position: absolute), so it takes no space of its own and
+    // the scroller has to buy its height back as extra scroll range — otherwise the last
+    // row sits behind the bar with nowhere left to scroll. That height is MEASURED rather
+    // than assumed: the bar wraps, and an inline failure message takes it from one 43px
+    // row to three (132px at a 680px viewport) and further still below that — a range no
+    // constant in the stylesheet covers. See .defects-bulk-spacer in App.css.
+    const hasSelection = ids.length > 0;
+    useEffect(() => {
+        const node = barRef.current;
+        if (!node || typeof ResizeObserver === 'undefined') return undefined;
+        const observer = new ResizeObserver(() => onHeightChange?.(node.offsetHeight));
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, [hasSelection, onHeightChange]);
 
     const toggleMenu = (name) => setMenu(current => (current === name ? null : name));
 
-    // Users load when the Assign menu is first opened rather than on mount: the bar mounts
-    // and unmounts with every selection, and most selections never open the menu.
-    const openAssign = async () => {
-        const opening = menu !== 'assign';
-        toggleMenu('assign');
-        if (!opening || users !== null || loadingUsers.current) return;
+    const loadUsers = async () => {
+        if (loadingUsers.current) return;
         loadingUsers.current = true;
+        setUsersFailed(false); // back to "Loading users…" while the retry is in flight
         try {
-            setUsers(await getAssignableUsers());
+            setUsers(await getAssignableUsers() || []);
         } catch {
-            // api.js already toasted; say so inline too, so an empty menu is not read as
-            // "nobody can be assigned".
-            setUsers([]);
-            setError('Could not load the assignable users.');
+            // Deliberately NOT setUsers([]) — the same call DefectRow's affected-tests
+            // load makes and for the same reason: `users !== null` is the load guard, so
+            // pinning it to [] would turn one transient failure into "No assignable
+            // users." for the life of the page, with no way back but a reload. Left null,
+            // both the Retry below and simply re-opening the menu try again.
+            setUsersFailed(true);
         } finally {
             loadingUsers.current = false;
         }
     };
 
+    // Users load when the Assign menu is first opened rather than on mount: most
+    // selections never open the menu.
+    const openAssign = () => {
+        const opening = menu !== 'assign';
+        toggleMenu('assign');
+        if (!opening || users !== null) return;
+        loadUsers();
+    };
+
     const apply = async (fields) => {
         const payload = buildBulkPayload(ids, fields);
         if (!payload || busy) return;
+        const epoch = mark.epoch; // the selection this call is being fired on
         setMenu(null);
         setBusy(true);
-        setError('');
+        // Reported upward so the page can freeze the row checkboxes and select-all for
+        // the round-trip: `ids` is captured here, and a selection that moves under an
+        // in-flight call both mis-attributes its failure and loses whatever the user
+        // built when the success handler clears. The bar's own buttons are covered by
+        // `busy` below — Clear included, or the one control that empties the selection
+        // would still be live while the request runs.
+        onBusyChange?.(true);
+        setError(null);
         try {
             const updated = await defectsApi.bulkUpdate(payload.ids, payload);
             onApplied?.(Array.isArray(updated) ? updated : []);
-        } catch {
+        } catch (err) {
             // The interceptor's toast disappears; this stays next to the selection it
-            // failed on, and the selection is kept so the action can simply be retried.
-            setError('Bulk update failed — nothing was changed.');
+            // failed on — which is what the epoch is for: the write is unconditional and
+            // the render decides whether that selection is still the one on screen.
+            // The server's own reason is kept when there is one — "too many ids (max 500
+            // per request)" is actionable, a generic failure notice is not.
+            const detail = err?.response?.data?.error;
+            setError({
+                epoch,
+                message: detail ? `Bulk update failed — ${detail}.` : 'Bulk update failed — nothing was changed.',
+            });
         } finally {
             setBusy(false);
+            onBusyChange?.(false);
         }
     };
 
-    if (ids.length === 0) return null;
+    if (!hasSelection) return null;
 
     return (
         <div className="defects-bulkbar" ref={barRef} role="group" aria-label="Bulk actions" data-testid="defects-bulk-bar">
@@ -101,7 +164,20 @@ export default function BulkBar({ selectedIds, onApplied, onClear }) {
                 </button>
                 {menu === 'assign' && (
                     <div className="defects-menu" role="group" aria-label="Assign the selection">
-                        {users === null && <p className="defects-menu-note">Loading users…</p>}
+                        {users === null && !usersFailed && <p className="defects-menu-note">Loading users…</p>}
+                        {usersFailed && (
+                            <p className="defects-menu-note">
+                                Couldn&apos;t load the assignable users.{' '}
+                                <button
+                                    type="button"
+                                    className="defects-inline-retry"
+                                    onClick={loadUsers}
+                                    data-testid="defects-bulk-users-retry"
+                                >
+                                    Retry
+                                </button>
+                            </p>
+                        )}
                         {users !== null && users.length === 0 && (
                             <p className="defects-menu-note">No assignable users.</p>
                         )}
@@ -171,11 +247,12 @@ export default function BulkBar({ selectedIds, onApplied, onClear }) {
                 Mark verified &amp; close
             </button>
 
-            {error && <span className="defects-bulkbar-error" role="alert">{error}</span>}
+            {shownError && <span className="defects-bulkbar-error" role="alert">{shownError}</span>}
 
             <button
                 type="button"
-                className="defects-bulk-clear defects-bulkbar-spacer"
+                className="defects-bulk-clear"
+                disabled={busy}
                 onClick={() => onClear?.()}
                 data-testid="defects-bulk-clear"
             >
