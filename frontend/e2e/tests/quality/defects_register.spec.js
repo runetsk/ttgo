@@ -1296,6 +1296,59 @@ test.describe('Defects register — triage queue', () => {
         });
     });
 
+    // Below 640px the tiles stack one per row and the filter bar wraps, so the page's
+    // flex-none chrome grows past the viewport. Against `height: 100%` that starved the
+    // `flex: 1` scroller to nothing — measured at 600x800 the queue was 1px tall with six
+    // rows inside it, and because the scroller WAS the viewport there was nowhere to
+    // scroll to reach them. The queue simply was not on screen at phone widths.
+    test('the queue is reachable at a phone width, where the chrome is taller than the viewport', async ({ page, api, defectsPage }) => {
+        const stamp = `Narrow-${Date.now()}`;
+        const SEEDS = 6;
+
+        await page.setViewportSize({ width: 600, height: 800 });
+
+        await test.step(`Seed ${SEEDS} defects`, async () => {
+            for (let i = 0; i < SEEDS; i++) {
+                await api.createDefect({ title: `Row ${String(i).padStart(2, '0')} ${stamp}`, severity: 'major' });
+            }
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(SEEDS, { timeout: TIMEOUTS.ELEMENT });
+        });
+
+        await test.step('The chrome really does overflow — otherwise this pins nothing', async () => {
+            const chrome = await page.evaluate(() => {
+                const page_ = document.querySelector('.defects-page');
+                return [...page_.children]
+                    .filter(c => !c.classList.contains('defects-table-wrap'))
+                    .reduce((sum, c) => sum + c.getBoundingClientRect().height, 0);
+            });
+            expect(chrome).toBeGreaterThan(400);
+        });
+
+        await test.step('Every row can be scrolled to and clicked', async () => {
+            const geo = await page.evaluate(async () => {
+                const scroller = document.querySelector('.content-area');
+                scroller.scrollTop = scroller.scrollHeight;
+                await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+                const rows = [...document.querySelectorAll('[data-testid="defects-row"]')];
+                const last = rows[rows.length - 1];
+                const box = last.querySelector('[data-testid="defects-row-select"]').getBoundingClientRect();
+                const onTop = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+                return {
+                    queueHeight: Math.round(document.querySelector('.defects-table-wrap').getBoundingClientRect().height),
+                    lastRowOnScreen: box.top >= 0 && box.bottom <= window.innerHeight,
+                    checkboxReachable: !!onTop && last.contains(onTop),
+                };
+            });
+
+            // Pre-fix this was 1: the whole queue collapsed into a hairline.
+            expect(geo.queueHeight).toBeGreaterThan(100);
+            expect(geo.lastRowOnScreen).toBe(true);
+            expect(geo.checkboxReachable).toBe(true);
+        });
+    });
+
     test('expanding a row shows its affected tests and the run each last failed in', async ({ api, defectsPage }) => {
         const stamp = `Expand-${Date.now()}`;
         let seed;

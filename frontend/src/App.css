@@ -3326,5 +3326,38 @@
     .defects-expand-col--actions {
         margin-left: 0;
     }
+
+    /* Below this width the tiles stack and the filter bar wraps, so the page's
+       flex-none chrome grows to ~610px. Against `height: 100%` that left the
+       `flex: 1` scroller nothing: measured at 600x800, .defects-table-wrap was
+       1px tall with six rows inside it — the queue was simply not on screen, and
+       no amount of scrolling reached it because the scroller WAS the viewport.
+       Let the page grow and scroll as a whole instead. */
+    .defects-page {
+        height: auto;
+        min-height: 100%;
+    }
+
+    .defects-table-wrap {
+        flex: none;
+        overflow: visible;
+    }
+
+    /* Sticky, not absolute: once the page itself scrolls, `bottom` on an absolutely
+       positioned child resolves against the content box, so the bar would sit at the
+       foot of the whole document and scroll out of view. Sticky keeps it against the
+       viewport for the length of the table, which is the behaviour the wide layout
+       gets from position: absolute. */
+    .defects-bulkbar {
+        position: sticky;
+        left: auto;
+        right: auto;
+        bottom: 12px;
+    }
+
+    /* Only ever existed to stop the absolutely positioned bar covering the last row. */
+    .defects-bulk-spacer {
+        display: none;
+    }
 }
 
