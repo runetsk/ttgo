@@ -7,6 +7,7 @@ const SECTIONS = [
     { id: 'test-runs', label: 'Test Runs', icon: 'M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664zM21 12a9 9 0 11-18 0 9 9 0 0118 0z' },
     { id: 'categories', label: 'Categories', icon: 'M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10' },
     { id: 'requirements', label: 'Requirements', icon: 'M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z' },
+    { id: 'defects', label: 'Defects', icon: 'M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99l-6.93-12a2 2 0 00-3.48 0l-6.93 12A2 2 0 005.07 19z' },
     { id: 'ai-generation', label: 'AI Generation', icon: 'M13 10V3L4 14h7v7l9-11h-7z' },
     { id: 'ai-import', label: 'AI Import', icon: 'M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12' },
     { id: 'ai-failure-analysis', label: 'AI Failure Analysis', icon: 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z' },
@@ -17,6 +18,12 @@ const SECTIONS = [
     { id: 'settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
     { id: 'shortcuts', label: 'Tips & Shortcuts', icon: 'M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z' },
 ];
+
+// Look sections up by id, not by array position — the quick-links grid used numeric
+// indexes, so inserting a section silently handed every later card the wrong icon.
+function iconFor(id) {
+    return SECTIONS.find(s => s.id === id)?.icon;
+}
 
 function SectionIcon({ d, size = 16, color = 'currentColor' }) {
     return (
@@ -107,6 +114,7 @@ export default function HelpPage() {
                     {activeSection === 'test-runs' && <TestRunsSection />}
                     {activeSection === 'categories' && <CategoriesSection />}
                     {activeSection === 'requirements' && <RequirementsSection />}
+                    {activeSection === 'defects' && <DefectsSection />}
                     {activeSection === 'ai-generation' && <AIGenerationSection />}
                     {activeSection === 'ai-import' && <AIImportSection />}
                     {activeSection === 'ai-failure-analysis' && <AIFailureAnalysisSection />}
@@ -158,12 +166,12 @@ function OverviewSection({ onNavigate }) {
             {/* Quick links grid */}
             <div style={styles.quickGrid}>
                 {[
-                    { id: 'test-cases', icon: SECTIONS[1].icon, title: 'Test Cases', desc: 'Create, organize, and version test cases in folders' },
-                    { id: 'test-runs', icon: SECTIONS[2].icon, title: 'Test Runs', desc: 'Execute tests and record pass/fail results' },
-                    { id: 'ai-generation', icon: SECTIONS[5].icon, title: 'AI Generation', desc: 'Generate test cases from requirements using LLMs' },
-                    { id: 'ai-import', icon: SECTIONS[6].icon, title: 'AI Import', desc: 'Import AI output from ChatGPT, Gemini, Claude' },
-                    { id: 'requirements', icon: SECTIONS[4].icon, title: 'Requirements', desc: 'Link tests to requirements for traceability' },
-                    { id: 'analytics', icon: SECTIONS[7].icon, title: 'Analytics', desc: 'Dashboards, trends, and flaky test detection' },
+                    { id: 'test-cases', icon: iconFor('test-cases'), title: 'Test Cases', desc: 'Create, organize, and version test cases in folders' },
+                    { id: 'test-runs', icon: iconFor('test-runs'), title: 'Test Runs', desc: 'Execute tests and record pass/fail results' },
+                    { id: 'ai-generation', icon: iconFor('ai-generation'), title: 'AI Generation', desc: 'Generate test cases from requirements using LLMs' },
+                    { id: 'defects', icon: iconFor('defects'), title: 'Defects', desc: 'Triage, assign and retest the bugs your runs find' },
+                    { id: 'requirements', icon: iconFor('requirements'), title: 'Requirements', desc: 'Link tests to requirements for traceability' },
+                    { id: 'analytics', icon: iconFor('analytics'), title: 'Analytics', desc: 'Dashboards, trends, and flaky test detection' },
                 ].map(item => (
                     <button
                         key={item.id}
@@ -358,6 +366,65 @@ function RequirementsSection() {
                     'Import from Confluence — extract requirements from pages.',
                     'Configure connections in Settings > Integrations.',
                 ]} />
+            </Card>
+        </div>
+    );
+}
+
+function DefectsSection() {
+    return (
+        <div>
+            <PageHeader title="Defects" desc="Bugs your runs find, worked as a triage queue: who owns it, how bad it is, and what it blocks." />
+
+            <SectionHeader>Filing a defect</SectionHeader>
+            <Card>
+                <UL items={[
+                    'From a failing result in a run — the defect is linked to that result and its test case automatically.',
+                    'From a test case, when the bug is not tied to one particular execution.',
+                    'Straight from the Defects page with "+ New defect", for anything found outside a run.',
+                    'Optionally point it at an external tracker (Jira, GitHub, anything) with a provider, key and URL — the key becomes a link on the row.',
+                ]} />
+                <Tip>A defect linked to a failing result is what feeds the Impact column and the Retest action — filing from the run detail is worth the extra second.</Tip>
+            </Card>
+
+            <SectionHeader>Four queues, three stored statuses</SectionHeader>
+            <Card>
+                <P>The register shows four states, but only three are stored. <strong>Needs triage</strong> and <strong>In progress</strong> are both stored as <code>open</code> — what separates them is whether the defect has an owner, because assigning it <em>is</em> the triage step.</P>
+                <DL items={[
+                    ['Needs triage', 'Open with no owner. Nobody has looked at it yet.'],
+                    ['In progress', 'Open and assigned. Somebody owns it.'],
+                    ['Fixed', 'The fix is in but nobody has retested it. Stored as "fixed".'],
+                    ['Closed', 'Verified and done. Stored as "closed".'],
+                ]} />
+                <Tip>Anything that is not Closed counts as open everywhere else in TTGO — the run badges, the test-case panels and the analytics tables all treat a Fixed defect as still outstanding.</Tip>
+            </Card>
+
+            <SectionHeader>Working the queue</SectionHeader>
+            <Card>
+                <Steps items={[
+                    { title: 'Start at the tiles', desc: 'Needs triage, Critical open, Stale · 7d+ and Fixed awaiting retest each filter the table to exactly the rows they count. Click one to narrow, click it again to release it.' },
+                    { title: 'Narrow further', desc: 'Status tabs, multi-select severity chips and a search box over titles and external keys. Sort by severity-then-oldest, most recently updated, or how many tests a defect affects.' },
+                    { title: 'Assign to triage', desc: 'Give the defect an owner and it moves from Needs triage to In progress. Unassigning sends it back.' },
+                    { title: 'Act in bulk', desc: 'Tick rows to reveal the bulk bar: assign, unassign, set severity, or mark verified and close — one request for the whole selection.' },
+                    { title: 'Retest when fixed', desc: 'Expand a row and hit Retest to build a run from exactly the tests that defect affects, then work through it as usual.' },
+                ]} />
+            </Card>
+
+            <SectionHeader>Reading a row</SectionHeader>
+            <Card>
+                <DL items={[
+                    ['Severity', 'The coloured bar down the left edge and the pill next to the title — critical, major, minor, trivial.'],
+                    ['Impact', 'How many test cases the defect is linked to. Expand the row to see them, each linking to the run it last failed in.'],
+                    ['Age', 'How long since the defect was filed. It turns amber once nothing has happened for a week — hover for the last-update date.'],
+                    ['Owner', 'Who is on it, or Unassigned. A deactivated owner still shows their name rather than silently emptying.'],
+                ]} />
+                <Tip>Changing any filter clears your selection on purpose, so a bulk close can never land on rows you have scrolled out of view.</Tip>
+            </Card>
+
+            <SectionHeader>Retesting and reverification</SectionHeader>
+            <Card>
+                <P>When every defect linked to a test case is fixed or closed, that test case is flagged for reverification — it is waiting on somebody to confirm the fix. The flag shows on the test case and in the grid, and the Fixed, awaiting retest tile is the queue-level view of the same idea.</P>
+                <Tip>Retest builds a run from a defect&apos;s affected tests. If the defect has no linked tests there is nothing to retest, and the button stays disabled.</Tip>
             </Card>
         </div>
     );
