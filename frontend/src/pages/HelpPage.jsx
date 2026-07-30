@@ -102,7 +102,7 @@ export default function HelpPage() {
                 </div>
 
                 <div style={styles.sidebarFooter}>
-                    <span style={styles.footerText}>TTGO v0.3.0</span>
+                    <span style={styles.footerText}>TTGO v{__APP_VERSION__}</span>
                 </div>
             </nav>
 
