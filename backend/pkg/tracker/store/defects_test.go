@@ -383,7 +383,8 @@ func TestReverificationCountsFixedAsResolved(t *testing.T) {
 }
 
 // TestSeedDemoReverificationFlags pins the demo dataset's reverification outcome across the
-// widened predicate: no seeded defect is "fixed", so only the closed-defect test case is flagged.
+// widened predicate: the seed's one "fixed" defect shares a test case with a still-open
+// one, so only the closed-defect test case is flagged.
 func TestSeedDemoReverificationFlags(t *testing.T) {
 	s := newTestStore(t)
 	_, err := s.SeedDemoTx(false)
@@ -394,7 +395,51 @@ func TestSeedDemoReverificationFlags(t *testing.T) {
 	assert.False(t, reverFlag(t, s, demoID("tc:session-expires")),
 		"linked defect is still open")
 	assert.False(t, reverFlag(t, s, demoID("tc:checkout-valid-payment")),
-		"linked defect is still open")
+		"carries a fixed defect AND a still-open one -> not ready")
+}
+
+// The demo seed exists to show the product working. An all-open, all-unassigned
+// defect set renders the register's Owner column, its In progress / Fixed tabs and
+// three of its four triage tiles empty, which reads as dead features rather than an
+// empty queue — so the shape is pinned here, not left to whoever edits the dataset.
+func TestSeedDemoDefectsCoverEveryQueue(t *testing.T) {
+	s := newTestStore(t)
+	owner, err := s.CreateUser("owner@example.com", "Demo Owner", "x", "admin")
+	require.NoError(t, err)
+
+	_, err = s.SeedDemoTx(false)
+	require.NoError(t, err)
+
+	defects, err := s.ListDefects("", "", "")
+	require.NoError(t, err)
+
+	byStatus := map[string]int{}
+	assigned, stale := 0, 0
+	cutoff := time.Now().AddDate(0, 0, -7)
+	for _, d := range defects {
+		byStatus[d.Status]++
+		if d.AssigneeID != nil && *d.AssigneeID == owner.ID {
+			assigned++
+			assert.Equal(t, "Demo Owner", d.AssigneeName, "owner name resolves for the register")
+		}
+		if d.Status != "closed" && d.UpdatedAt.Before(cutoff) {
+			stale++
+		}
+	}
+
+	assert.Positive(t, byStatus["open"], "Needs triage / In progress")
+	assert.Positive(t, byStatus["fixed"], "Fixed, awaiting retest tile")
+	assert.Positive(t, byStatus["closed"], "Closed tab")
+	assert.Positive(t, assigned, "at least one defect has an owner, so In progress is reachable")
+	assert.Positive(t, stale, "Stale 7d+ tile")
+
+	var criticalOpen int
+	for _, d := range defects {
+		if d.Severity == "critical" && d.Status != "closed" {
+			criticalOpen++
+		}
+	}
+	assert.Positive(t, criticalOpen, "Critical open tile")
 }
 
 // newDefectUser inserts a user and forces the active/deleted flags CreateUser does not expose.

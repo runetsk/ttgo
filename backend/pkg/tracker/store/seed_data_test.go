@@ -9,7 +9,7 @@ import (
 // config) are populated with deterministic IDs that line up with the
 // RunResults and TestCases they reference.
 func TestDemoDatasetStructure(t *testing.T) {
-	ds := demoDataset()
+	ds := demoDataset("")
 
 	if len(ds.DefectLinks) == 0 {
 		t.Fatalf("expected demo DefectLinks to be populated")

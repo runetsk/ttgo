@@ -18,10 +18,28 @@ func seedMark(tx *gorm.DB, entityType, entityID string) error {
 	}).Error
 }
 
+// resolveSeedUser returns the user ID demo content should belong to: comments need
+// it as an FK, and the defects use it as an owner. Prefers an active admin, falls
+// back to any user, and returns "" when the instance has none yet — callers must
+// treat that as "seed unowned" rather than an error.
+func resolveSeedUser(tx *gorm.DB) string {
+	var u models.User
+	if err := tx.Where("role = ? AND active = ?", "admin", true).
+		Order("created_at ASC").First(&u).Error; err != nil {
+		if err := tx.Order("created_at ASC").First(&u).Error; err != nil {
+			return ""
+		}
+	}
+	return u.ID
+}
+
 // SeedDemo creates all demo entities within the supplied transaction.
 // The caller is responsible for wrapping this in db.Transaction().
 func SeedDemo(tx *gorm.DB) (SeedResult, error) {
-	ds := demoDataset()
+	// Resolved up front because the defects need it too — an all-unassigned demo
+	// leaves the register's Owner column and In progress / Fixed tiles empty.
+	seedUser := resolveSeedUser(tx)
+	ds := demoDataset(seedUser)
 	var counts SeedCounts
 
 	for _, f := range ds.Folders {
@@ -142,6 +160,16 @@ func SeedDemo(tx *gorm.DB) (SeedResult, error) {
 		counts.DefectLinks++
 	}
 
+	// Backdate one defect so the register's "Stale · 7d+" tile is non-zero. This has
+	// to be a follow-up UPDATE: GORM stamps UpdatedAt on create, so a past value set
+	// in the dataset would not survive the insert. staleDemoDefectAge is > the 7-day
+	// threshold the frontend uses (utils/defectQueue.js STALE_DAYS).
+	staleAt := time.Now().AddDate(0, 0, -staleDemoDefectAgeDays)
+	if err := tx.Model(&models.Defect{}).Where("id = ?", demoID("defect:1")).
+		Update("updated_at", staleAt).Error; err != nil {
+		return SeedResult{}, err
+	}
+
 	// Recompute reverification for tc:category-filter whose only defect is closed.
 	if err := recomputeReverification(tx, []string{demoID("tc:category-filter")}); err != nil {
 		return SeedResult{}, err
@@ -166,18 +194,9 @@ func SeedDemo(tx *gorm.DB) (SeedResult, error) {
 		counts.RunResultAnalyses++
 	}
 
-	// Comments need a live User ID (FK) — look one up at seed time.
-	// Prefer an active admin; fall back to any user; if none exist, skip comments.
-	var author models.User
-	if err := tx.Where("role = ? AND active = ?", "admin", true).
-		Order("created_at ASC").First(&author).Error; err != nil {
-		if err := tx.Order("created_at ASC").First(&author).Error; err != nil {
-			author = models.User{}
-		}
-	}
-	if author.ID != "" {
+	if seedUser != "" {
 		now := time.Now()
-		for _, c := range buildDemoComments(now, author.ID) {
+		for _, c := range buildDemoComments(now, seedUser) {
 			if err := tx.Create(&c).Error; err != nil {
 				return SeedResult{}, err
 			}

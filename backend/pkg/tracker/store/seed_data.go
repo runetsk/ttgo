@@ -42,13 +42,16 @@ func ptr(s string) *string { return &s }
 // demoDataset builds and returns the complete hardcoded demo dataset.
 // All IDs are deterministic (UUID v5) so that re-seeding after removal produces
 // identical rows and the same DemoSeed lookup entries.
-func demoDataset() seedDataset {
+// demoDataset builds the demo entities. assigneeID owns the defects that seed as
+// "in progress" and "fixed"; pass "" when no user is available or when the caller
+// only needs entity IDs (the purge path), since ownership does not affect them.
+func demoDataset(assigneeID string) seedDataset {
 	now := time.Now()
 	catalog := buildDemoCatalog(now)
 	runs := buildDemoRuns(now, catalog)
 	requirements := buildDemoRequirements(now, catalog)
 	ai := buildDemoAIData(now)
-	defects, defectLinks := buildDemoDefects(now)
+	defects, defectLinks := buildDemoDefects(now, assigneeID)
 
 	return seedDataset{
 		Folders:             catalog.Folders,

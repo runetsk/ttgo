@@ -32,7 +32,7 @@ func (s *Store) SeedDemoTx(removeFirst bool) (SeedResult, error) {
 // identified by their deterministic UUIDs. It is safe to call even when the
 // demo_seeds table is empty or partially populated.
 func purgeKnownDemoEntities(tx *gorm.DB) error {
-	ds := demoDataset()
+	ds := demoDataset("")
 
 	rrIDs := make([]string, 0, len(ds.RunResults))
 	for _, rr := range ds.RunResults {
