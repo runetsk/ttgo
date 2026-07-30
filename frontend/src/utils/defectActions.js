@@ -36,6 +36,133 @@ export function buildBulkPayload(selectedIds, fields) {
     return payload;
 }
 
+// bulkLockFor turns the ids a bulk apply captured at click time into the freeze the queue
+// holds for the round-trip: the set of rows that call is writing to, or null when nothing
+// is in flight.
+//
+// The CAPTURED ids are the whole point of it. The register locks none of its filter
+// controls during an apply, and every one of them deliberately clears the selection (a bulk
+// action must never land on rows that have been filtered out of sight) — so a freeze read
+// off the live selection released the moment somebody re-sorted, typed in the search box or
+// pressed a tile, handing back the edit modal, Delete and Retest on the very rows the
+// request was still writing to. The modal is a full-record editor seeded from the pre-bulk
+// snapshot, so the save that followed put the old status and severity straight back over
+// the bulk write.
+//
+// An empty capture collapses to null rather than an empty Set, so "is anything in flight"
+// stays a single null check and a call that somehow sent no ids cannot freeze the table.
+export function bulkLockFor(ids) {
+    const locked = new Set(Array.from(ids || []).filter(Boolean));
+    return locked.size > 0 ? locked : null;
+}
+
+// isBulkLocked is the question every per-defect write on this page asks IMMEDIATELY BEFORE it
+// issues its request: is a bulk apply currently writing to this defect?
+//
+// It is deliberately not phrased as "should this button be disabled". Disabling the button was
+// tried — the checkbox, then the row's Open detail / Delete / Retest, then keying those on the
+// captured ids — and each round a different way to the same write was found, because a
+// DISABLED BUTTON ONLY GUARDS THE PATH THAT GOES THROUGH IT. The one that finally had no
+// button at all: a dialog opened BEFORE the apply started. Nothing was locked when it opened,
+// its Save sits inside an overlay with no focus containment (see hooks/useDialogFocus), and
+// the bulk bar stays in the DOM behind it and is reachable by Tab. So the guard belongs on the
+// write, where every path has to pass through it, and the hazard is total: DefectModal is a
+// full-record editor seeded from the PRE-bulk snapshot, so its PATCH puts the old status and
+// severity straight back over the bulk write.
+//
+// `lock` is bulkLockFor's output — a Set of captured ids, or null when nothing is in flight.
+export function isBulkLocked(lock, id) {
+    if (!lock || !id || typeof lock.has !== 'function') return false;
+    return lock.has(id);
+}
+
+// isEditSnapshotStale is the question DefectModal's PATCH asks — a strictly WIDER one than
+// isBulkLocked, and the difference is where the sixth hole was.
+//
+// isBulkLocked is about a request being in flight, so it stops being true the moment that
+// request lands. A dialog's SNAPSHOT does not work that way: the form was seeded when the
+// dialog opened, a bulk apply then rewrote the row underneath it, and the form still holds the
+// pre-bulk values afterwards. Guarding only the in-flight window therefore just moved the
+// overwrite later — wait for the apply to finish, press Save on the dialog that is still
+// standing, and its full-record PATCH puts the old status and severity back exactly as before,
+// with no refusal shown at all because nothing is locked any more.
+//
+// So staleness is remembered rather than sampled: `touched` is the set of ids a bulk apply has
+// written to since this dialog opened. It does not expire — only opening a dialog clears it,
+// because a dialog opened AFTER an apply is seeded from the row that apply produced.
+//
+// Deliberately NOT used for Delete or Retest: neither carries a snapshot, so neither can write
+// stale values back, and refusing them after an apply had finished would be a lie.
+export function isEditSnapshotStale(lock, touched, id) {
+    if (isBulkLocked(lock, id)) return true;
+    if (!id || !touched || typeof touched.has !== 'function') return false;
+    return touched.has(id);
+}
+
+// rememberBulkTouched is the other side of isEditSnapshotStale: what a landed bulk apply has to
+// leave behind for the dialog standing over it. Deliberately NARROWER than "every id that was
+// applied".
+//
+// The record exists for exactly one thing — an edit dialog opened BEFORE an apply still holds
+// the pre-bulk snapshot after that apply lands, and its full-record PATCH would put the old
+// values back. That can only be true of the defect a dialog is open on RIGHT NOW: with no
+// dialog up there is no snapshot to refuse, and the next dialog is seeded from the row the
+// apply produced. Recording every applied id was correct but unbounded — only OPENING a dialog
+// cleared the set, so a session that spent the afternoon doing bulk applies and never opened
+// one grew it for the life of the page.
+//
+// `editingId` is the open edit dialog's defect, or falsy when no edit dialog is up. Mutates and
+// returns `touched` — it is the page's ref, and nothing re-renders off it.
+export function rememberBulkTouched(touched, editingId, requestedIds) {
+    if (!touched || typeof touched.add !== 'function' || !editingId) return touched;
+    for (const id of requestedIds || []) {
+        if (id === editingId) {
+            touched.add(id);
+            break;
+        }
+    }
+    return touched;
+}
+
+// What a refused write says. One string, because all three refusals (save, delete, retest) are
+// the same fact and a silent no-op is what the guard must never be — the modal's own
+// `.catch(() => {})` already swallows enough.
+export const BULK_LOCK_MESSAGE =
+    'A bulk update is being applied to this defect. Wait for it to finish, then reopen this — saving now would undo it.';
+
+// applyBulkResult folds a bulk-update response back into the page's row list.
+//
+// Two things happen at once, and only one of them is obvious. Every id the server DID return
+// is replaced outright by the row it sent back — bulk-update enriches its rows exactly like
+// GET /defects (assignee_name AND linked_test_count), so nothing has to be re-merged by hand.
+// Every id that was REQUESTED but is missing from the response is dropped instead: the endpoint
+// tolerates unknown ids rather than rejecting the call (they simply match nothing), so an id
+// that comes back missing is a defect somebody else deleted since this page loaded. Left in
+// place it would sit there unchanged after a "successful" apply, telling the user they had just
+// closed something that no longer exists.
+//
+// Rows outside `requestedIds` are untouched: they were never part of the call, and their absence
+// from the response says nothing at all about them.
+export function applyBulkResult(rows, updated, requestedIds) {
+    const list = Array.isArray(rows) ? rows : [];
+    const byID = new Map((Array.isArray(updated) ? updated : []).map(d => [d.id, d]));
+    const requested = new Set(Array.from(requestedIds || []));
+    if (requested.size === 0) return list;
+
+    const next = [];
+    for (const row of list) {
+        const replacement = byID.get(row.id);
+        if (replacement) {
+            next.push(replacement);
+            continue;
+        }
+        // Requested, not returned — gone server-side.
+        if (requested.has(row.id)) continue;
+        next.push(row);
+    }
+    return next;
+}
+
 // assigneeOptions is the list an assignee picker offers below its static "Unassigned"
 // entry: the assignable users, labelled display-name-else-email the way AssigneePicker
 // labels them.

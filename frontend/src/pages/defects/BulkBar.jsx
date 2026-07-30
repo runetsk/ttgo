@@ -18,7 +18,7 @@ function severityLabel(severity) {
     return severity.charAt(0).toUpperCase() + severity.slice(1);
 }
 
-export default function BulkBar({ selectedIds, onApplied, onClear, onHeightChange, onBusyChange }) {
+export default function BulkBar({ selectedIds, onApplied, onClear, onHeightChange, onInFlightChange }) {
     const [menu, setMenu] = useState(null); // 'assign' | 'severity' | null
     const [users, setUsers] = useState(null); // null until the assign menu has loaded them
     const [usersFailed, setUsersFailed] = useState(false);
@@ -115,17 +115,39 @@ export default function BulkBar({ selectedIds, onApplied, onClear, onHeightChang
         const epoch = mark.epoch; // the selection this call is being fired on
         setMenu(null);
         setBusy(true);
-        // Reported upward so the page can freeze the row checkboxes and select-all for
-        // the round-trip: `ids` is captured here, and a selection that moves under an
-        // in-flight call both mis-attributes its failure and loses whatever the user
-        // built when the success handler clears. The bar's own buttons are covered by
-        // `busy` below — Clear included, or the one control that empties the selection
-        // would still be live while the request runs.
-        onBusyChange?.(true);
+        // Reported upward as the ids this call CAPTURED — deliberately not as a bare busy
+        // flag, and never as "whatever is ticked right now". The page freezes two things
+        // off it for the round-trip: every checkbox on the table (the id set must not move
+        // under an in-flight call, which both mis-attributes its failure and loses whatever
+        // the user built when the success handler clears), and the OWN write paths of the
+        // rows in this list. The second one has to follow these ids: no filter control is
+        // locked and every one of them clears the selection by design
+        // (DefectsPage.afterFilterChange), so a freeze keyed on the selection released the
+        // moment somebody re-sorted — on the very rows this request is still writing to.
+        //
+        // payload.ids rather than `ids`: buildBulkPayload is what deduplicates them, and
+        // that is the list the server is actually being given.
+        //
+        // The bar's own buttons need none of this — `busy` below covers them, Clear
+        // included, or the one control that empties the selection outright would still be
+        // live while the request runs.
+        onInFlightChange?.(payload.ids);
         setError(null);
         try {
             const updated = await defectsApi.bulkUpdate(payload.ids, payload);
-            onApplied?.(Array.isArray(updated) ? updated : []);
+            // The ids go up with the reply because the reply alone cannot describe the call:
+            // unknown ids are tolerated and simply omitted, so "which of these came back" is
+            // the only way the page can tell a row that was updated from one that has been
+            // deleted out from under it. payload.ids, not `ids` — buildBulkPayload is what
+            // deduplicates them, and it is that list the server was actually given.
+            //
+            // They only go up alongside a REAL array, though. The endpoint always answers 200
+            // with one, but a gateway that answers 200 with something else would otherwise
+            // read as "every id is missing" and take the whole selection off the queue over a
+            // merely malformed reply. Sending no ids then means "reconcile nothing", which is
+            // what patching an unrecognisable response has always done.
+            const rows = Array.isArray(updated) ? updated : [];
+            onApplied?.(rows, Array.isArray(updated) ? payload.ids : []);
         } catch (err) {
             // The interceptor's toast disappears; this stays next to the selection it
             // failed on — which is what the epoch is for: the write is unconditional and
@@ -139,7 +161,7 @@ export default function BulkBar({ selectedIds, onApplied, onClear, onHeightChang
             });
         } finally {
             setBusy(false);
-            onBusyChange?.(false);
+            onInFlightChange?.(null);
         }
     };
 

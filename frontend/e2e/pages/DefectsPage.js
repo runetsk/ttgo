@@ -136,6 +136,12 @@ export class DefectsPage extends BasePage {
         return this.page.getByTestId('defects-affected-retry');
     }
 
+    // The expand's inline message: a Retest that could not start, or a write the page refused
+    // because a bulk apply is mid-flight on this defect.
+    get rowNotice() {
+        return this.page.getByTestId('defects-row-notice');
+    }
+
     // ── Bulk bar ──
     // Renders only while at least one row is ticked, so assert on it after
     // selecting rather than before.
@@ -198,6 +204,48 @@ export class DefectsPage extends BasePage {
 
     get modalSave() {
         return this.page.getByTestId('defect-save');
+    }
+
+    get modalCancel() {
+        return this.modalDialog.getByRole('button', { name: 'Cancel' });
+    }
+
+    // The dialog element itself — role=dialog + aria-modal, and the boundary focus is
+    // contained inside (hooks/useDialogFocus).
+    get modalDialog() {
+        return this.page.getByTestId('defect-dialog');
+    }
+
+    // Shown when Save was refused because a bulk apply is writing to this defect.
+    get modalRefusal() {
+        return this.page.getByTestId('defect-refused');
+    }
+
+    // The data-testid of whatever holds focus right now, falling back to the tag name for the
+    // controls that carry none. Enough to say WHICH control focus was handed to — which is what
+    // a dialog's close has to answer (hooks/useDialogFocus restores it to the opener).
+    async focusedTestId() {
+        return this.page.evaluate(() => {
+            const active = document.activeElement;
+            if (!active) return null;
+            return active.getAttribute('data-testid') || active.tagName.toLowerCase();
+        });
+    }
+
+    // Presses Tab `times` and reports the first thing focus landed on OUTSIDE `dialog`, or
+    // null if it never escaped. A dialog with no focus containment leaks within ~12 presses:
+    // Tab runs off its last control and wraps to the top of the page behind it.
+    async tabOutOf(dialog, times = 24) {
+        for (let i = 0; i < times; i++) {
+            await this.page.keyboard.press('Tab');
+            const escaped = await dialog.evaluate((node) => {
+                const active = document.activeElement;
+                if (!active || node.contains(active)) return null;
+                return active.getAttribute('data-testid') || active.tagName.toLowerCase();
+            });
+            if (escaped !== null) return escaped;
+        }
+        return null;
     }
 
     // ── Notices ──

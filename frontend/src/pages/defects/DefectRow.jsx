@@ -40,12 +40,16 @@ function DefectRow({
     defect,
     now,
     selected = false,
-    // True while a bulk apply is in flight: that call captured its ids at click time,
-    // so the selection it is writing to must not move under it.
+    // True while ANY bulk apply is in flight — table-wide, because that call captured its
+    // ids at click time and ticking any row at all moves the set it is writing to.
     selectionLocked = false,
+    // True only for the rows THAT call captured: the ones actually being written to.
+    actionsLocked = false,
     expanded = false,
     focused = false,
-    retestError = '',
+    // One inline message for this row's expand panel: a Retest that could not start, or a write
+    // the page refused because a bulk apply is mid-flight on this defect.
+    notice = '',
     onToggleSelect,
     onToggleExpand,
     onOpenDetail,
@@ -88,6 +92,37 @@ function DefectRow({
         if (!expanded || affected !== null) return;
         loadAffected();
     }, [expanded, affected, loadAffected]);
+
+    // Every write this row owns is frozen while a bulk apply is writing to THIS row.
+    //
+    // Scoped to the captured rows on purpose, unlike the table-wide checkbox freeze. The
+    // checkbox is locked everywhere because what must hold still there is the id SET —
+    // ticking any row moves the selection the in-flight call captured. What must hold still
+    // here is the DEFECT, and the call only writes to the ids it captured: a row outside
+    // them is not being changed by it, so freezing its actions would cost the user a
+    // working modal for no hazard at all.
+    //
+    // Which is why `actionsLocked` is handed down from those captured ids rather than
+    // derived here from `selected && selectionLocked`. That derivation was the bug: no
+    // filter control is locked during an apply and every one of them clears the selection
+    // by design (DefectsPage.afterFilterChange), so one re-sort, keystroke or tile click
+    // mid-flight emptied `selected` and released this freeze on the rows that were still
+    // being written to.
+    //
+    // The hazard on a captured row is total, not partial: `defect` is the row as it was
+    // BEFORE the bulk write, DefectModal seeds its form from that snapshot, and
+    // buildDefectPayload deliberately sends the full record on save (it is a full-record
+    // editor — clearing a field has to be sent as ""). So a save that lands after the
+    // bulk PATCHes the pre-bulk status and severity straight back over it, and the user's
+    // "Mark verified & close" silently reverts for exactly that row. Delete and Retest are
+    // locked with it: one destroys the row the call is mid-write on, the other navigates
+    // away to a new run, which unmounts the page before the apply can report at all.
+    //
+    // These disabled buttons are the AFFORDANCE, not the guarantee. A dialog opened before the
+    // apply started never passes through any of them, so the page also refuses each of those
+    // three writes at the call itself (DefectsPage's isLocked / DefectModal.submit). Do not
+    // treat this lock as the thing that keeps the register safe.
+    const lockedTitle = actionsLocked ? 'A bulk update is being applied to this defect' : undefined;
 
     const status = deriveStatus(defect);
     const severity = defect.severity || '';
@@ -269,6 +304,8 @@ function DefectRow({
                                     <button
                                         type="button"
                                         className="defects-ghost-btn"
+                                        disabled={actionsLocked}
+                                        title={lockedTitle}
                                         onClick={() => onOpenDetail?.(defect)}
                                         data-testid="defects-open-detail"
                                     >
@@ -277,8 +314,8 @@ function DefectRow({
                                     <button
                                         type="button"
                                         className="defects-ghost-btn"
-                                        disabled={tests.length === 0}
-                                        title={tests.length === 0 ? 'No linked tests to retest' : undefined}
+                                        disabled={actionsLocked || tests.length === 0}
+                                        title={lockedTitle || (tests.length === 0 ? 'No linked tests to retest' : undefined)}
                                         onClick={() => onRetest?.(defect, tests)}
                                         data-testid="defects-retest"
                                     >
@@ -291,6 +328,8 @@ function DefectRow({
                                         <button
                                             type="button"
                                             className="defects-ghost-btn defects-ghost-btn--danger"
+                                            disabled={actionsLocked}
+                                            title={lockedTitle}
                                             onClick={() => onDelete(defect)}
                                             data-testid="defects-delete"
                                         >
@@ -298,7 +337,7 @@ function DefectRow({
                                         </button>
                                     )}
                                 </div>
-                                {retestError && <span className="defects-bulkbar-error" role="alert">{retestError}</span>}
+                                {notice && <span className="defects-bulkbar-error" role="alert" data-testid="defects-row-notice">{notice}</span>}
                             </div>
                         </div>
                     </td>

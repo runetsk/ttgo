@@ -3,10 +3,16 @@ import assert from 'node:assert/strict';
 import {
     RETEST_TITLE_MAX,
     UNASSIGNED,
+    applyBulkResult,
     assigneeOptions,
     buildBulkPayload,
+    bulkLockFor,
     buildDefectPayload,
     buildRetestRun,
+    isBulkLocked,
+    isEditSnapshotStale,
+    rememberBulkTouched,
+    BULK_LOCK_MESSAGE,
 } from './defectActions.js';
 import { DEFECT_STATUS_OPTIONS, deriveStatus } from './defectQueue.js';
 
@@ -69,6 +75,234 @@ test('unassign is sent as "" — null would decode to nil and change nothing', (
 test('an omitted assignee leaves the key out entirely (= unchanged)', () => {
     assert.equal('assignee_id' in buildBulkPayload(['d1'], { status: 'closed' }), false);
     assert.equal('assignee_id' in buildBulkPayload(['d1'], { assignee_id: undefined }), false);
+});
+
+// ── bulkLockFor ──
+
+test('the lock is the set of ids the apply captured', () => {
+    const lock = bulkLockFor(['d1', 'd2', 'd3']);
+    assert.equal(lock.has('d1'), true);
+    assert.equal(lock.has('d3'), true);
+    assert.equal(lock.has('elsewhere'), false);
+});
+
+// The bug this exists to prevent: the register locks none of its filter controls during an
+// apply and every one of them CLEARS the selection (afterFilterChange), so the freeze can
+// only be built from what the call captured. Built from the selection instead, one re-sort
+// mid-flight released the row's modal, Delete and Retest on the rows still being written to
+// — and that modal is a full-record editor seeded from the pre-bulk snapshot, so saving it
+// put the old status and severity back over the bulk write.
+test('the lock is unmoved by whatever the selection does next', () => {
+    const selected = new Set(['d1', 'd2', 'd3']);
+    const lock = bulkLockFor(Array.from(selected));
+
+    selected.clear(); // a sort change, a keystroke, a tile — all of them do this
+    assert.equal(selected.size, 0);
+    assert.deepEqual([...lock].sort(), ['d1', 'd2', 'd3']);
+
+    selected.add('someone-else'); // and re-ticking other rows does not extend it
+    assert.equal(lock.has('someone-else'), false);
+    assert.equal(lock.size, 3);
+});
+
+// Nothing in flight is a single null check, and a call that somehow sent no ids must not
+// leave the table frozen with no way back.
+test('nothing captured means nothing is locked', () => {
+    assert.equal(bulkLockFor([]), null);
+    assert.equal(bulkLockFor(null), null);
+    assert.equal(bulkLockFor(undefined), null);
+    assert.equal(bulkLockFor(['', null, undefined]), null);
+});
+
+test('a Set is accepted, ids are deduplicated and blanks dropped', () => {
+    assert.deepEqual([...bulkLockFor(new Set(['d1', 'd2']))].sort(), ['d1', 'd2']);
+    assert.equal(bulkLockFor(['d1', 'd1', 'd1']).size, 1);
+    assert.deepEqual([...bulkLockFor(['d1', '', null])], ['d1']);
+});
+
+// ── isBulkLocked ──
+//
+// The question a write asks about ITSELF, as opposed to the boolean a button reads. Five
+// rounds of guarding the paths INTO these writes (the checkbox, then the row's buttons, then
+// keying those on the captured ids) each closed one path and left another: a dialog opened
+// before the apply started passes through none of them, because it was opened while nothing
+// was locked and no overlay in this app makes the page behind it unreachable.
+
+test('a captured id is locked, anything else is not', () => {
+    const lock = bulkLockFor(['d1', 'd2']);
+    assert.equal(isBulkLocked(lock, 'd1'), true);
+    assert.equal(isBulkLocked(lock, 'd2'), true);
+    assert.equal(isBulkLocked(lock, 'd3'), false);
+});
+
+test('nothing in flight locks nothing', () => {
+    assert.equal(isBulkLocked(null, 'd1'), false);
+    assert.equal(isBulkLocked(undefined, 'd1'), false);
+    assert.equal(isBulkLocked(bulkLockFor([]), 'd1'), false);
+});
+
+// A create has no id and a malformed row may have none either. Neither can be "the defect a
+// bulk is writing to", and neither may be refused a save over it.
+test('a missing id is never locked', () => {
+    const lock = bulkLockFor(['d1']);
+    for (const id of ['', null, undefined]) assert.equal(isBulkLocked(lock, id), false);
+});
+
+// Defensive: the predicate is called on every save/delete/retest, so a lock that is somehow
+// not a Set must read as "not locked" rather than throw inside a click handler and take the
+// whole page down.
+test('a lock that is not a Set reads as unlocked instead of throwing', () => {
+    assert.equal(isBulkLocked({}, 'd1'), false);
+    assert.equal(isBulkLocked('d1', 'd1'), false);
+    assert.equal(isBulkLocked(['d1'], 'd1'), false);
+});
+
+// ── isEditSnapshotStale ──
+//
+// The sixth hole, and the reason "is a bulk in flight" was the wrong question. The lock
+// releases when the request lands; the dialog's snapshot does not stop being stale. Guarding
+// only the flight moved the overwrite to the far side of it — wait for the apply, press Save on
+// the dialog still standing, and the full-record PATCH reverts it with nothing shown at all.
+
+test('an in-flight capture is stale, exactly like isBulkLocked', () => {
+    const lock = bulkLockFor(['d1']);
+    assert.equal(isEditSnapshotStale(lock, new Set(), 'd1'), true);
+    assert.equal(isEditSnapshotStale(lock, new Set(), 'd2'), false);
+});
+
+// The one that matters: nothing is in flight any more, and the snapshot is STILL stale.
+test('a landed apply leaves the snapshot stale after the lock has released', () => {
+    assert.equal(isEditSnapshotStale(null, new Set(['d1']), 'd1'), true);
+});
+
+test('a defect no apply touched is never stale', () => {
+    assert.equal(isEditSnapshotStale(null, new Set(['d1']), 'd2'), false);
+    assert.equal(isEditSnapshotStale(null, new Set(), 'd1'), false);
+});
+
+// A create has no id, and must not be refused a save over a bulk on some other row.
+test('a missing id is never stale', () => {
+    const touched = new Set(['d1']);
+    for (const id of ['', null, undefined]) {
+        assert.equal(isEditSnapshotStale(bulkLockFor(['d1']), touched, id), false);
+    }
+});
+
+// Defensive, like isBulkLocked: read at the moment of a click, so a malformed set must read
+// as "not stale" rather than throw and take the page down.
+test('a touched set that is not a Set reads as not stale instead of throwing', () => {
+    assert.equal(isEditSnapshotStale(null, undefined, 'd1'), false);
+    assert.equal(isEditSnapshotStale(null, {}, 'd1'), false);
+    assert.equal(isEditSnapshotStale(null, ['d1'], 'd1'), false);
+});
+
+// ── rememberBulkTouched ──
+//
+// What feeds the set isEditSnapshotStale reads. The staleness has to survive the request, but
+// the RECORD of it must not survive the dialog: the first version added every applied id and was
+// only ever cleared by opening a dialog, so a session that did nothing but bulk applies grew it
+// for the lifetime of the page.
+
+// The case the guard exists for, unchanged: the dialog is open on the defect the apply rewrote.
+test('the open dialog\'s own defect is recorded, and reads back as stale', () => {
+    const touched = new Set();
+    rememberBulkTouched(touched, 'd1', ['d1', 'd2']);
+    assert.deepEqual([...touched], ['d1']);
+    // Nothing is in flight any more and the save must still be refused.
+    assert.equal(isEditSnapshotStale(null, touched, 'd1'), true);
+});
+
+// The growth bound. Everything else in the apply is somebody else's row, and no dialog holds a
+// snapshot of it — the next one opened is seeded from the row the apply produced.
+test('no dialog open records nothing at all', () => {
+    for (const editing of [null, undefined, '']) {
+        const touched = new Set();
+        rememberBulkTouched(touched, editing, ['d1', 'd2', 'd3']);
+        assert.equal(touched.size, 0);
+    }
+});
+
+test('the other ids in the same apply are not recorded', () => {
+    const touched = new Set();
+    rememberBulkTouched(touched, 'd1', ['d2', 'd3']);
+    assert.equal(touched.size, 0);
+    assert.equal(isEditSnapshotStale(null, touched, 'd2'), false);
+});
+
+// Twenty applies with one dialog open cannot leave more than that one dialog's defect behind.
+test('repeated applies keep the set at one id', () => {
+    const touched = new Set();
+    for (let i = 0; i < 20; i++) rememberBulkTouched(touched, 'd1', [`x${i}`, 'd1', `y${i}`]);
+    assert.deepEqual([...touched], ['d1']);
+});
+
+test('accepts any iterable of requested ids, and tolerates none', () => {
+    assert.deepEqual([...rememberBulkTouched(new Set(), 'd1', new Set(['d1']))], ['d1']);
+    assert.equal(rememberBulkTouched(new Set(), 'd1', []).size, 0);
+    assert.equal(rememberBulkTouched(new Set(), 'd1', null).size, 0);
+    assert.equal(rememberBulkTouched(new Set(), 'd1', undefined).size, 0);
+});
+
+// Defensive like the two predicates above: it runs inside a response handler, so a malformed
+// set must be a no-op rather than take the page down mid-apply.
+test('a touched set that is not a Set is handed straight back', () => {
+    assert.doesNotThrow(() => rememberBulkTouched(undefined, 'd1', ['d1']));
+    assert.doesNotThrow(() => rememberBulkTouched({}, 'd1', ['d1']));
+    assert.deepEqual(rememberBulkTouched(['d1'], 'd1', ['d1']), ['d1']);
+});
+
+// The refusal is shown, never swallowed: DefectModal's request path already ends in
+// `.catch(() => {})`, so a guard that returned silently would look exactly like the overwrite
+// it prevents — a Save that appears to do nothing.
+test('the refusal has a message to show, and it says what to do', () => {
+    assert.equal(typeof BULK_LOCK_MESSAGE, 'string');
+    assert.ok(BULK_LOCK_MESSAGE.length > 0);
+    assert.match(BULK_LOCK_MESSAGE, /bulk update/i);
+});
+
+// ── applyBulkResult ──
+
+const row = (id, over = {}) => ({ id, title: `Defect ${id}`, status: 'open', ...over });
+
+test('returned rows replace the ones on the page, in place', () => {
+    const rows = [row('d1'), row('d2'), row('d3')];
+    const next = applyBulkResult(rows, [row('d1', { status: 'closed' }), row('d2', { status: 'closed' })], ['d1', 'd2']);
+    assert.deepEqual(next.map(r => r.id), ['d1', 'd2', 'd3']);
+    assert.deepEqual(next.map(r => r.status), ['closed', 'closed', 'open']);
+});
+
+// The endpoint tolerates unknown ids rather than rejecting the call, so an id that was sent
+// and did not come back is a defect somebody else deleted since this page loaded. Left in the
+// list it sat there unchanged after a "successful" apply — the user is told they closed
+// something that no longer exists.
+test('an id that was sent but not returned is dropped — it no longer exists server-side', () => {
+    const rows = [row('d1'), row('gone'), row('d3')];
+    const next = applyBulkResult(rows, [row('d1', { status: 'closed' })], ['d1', 'gone']);
+    assert.deepEqual(next.map(r => r.id), ['d1', 'd3']);
+});
+
+test('a whole selection that has been deleted leaves the rest of the queue alone', () => {
+    const rows = [row('gone1'), row('d2'), row('gone2')];
+    assert.deepEqual(applyBulkResult(rows, [], ['gone1', 'gone2']).map(r => r.id), ['d2']);
+});
+
+// Absence from the response says nothing about a row that was never part of the call.
+test('rows outside the request are never dropped, whatever came back', () => {
+    const rows = [row('d1'), row('untouched')];
+    const next = applyBulkResult(rows, [row('d1', { severity: 'critical' })], ['d1']);
+    assert.deepEqual(next.map(r => r.id), ['d1', 'untouched']);
+});
+
+test('no ids requested => the list is handed back untouched', () => {
+    const rows = [row('d1')];
+    assert.equal(applyBulkResult(rows, [], []), rows);
+    assert.equal(applyBulkResult(rows, [], undefined), rows);
+});
+
+test('a Set of ids works too, and neither argument has to be an array', () => {
+    const rows = [row('d1'), row('gone')];
+    assert.deepEqual(applyBulkResult(rows, null, new Set(['gone'])).map(r => r.id), ['d1']);
+    assert.deepEqual(applyBulkResult(null, null, ['d1']), []);
 });
 
 // ── assigneeOptions ──

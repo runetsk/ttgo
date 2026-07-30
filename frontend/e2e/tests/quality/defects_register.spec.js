@@ -544,6 +544,499 @@ test.describe('Defects register — triage queue', () => {
         });
     });
 
+    // The other half of the lock above, and the one that actually loses data. Freezing the
+    // checkboxes keeps the id SET still; it does nothing about the row's own write paths.
+    // DefectModal seeds its form from the row as it was BEFORE the bulk write and sends the
+    // FULL record on save (it is a full-record editor by design), so a detail opened on a
+    // selected row and saved while the bulk is in flight PATCHes the pre-bulk status and
+    // severity straight back over it — "Mark verified & close" silently reverts for that row,
+    // with nothing on screen to say so. The freeze is scoped to SELECTED rows: those are the
+    // only ones the call is writing to.
+    test('a bulk apply in flight freezes the write paths of the rows it is writing to', async ({ page, api, defectsPage }) => {
+        const stamp = `Overwrite-${Date.now()}`;
+        let target;
+
+        await test.step('Seed a selected defect and a bystander that stays unticked', async () => {
+            target = await api.createDefect({ title: `Ticked ${stamp}`, severity: 'major' });
+            await api.createDefect({ title: `Untouched ${stamp}`, severity: 'minor' });
+
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(2, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.selectRow(`Ticked ${stamp}`);
+            await expect(defectsPage.bulkBar).toContainText('1 selected');
+        });
+
+        // Counted rather than inferred: the whole point is that no stale full-record PATCH
+        // can be issued while the bulk is in flight, and a PATCH is the only way it could be.
+        let patches = 0;
+        await page.route('**/api/defects/*', (route) => {
+            if (route.request().method() === 'PATCH') patches += 1;
+            return route.continue();
+        });
+
+        // Held open inside the route handler, so "in flight" is a state the test opens and
+        // closes rather than a window it has to race.
+        let release;
+        const held = new Promise(resolve => { release = resolve; });
+        await page.route('**/api/defects/bulk-update', async (route) => {
+            await held;
+            await route.continue();
+        });
+
+        // Expanded BEFORE the apply: expanding is deliberately not locked (it is read-only,
+        // and it is how the user watches what is happening), so the panel is already open and
+        // its buttons have to be the thing that refuses.
+        await defectsPage.expandRow(`Ticked ${stamp}`);
+        await expect(defectsPage.openDetailButton).toBeEnabled();
+
+        await test.step('While it is in flight, the selected row cannot be opened, deleted or retested', async () => {
+            await defectsPage.bulkClose.click();
+            await expect(defectsPage.openDetailButton).toBeDisabled();
+            await expect(defectsPage.deleteButton).toBeDisabled();
+            await expect(defectsPage.retestButton).toBeDisabled();
+        });
+
+        await test.step('Forcing the click past the actionability check opens nothing', async () => {
+            // Refusing the click IS the fix, so the click has to be forced to prove it:
+            // a disabled button takes no input, so the modal never opens and no PATCH exists
+            // to overwrite the bulk write with.
+            await defectsPage.openDetailButton.click({ force: true });
+            await expect(defectsPage.modalSave).toHaveCount(0);
+            await defectsPage.deleteButton.click({ force: true });
+            await expect(defectsPage.deleteDialog).toHaveCount(0);
+        });
+
+        // The lock is on the rows the call captured, not on the table: a row outside the
+        // selection is not being written to, so freezing it would cost a working modal for
+        // no hazard at all.
+        await test.step('A row the apply is not writing to stays fully usable', async () => {
+            await defectsPage.expandRow(`Untouched ${stamp}`);
+            await expect(defectsPage.openDetailButton).toBeEnabled();
+            await expect(defectsPage.deleteButton).toBeEnabled();
+        });
+
+        await test.step('Released, the close lands and the server kept it', async () => {
+            release();
+            await expect(defectsPage.statusPill(`Ticked ${stamp}`)).toHaveText('Closed', {
+                timeout: TIMEOUTS.ELEMENT,
+            });
+            expect(patches).toBe(0);
+
+            const stored = (await api.listDefects()).find(d => d.id === target.id);
+            expect(stored.status).toBe('closed');
+            expect(stored.severity).toBe('major');
+        });
+
+        await page.unroute('**/api/defects/bulk-update');
+        await page.unroute('**/api/defects/*');
+
+        // And the freeze really is only for the round-trip.
+        await test.step('Afterwards the row is editable again', async () => {
+            await defectsPage.expandRow(`Ticked ${stamp}`);
+            await expect(defectsPage.openDetailButton).toBeEnabled();
+        });
+    });
+
+    // …and that freeze has to follow the ids the apply CAPTURED, not what is ticked on
+    // screen. Nothing locks the filter controls, and by design they DROP the selection
+    // (afterFilterChange) so a bulk action can never land on rows filtered out of sight —
+    // so one sort change mid-flight empties it. A freeze keyed on the live selection
+    // therefore let go of the very rows the request was still writing to, and the stale
+    // full-record PATCH the row's modal issues then landed on top of the bulk write.
+    test('the freeze follows the ids the apply captured, not the selection on screen', async ({ page, api, defectsPage }) => {
+        const stamp = `Captured-${Date.now()}`;
+        let target;
+
+        await test.step('Seed one defect, tick it and open its panel', async () => {
+            target = await api.createDefect({ title: `Captured ${stamp}`, severity: 'major' });
+
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.selectRow(`Captured ${stamp}`);
+            await expect(defectsPage.bulkBar).toContainText('1 selected');
+            // Expanded before the apply: expanding is read-only and deliberately never
+            // locked, so the panel's own buttons are what have to refuse.
+            await defectsPage.expandRow(`Captured ${stamp}`);
+            await expect(defectsPage.openDetailButton).toBeEnabled();
+        });
+
+        let patches = 0;
+        await page.route('**/api/defects/*', (route) => {
+            if (route.request().method() === 'PATCH') patches += 1;
+            return route.continue();
+        });
+
+        // The RESPONSE is held here, not the request — unlike the test above. The server
+        // applies the close immediately and only the page is kept waiting, which is the
+        // shape that actually loses data: a stale save issued while the page still thinks
+        // it is waiting lands AFTER the bulk write and wins.
+        let release, served;
+        const held = new Promise(resolve => { release = resolve; });
+        const reached = new Promise(resolve => { served = resolve; });
+        await page.route('**/api/defects/bulk-update', async (route) => {
+            const response = await route.fetch();
+            served();
+            await held;
+            await route.fulfill({ response });
+        });
+
+        await test.step('The apply goes out and the server has already applied it', async () => {
+            await defectsPage.bulkClose.click();
+            await reached;
+        });
+
+        await test.step('A sort change empties the selection — the freeze stays put', async () => {
+            await defectsPage.sortSelect.selectOption('updated');
+            // The selection really is gone: the bar only renders while something is ticked.
+            await expect(defectsPage.bulkBar).toHaveCount(0);
+
+            await expect(defectsPage.openDetailButton).toBeDisabled();
+            await expect(defectsPage.deleteButton).toBeDisabled();
+            await expect(defectsPage.retestButton).toBeDisabled();
+            // Table-wide and driven by the same in-flight ids, so it holds too.
+            await expect(defectsPage.selectAll).toBeDisabled();
+        });
+
+        await test.step('So no stale full-record save can be issued over the bulk write', async () => {
+            // Forced past the actionability check, because refusing the click IS the fix.
+            await defectsPage.openDetailButton.click({ force: true });
+            await expect(defectsPage.modalSave).toHaveCount(0);
+            await defectsPage.deleteButton.click({ force: true });
+            await expect(defectsPage.deleteDialog).toHaveCount(0);
+        });
+
+        // The other thing keying on the captured ids buys: the freeze is a property of the
+        // defect, not of a row component, so filtering it off the queue and back does not
+        // reset it.
+        await test.step('It survives the row leaving the queue and coming back', async () => {
+            await defectsPage.tab('Closed').click();
+            await expect(defectsPage.row(`Captured ${stamp}`)).toHaveCount(0);
+            await defectsPage.tab('All').click();
+            await expect(defectsPage.row(`Captured ${stamp}`)).toHaveCount(1);
+            await expect(defectsPage.openDetailButton).toBeDisabled();
+        });
+
+        await test.step('Released, the close is what stands', async () => {
+            release();
+            await expect(defectsPage.statusPill(`Captured ${stamp}`)).toHaveText('Closed', {
+                timeout: TIMEOUTS.ELEMENT,
+            });
+            await expect(defectsPage.openDetailButton).toBeEnabled();
+            await expect(defectsPage.selectAll).toBeEnabled();
+            expect(patches).toBe(0);
+
+            const stored = (await api.listDefects()).find(d => d.id === target.id);
+            expect(stored.status).toBe('closed');
+            expect(stored.severity).toBe('major');
+        });
+
+        await page.unroute('**/api/defects/bulk-update');
+        await page.unroute('**/api/defects/*');
+    });
+
+    // …and the hole that neither of the two freezes above can close, because it does not go
+    // through a button at all.
+    //
+    // A dialog OPENED BEFORE the apply started was opened while nothing was locked, so every
+    // disabled control was live at the time and none of them is on the path its Save takes. The
+    // overlay does not help: no dialog in this app used to contain focus, nothing behind one is
+    // `inert`, and the page renders the bulk bar above the modal in the DOM — so Tab walked out
+    // of the open editor straight into "Mark verified & close". Fire that, then Save, and the
+    // modal's full-record PATCH (seeded from the PRE-bulk snapshot) lands after the bulk and
+    // wins. Five rounds of guarding paths, five different paths; the guard therefore sits on the
+    // WRITE — DefectModal.submit and DefectsPage.confirmDelete both ask isBulkLocked immediately
+    // before issuing their request, so every path has to pass through it.
+    test('a dialog opened before a bulk apply cannot write over it', async ({ page, api, defectsPage }) => {
+        const stamp = `Preopened-${Date.now()}`;
+        let target;
+
+        await test.step('Tick a row and open its editor while nothing at all is in flight', async () => {
+            target = await api.createDefect({ title: `Preopened ${stamp}`, severity: 'major' });
+
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.selectRow(`Preopened ${stamp}`);
+            await expect(defectsPage.bulkBar).toContainText('1 selected');
+
+            await defectsPage.expandRow(`Preopened ${stamp}`);
+            // Live, because nothing is locked yet — which is the whole premise.
+            await expect(defectsPage.openDetailButton).toBeEnabled();
+            await defectsPage.openDetailButton.click();
+            await expect(defectsPage.modalSave).toBeVisible();
+        });
+
+        // Half one: close the keyboard path. role="dialog" + aria-modal claim the page behind is
+        // unreachable, and useDialogFocus is what makes that true — without it Tab ran off the
+        // modal's last control, wrapped to the top of the page and reached the bulk bar.
+        await test.step('The open dialog contains focus — Tab never reaches the bar behind it', async () => {
+            await expect(defectsPage.modalDialog).toHaveAttribute('aria-modal', 'true');
+            expect(await defectsPage.tabOutOf(defectsPage.modalDialog)).toBeNull();
+        });
+
+        // Counted rather than inferred: a PATCH is the only way the pre-bulk record could be
+        // written back, so zero of them is the claim.
+        let patches = 0;
+        await page.route('**/api/defects/*', (route) => {
+            if (route.request().method() === 'PATCH') patches += 1;
+            return route.continue();
+        });
+
+        // The RESPONSE is held, not the request: the server has already closed the defect and
+        // only the page is kept waiting. That is the shape that loses data — a save issued now
+        // lands AFTER the bulk write.
+        let release, served;
+        const held = new Promise(resolve => { release = resolve; });
+        const reached = new Promise(resolve => { served = resolve; });
+        await page.route('**/api/defects/bulk-update', async (route) => {
+            const response = await route.fetch();
+            served();
+            await held;
+            await route.fulfill({ response });
+        });
+
+        await test.step('Half two: the bar is driven directly, as if focus had got there', async () => {
+            // dispatchEvent rather than a click — the overlay covers the bar, and the point is
+            // that the WRITE refuses regardless of how its trigger was reached. Any future path
+            // to this button is covered by the same assertion.
+            await defectsPage.bulkClose.dispatchEvent('click');
+            await reached;
+        });
+
+        await test.step('Save is refused, says why, and issues no request at all', async () => {
+            await defectsPage.modalSave.click();
+            await expect(defectsPage.modalRefusal).toContainText('bulk update', {
+                timeout: TIMEOUTS.UI_SETTLE,
+            });
+            // Refused, not closed: nothing the user typed is thrown away.
+            await expect(defectsPage.modalSave).toBeVisible();
+            expect(patches).toBe(0);
+        });
+
+        await test.step('Released, the bulk close is what stands — nothing reverted it', async () => {
+            release();
+            await expect(defectsPage.statusPill(`Preopened ${stamp}`)).toHaveText('Closed', {
+                timeout: TIMEOUTS.ELEMENT,
+            });
+            expect(patches).toBe(0);
+
+            const stored = (await api.listDefects()).find(d => d.id === target.id);
+            expect(stored.status).toBe('closed');
+            expect(stored.severity).toBe('major');
+        });
+
+        await page.unroute('**/api/defects/bulk-update');
+
+        // Guarding the ROUND-TRIP alone would only have moved this overwrite to the far side of
+        // it. Nothing is in flight now and no button is disabled, but this dialog is still
+        // holding the pre-bulk snapshot — so the refusal has to outlive the request that caused
+        // it, or waiting two seconds and pressing Save is the whole bug again.
+        await test.step('Still refused once the apply has LANDED — the snapshot is what is stale', async () => {
+            await defectsPage.modalSave.click();
+            await expect(defectsPage.modalRefusal).toContainText('bulk update', {
+                timeout: TIMEOUTS.UI_SETTLE,
+            });
+            expect(patches).toBe(0);
+
+            const stored = (await api.listDefects()).find(d => d.id === target.id);
+            expect(stored.status).toBe('closed');
+        });
+
+        // Reopening is what clears it: a fresh editor is seeded from the post-bulk row, so it
+        // has nothing stale to write and saves normally.
+        await test.step('Afterwards the editor works again, on the row as it now is', async () => {
+            await defectsPage.modalCancel.click();
+            await expect(defectsPage.modalSave).toHaveCount(0);
+
+            await expect(defectsPage.openDetailButton).toBeEnabled();
+            await defectsPage.openDetailButton.click();
+            await defectsPage.modalSeverity.selectOption('critical');
+            await defectsPage.modalSave.click();
+            await expect(defectsPage.modalSave).toHaveCount(0, { timeout: TIMEOUTS.ELEMENT });
+
+            const stored = (await api.listDefects()).find(d => d.id === target.id);
+            expect(stored.severity).toBe('critical');
+            expect(stored.status).toBe('closed');
+        });
+
+        await page.unroute('**/api/defects/*');
+    });
+
+    // The same hole through the other dialog. components/Modal is the shared confirm, so the
+    // delete confirmation can be standing open when an apply starts too — and confirming it
+    // would DELETE the row the bulk call is mid-write on.
+    test('a delete confirmation opened before a bulk apply cannot destroy the row', async ({ page, api, defectsPage }) => {
+        const stamp = `PreDelete-${Date.now()}`;
+        let target;
+
+        await test.step('Tick a row and open its delete confirmation before anything is in flight', async () => {
+            target = await api.createDefect({ title: `Doomed early ${stamp}`, severity: 'major' });
+
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.selectRow(`Doomed early ${stamp}`);
+            await expect(defectsPage.bulkBar).toContainText('1 selected');
+
+            await defectsPage.expandRow(`Doomed early ${stamp}`);
+            await expect(defectsPage.deleteButton).toBeEnabled();
+            await defectsPage.deleteButton.click();
+            await expect(defectsPage.deleteDialog).toContainText(`Doomed early ${stamp}`);
+        });
+
+        await test.step('components/Modal contains focus too — this was an app-wide gap', async () => {
+            await expect(defectsPage.deleteDialog).toHaveAttribute('aria-modal', 'true');
+            expect(await defectsPage.tabOutOf(defectsPage.deleteDialog)).toBeNull();
+        });
+
+        let deletes = 0;
+        await page.route('**/api/defects/*', (route) => {
+            if (route.request().method() === 'DELETE') deletes += 1;
+            return route.continue();
+        });
+
+        let release, served;
+        const held = new Promise(resolve => { release = resolve; });
+        const reached = new Promise(resolve => { served = resolve; });
+        await page.route('**/api/defects/bulk-update', async (route) => {
+            const response = await route.fetch();
+            served();
+            await held;
+            await route.fulfill({ response });
+        });
+
+        await test.step('Confirming while the apply is in flight deletes nothing and says why', async () => {
+            await defectsPage.bulkClose.dispatchEvent('click');
+            await reached;
+
+            await defectsPage.confirmModal();
+            await expect(defectsPage.deleteDialog).toHaveCount(0);
+            // The refusal lands in the row's own expand panel — the only place Delete is
+            // reachable from, so it is on screen.
+            await expect(defectsPage.rowNotice).toContainText('bulk update', {
+                timeout: TIMEOUTS.UI_SETTLE,
+            });
+            expect(deletes).toBe(0);
+        });
+
+        await test.step('Released, the defect is closed and still exists', async () => {
+            release();
+            await expect(defectsPage.statusPill(`Doomed early ${stamp}`)).toHaveText('Closed', {
+                timeout: TIMEOUTS.ELEMENT,
+            });
+            expect(deletes).toBe(0);
+
+            const stored = (await api.listDefects()).find(d => d.id === target.id);
+            expect(stored).toBeTruthy();
+            expect(stored.status).toBe('closed');
+        });
+
+        await page.unroute('**/api/defects/bulk-update');
+        await page.unroute('**/api/defects/*');
+    });
+
+    // The other half of what useDialogFocus promises. Containment stops Tab leaving an open
+    // dialog; this is what happens when the dialog goes — focus has to land back on the control
+    // that opened it, or a keyboard user is dropped on <body> and has to Tab the whole register
+    // again to get back to the row they were working on.
+    //
+    // It read the restore target in a passive effect, which is too late: BOTH dialogs autoFocus
+    // a field, and React does that during commit — before any effect, layout or passive, runs.
+    // So the "opener" it recorded was the dialog's own input, and closing the dialog focused a
+    // node that had just been unmounted, i.e. nothing. Captured during render instead, which is
+    // the only point at which focus is still on the button that was pressed.
+    test('closing a dialog hands focus back to the control that opened it', async ({ api, defectsPage }) => {
+        const stamp = `Restore-${Date.now()}`;
+
+        await test.step('Seed one defect and expand it', async () => {
+            await api.createDefect({ title: `Restored ${stamp}`, severity: 'major' });
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(1, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.expandRow(`Restored ${stamp}`);
+            await expect(defectsPage.openDetailButton).toBeEnabled();
+        });
+
+        await test.step('The editor takes focus on open and gives it back to Open detail', async () => {
+            await defectsPage.openDetailButton.click();
+            await expect(defectsPage.modalSave).toBeVisible();
+            // The premise: autoFocus has already moved focus INTO the dialog, so whatever the
+            // restore target is, it was not read after this point.
+            await expect(defectsPage.modalTitle).toBeFocused();
+
+            await defectsPage.modalCancel.click();
+            await expect(defectsPage.modalDialog).toHaveCount(0);
+            expect(await defectsPage.focusedTestId()).toBe('defects-open-detail');
+        });
+
+        // components/Modal is the shared confirm/prompt, so this half lands app-wide.
+        await test.step('The delete confirmation gives it back to Delete', async () => {
+            await defectsPage.deleteButton.click();
+            await expect(defectsPage.deleteDialog).toContainText(`Restored ${stamp}`);
+
+            await defectsPage.deleteCancel.click();
+            await expect(defectsPage.deleteDialog).toHaveCount(0);
+            expect(await defectsPage.focusedTestId()).toBe('defects-delete');
+        });
+
+        // And from a control that is nowhere near the row — the create dialog is opened from
+        // the title bar, so a restore that merely happened to land in the expand panel would
+        // pass the two steps above and still be wrong here.
+        await test.step('The create dialog gives it back to + New defect', async () => {
+            await defectsPage.newDefectButton.click();
+            await expect(defectsPage.modalSave).toBeVisible();
+            await expect(defectsPage.modalTitle).toBeFocused();
+
+            await defectsPage.modalCancel.click();
+            await expect(defectsPage.modalDialog).toHaveCount(0);
+            expect(await defectsPage.focusedTestId()).toBe('defects-new');
+        });
+    });
+
+    // The bulk endpoint tolerates unknown ids rather than rejecting the whole call, so a
+    // defect somebody else deleted since this page loaded simply comes back missing from the
+    // response. The page used to patch only what came back, which left that row on screen,
+    // unchanged, after an apply that reported success — the user is told they closed
+    // something that does not exist any more.
+    test('a bulk apply drops rows the server no longer knows about', async ({ api, defectsPage }) => {
+        const stamp = `Vanished-${Date.now()}`;
+        let survivor, doomed;
+
+        await test.step('Seed two defects and tick them both', async () => {
+            survivor = await api.createDefect({ title: `Still here ${stamp}`, severity: 'major' });
+            doomed = await api.createDefect({ title: `Deleted elsewhere ${stamp}`, severity: 'minor' });
+
+            await defectsPage.open();
+            await defectsPage.search(stamp);
+            await expect(defectsPage.rows).toHaveCount(2, { timeout: TIMEOUTS.ELEMENT });
+            await defectsPage.selectAll.check();
+            await expect(defectsPage.bulkBar).toContainText('2 selected');
+        });
+
+        // Deleted out of band — another user, another tab — after this page loaded its list.
+        await test.step('One of them is deleted from under the page', async () => {
+            const gone = await api.delete(`/defects/${doomed.id}`);
+            expect(gone.ok()).toBe(true);
+        });
+
+        await test.step('The apply closes the survivor and takes the ghost off the queue', async () => {
+            await defectsPage.bulkClose.click();
+            await expect(defectsPage.statusPill(`Still here ${stamp}`)).toHaveText('Closed', {
+                timeout: TIMEOUTS.ELEMENT,
+            });
+            await expect(defectsPage.row(`Deleted elsewhere ${stamp}`)).toHaveCount(0);
+            await expect(defectsPage.rows).toHaveCount(1);
+        });
+
+        await test.step('The server agrees on both counts', async () => {
+            const all = await api.listDefects();
+            expect(all.find(d => d.id === survivor.id).status).toBe('closed');
+            expect(all.find(d => d.id === doomed.id)).toBeUndefined();
+        });
+    });
+
     test('bulk assign gives a selection an owner, and unassign sends it back to triage', async ({ page, api, defectsPage }) => {
         const stamp = `Assign-${Date.now()}`;
         let owner;

@@ -700,6 +700,74 @@ func TestBulkUpdateDefectsReverificationParity(t *testing.T) {
 	})
 }
 
+// TestAffectedTestCaseLookupFailureAborts pins that a failed affectedTestCaseIDs lookup is never
+// swallowed. The list it returns is the INPUT to recomputeReverification, so a swallowed error is
+// indistinguishable from "no test cases are affected": the recompute no-ops on the empty slice and
+// the caller commits a status change, returns success, and leaves every affected test case's
+// reverification_flagged silently stale. Dropping defect_links is what makes that lookup — and only
+// that lookup — fail on demand.
+func TestAffectedTestCaseLookupFailureAborts(t *testing.T) {
+	// seedLinkedDefect builds one test case with one defect linked to it, then breaks the table
+	// the link lives in. Seeding happens first, so the fixture is real before the query can fail.
+	seedLinkedDefect := func(t *testing.T, s *Store) *models.Defect {
+		t.Helper()
+		require.NoError(t, s.db.Exec(
+			`INSERT INTO test_cases (id,name,created_at,updated_at) VALUES ('tc1','Login',CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)`).Error)
+		d := &models.Defect{Title: "linked bug"}
+		require.NoError(t, s.CreateDefect(d))
+		_, err := s.LinkDefectToTestCase(d.ID, "tc1")
+		require.NoError(t, err)
+		require.NoError(t, s.db.Exec(`DROP TABLE defect_links`).Error)
+		return d
+	}
+
+	// The one that was reported: a bulk close committed and reported success while the retest
+	// flags it is supposed to raise were never recomputed.
+	t.Run("BulkUpdateDefects rolls the status change back", func(t *testing.T) {
+		s := newTestStore(t)
+		d := seedLinkedDefect(t, s)
+
+		_, err := s.BulkUpdateDefects([]string{d.ID}, models.BulkUpdateDefectsRequest{Status: strPtr("closed")})
+		require.Error(t, err, "a failed lookup must not commit as a success")
+
+		after, err := s.GetDefect(d.ID)
+		require.NoError(t, err)
+		assert.Equal(t, "open", after.Status, "the whole transaction rolls back, status included")
+	})
+
+	// Not transactional by design (see the comment at the call site): the UPDATE has already
+	// committed by then, so what this pins is that the failure is REPORTED rather than hidden.
+	t.Run("UpdateDefect reports the failure", func(t *testing.T) {
+		s := newTestStore(t)
+		d := seedLinkedDefect(t, s)
+
+		_, err := s.UpdateDefect(d.ID, models.UpdateDefectRequest{Status: strPtr("closed")})
+		require.Error(t, err)
+	})
+
+	// The links are the only record of which test cases need recomputing, so deleting them
+	// without that list in hand is unrecoverable — the delete aborts instead. This one held
+	// before the fix too (the link DELETE that follows fails against the same dropped table,
+	// which rolled the transaction back anyway); what it pins is the ORDERING that makes the
+	// abort reachable at all — the lookup has to run, and be checked, before the links go.
+	t.Run("DeleteDefect aborts and keeps the defect", func(t *testing.T) {
+		s := newTestStore(t)
+		d := seedLinkedDefect(t, s)
+
+		require.Error(t, s.DeleteDefect(d.ID))
+
+		after, err := s.GetDefect(d.ID)
+		require.NoError(t, err)
+		require.NotNil(t, after, "an aborted delete leaves the defect in place")
+	})
+
+	// That the abort belongs to the status path alone — a bulk that changes no status never asks
+	// the question and recomputes nothing — is pinned by TestBulkUpdateDefectsReverificationParity's
+	// "a severity-only bulk leaves the flags alone", against an intact database. It cannot be
+	// asserted here: the enrichment every bulk response carries reads defect_links too, so with
+	// the table dropped there is no such thing as a bulk call that succeeds.
+}
+
 func TestDefectAssigneeNamePopulation(t *testing.T) {
 	s := newTestStore(t)
 	active := newDefectUser(t, s, "active@example.com", "Active Ann", true)

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { defects as defectsApi, getAssignableUsers } from '../api';
-import { assigneeOptions, buildDefectPayload } from '../utils/defectActions';
+import useDialogFocus from '../hooks/useDialogFocus';
+import { assigneeOptions, buildDefectPayload, BULK_LOCK_MESSAGE } from '../utils/defectActions';
 import { DEFECT_STATUS_OPTIONS } from '../utils/defectQueue';
 
 const SEVERITIES = ['critical', 'major', 'minor', 'trivial'];
@@ -8,10 +9,11 @@ const SEVERITIES = ['critical', 'major', 'minor', 'trivial'];
 /**
  * DefectModal — create or edit a native defect. Reached from the Defects register's
  * "+ New defect" and from a row expand's "Open detail".
- * Props: mode ('create'|'edit'), defect (object, edit only), onClose(), onSaved(saved).
+ * Props: mode ('create'|'edit'), defect (object, edit only), isSnapshotStale(id) (optional predicate,
+ * see submit), onClose(), onSaved(saved).
  * Render with a `key` (e.g. defect id or 'create') so state re-initializes per target.
  */
-export default function DefectModal({ mode = 'create', defect = null, onClose, onSaved }) {
+export default function DefectModal({ mode = 'create', defect = null, isSnapshotStale, onClose, onSaved }) {
     const [title, setTitle] = useState(defect?.title || '');
     const [description, setDescription] = useState(defect?.description || '');
     const [severity, setSeverity] = useState(defect?.severity || 'minor');
@@ -22,6 +24,11 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
     const [extKey, setExtKey] = useState(defect?.external_key || '');
     const [extUrl, setExtUrl] = useState(defect?.external_url || '');
     const [submitting, setSubmitting] = useState(false);
+    // Why the last Save did nothing, when the guard below refused it. Never silent: the request
+    // path's own .catch already swallows failures, and a Save button that visibly does nothing
+    // is exactly how the overwrite this guard prevents used to go unnoticed.
+    const [refused, setRefused] = useState('');
+    const dialogRef = useDialogFocus();
 
     // Loaded on mount rather than on first open, unlike BulkBar's menu: this modal only
     // exists while someone is editing one defect, and the picker is on screen the whole time.
@@ -35,6 +42,22 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
 
     const submit = (e) => {
         e.preventDefault();
+        // The write refuses ITSELF when a bulk apply has invalidated this form's snapshot,
+        // rather than trusting that the button which opened this dialog was disabled. A dialog
+        // opened BEFORE that apply started was opened while nothing was locked, and neither the
+        // overlay nor the page behind it stops the bulk bar from being reached afterwards — so
+        // the disabled "Open detail" button is not on the path this save took. Nothing below
+        // this line may run: the form is seeded from the PRE-bulk snapshot and sends the full
+        // record, so the PATCH would put the old status and severity back over the bulk write.
+        //
+        // The question is "is my snapshot stale", NOT "is a request in flight" — the two come
+        // apart the moment the apply lands, and guarding only the flight simply moved this
+        // overwrite to the other side of it. See utils/defectActions isEditSnapshotStale.
+        if (mode === 'edit' && isSnapshotStale?.(defect?.id)) {
+            setRefused(BULK_LOCK_MESSAGE);
+            return;
+        }
+        setRefused('');
         // buildDefectPayload sends every field — this form is a full-record editor — with
         // one exception: an assignee that has not been touched is omitted, so editing a
         // defect owned by a since-deactivated user cannot be rejected for echoing that
@@ -53,8 +76,20 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
 
     return (
         <div style={overlay} onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-            <div className="glass-panel" style={{ width: '100%', maxWidth: 560, padding: '22px 26px 24px', borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)' }}>
-                <h3 style={{ margin: '0 0 14px', paddingBottom: 12, borderBottom: '1px solid var(--border-color)', fontSize: '1.05rem', fontWeight: 700 }}>
+            {/* role/aria-modal say the page behind is unreachable; useDialogFocus is what makes
+                that true for the keyboard. tabIndex={-1} lets the panel hold focus itself while
+                a submitting form has every control disabled. */}
+            <div
+                ref={dialogRef}
+                tabIndex={-1}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="defect-modal-title"
+                data-testid="defect-dialog"
+                className="glass-panel"
+                style={{ width: '100%', maxWidth: 560, padding: '22px 26px 24px', borderRadius: 12, background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', outline: 'none' }}
+            >
+                <h3 id="defect-modal-title" style={{ margin: '0 0 14px', paddingBottom: 12, borderBottom: '1px solid var(--border-color)', fontSize: '1.05rem', fontWeight: 700 }}>
                     {mode === 'edit' ? 'Edit Defect' : 'New Defect'}
                 </h3>
                 <form onSubmit={submit}>
@@ -107,6 +142,17 @@ export default function DefectModal({ mode = 'create', defect = null, onClose, o
                         <input className="modern-input" style={{ ...inp, flex: 1 }} placeholder="Key (e.g. PROJ-1)" value={extKey} onChange={e => setExtKey(e.target.value)} disabled={submitting} />
                     </div>
                     <input className="modern-input" style={inp} placeholder="https://…" value={extUrl} onChange={e => setExtUrl(e.target.value)} disabled={submitting} />
+
+                    {refused && (
+                        <p
+                            className="defects-bulkbar-error"
+                            role="alert"
+                            style={{ display: 'block', margin: '16px 0 0' }}
+                            data-testid="defect-refused"
+                        >
+                            {refused}
+                        </p>
+                    )}
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--border-color)' }}>
                         <button type="button" className="action-btn" onClick={onClose} disabled={submitting}>Cancel</button>

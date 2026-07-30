@@ -7,7 +7,7 @@ import BulkBar from './defects/BulkBar';
 import DefectRow from './defects/DefectRow';
 import FilterBar from './defects/FilterBar';
 import TriageStrip from './defects/TriageStrip';
-import { buildRetestRun } from '../utils/defectActions';
+import { applyBulkResult, bulkLockFor, buildRetestRun, isBulkLocked, isEditSnapshotStale, rememberBulkTouched, BULK_LOCK_MESSAGE } from '../utils/defectActions';
 import { filterDefects, queueCounts, sortDefects } from '../utils/defectQueue';
 
 // The Defects register, as a triage queue rather than a record table.
@@ -56,16 +56,77 @@ export default function DefectsPage() {
     const [focusId, setFocusId] = useState(null);
     const [modal, setModal] = useState(null); // { mode:'create'|'edit', defect } | null
     const [pendingDelete, setPendingDelete] = useState(null); // defect awaiting confirmation | null
-    const [retestError, setRetestError] = useState(null); // { id, message } | null
+    // An inline message pinned to ONE row's expand panel: a Retest that could not be started, or
+    // a write this page refused because a bulk apply is mid-flight on that defect.
+    const [notice, setNotice] = useState(null); // { id, message } | null
     const [focusMissing, setFocusMissing] = useState(false); // ?focus named a defect that is gone
     // Reported by BulkBar as it resizes; drives the scroll clearance under the bar.
     const [barHeight, setBarHeight] = useState(0);
-    // Also reported by BulkBar: true while one of its applies is in flight. The call
-    // captures the ids at click time, so the selection has to hold still for the
-    // round-trip — otherwise the success handler below clears rows the user ticked
-    // after firing, and the failure message lands over a set nothing was tried on.
-    // The bar disables its own controls; these are the two it cannot reach.
-    const [selectionLocked, setSelectionLocked] = useState(false);
+    // Also reported by BulkBar: the ids one of its applies CAPTURED at click time, held as
+    // a Set for as long as that call is in flight and null the rest of the time. Two
+    // different freezes come off it, and the difference is the whole point (bulkLockFor):
+    //
+    //   · the checkboxes and select-all freeze TABLE-WIDE, because what must hold still
+    //     there is the id set itself — ticking any row moves the selection the in-flight
+    //     call captured, which loses what the user built when the success handler clears
+    //     and lands the failure message over a set nothing was tried on;
+    //   · each row's OWN write paths freeze only if that row is in the captured list,
+    //     because those are the only defects being written to.
+    //
+    // The second one must never be read off `selected`. No filter control is locked while
+    // an apply runs and every one of them clears the selection on purpose
+    // (afterFilterChange), so one re-sort mid-flight emptied it and handed back the modal,
+    // Delete and Retest on rows the request was still writing to.
+    const [bulkLock, setBulkLock] = useState(null);
+    const handleBulkInFlight = useCallback((ids) => setBulkLock(bulkLockFor(ids)), []);
+    const selectionLocked = bulkLock !== null;
+
+    // The same lock, asked as a question at the point of a write rather than read as a boolean
+    // at a button. Disabling the buttons is still done — it is the honest thing to show — but it
+    // is no longer what makes the register safe: a dialog opened BEFORE an apply started was
+    // opened while nothing was locked, and its Save/Delete never pass any disabled control. So
+    // every per-defect write below asks this immediately before issuing its request. See
+    // utils/defectActions isBulkLocked for why five rounds of path-guarding kept losing.
+    const isLocked = useCallback((id) => isBulkLocked(bulkLock, id), [bulkLock]);
+
+    // Which ids a bulk apply has REWRITTEN under the edit dialog that is open RIGHT NOW. A ref,
+    // not state: nothing on screen depends on it, and it is only ever read inside a click handler
+    // at the moment of a write. It is what makes the edit dialog's guard outlive the request —
+    // the lock releases when the apply lands, the dialog's pre-bulk snapshot does not stop being
+    // stale.
+    //
+    // Emptied whenever a dialog opens OR closes, and only the open dialog's own defect is ever
+    // put in it (rememberBulkTouched), so it holds at most one id. An id can only matter while a
+    // dialog holding a snapshot of it is up: with nothing open there is no stale snapshot to
+    // refuse, and the next dialog is seeded from the row the apply produced. Recording every
+    // applied id — the first shape of this — was correct but unbounded, because only opening a
+    // dialog cleared it and a bulk-only session never does.
+    const bulkTouchedRef = useRef(new Set());
+    // The defect the open edit dialog is holding a snapshot of, or null. A ref rather than a read
+    // of `modal` because BulkBar captures its onApplied at click time: a callback closed over
+    // `modal` would report the dialog as it stood when the apply STARTED, not when it landed.
+    const editingIdRef = useRef(null);
+
+    // Every dialog open and close goes through these two, so the staleness record cannot drift
+    // from what is on screen. Opening is what takes a fresh snapshot; closing is what throws the
+    // last one away.
+    const openModal = useCallback((next) => {
+        bulkTouchedRef.current = new Set();
+        editingIdRef.current = next?.mode === 'edit' ? (next.defect?.id || null) : null;
+        setModal(next);
+    }, []);
+    const closeModal = useCallback(() => {
+        bulkTouchedRef.current = new Set();
+        editingIdRef.current = null;
+        setModal(null);
+    }, []);
+
+    // What DefectModal asks immediately before it PATCHes. Wider than isLocked on purpose; see
+    // utils/defectActions isEditSnapshotStale for why the in-flight window alone was not enough.
+    const isEditStale = useCallback(
+        (id) => isEditSnapshotStale(bulkLock, bulkTouchedRef.current, id),
+        [bulkLock],
+    );
 
     const searchRef = useRef(null);
 
@@ -238,17 +299,28 @@ export default function DefectsPage() {
 
     const toggleExpand = useCallback((defect) => {
         setExpandedId(prev => (prev === defect.id ? null : defect.id));
-        setRetestError(null);
+        setNotice(null);
         setFocusId(null);
     }, []);
 
-    // bulk-update hands back fully enriched rows (assignee_name AND
-    // linked_test_count), so the response replaces the row outright.
-    const handleBulkApplied = useCallback((updated) => {
-        if (updated.length > 0) {
-            const byID = new Map(updated.map(d => [d.id, d]));
-            setRows(prev => prev.map(r => byID.get(r.id) || r));
-        }
+    // bulk-update hands back fully enriched rows (assignee_name AND linked_test_count), so
+    // the response replaces the row outright — and an id that was sent but does NOT come
+    // back is a defect someone else deleted since this page loaded, so its row goes with it
+    // rather than sitting there unchanged after a "successful" apply. Both halves live in
+    // applyBulkResult (utils/defectActions), where they are unit-tested.
+    //
+    // Nothing else has to be swept up behind a dropped row: its expand panel is rendered by the
+    // row itself and goes when the row does. A dialog CAN be open while an apply is in flight —
+    // an overlay is not inertness, and one opened before the apply started was never refused —
+    // but it cannot write to a locked row (isLocked below), so a dialog left standing over a
+    // dropped row can only be cancelled.
+    const handleBulkApplied = useCallback((updated, requestedIds) => {
+        // Remembered BEFORE the rows change, and never unset here: if this apply rewrote the
+        // defect an edit dialog is standing open on, that dialog's snapshot is now wrong — and
+        // stays wrong after the request has landed. Only the open dialog's id is recorded, and
+        // only while it IS open; see rememberBulkTouched for why the wider version grew forever.
+        rememberBulkTouched(bulkTouchedRef.current, editingIdRef.current, requestedIds);
+        setRows(prev => applyBulkResult(prev, updated, requestedIds));
         // Cleared even on success: a closed defect usually leaves the queue it was
         // ticked in, and a selection of rows nobody can see is the hazard this page
         // clears selections to avoid in the first place. This is only ever the
@@ -301,6 +373,16 @@ export default function DefectsPage() {
         const defect = pendingDelete;
         setPendingDelete(null);
         if (!defect) return;
+        // Guarded at the call, exactly like DefectModal.submit and for the same reason: this
+        // confirmation can have been opened before the apply started, when the Delete button
+        // that opens it was still live. DELETE would destroy the row the bulk call is mid-write
+        // on. The refusal lands in that row's expand panel, which is the only place Delete can
+        // be reached from and is therefore on screen.
+        if (isLocked(defect.id)) {
+            setNotice({ id: defect.id, message: BULK_LOCK_MESSAGE });
+            return;
+        }
+        setNotice(null);
         defectsApi.remove(defect.id).then(() => {
             setRows(prev => prev.filter(r => r.id !== defect.id));
             setSelected(prev => {
@@ -316,20 +398,33 @@ export default function DefectsPage() {
     // useCallback, like every other handler handed to DefectRow: the row is memoised,
     // and a fresh closure per render would defeat that on every keystroke.
     const handleRetest = useCallback((defect, tests) => {
+        // Guarded at the call like the two writes above, though this one has no dialog of its
+        // own to be reached from: its button lives in the row and is disabled while the row is
+        // locked. It is guarded anyway because the point of this round is that a disabled
+        // button is not a guarantee, and because Retest NAVIGATES — unmounting the page before
+        // the in-flight apply can report at all.
+        if (isLocked(defect?.id)) {
+            setNotice({ id: defect.id, message: BULK_LOCK_MESSAGE });
+            return;
+        }
         const body = buildRetestRun(defect, tests);
         if (!body) return;
-        setRetestError(null);
+        setNotice(null);
         createTestRun(null, body.name, null, body.test_case_ids)
             .then(run => navigate(`/runs/run/${run.id}`))
-            .catch(() => setRetestError({
+            .catch(() => setNotice({
                 id: defect.id,
                 // POST /runs rejects the whole body when any id is unknown
                 // (store.ErrUnknownTestCases), so one deleted test case fails the run.
                 message: 'Could not start the retest run — one of the linked tests may no longer exist.',
             }));
-    }, [navigate]);
+    }, [isLocked, navigate]);
 
-    const openDetail = useCallback((target) => setModal({ mode: 'edit', defect: target }), []);
+    // `target` comes from the row list as it stands now, which already includes every apply that
+    // has landed — so the fresh snapshot openModal records is by definition not stale.
+    const openDetail = useCallback((target) => {
+        openModal({ mode: 'edit', defect: target });
+    }, [openModal]);
 
     return (
         <div className="defects-page">
@@ -369,7 +464,7 @@ export default function DefectsPage() {
                     <button
                         type="button"
                         className="primary-btn"
-                        onClick={() => setModal({ mode: 'create', defect: null })}
+                        onClick={() => openModal({ mode: 'create', defect: null })}
                         data-testid="defects-new"
                     >
                         + New defect
@@ -401,7 +496,7 @@ export default function DefectsPage() {
                 onApplied={handleBulkApplied}
                 onClear={() => setSelected(new Set())}
                 onHeightChange={setBarHeight}
-                onBusyChange={setSelectionLocked}
+                onInFlightChange={handleBulkInFlight}
             />
 
             <div className="defects-table-wrap">
@@ -434,9 +529,12 @@ export default function DefectsPage() {
                                 now={now}
                                 selected={selected.has(defect.id)}
                                 selectionLocked={selectionLocked}
+                                // From the captured ids, never from `selected` — see bulkLock
+                                // above. A boolean per row keeps DefectRow's memo intact.
+                                actionsLocked={selectionLocked && bulkLock.has(defect.id)}
                                 expanded={expandedId === defect.id}
                                 focused={focusId === defect.id}
-                                retestError={retestError?.id === defect.id ? retestError.message : ''}
+                                notice={notice?.id === defect.id ? notice.message : ''}
                                 onToggleSelect={toggleSelect}
                                 onToggleExpand={toggleExpand}
                                 onOpenDetail={openDetail}
@@ -519,7 +617,12 @@ export default function DefectsPage() {
                     key={modal.defect?.id || 'create'}
                     mode={modal.mode}
                     defect={modal.defect}
-                    onClose={() => setModal(null)}
+                    // Not a disabled prop: the modal asks this at the moment it saves, because
+                    // it can have been opened before the apply that now owns this defect — and
+                    // it stays true after that apply lands, for as long as this dialog holds the
+                    // snapshot the apply invalidated.
+                    isSnapshotStale={isEditStale}
+                    onClose={closeModal}
                     onSaved={handleSaved}
                 />
             )}

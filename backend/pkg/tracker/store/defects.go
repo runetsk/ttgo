@@ -244,7 +244,16 @@ func (s *Store) UpdateDefect(id string, req models.UpdateDefectRequest) (*models
 		return nil, err
 	}
 	if d != nil && req.Status != nil {
-		if err := recomputeReverification(s.db, affectedTestCaseIDs(s.db, id)); err != nil {
+		// Not transactional, and deliberately unchanged in that respect: the UPDATE above has
+		// already committed by the time this runs, so an error here reports "the status was
+		// written but its reverification could not be recomputed" — which is exactly what the
+		// recompute's own error has always meant on this path. What must not happen is the
+		// third case: recomputing against a silently empty list and reporting success.
+		tcIDs, err := affectedTestCaseIDs(s.db, id)
+		if err != nil {
+			return nil, err
+		}
+		if err := recomputeReverification(s.db, tcIDs); err != nil {
 			return nil, err
 		}
 	}
@@ -290,7 +299,13 @@ func (s *Store) BulkUpdateDefects(ids []string, req models.BulkUpdateDefectsRequ
 			if req.Status == nil {
 				return nil
 			}
-			return recomputeReverification(tx, affectedTestCaseIDs(tx, ids...))
+			// Inside the transaction, so a failed lookup rolls the status change back rather
+			// than committing defects whose test cases never had their retest flags recomputed.
+			tcIDs, err := affectedTestCaseIDs(tx, ids...)
+			if err != nil {
+				return err
+			}
+			return recomputeReverification(tx, tcIDs)
 		})
 		if err != nil {
 			return nil, err
@@ -309,7 +324,13 @@ func (s *Store) BulkUpdateDefects(ids []string, req models.BulkUpdateDefectsRequ
 
 func (s *Store) DeleteDefect(id string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		tcIDs := affectedTestCaseIDs(tx, id)
+		// Read before the links are deleted — after that there is nothing left to find. A
+		// failure aborts the whole delete: the links are the only record of which test cases
+		// need recomputing, so losing them without the list is unrecoverable.
+		tcIDs, err := affectedTestCaseIDs(tx, id)
+		if err != nil {
+			return err
+		}
 		if err := tx.Where("defect_id = ?", id).Delete(&models.DefectLink{}).Error; err != nil {
 			return err
 		}
@@ -470,15 +491,23 @@ func (s *Store) ListDefectsByTestCase(testCaseID string) ([]models.Defect, error
 
 // affectedTestCaseIDs returns the distinct test cases linked to the given defects — the union, when
 // several are passed, so a bulk status change recomputes each test case exactly once.
-func affectedTestCaseIDs(tx *gorm.DB, defectIDs ...string) []string {
+//
+// The error is returned rather than swallowed, and every caller aborts on it. This list is the INPUT
+// to recomputeReverification, so a failed query is indistinguishable from "no test cases are
+// affected": the recompute would no-op on an empty slice and the caller would commit a status change
+// and report success while the test cases' reverification_flagged silently kept its old value.
+func affectedTestCaseIDs(tx *gorm.DB, defectIDs ...string) ([]string, error) {
 	if len(defectIDs) == 0 {
-		return nil
+		return nil, nil
 	}
 	var ids []string
-	_ = tx.Model(&models.DefectLink{}).
+	err := tx.Model(&models.DefectLink{}).
 		Where("defect_id IN ? AND test_case_id IS NOT NULL", defectIDs).
 		Distinct().Pluck("test_case_id", &ids).Error
-	return ids
+	if err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // recomputeReverification sets reverification_flagged per test case: it raises the flag when a
