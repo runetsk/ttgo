@@ -1,9 +1,21 @@
-import React from 'react';
+import React, { useId } from 'react';
+import useDialogFocus from '../../hooks/useDialogFocus';
 
 export default function ModalShell({ title, subtitle, width = 540, maxHeight, onClose, footer, children }) {
+    // Shared by the import, resync and gallery dialogs, none of which contained keyboard focus:
+    // Tab walked straight out into the page behind them. Additive — the outside click and each
+    // dialog's own keys are untouched, and the hook only claims focus if nothing inside has it.
+    const dialogRef = useDialogFocus();
+    const titleId = useId();
+
     return (
         <div className="modal-overlay" onClick={onClose}>
             <div
+                ref={dialogRef}
+                tabIndex={-1}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={titleId}
                 className="modal-content"
                 onClick={e => e.stopPropagation()}
                 style={{
@@ -12,7 +24,7 @@ export default function ModalShell({ title, subtitle, width = 540, maxHeight, on
                 }}
             >
                 <header className="modal-header">
-                    <h3 style={{ margin: 0 }}>
+                    <h3 id={titleId} style={{ margin: 0 }}>
                         {title}
                         {subtitle && (
                             <span style={{ fontSize: '0.75rem', fontWeight: 400, color: 'var(--text-secondary)', marginLeft: 8 }}>
