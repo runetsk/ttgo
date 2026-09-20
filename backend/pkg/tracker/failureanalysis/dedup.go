@@ -42,6 +42,10 @@ type FailureGroup struct {
 	Key            string
 	Representative *models.RunResult
 	Members        []*models.RunResult
+	// SemanticMembers is filled by MergeGroupsSemantically: result id -> probability of the
+	// (final representative's original group, this member's original group) pair. Empty for
+	// members that share the representative's signature.
+	SemanticMembers map[string]float64
 }
 
 // GroupFailures clusters results by Signature. Representative per group is the
