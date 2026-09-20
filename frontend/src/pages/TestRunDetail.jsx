@@ -81,8 +81,15 @@ export default function TestRunDetail() {
                     version: d.version,
                     verdict: d.verdict,
                     suggested_defect_type: d.suggested_defect_type,
+                    suggested_defect_type_confidence: d.suggested_defect_type_confidence ?? null,
                     confidence: d.confidence,
+                    confidence_score: d.confidence_score ?? null,
+                    engine: d.engine || 'generative',
+                    model_name: d.model_name || '',
+                    narrative_status: d.narrative_status || 'ok',
                     dedup_group_key: d.dedup_group_key || null,
+                    dedup_method: d.dedup_method || '',
+                    dedup_p_same: d.dedup_p_same ?? null,
                 },
             }));
             return;

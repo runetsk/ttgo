@@ -27,7 +27,8 @@ function Pane({ title, result, verdict, aiEnabled }) {
             <KV k="Duration">{result ? formatDuration(result.duration_ms) : '—'}</KV>
             <KV k="Defect type">{result && result.defect_type ? (DEFECT_LABELS[result.defect_type] || result.defect_type) : '—'}</KV>
             {aiEnabled && (
-                <KV k="AI verdict">{verdict ? <AIVerdictBadge verdict={verdict.verdict} confidence={verdict.confidence} dedupGroup={!!verdict.dedup_group_key} /> : '—'}</KV>
+                <KV k="AI verdict">{verdict ? <AIVerdictBadge verdict={verdict.verdict} confidence={verdict.confidence} dedupGroup={!!verdict.dedup_group_key}
+                    engine={verdict.engine} modelName={verdict.model_name} confidenceScore={verdict.confidence_score} /> : '—'}</KV>
             )}
             <KV k="Error">{result && result.error_message
                 ? <code style={{ fontSize: '0.72rem', color: 'var(--accent-red)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{result.error_message}</code>

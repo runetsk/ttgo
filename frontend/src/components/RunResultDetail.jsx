@@ -8,6 +8,7 @@ import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
 import { isManualStepResults } from '../utils/stepResults';
 import { isFailureStatus } from '../utils/resultStatus';
+import { analysisMetaParts, narrativeNotice, groupingNote } from '../utils/analysisMeta.js';
 import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
@@ -181,7 +182,8 @@ const RunResultDetail = ({ result, attempts }) => {
                                     {tab.label}
                                     {tab.key === 'ai' && analyses && analyses[0] && (
                                         <span style={{ marginLeft: 6, verticalAlign: 'middle' }}>
-                                            <AIVerdictBadge verdict={analyses[0].verdict} confidence={analyses[0].confidence} dedupGroup={!!analyses[0].dedup_group_key} />
+                                            <AIVerdictBadge verdict={analyses[0].verdict} confidence={analyses[0].confidence} dedupGroup={!!analyses[0].dedup_group_key}
+                                                engine={analyses[0].engine} modelName={analyses[0].model_name} confidenceScore={analyses[0].confidence_score} />
                                         </span>
                                     )}
                                 </button>
@@ -527,19 +529,30 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, versions, selected
             {/* Meta row: verdict + confidence on left, model · time on right */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                    <AIVerdictBadge verdict={analysis.verdict} confidence={analysis.confidence} dedupGroup={!!analysis.dedup_group_key} />
-                    {analysis.dedup_group_key && analysis.source_analysis_id && (
-                        <span title="Grouped from representative analysis" style={{ color: 'var(--text-secondary)', fontSize: 11 }}>
-                            ↳ Grouped
+                    <AIVerdictBadge verdict={analysis.verdict} confidence={analysis.confidence} dedupGroup={!!analysis.dedup_group_key}
+                        engine={analysis.engine} modelName={analysis.model_name} confidenceScore={analysis.confidence_score} />
+                    {groupingNote(analysis) && (
+                        <span title={groupingNote(analysis)} style={{ color: 'var(--text-secondary)', fontSize: 11 }} data-testid="analysis-grouping-note">
+                            ↳ {groupingNote(analysis)}
                         </span>
                     )}
                 </div>
-                <div style={{ color: 'var(--text-secondary)', fontSize: 11, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    {analysis.model_name && <span>{analysis.model_name}</span>}
-                    {analysis.model_name && analysis.created_at && <span style={{ opacity: 0.5 }}>•</span>}
-                    {analysis.created_at && <span>{new Date(analysis.created_at).toLocaleString()}</span>}
+                <div style={{ color: 'var(--text-secondary)', fontSize: 11, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} data-testid="analysis-meta">
+                    {analysisMetaParts(analysis).map((p, i) => (
+                        <React.Fragment key={p}>
+                            {i > 0 && <span style={{ opacity: 0.5 }}>•</span>}
+                            <span>{p}</span>
+                        </React.Fragment>
+                    ))}
+                    {analysis.created_at && <><span style={{ opacity: 0.5 }}>•</span><span>{new Date(analysis.created_at).toLocaleString()}</span></>}
                 </div>
             </div>
+
+            {narrativeNotice(analysis) && (
+                <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)' }} data-testid="analysis-narrative-notice">
+                    {narrativeNotice(analysis)}
+                </div>
+            )}
 
             {/* Summary (or failure card) */}
             {failed ? (

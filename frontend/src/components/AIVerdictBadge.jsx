@@ -1,4 +1,5 @@
 import React from 'react';
+import { badgeTitle } from '../utils/analysisMeta.js';
 
 const COLORS = {
     product_bug:    { bg: '#3d2020', fg: '#ff9d9d' },
@@ -20,10 +21,11 @@ const LABELS = {
 
 const CONF_SHORT = { low: 'low', medium: 'med', high: 'high' };
 
-export default function AIVerdictBadge({ verdict, confidence, dedupGroup, style }) {
+export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine, modelName, confidenceScore, style }) {
     const color = COLORS[verdict] || COLORS.unknown;
+    const title = badgeTitle({ engine, model_name: modelName, confidence_score: confidenceScore });
     return (
-        <span style={{
+        <span title={title} style={{
             background: color.bg, color: color.fg,
             padding: '2px 8px', borderRadius: 10, fontSize: 11,
             whiteSpace: 'nowrap', ...style,

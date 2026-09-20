@@ -37,10 +37,11 @@ const SUGGESTION_FG = {
 function DefectSuggestionChip({ result, analysis, enabled, onAccept }) {
     if (!enabled || !shouldShowSuggestion(result, analysis)) return null;
     const suggested = analysis.suggested_defect_type;
+    const dc = Number.isFinite(analysis.suggested_defect_type_confidence) ? ` (confidence ${analysis.suggested_defect_type_confidence.toFixed(2)})` : '';
     return (
         <div
             data-testid={`defect-suggestion-${result.test_case_id}`}
-            title={`AI failure analysis suggests "${suggestionLabel(suggested)}" — accept it, or pick another value above`}
+            title={`AI failure analysis suggests "${suggestionLabel(suggested)}"${dc} — accept it, or pick another value above`}
             style={{
                 display: 'flex', alignItems: 'center', gap: 4,
                 marginTop: 3, padding: '1px 4px',
@@ -1105,6 +1106,9 @@ function AIVerdictCell({ result, analysis, onAnalyze }) {
             verdict={analysis.verdict}
             confidence={analysis.confidence}
             dedupGroup={!!analysis.dedup_group_key}
+            engine={analysis.engine}
+            modelName={analysis.model_name}
+            confidenceScore={analysis.confidence_score}
         />
     );
 }
