@@ -579,6 +579,37 @@ func TestFailureAnalysisAccuracy_DaysParam(t *testing.T) {
 	}
 }
 
+// TestAnalysesResponses_ReturnPersistedSuggestion asserts the read paths return the persisted
+// suggested_defect_type verbatim (models.RunResultAnalysis, spec §5) rather than deriving it from
+// the verdict — including unknown+suggestion, a combination the old verdict-mapping derivation
+// could never produce (SuggestedDefectType(VerdictUnknown) == "").
+func TestAnalysesResponses_ReturnPersistedSuggestion(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	run := &models.TestRun{Name: "r"}
+	require.NoError(t, env.store.CreateTestRun(run))
+	rr := &models.RunResult{TestRunID: run.ID, TestNameSnapshot: "t", AttemptNumber: 1, Status: models.StatusFail, FailureType: "assertion", ErrorMessage: "boom"}
+	require.NoError(t, env.store.AddRunResult(rr))
+	conf := 0.9
+	_, err := env.store.CreateAnalysis(&models.RunResultAnalysis{RunResultID: rr.ID, Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow,
+		Engine: models.AnalysisEngineTypeSafe, SuggestedDefectType: "automation_bug", SuggestedDefectTypeConfidence: &conf, ModelName: "jev-1.13.0"})
+	require.NoError(t, err)
+
+	list := doRequest(env, "GET", "/api/run-results/"+rr.ID+"/analyses", nil)
+	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
+	var rows []models.RunResultAnalysis
+	require.NoError(t, json.NewDecoder(list.Body).Decode(&rows))
+	require.Len(t, rows, 1)
+	require.Equal(t, "automation_bug", rows[0].SuggestedDefectType)
+	require.Equal(t, models.AnalysisEngineTypeSafe, rows[0].Engine)
+
+	current := doRequest(env, "GET", "/api/runs/"+run.ID+"/analyses/current", nil)
+	require.Equal(t, http.StatusOK, current.Code)
+	var byResult map[string]models.RunResultAnalysis
+	require.NoError(t, json.NewDecoder(current.Body).Decode(&byResult))
+	require.Equal(t, "automation_bug", byResult[rr.ID].SuggestedDefectType)
+}
+
 // createTestRun creates an empty run and returns its ID.
 func createTestRun(t *testing.T, env *testEnv, name string) string {
 	t.Helper()

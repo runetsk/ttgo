@@ -41,13 +41,20 @@ func (b *RunAnalysisBroadcaster) BroadcastRunAnalysisCompleted(job *models.RunAn
 
 func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisCreated(a *models.RunResultAnalysis, testRunID string) {
 	payload := map[string]interface{}{
-		"run_result_id":         a.RunResultID,
-		"analysis_id":           a.ID,
-		"version":               a.Version,
-		"verdict":               a.Verdict,
-		"suggested_defect_type": models.SuggestedDefectType(a.Verdict),
-		"confidence":            a.Confidence,
-		"dedup_group_key":       a.DedupGroupKey,
+		"run_result_id":                    a.RunResultID,
+		"analysis_id":                      a.ID,
+		"version":                          a.Version,
+		"verdict":                          a.Verdict,
+		"suggested_defect_type":            a.SuggestedDefectType,
+		"suggested_defect_type_confidence": a.SuggestedDefectTypeConfidence,
+		"confidence":                       a.Confidence,
+		"confidence_score":                 a.ConfidenceScore,
+		"engine":                           a.Engine,
+		"model_name":                       a.ModelName,
+		"narrative_status":                 a.NarrativeStatus,
+		"dedup_group_key":                  a.DedupGroupKey,
+		"dedup_method":                     a.DedupMethod,
+		"dedup_p_same":                     a.DedupPSame,
 	}
 	b.Hub.Broadcast(NewEvent(EventRunResultAnalysisCreated, runResultTopic(a.RunResultID), payload))
 	if testRunID != "" {

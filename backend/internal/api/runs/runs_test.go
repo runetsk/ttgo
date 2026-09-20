@@ -588,6 +588,49 @@ func TestBulkUpdateSnapshotsPerResultAISuggestion(t *testing.T) {
 	}
 }
 
+// Two TypeSafe analyses share a verdict but differ in suggestion and confidence. Before the
+// persisted suggestion the bulk path bucketed on (verdict, confidence) alone; this guards the
+// extended bucket key so neither row receives the other's snapshot.
+func TestBulkUpdateSnapshotsTypeSafeRowsBySuggestion(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 3)
+	f := func(v float64) *float64 { return &v }
+	seeded := []*models.RunResultAnalysis{
+		{Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow, Engine: models.AnalysisEngineTypeSafe, ConfidenceScore: f(0.3),
+			SuggestedDefectType: "automation_bug", SuggestedDefectTypeConfidence: f(0.93)},
+		{Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow, Engine: models.AnalysisEngineTypeSafe, ConfidenceScore: f(0.3),
+			SuggestedDefectType: "", SuggestedDefectTypeConfidence: f(0.41)}, // abstained
+		{Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow}, // generative, legacy map → ""
+	}
+	ids := make([]string, len(results))
+	for i, rr := range results {
+		ids[i] = rr.ID
+		seeded[i].RunResultID = rr.ID
+		seeded[i].ModelName = "m"
+		_, err := s.CreateAnalysis(seeded[i])
+		require.NoError(t, err)
+	}
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{"result_ids": ids, "status": "FAIL", "defect_type": "automation_bug"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	got0, _ := s.GetRunResultByID(results[0].ID)
+	assert.Equal(t, "automation_bug", got0.SuggestedDefectType)
+	assert.Equal(t, models.AnalysisEngineTypeSafe, got0.SuggestedEngine)
+	assert.Equal(t, models.ConfidenceHigh, got0.SuggestedConfidence, "bucket of the defect-type confidence 0.93")
+	require.NotNil(t, got0.SuggestedConfidenceScore)
+	assert.InDelta(t, 0.93, *got0.SuggestedConfidenceScore, 1e-9)
+
+	got1, _ := s.GetRunResultByID(results[1].ID)
+	assert.Equal(t, "", got1.SuggestedDefectType, "abstention is preserved, not filled from the verdict")
+	assert.Equal(t, models.AnalysisEngineTypeSafe, got1.SuggestedEngine)
+	assert.Equal(t, models.ConfidenceLow, got1.SuggestedConfidence)
+
+	got2, _ := s.GetRunResultByID(results[2].ID)
+	assert.Equal(t, models.AnalysisEngineGenerative, got2.SuggestedEngine)
+	assert.Nil(t, got2.SuggestedConfidenceScore)
+	assert.Equal(t, models.ConfidenceLow, got2.SuggestedConfidence)
+}
+
 // Best-effort: results with no analysis get their snapshot CLEARED rather than skipped, and
 // their presence must not stop the rows that DO have one from being snapshotted, nor fail the
 // bulk triage itself. Row 0 carries a snapshot from an earlier decision — leaving it in place

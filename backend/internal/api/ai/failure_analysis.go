@@ -81,9 +81,8 @@ func (h *Handler) AnalyzeRunResult(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadGateway, err)
 		return
 	}
-	// Derive the suggested defect_type from the verdict. RawResponse is deliberately
-	// NOT stripped here — the F-068 omission applies to list responses only.
-	row.SuggestedDefectType = models.SuggestedDefectType(row.Verdict)
+	// RawResponse is deliberately NOT stripped here — the F-068 omission applies to list
+	// responses only. SuggestedDefectType is persisted (models.RunResultAnalysis), not derived.
 	httpx.JSON(w, http.StatusCreated, row)
 }
 
@@ -108,7 +107,6 @@ func (h *Handler) ListRunResultAnalyses(w http.ResponseWriter, r *http.Request) 
 	// responses; it stays available in the stored record (F-068).
 	for _, a := range rows {
 		a.RawResponse = ""
-		a.SuggestedDefectType = models.SuggestedDefectType(a.Verdict)
 	}
 	httpx.JSON(w, http.StatusOK, rows)
 }
@@ -132,7 +130,6 @@ func (h *Handler) ListCurrentAnalysesForRun(w http.ResponseWriter, r *http.Reque
 	}
 	for _, a := range m {
 		a.RawResponse = "" // omit raw LLM output from list responses (F-068)
-		a.SuggestedDefectType = models.SuggestedDefectType(a.Verdict)
 	}
 	httpx.JSON(w, http.StatusOK, m)
 }

@@ -414,7 +414,63 @@ func clearAISuggestion(updateMap map[string]interface{}) {
 	updateMap["suggested_verdict"] = ""
 	updateMap["suggested_defect_type"] = ""
 	updateMap["suggested_confidence"] = ""
+	updateMap["suggested_engine"] = ""
+	updateMap["suggested_confidence_score"] = nil
 	updateMap["decided_at"] = nil
+}
+
+// snapshotBucket mirrors failureanalysis.confidenceBucket for the snapshot (kept local so the
+// runs package does not import the analyzer; thresholds are the spec's 0.5/0.9).
+func snapshotBucket(score float64) string {
+	switch {
+	case score >= 0.9:
+		return models.ConfidenceHigh
+	case score >= 0.5:
+		return models.ConfidenceMedium
+	default:
+		return models.ConfidenceLow
+	}
+}
+
+// snapshotValues is the ONE definition of what a triage decision records about the AI
+// suggestion (spec §5). For typesafe rows the confidence columns come from the defect-type
+// question, because that is the quantity the accuracy metric grades; generative rows keep
+// the legacy verdict bucket and no numeric score. A legacy row with an empty engine is generative.
+func snapshotValues(a *models.RunResultAnalysis, decidedAt time.Time) map[string]interface{} {
+	engine := a.Engine
+	if engine == "" {
+		engine = models.AnalysisEngineGenerative
+	}
+	v := map[string]interface{}{
+		"suggested_verdict":          a.Verdict,
+		"suggested_defect_type":      a.SuggestedDefectType,
+		"suggested_confidence":       a.Confidence,
+		"suggested_engine":           engine,
+		"suggested_confidence_score": nil,
+		"decided_at":                 decidedAt,
+	}
+	if engine == models.AnalysisEngineTypeSafe && a.SuggestedDefectTypeConfidence != nil {
+		score := *a.SuggestedDefectTypeConfidence
+		v["suggested_confidence"] = snapshotBucket(score)
+		v["suggested_confidence_score"] = &score
+	}
+	return v
+}
+
+type snapshotKey struct {
+	verdict, confidence, suggestedDefectType, engine, confidenceScore string
+}
+
+// snapshotKeyFor buckets analyses whose snapshot columns are identical, so the bulk path can
+// write one grouped UPDATE per distinct snapshot (spec §5: every snapshot dimension is in the key).
+func snapshotKeyFor(a *models.RunResultAnalysis) snapshotKey {
+	v := snapshotValues(a, time.Time{})
+	score := ""
+	if p, ok := v["suggested_confidence_score"].(*float64); ok && p != nil {
+		score = strconv.FormatFloat(*p, 'f', -1, 64)
+	}
+	return snapshotKey{verdict: v["suggested_verdict"].(string), confidence: v["suggested_confidence"].(string),
+		suggestedDefectType: v["suggested_defect_type"].(string), engine: v["suggested_engine"].(string), confidenceScore: score}
 }
 
 // snapshotAISuggestion adds the AI failure-analysis suggestion columns to updateMap so the
@@ -455,10 +511,9 @@ func (h *Handler) snapshotAISuggestion(ctx context.Context, resultID string, upd
 		return
 	}
 
-	updateMap["suggested_verdict"] = a.Verdict
-	updateMap["suggested_defect_type"] = models.SuggestedDefectType(a.Verdict)
-	updateMap["suggested_confidence"] = a.Confidence
-	updateMap["decided_at"] = time.Now().UTC()
+	for k, val := range snapshotValues(a, time.Now().UTC()) {
+		updateMap[k] = val
+	}
 }
 
 // effectiveResultStatus resolves the status the result will hold once the update is applied:
@@ -493,9 +548,9 @@ func (h *Handler) effectiveResultStatus(resultID string, reqStatus *string) (mod
 // verdict across the whole selection and silently corrupt the calibration record.
 //
 // Rather than one UPDATE per row (up to 500), results are bucketed by their snapshot values and
-// each bucket is written with a single grouped "id IN (...)" statement. suggested_defect_type is
-// a pure function of the verdict, so the bucket key needs only (verdict, confidence) — in
-// practice at most 6 verdicts x 3 confidences = 18 statements, regardless of selection size.
+// each bucket is written with a single grouped "id IN (...)" statement. The bucket key carries
+// every snapshot dimension (verdict, confidence, suggestion, engine, numeric score), so distinct
+// suggestions never share a statement; bucket count is bounded by distinct analyses in the run.
 //
 // Results with no analysis are not skipped but CLEARED. The caller's main UPDATE has already
 // blanked these columns atomically with defect_type, so this is a redundant safety net rather
@@ -527,8 +582,8 @@ func (h *Handler) snapshotAISuggestionsBulk(ctx context.Context, runID string, r
 		return
 	}
 
-	type snapshotKey struct{ verdict, confidence string }
 	buckets := make(map[snapshotKey][]string)
+	sample := make(map[snapshotKey]*models.RunResultAnalysis)
 	var noAnalysis []string
 	for _, id := range resultIDs {
 		a := analyses[id]
@@ -536,20 +591,16 @@ func (h *Handler) snapshotAISuggestionsBulk(ctx context.Context, runID string, r
 			noAnalysis = append(noAnalysis, id)
 			continue
 		}
-		k := snapshotKey{verdict: a.Verdict, confidence: a.Confidence}
+		k := snapshotKeyFor(a)
 		buckets[k] = append(buckets[k], id)
+		sample[k] = a
 	}
 	clearRows(noAnalysis, "no analysis")
 
 	decidedAt := now.UTC() // UTC: the accuracy window compares decided_at as TEXT, see models.RunResult
 	for k, ids := range buckets {
-		updates := map[string]interface{}{
-			"suggested_verdict":     k.verdict,
-			"suggested_defect_type": models.SuggestedDefectType(k.verdict),
-			"suggested_confidence":  k.confidence,
-			"decided_at":            decidedAt,
-			"updated_at":            now,
-		}
+		updates := snapshotValues(sample[k], decidedAt)
+		updates["updated_at"] = now
 		if _, err := h.store.BulkUpdateRunResults(runID, ids, updates); err != nil {
 			slog.WarnContext(ctx, "ai-suggestion bulk snapshot: grouped update failed",
 				"run_id", runID, "verdict", k.verdict, "count", len(ids), "error", err)

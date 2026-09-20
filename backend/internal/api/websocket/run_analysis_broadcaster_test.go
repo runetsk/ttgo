@@ -10,20 +10,22 @@ import (
 )
 
 // TestBroadcastRunResultAnalysisCreated_IncludesSuggestedDefectType asserts the
-// live payload carries the verdict-derived suggestion next to the raw verdict, so
-// a client applying a WS event lands on the same suggestion the REST endpoints
-// return. The mapping is lossy (flaky_test → automation_bug), so echoing the
-// verdict alone would not be equivalent.
+// live payload carries the PERSISTED suggestion (models.RunResultAnalysis.SuggestedDefectType)
+// next to the raw verdict, so a client applying a WS event lands on the same suggestion the REST
+// endpoints return. The broadcaster no longer derives it from the verdict — CreateAnalysis writes
+// it at analysis time (spec §5) — so this row is seeded with the value that write-time default
+// would have produced, the same way a persisted row reaches this code.
 func TestBroadcastRunResultAnalysisCreated_IncludesSuggestedDefectType(t *testing.T) {
 	hub := NewHub()
 	go hub.Run()
 
 	a := &models.RunResultAnalysis{
-		ID:          "an-1",
-		RunResultID: "rr-1",
-		Version:     1,
-		Verdict:     models.VerdictFlakyTest,
-		Confidence:  models.ConfidenceHigh,
+		ID:                  "an-1",
+		RunResultID:         "rr-1",
+		Version:             1,
+		Verdict:             models.VerdictFlakyTest,
+		Confidence:          models.ConfidenceHigh,
+		SuggestedDefectType: "automation_bug",
 	}
 
 	client := makeTestClient(hub, RoleMember, runResultTopic(a.RunResultID))

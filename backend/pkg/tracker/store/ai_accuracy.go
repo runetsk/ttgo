@@ -22,14 +22,26 @@ type AIAccuracyConfidenceBucket struct {
 	Rate       float64 `json:"rate"`
 }
 
+// AIAccuracyEngineBucket is one engine's agreement with its own confidence ladder. Ladders are
+// per engine because generative confidence is self-reported while TypeSafe's is calibrated on
+// the defect-type question; mixing them in one ladder would make both unreadable.
+type AIAccuracyEngineBucket struct {
+	Engine       string                       `json:"engine"`
+	Total        int                          `json:"total"`
+	Agreed       int                          `json:"agreed"`
+	Rate         float64                      `json:"rate"`
+	ByConfidence []AIAccuracyConfidenceBucket `json:"by_confidence"`
+}
+
 // AIFailureAnalysisAccuracy answers "how often did the AI's suggested defect_type match the
-// human's triage decision" — overall, per verdict, and per confidence level.
+// human's triage decision" — overall, per verdict, per confidence level, and per engine.
 type AIFailureAnalysisAccuracy struct {
 	Total         int                          `json:"total"`
 	Agreed        int                          `json:"agreed"`
 	AgreementRate float64                      `json:"agreement_rate"`
 	ByVerdict     []AIAccuracyVerdictBucket    `json:"by_verdict"`
 	ByConfidence  []AIAccuracyConfidenceBucket `json:"by_confidence"`
+	ByEngine      []AIAccuracyEngineBucket     `json:"by_engine"`
 }
 
 // accuracyCalibrationFilter defines the calibration set: the rows where a real human decision
@@ -83,6 +95,7 @@ func (s *Store) GetFailureAnalysisAccuracy(since time.Time) (*AIFailureAnalysisA
 	out := &AIFailureAnalysisAccuracy{
 		ByVerdict:    []AIAccuracyVerdictBucket{},
 		ByConfidence: []AIAccuracyConfidenceBucket{},
+		ByEngine:     []AIAccuracyEngineBucket{},
 	}
 
 	// One transaction for both breakdowns: they are rendered side by side and the headline is
@@ -101,7 +114,7 @@ func (s *Store) GetFailureAnalysisAccuracy(since time.Time) (*AIFailureAnalysisA
 
 		// Ordered high -> medium -> low so the calibration ladder reads as a descent: a clean
 		// drop means confidence is trustworthy, a flat one means it is noise.
-		return tx.Raw(`
+		if err := tx.Raw(`
 			SELECT suggested_confidence AS confidence,
 			       COUNT(*) AS total,
 			       SUM(CASE WHEN suggested_defect_type = defect_type THEN 1 ELSE 0 END) AS agreed
@@ -112,7 +125,48 @@ func (s *Store) GetFailureAnalysisAccuracy(since time.Time) (*AIFailureAnalysisA
 			           WHEN 'medium' THEN 1
 			           WHEN 'low' THEN 2
 			           ELSE 3
-			         END, confidence ASC`, since).Scan(&out.ByConfidence).Error
+			         END, confidence ASC`, since).Scan(&out.ByConfidence).Error; err != nil {
+			return err
+		}
+
+		// Per-engine ladders (spec §5): generative confidence is self-reported, TypeSafe's is
+		// calibrated on the defect-type question, so mixing them into one ladder would be
+		// meaningless. suggested_engine is blank on rows decided before engines existed; those
+		// are grouped with 'generative' rather than forming their own silent bucket.
+		type engineRow struct {
+			Engine, Confidence string
+			Total, Agreed      int
+		}
+		var rows []engineRow
+		if err := tx.Raw(`
+			SELECT COALESCE(NULLIF(suggested_engine, ''), 'generative') AS engine,
+			       suggested_confidence AS confidence,
+			       COUNT(*) AS total,
+			       SUM(CASE WHEN suggested_defect_type = defect_type THEN 1 ELSE 0 END) AS agreed
+			FROM run_results`+accuracyCalibrationFilter+`
+			GROUP BY engine, suggested_confidence
+			ORDER BY engine ASC, CASE suggested_confidence WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 ELSE 3 END`, since).Scan(&rows).Error; err != nil {
+			return err
+		}
+		byEngine := map[string]*AIAccuracyEngineBucket{}
+		var order []string
+		for _, r := range rows {
+			b := byEngine[r.Engine]
+			if b == nil {
+				b = &AIAccuracyEngineBucket{Engine: r.Engine, ByConfidence: []AIAccuracyConfidenceBucket{}}
+				byEngine[r.Engine] = b
+				order = append(order, r.Engine)
+			}
+			b.Total += r.Total
+			b.Agreed += r.Agreed
+			b.ByConfidence = append(b.ByConfidence, AIAccuracyConfidenceBucket{Confidence: r.Confidence, Total: r.Total, Agreed: r.Agreed, Rate: accuracyRate(r.Agreed, r.Total)})
+		}
+		for _, e := range order {
+			b := byEngine[e]
+			b.Rate = accuracyRate(b.Agreed, b.Total)
+			out.ByEngine = append(out.ByEngine, *b)
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, err

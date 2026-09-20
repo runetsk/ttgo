@@ -323,3 +323,48 @@ func TestAccuracyEmptySet(t *testing.T) {
 	require.Empty(t, got.ByVerdict)
 	require.Empty(t, got.ByConfidence)
 }
+
+// TestAccuracy_ByEngineLaddersAreSeparate proves the engine breakdown does not mix generative's
+// self-reported confidence with TypeSafe's defect-type-calibrated confidence in one ladder, and
+// that a legacy row with no suggested_engine is bucketed as generative rather than forming its
+// own silent bucket.
+func TestAccuracy_ByEngineLaddersAreSeparate(t *testing.T) {
+	s := newTestStore(t)
+	now := time.Now().UTC()
+	seed := func(engine, conf, suggested, human string, score *float64) {
+		run := &models.TestRun{Name: "r"}
+		require.NoError(t, s.CreateTestRun(run))
+		r := &models.RunResult{TestRunID: run.ID, AttemptNumber: 1, Status: models.StatusFail, DefectType: human,
+			SuggestedVerdict: "product_bug", SuggestedDefectType: suggested, SuggestedConfidence: conf,
+			SuggestedEngine: engine, SuggestedConfidenceScore: score, DecidedAt: &now}
+		require.NoError(t, s.AddRunResult(r))
+	}
+	sc := 0.95
+	seed("typesafe", "high", "product_bug", "product_bug", &sc)
+	seed("typesafe", "high", "product_bug", "automation_bug", &sc)
+	seed("generative", "high", "product_bug", "product_bug", nil)
+	seed("", "medium", "product_bug", "product_bug", nil) // legacy: counts as generative
+
+	rep, err := s.GetFailureAnalysisAccuracy(now.Add(-time.Hour))
+	require.NoError(t, err)
+	require.Equal(t, 4, rep.Total)
+	require.Len(t, rep.ByEngine, 2)
+	var ts, gen *AIAccuracyEngineBucket
+	for i := range rep.ByEngine {
+		switch rep.ByEngine[i].Engine {
+		case "typesafe":
+			ts = &rep.ByEngine[i]
+		case "generative":
+			gen = &rep.ByEngine[i]
+		}
+	}
+	require.NotNil(t, ts)
+	require.Equal(t, 2, ts.Total)
+	require.Equal(t, 1, ts.Agreed)
+	require.Len(t, ts.ByConfidence, 1)
+	require.Equal(t, "high", ts.ByConfidence[0].Confidence)
+	require.NotNil(t, gen)
+	require.Equal(t, 2, gen.Total)
+	require.Equal(t, 2, gen.Agreed)
+	require.Len(t, gen.ByConfidence, 2)
+}
