@@ -246,8 +246,9 @@ func classifyStatus(status int, retryAfter string, body []byte) *Error {
 	case status == 422:
 		e.Category = CategoryValidation
 		lower := strings.ToLower(msg)
-		e.Oversized = strings.Contains(lower, "context") || strings.Contains(lower, "token limit") ||
-			strings.Contains(lower, "too many tokens") || strings.Contains(lower, "exceeds")
+		hasContextOrToken := strings.Contains(lower, "context") || strings.Contains(lower, "token")
+		hasLimitOrExceed := strings.Contains(lower, "limit") || strings.Contains(lower, "exceed") || strings.Contains(lower, "too many")
+		e.Oversized = hasContextOrToken && hasLimitOrExceed
 	case status == 429:
 		e.Category = CategoryRateLimit
 		e.RetryAfter = parseRetryAfter(retryAfter)

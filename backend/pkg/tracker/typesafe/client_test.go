@@ -119,6 +119,25 @@ func TestEvaluate_OversizedValidationFlagged(t *testing.T) {
 	require.True(t, te.Oversized)
 }
 
+func TestEvaluate_UnrelatedValidationErrorsAreNotOversized(t *testing.T) {
+	cases := map[string]string{
+		"field length limit":    `{"detail":"'model' field exceeds the 64-character limit"}`,
+		"context in field name": `{"detail":"missing required field in request context"}`,
+		"empty questions":       `{"detail":"questions must not be empty"}`,
+	}
+	for name, body := range cases {
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(422)
+			_, _ = w.Write([]byte(body))
+		})
+		_, err := c.Evaluate(context.Background(), Request{State: "s", Model: "m", Questions: choiceQ()})
+		var te *Error
+		require.ErrorAs(t, err, &te, name)
+		require.Equal(t, CategoryValidation, te.Category, name)
+		require.False(t, te.Oversized, name)
+	}
+}
+
 func TestEvaluate_CancelDuringBackoffReturnsPromptly(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
