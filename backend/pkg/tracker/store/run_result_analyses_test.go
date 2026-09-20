@@ -123,6 +123,23 @@ func TestGetCurrentAnalysisForResult_ReturnsNewestVersion(t *testing.T) {
 	require.Equal(t, models.VerdictProductBug, got.Verdict)
 }
 
+func TestCreateAnalysis_WriteTimeDefaults(t *testing.T) {
+	s := newTestStore(t)
+	gen, err := s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: "rr-gen", Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceMedium})
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineGenerative, gen.Engine)
+	require.Equal(t, models.NarrativeStatusOK, gen.NarrativeStatus)
+	require.Equal(t, "automation_bug", gen.SuggestedDefectType, "generative rows get the legacy mapping at write time")
+
+	unknown, err := s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: "rr-unk", Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow})
+	require.NoError(t, err)
+	require.Equal(t, "", unknown.SuggestedDefectType)
+
+	ts, err := s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: "rr-ts", Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceHigh, Engine: models.AnalysisEngineTypeSafe})
+	require.NoError(t, err)
+	require.Equal(t, "", ts.SuggestedDefectType, "a typesafe row's empty suggestion means abstained and is never derived")
+}
+
 func seedRun(t *testing.T, s *Store) string {
 	t.Helper()
 	run := &models.TestRun{Name: "r"}

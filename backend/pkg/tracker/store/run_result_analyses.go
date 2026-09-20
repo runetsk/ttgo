@@ -20,6 +20,17 @@ func (s *Store) CreateAnalysis(a *models.RunResultAnalysis) (*models.RunResultAn
 	if a.RunResultID == "" {
 		return nil, fmt.Errorf("run_result_id is required")
 	}
+	// Write-time defaults (spec §5 resolution rule). A typesafe row keeps an empty
+	// suggestion: that means "abstained" and must never be derived.
+	if a.Engine == "" {
+		a.Engine = models.AnalysisEngineGenerative
+	}
+	if a.NarrativeStatus == "" {
+		a.NarrativeStatus = models.NarrativeStatusOK
+	}
+	if a.Engine == models.AnalysisEngineGenerative && a.SuggestedDefectType == "" {
+		a.SuggestedDefectType = models.SuggestedDefectType(a.Verdict)
+	}
 	a.ID = uuid.New().String()
 	a.CreatedAt = time.Now()
 

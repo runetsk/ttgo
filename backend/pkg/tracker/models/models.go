@@ -339,6 +339,14 @@ type RunResult struct {
 	SuggestedDefectType string `json:"suggested_defect_type" gorm:"default:''"`
 	SuggestedConfidence string `json:"suggested_confidence" gorm:"default:''"`
 
+	// SuggestedEngine records which engine's suggestion was snapshotted; "" on rows decided
+	// before engines existed and on rows with no snapshot. SuggestedConfidenceScore is the
+	// numeric confidence of the DEFECT-TYPE question for typesafe rows (the quantity the
+	// accuracy metric grades), NULL for generative rows. Both are cleared with the other
+	// snapshot columns.
+	SuggestedEngine          string   `json:"suggested_engine" gorm:"default:''"`
+	SuggestedConfidenceScore *float64 `json:"suggested_confidence_score,omitempty"`
+
 	// DecidedAt is the instant the human triage decision above was recorded, written in UTC
 	// alongside the snapshot columns and NULL until a real decision lands.
 	//

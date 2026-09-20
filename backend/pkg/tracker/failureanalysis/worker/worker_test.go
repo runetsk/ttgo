@@ -195,7 +195,8 @@ func TestWorkerCancellationStopsAfterCurrentGroup(t *testing.T) {
 	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
 	require.NoError(t, err)
 
-	require.NoError(t, s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, ""))
+	_, err = s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, "")
+	require.NoError(t, err)
 
 	w := NewWorker(s, &verdictProvider{verdict: "flaky_test"}, nil, 10*time.Millisecond)
 	require.NoError(t, w.processOnce(context.Background()))

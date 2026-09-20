@@ -66,13 +66,13 @@ func (w *Worker) processOnce(ctx context.Context) error {
 	if err != nil || job == nil {
 		return err
 	}
-	if err := w.store.MarkAnalysisJobRunning(job.ID); err != nil {
+	if _, err := w.store.MarkAnalysisJobRunning(job.ID); err != nil {
 		return fmt.Errorf("mark running: %w", err)
 	}
 
 	settings, err := w.store.GetFailureAnalysisSettings()
 	if err != nil {
-		if uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load settings: "+err.Error()); uerr != nil {
+		if _, uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load settings: "+err.Error()); uerr != nil {
 			slog.Error("failure-analysis: could not mark job failed", "job_id", job.ID, "error", uerr)
 		}
 		return err
@@ -80,7 +80,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 
 	failures, err := w.store.ListLatestFailingResults(job.TestRunID)
 	if err != nil {
-		if uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load failures: "+err.Error()); uerr != nil {
+		if _, uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load failures: "+err.Error()); uerr != nil {
 			slog.Error("failure-analysis: could not mark job failed", "job_id", job.ID, "error", uerr)
 		}
 		return err
@@ -194,7 +194,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		}
 	}
 
-	if err := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, ""); err != nil {
+	if _, err := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, ""); err != nil {
 		return err
 	}
 	if w.bc != nil {

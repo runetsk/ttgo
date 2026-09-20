@@ -169,6 +169,25 @@ var ValidConfidences = map[string]bool{
 	ConfidenceLow: true, ConfidenceMedium: true, ConfidenceHigh: true,
 }
 
+// Engines that can produce a failure-analysis verdict.
+const (
+	AnalysisEngineGenerative = "generative" // the configured chat LLM decided the verdict
+	AnalysisEngineTypeSafe   = "typesafe"   // TypeSafe.ai System One decided; the LLM only narrated
+)
+
+// Narrative outcomes for a TypeSafe-decided analysis. Generative rows are always "ok".
+const (
+	NarrativeStatusOK          = "ok"
+	NarrativeStatusUnavailable = "unavailable" // no narrative provider, or it failed
+	NarrativeStatusUnparseable = "unparseable" // narrative came back but was not valid JSON twice
+)
+
+// How a dedup clone was attached to its representative.
+const (
+	DedupMethodSignature = "signature" // identical SHA-1 signature (regex-normalized message)
+	DedupMethodSemantic  = "semantic"  // TypeSafe judged the two failures to share a cause
+)
+
 // Job status / trigger constants.
 const (
 	RunAnalysisJobStatusQueued    = "queued"
@@ -203,8 +222,30 @@ type RunResultAnalysis struct {
 	CreatedBy            *string   `json:"created_by,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
 
-	// SuggestedDefectType is derived from Verdict via SuggestedDefectType(); never persisted.
-	SuggestedDefectType string `json:"suggested_defect_type" gorm:"-"`
+	// Engine that produced Verdict. Legacy rows read as generative (column default).
+	Engine string `json:"engine" gorm:"not null;default:'generative'"`
+	// TypeSafe verdict confidence 0..1; NULL for generative rows (never invented).
+	ConfidenceScore      *float64 `json:"confidence_score,omitempty"`
+	VerdictProbabilities string   `json:"verdict_probabilities,omitempty" gorm:"type:text"`
+
+	// SuggestedDefectType is PERSISTED and is the single source of truth for the suggestion.
+	// typesafe rows: the decided option, or "" when TypeSafe abstained.
+	// generative rows: SuggestedDefectType(Verdict), written at analysis time (and backfilled).
+	// No read path may derive it from Verdict any more.
+	SuggestedDefectType           string   `json:"suggested_defect_type" gorm:"default:''"`
+	SuggestedDefectTypeConfidence *float64 `json:"suggested_defect_type_confidence,omitempty"`
+	DefectTypeProbabilities       string   `json:"defect_type_probabilities,omitempty" gorm:"type:text"`
+
+	NarrativeStatus     string `json:"narrative_status" gorm:"not null;default:'ok'"`
+	PolicyVersion       string `json:"policy_version,omitempty"`
+	TypeSafeInputTokens int    `json:"typesafe_input_tokens"`
+
+	// Grouping provenance. "" on representatives; on clones: how they were grouped and,
+	// for semantic clones, the probability/model/policy that justified the merge.
+	DedupMethod        string   `json:"dedup_method,omitempty" gorm:"default:''"`
+	DedupPSame         *float64 `json:"dedup_p_same,omitempty"`
+	DedupModel         string   `json:"dedup_model,omitempty"`
+	DedupPolicyVersion string   `json:"dedup_policy_version,omitempty"`
 }
 
 // RunAnalysisJob tracks a batch/auto analysis of a TestRun.
@@ -224,6 +265,8 @@ type RunAnalysisJob struct {
 	CreatedAt     time.Time  `json:"created_at"`
 	StartedAt     *time.Time `json:"started_at,omitempty"`
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
+
+	SemanticInputTokens int `json:"semantic_input_tokens" gorm:"default:0"` // TypeSafe tokens used by semantic grouping
 }
 
 // GeneratedStep is a single step in a generated test case draft.

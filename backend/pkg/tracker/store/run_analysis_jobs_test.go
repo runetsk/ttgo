@@ -37,7 +37,12 @@ func TestMaybeEnqueueForRunAllowsNewAfterTerminal(t *testing.T) {
 
 	j1, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
 	require.NoError(t, err)
-	require.NoError(t, s.UpdateAnalysisJobStatus(j1.ID, models.RunAnalysisJobStatusCompleted, ""))
+	claimed, err := s.MarkAnalysisJobRunning(j1.ID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	changed, err := s.UpdateAnalysisJobStatus(j1.ID, models.RunAnalysisJobStatusCompleted, "")
+	require.NoError(t, err)
+	require.True(t, changed)
 
 	j2, created, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
 	require.NoError(t, err)
@@ -50,7 +55,8 @@ func TestSweepRunningJobsMarksOrphansFailed(t *testing.T) {
 	runID := seedRun(t, s)
 	j, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
 	require.NoError(t, err)
-	require.NoError(t, s.MarkAnalysisJobRunning(j.ID))
+	_, err = s.MarkAnalysisJobRunning(j.ID)
+	require.NoError(t, err)
 
 	affected, err := s.SweepRunningAnalysisJobs()
 	require.NoError(t, err)
@@ -60,4 +66,62 @@ func TestSweepRunningJobsMarksOrphansFailed(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.RunAnalysisJobStatusFailed, got.Status)
 	require.Contains(t, got.ErrorMessage, "interrupted")
+}
+
+func TestMarkAnalysisJobRunning_DoesNotReviveCancelledJob(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "r"}
+	require.NoError(t, s.CreateTestRun(run))
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	// Cancel lands between the worker's pick-up and its claim.
+	changed, err := s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, "")
+	require.NoError(t, err)
+	require.True(t, changed)
+	claimed, err := s.MarkAnalysisJobRunning(job.ID)
+	require.NoError(t, err)
+	require.False(t, claimed, "a cancelled job must not be revived as running")
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCancelled, got.Status)
+}
+
+func TestUpdateAnalysisJobStatus_CompletedCannotOverwriteCancelled(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "r"}
+	require.NoError(t, s.CreateTestRun(run))
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	claimed, err := s.MarkAnalysisJobRunning(job.ID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	changed, err := s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, "")
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	changed, err = s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, "")
+	require.NoError(t, err)
+	require.False(t, changed, "completed must not overwrite cancelled")
+
+	got, err := s.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RunAnalysisJobStatusCancelled, got.Status)
+}
+
+func TestUpdateAnalysisJobStatus_CompletesRunningJob(t *testing.T) {
+	s := newTestStore(t)
+	run := &models.TestRun{Name: "r"}
+	require.NoError(t, s.CreateTestRun(run))
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	claimed, err := s.MarkAnalysisJobRunning(job.ID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+	changed, err := s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, "")
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NoError(t, s.SetAnalysisJobSemanticTokens(job.ID, 1234))
+	got, err := s.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1234, got.SemanticInputTokens)
 }

@@ -51,6 +51,8 @@ func buildDemoAIData(now time.Time) demoAIData {
 			TokenUsagePrompt:     1180,
 			TokenUsageCompletion: 320,
 			CreatedAt:            now.Add(-30 * time.Minute),
+			Engine:               models.AnalysisEngineGenerative,
+			SuggestedDefectType:  models.SuggestedDefectType(models.VerdictProductBug),
 		},
 		{
 			ID:                   demoID("analysis:run2:tc15:v1"),
@@ -66,6 +68,8 @@ func buildDemoAIData(now time.Time) demoAIData {
 			TokenUsagePrompt:     1090,
 			TokenUsageCompletion: 260,
 			CreatedAt:            now.Add(-28 * time.Minute),
+			Engine:               models.AnalysisEngineGenerative,
+			SuggestedDefectType:  models.SuggestedDefectType(models.VerdictEnvironment),
 		},
 		{
 			ID:                   demoID("analysis:run3:tc11:v1"),
@@ -81,6 +85,8 @@ func buildDemoAIData(now time.Time) demoAIData {
 			TokenUsagePrompt:     980,
 			TokenUsageCompletion: 240,
 			CreatedAt:            now.Add(-25 * time.Minute),
+			Engine:               models.AnalysisEngineGenerative,
+			SuggestedDefectType:  models.SuggestedDefectType(models.VerdictFlakyTest),
 		},
 		{
 			ID:                   demoID("analysis:run3:tc11:v2"),
@@ -96,6 +102,8 @@ func buildDemoAIData(now time.Time) demoAIData {
 			TokenUsagePrompt:     1040,
 			TokenUsageCompletion: 310,
 			CreatedAt:            now.Add(-10 * time.Minute),
+			Engine:               models.AnalysisEngineGenerative,
+			SuggestedDefectType:  models.SuggestedDefectType(models.VerdictFlakyTest),
 		},
 		{
 			ID:                   demoID("analysis:run6:tc21:v1"),
@@ -111,6 +119,8 @@ func buildDemoAIData(now time.Time) demoAIData {
 			TokenUsagePrompt:     920,
 			TokenUsageCompletion: 210,
 			CreatedAt:            now.Add(-20 * time.Minute),
+			Engine:               models.AnalysisEngineGenerative,
+			SuggestedDefectType:  models.SuggestedDefectType(models.VerdictInfrastructure),
 		},
 	}
 

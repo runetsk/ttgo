@@ -240,6 +240,15 @@ func (s *Store) bootstrapDB() error {
 		return fmt.Errorf("failed to seed AI failure analysis settings: %w", err)
 	}
 
+	// typesafe: legacy analyses/snapshots predate the engine and persisted-suggestion
+	// columns. Both backfills are idempotent (their WHERE clauses become false once run).
+	if err := s.backfillAnalysisSuggestions(); err != nil {
+		return fmt.Errorf("failed to backfill analysis suggestions: %w", err)
+	}
+	if err := s.backfillSnapshotEngine(); err != nil {
+		return fmt.Errorf("failed to backfill snapshot engine: %w", err)
+	}
+
 	// Encrypt any pre-existing plaintext integration/LLM secrets at rest (F-016).
 	if err := s.backfillEncryptSecrets(); err != nil {
 		return fmt.Errorf("failed to backfill secret encryption: %w", err)
@@ -404,4 +413,29 @@ func (s *Store) SeedAdminIfNeeded(adminEmail, adminPassword string) error {
 		return fmt.Errorf("failed to seed admin user: %w", err)
 	}
 	return nil
+}
+
+// backfillAnalysisSuggestions fills suggested_defect_type on generative analyses written
+// before the column existed, using the legacy verdict -> defect_type map. Rows already
+// carrying a value, typesafe rows, and unknown verdicts are untouched, so re-running is a no-op.
+func (s *Store) backfillAnalysisSuggestions() error {
+	return s.db.Exec(`
+		UPDATE run_result_analyses
+		   SET suggested_defect_type = CASE verdict
+		         WHEN 'product_bug'    THEN 'product_bug'
+		         WHEN 'flaky_test'     THEN 'automation_bug'
+		         WHEN 'test_data'      THEN 'automation_bug'
+		         WHEN 'environment'    THEN 'system_issue'
+		         WHEN 'infrastructure' THEN 'system_issue'
+		         ELSE '' END
+		 WHERE engine = 'generative' AND suggested_defect_type = ''
+		   AND verdict IN ('product_bug','flaky_test','test_data','environment','infrastructure')`).Error
+}
+
+// backfillSnapshotEngine attributes every pre-existing triage snapshot to the generative
+// engine. Numeric confidence is deliberately left NULL: it was never recorded.
+func (s *Store) backfillSnapshotEngine() error {
+	return s.db.Exec(`
+		UPDATE run_results SET suggested_engine = 'generative'
+		 WHERE suggested_verdict != '' AND suggested_engine = ''`).Error
 }

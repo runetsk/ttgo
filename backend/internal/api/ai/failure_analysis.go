@@ -208,7 +208,7 @@ func (h *Handler) CancelRunAnalysisJob(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, fmt.Errorf("no active analysis job for this run"))
 		return
 	}
-	if err := h.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, ""); err != nil {
+	if _, err := h.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, ""); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}

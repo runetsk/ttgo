@@ -92,30 +92,50 @@ func (s *Store) NextQueuedAnalysisJob() (*models.RunAnalysisJob, error) {
 	return &job, nil
 }
 
-// MarkAnalysisJobRunning transitions status to running and sets StartedAt.
-func (s *Store) MarkAnalysisJobRunning(id string) error {
+// MarkAnalysisJobRunning claims a queued job. It is conditional on the job still being
+// queued, so a cancel that lands between pick-up and claim wins; returns whether it claimed.
+func (s *Store) MarkAnalysisJobRunning(id string) (bool, error) {
 	now := time.Now()
-	return s.db.Model(&models.RunAnalysisJob{}).
-		Where("id = ?", id).
+	res := s.db.Model(&models.RunAnalysisJob{}).
+		Where("id = ? AND status = ?", id, models.RunAnalysisJobStatusQueued).
 		Updates(map[string]interface{}{
 			"status":     models.RunAnalysisJobStatusRunning,
 			"started_at": &now,
-		}).Error
+		})
+	return res.RowsAffected > 0, res.Error
 }
 
-// UpdateAnalysisJobStatus moves a job to a terminal state (completed/failed/cancelled).
-func (s *Store) UpdateAnalysisJobStatus(id, status, errorMessage string) error {
+// UpdateAnalysisJobStatus moves a job to a terminal state. completed and failed are
+// only ever written over a job that is still running, so a worker finishing after a
+// cancel can never overwrite "cancelled"; cancelled itself may be written over queued or
+// running. Returns whether a row actually changed.
+func (s *Store) UpdateAnalysisJobStatus(id, status, errorMessage string) (bool, error) {
 	updates := map[string]interface{}{"status": status}
-	if status == models.RunAnalysisJobStatusCompleted ||
+	terminal := status == models.RunAnalysisJobStatusCompleted ||
 		status == models.RunAnalysisJobStatusFailed ||
-		status == models.RunAnalysisJobStatusCancelled {
+		status == models.RunAnalysisJobStatusCancelled
+	if terminal {
 		now := time.Now()
 		updates["completed_at"] = &now
 	}
 	if errorMessage != "" {
 		updates["error_message"] = errorMessage
 	}
-	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).Updates(updates).Error
+	q := s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id)
+	switch status {
+	case models.RunAnalysisJobStatusCompleted, models.RunAnalysisJobStatusFailed:
+		q = q.Where("status = ?", models.RunAnalysisJobStatusRunning)
+	case models.RunAnalysisJobStatusCancelled:
+		q = q.Where("status IN ?", []string{models.RunAnalysisJobStatusQueued, models.RunAnalysisJobStatusRunning})
+	}
+	res := q.Updates(updates)
+	return res.RowsAffected > 0, res.Error
+}
+
+// SetAnalysisJobSemanticTokens records the TypeSafe input tokens the semantic pass used.
+func (s *Store) SetAnalysisJobSemanticTokens(id string, tokens int) error {
+	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).
+		Update("semantic_input_tokens", tokens).Error
 }
 
 // UpdateAnalysisJobProgress bumps analyzed_count and sets capped_at / unique_groups / total_failures.
