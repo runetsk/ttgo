@@ -8,6 +8,7 @@ import {
     summarizeAccuracy,
     confidenceRows,
     verdictRows,
+    engineRows,
 } from './accuracyFormat.js';
 
 // ── formatPercent ────────────────────────────────────────────────────────
@@ -205,4 +206,31 @@ test('verdictRows tolerates a missing or malformed report', () => {
     for (const input of [undefined, null, {}, { by_verdict: [] }, { by_verdict: 'nope' }]) {
         assert.deepEqual(verdictRows(input), []);
     }
+});
+
+// ── engineRows: one ladder per engine ────────────────────────────────────
+
+test('engineRows builds one ladder per engine in server order with fixed rungs', () => {
+    const report = {
+        total: 5, agreed: 3,
+        by_engine: [
+            { engine: 'typesafe', total: 3, agreed: 2, rate: 0.667, by_confidence: [{ confidence: 'high', total: 3, agreed: 2, rate: 0.667 }] },
+            { engine: 'generative', total: 2, agreed: 1, rate: 0.5, by_confidence: [{ confidence: 'medium', total: 2, agreed: 1, rate: 0.5 }] },
+        ],
+    };
+    const rows = engineRows(report);
+    assert.equal(rows.length, 2);
+    assert.equal(rows[0].key, 'typesafe');
+    assert.equal(rows[0].label, 'TypeSafe');
+    assert.equal(rows[0].rateLabel, '67%');
+    assert.equal(rows[0].samples, '3 triaged results');
+    assert.deepEqual(rows[0].rows.map((r) => [r.key, r.rateLabel]), [['high', '67%'], ['medium', '—'], ['low', '—']]);
+    assert.equal(rows[1].label, 'LLM');
+    assert.deepEqual(rows[1].rows.map((r) => [r.key, r.rateLabel]), [['high', '—'], ['medium', '50%'], ['low', '—']]);
+});
+
+test('engineRows tolerates a missing or empty by_engine', () => {
+    assert.deepEqual(engineRows(null), []);
+    assert.deepEqual(engineRows({ by_engine: [] }), []);
+    assert.deepEqual(engineRows({ by_engine: [{ engine: 'typesafe', total: 0 }] }), []);
 });

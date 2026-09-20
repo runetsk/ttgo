@@ -114,3 +114,19 @@ export function verdictRows(report) {
             label: VERDICT_LABELS[b.verdict] || b.verdict,
         }));
 }
+
+const ENGINE_LABELS = { typesafe: 'TypeSafe', generative: 'LLM' };
+
+// engineRows shapes one confidence ladder per engine. Ladders are per engine because generative
+// confidence is self-reported by the LLM while TypeSafe's is calibrated on the defect-type
+// question; one mixed ladder would make both unreadable. Engines with no samples are dropped.
+export function engineRows(report) {
+    const buckets = Array.isArray(report?.by_engine) ? report.by_engine : [];
+    return buckets
+        .filter((b) => b && typeof b.engine === 'string' && toCount(b.total) > 0)
+        .map((b) => ({
+            ...shapeRow(b.engine, b),
+            label: ENGINE_LABELS[b.engine] || b.engine,
+            rows: confidenceRows({ by_confidence: b.by_confidence }),
+        }));
+}

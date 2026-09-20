@@ -5,7 +5,7 @@ import {
     resetFailureAnalysisPrompt,
     getFailureAnalysisAccuracy,
 } from '../api';
-import { summarizeAccuracy, confidenceRows, verdictRows } from './aiSettings/accuracyFormat';
+import { summarizeAccuracy, confidenceRows, verdictRows, engineRows } from './aiSettings/accuracyFormat';
 import { toast } from '../toast';
 
 // Rolling window for the accuracy panel. Matches the backend default so the
@@ -254,10 +254,11 @@ function AccuracyPanel() {
         return () => { alive = false; };
     }, []);
 
-    // All three derivations tolerate a null report, so they are safe before the fetch lands.
+    // All derivations tolerate a null report, so they are safe before the fetch lands.
     const summary = summarizeAccuracy(report);
     const rows = confidenceRows(report);
     const byVerdict = verdictRows(report);
+    const byEngine = engineRows(report);
 
     return (
         <div style={s.accuracyPanel}>
@@ -265,7 +266,7 @@ function AccuracyPanel() {
                 <div style={{ minWidth: 0 }}>
                     <div style={s.subTitle}>Suggestion accuracy</div>
                     <p style={s.fieldHint}>
-                        How often the suggested defect type matched the human triage decision, last {ACCURACY_WINDOW_DAYS} days.
+                        How often the suggested defect type matched the human triage decision, last {ACCURACY_WINDOW_DAYS} days, per engine.
                     </p>
                 </div>
                 {status === 'ready' && summary.hasData && (
@@ -283,8 +284,22 @@ function AccuracyPanel() {
                     Not enough triaged results yet — accuracy appears once failing results are triaged with a defect type.
                 </div>
             )}
+            {status === 'ready' && summary.hasData && byEngine.map((eng) => (
+                <div key={eng.key} style={s.ladder} data-testid={`accuracy-engine-${eng.key}`}>
+                    <div style={s.ladderCaption}>{eng.label} · {eng.rateLabel} · {eng.samples}</div>
+                    {eng.rows.map((row) => (
+                        <div key={row.key} style={s.ladderRow}>
+                            <span style={s.ladderLabel}>{row.label} confidence</span>
+                            <span style={{ ...s.ladderRate, color: row.hasSamples ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{row.rateLabel}</span>
+                            <span style={s.ladderSamples}>{row.hasSamples ? row.samples : 'no samples yet'}</span>
+                        </div>
+                    ))}
+                </div>
+            ))}
+
             {status === 'ready' && summary.hasData && (
                 <div style={s.ladder}>
+                    <div style={s.ladderCaption}>All engines</div>
                     {rows.map((row) => (
                         <div key={row.key} style={s.ladderRow}>
                             <span style={s.ladderLabel}>{row.label} confidence</span>
