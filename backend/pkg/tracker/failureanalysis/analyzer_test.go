@@ -3,11 +3,13 @@ package failureanalysis
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/typesafe"
 
 	"github.com/stretchr/testify/require"
 )
@@ -291,6 +293,15 @@ func TestAnalyze_NarrativeProviderErrorsKeepDecision(t *testing.T) {
 	}
 }
 
+func TestAnalyze_NarrativeProviderErrorCategoryReachesSummary(t *testing.T) {
+	prov := &stubProvider{errs: []error{&llm.ProviderError{Category: llm.ErrCatTimeout, Message: "deadline"}}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Equal(t, models.NarrativeStatusUnavailable, out.NarrativeStatus)
+	require.Equal(t, "AI narrative unavailable: timeout", out.Summary)
+}
+
 func TestAnalyze_TemplateErrorKeepsDecision(t *testing.T) {
 	in := baseContext()
 	in.PromptTemplate = "{{ .Broken"
@@ -314,18 +325,22 @@ func TestAnalyze_CancelledContextPropagates(t *testing.T) {
 
 func TestAnalyze_DeciderErrorFallsBackToGenerative(t *testing.T) {
 	prov := &stubProvider{responses: []string{`{"verdict":"product_bug","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`}}
-	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{err: &typesafeErr{}}}, baseContext())
+	deciderErr := &typesafe.Error{Category: typesafe.CategoryRateLimit, Status: 429, Message: "slow down"}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{err: deciderErr}}, baseContext())
 	require.NoError(t, err)
 	require.Equal(t, models.AnalysisEngineGenerative, out.Engine)
 	require.Equal(t, models.VerdictProductBug, out.Verdict)
 	require.Equal(t, "product_bug", out.SuggestedDefectType, "generative rows persist the legacy mapping")
 	require.Nil(t, out.ConfidenceScore)
-	require.True(t, strings.HasPrefix(out.Rationale, "[verdict engine: TypeSafe unavailable"), out.Rationale)
+	require.True(t, strings.HasPrefix(out.Rationale, "[verdict engine: TypeSafe unavailable (rate_limit); used generative] "), out.Rationale)
 }
 
-type typesafeErr struct{}
-
-func (typesafeErr) Error() string { return "typesafe: rate_limit (HTTP 429): slow down" }
+func TestErrCategory_ExtractsRealCategories(t *testing.T) {
+	require.Equal(t, "rate_limit", errCategory(&typesafe.Error{Category: typesafe.CategoryRateLimit, Status: 429}))
+	require.Equal(t, "timeout", errCategory(&llm.ProviderError{Category: llm.ErrCatTimeout, Message: "t"}))
+	require.Equal(t, "error", errCategory(errors.New("boom")))
+	require.Equal(t, "overloaded", errCategory(fmt.Errorf("wrap: %w", &typesafe.Error{Category: typesafe.CategoryOverloaded})))
+}
 
 func TestAnalyze_DecisionWithoutNarrativeProvider(t *testing.T) {
 	out, err := Analyze(context.Background(), AnalyzeDeps{Decider: fixedDecider{d: flakyDecision()}}, baseContext())
