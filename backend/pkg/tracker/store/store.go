@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -52,6 +53,42 @@ func (s *Store) decryptSecret(v string) string {
 		return dec
 	}
 	return v
+}
+
+// ErrEncryptionUnavailable is returned by the strict helpers when no encryption box is
+// loaded. The TypeSafe key must never be stored or read as plaintext.
+var ErrEncryptionUnavailable = errors.New("secret encryption is unavailable")
+
+// ErrSecretNotEncrypted: a strict-read secret was found stored as plaintext.
+var ErrSecretNotEncrypted = errors.New("stored secret is not encrypted")
+
+// encryptSecretStrict is the fail-closed counterpart of encryptSecret: an empty value
+// passes through, everything else must encrypt or the write is refused.
+func (s *Store) encryptSecretStrict(v string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	if s.box == nil {
+		return "", ErrEncryptionUnavailable
+	}
+	return s.box.Encrypt(v)
+}
+
+// decryptSecretStrict is the fail-closed counterpart of decryptSecret: a stored value
+// that does not decrypt is an error, never returned as-is.
+func (s *Store) decryptSecretStrict(v string) (string, error) {
+	if v == "" {
+		return "", nil
+	}
+	if s.box == nil {
+		return "", ErrEncryptionUnavailable
+	}
+	// Box.Decrypt deliberately passes plaintext (no sentinel) through unchanged for the
+	// legacy secrets (secretbox.go:112). Strict means a stored value must be ciphertext.
+	if !secretbox.IsEncrypted(v) {
+		return "", ErrSecretNotEncrypted
+	}
+	return s.box.Decrypt(v)
 }
 
 // gormLogger builds the GORM logger shared by every store connection. It mirrors
@@ -164,6 +201,7 @@ func (s *Store) bootstrapDB() error {
 		&models.AIGenerationEvent{},         // ai-generation-improvements: lifecycle events
 		&models.AIGenerationAttempt{},       // ai-generation stage 6: per-attempt usage
 		&models.AIBudgetSettings{},          // ai-generation stage 6: soft cost budgets
+		&models.TypeSafeSettings{},          // typesafe: vendor settings singleton
 	); err != nil {
 		return fmt.Errorf("failed to migrate schema: %w", err)
 	}
@@ -238,6 +276,10 @@ func (s *Store) bootstrapDB() error {
 	// and keep default_prompt_template column in sync so "Reset to default" works.
 	if err := s.seedFailureAnalysisSettings(); err != nil {
 		return fmt.Errorf("failed to seed AI failure analysis settings: %w", err)
+	}
+
+	if err := s.seedTypeSafeSettings(); err != nil {
+		return fmt.Errorf("failed to seed TypeSafe settings: %w", err)
 	}
 
 	// typesafe: legacy analyses/snapshots predate the engine and persisted-suggestion
@@ -320,6 +362,12 @@ func (s *Store) backfillEncryptSecrets() error {
 	}
 	for _, p := range providers {
 		if err := encryptColumn(&models.LLMProviderConfig{}, p.ID, "api_key", p.APIKey); err != nil {
+			return err
+		}
+	}
+	var ts models.TypeSafeSettings
+	if err := s.db.First(&ts, "id = ?", models.TypeSafeSettingsID).Error; err == nil {
+		if err := encryptColumn(&models.TypeSafeSettings{}, ts.ID, "api_key", ts.APIKey); err != nil {
 			return err
 		}
 	}
