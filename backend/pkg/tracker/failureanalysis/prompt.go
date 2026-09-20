@@ -10,11 +10,12 @@ import (
 
 // Budget constants — see spec §Truncation budget.
 const (
-	StackTraceHeadCap  = 4000
-	LogTextTailCap     = 2000
-	SimilarFailuresMax = 5
-	SimilarMsgCap      = 200
-	PromptCharCap      = 24000
+	StackTraceHeadCap   = 4000
+	LogTextTailCap      = 2000
+	SimilarFailuresMax  = 5
+	SimilarMsgCap       = 200
+	PromptCharCap       = 24000
+	ErrorMessageHeadCap = 4000 // new: applies to both engines (spec §6 compatibility exception)
 )
 
 // DefaultPromptTemplate is the shipped-default admin-editable template.
@@ -109,6 +110,12 @@ type PromptInput struct {
 	SimilarFailuresRollup string // one-line human-label distribution rollup
 	LinkedDefects         []LinkedDefect
 	LinkedRequirements    []LinkedRequirement
+
+	// Set only when a TypeSafe decision precedes the narrative call (spec §6). Admin templates
+	// may reference them; the code-owned system message carries the binding instruction.
+	DecidedVerdict    string
+	DecidedConfidence string
+	DecidedDefectType string
 }
 
 // PromptMeta reports what was trimmed so the caller can prefix Rationale.
@@ -120,13 +127,14 @@ type PromptMeta struct {
 // If the rendered size still exceeds PromptCharCap, we drop fields in this
 // order: log_text → similar_failures → steps → linked_defects → linked_requirements.
 func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
-	in.StackTrace = headN(in.StackTrace, StackTraceHeadCap)
-	in.LogText = tailN(in.LogText, LogTextTailCap)
+	in.StackTrace = headRunes(in.StackTrace, StackTraceHeadCap)
+	in.LogText = tailRunes(in.LogText, LogTextTailCap)
+	in.ErrorMessage = headRunes(in.ErrorMessage, ErrorMessageHeadCap)
 	if len(in.SimilarFailures) > SimilarFailuresMax {
 		in.SimilarFailures = in.SimilarFailures[:SimilarFailuresMax]
 	}
 	for i := range in.SimilarFailures {
-		in.SimilarFailures[i].ErrorMessage = oneline(headN(in.SimilarFailures[i].ErrorMessage, SimilarMsgCap))
+		in.SimilarFailures[i].ErrorMessage = oneline(headRunes(in.SimilarFailures[i].ErrorMessage, SimilarMsgCap))
 	}
 
 	tmpl := in.Template
@@ -178,20 +186,6 @@ func render(tmpl string, in PromptInput) (string, error) {
 		return "", fmt.Errorf("execute template: %w", err)
 	}
 	return buf.String(), nil
-}
-
-func headN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
-}
-
-func tailN(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[len(s)-n:]
 }
 
 func oneline(s string) string {
