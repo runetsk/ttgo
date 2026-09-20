@@ -7324,6 +7324,115 @@ const docTemplate = `{
                 }
             }
         },
+        "/settings/typesafe": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Vendor master switch, pinned model, per-feature switches and the API key's status (missing | ok | undecryptable). The key itself is never returned.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-settings"
+                ],
+                "summary": "TypeSafe settings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.TypeSafeSettingsResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-settings"
+                ],
+                "summary": "Update TypeSafe settings",
+                "parameters": [
+                    {
+                        "description": "Fields to change",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.TypeSafeSettingsPatch"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.TypeSafeSettingsResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/typesafe/test": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Calls the vendor's models endpoint with the stored key. Always 200: {ok:true, models:[...]} or {ok:false, category, message}. A missing or undecryptable key reports category \"auth\".",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-settings"
+                ],
+                "summary": "Test TypeSafe connection",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/tests": {
             "get": {
                 "description": "Returns a list of test cases, optionally filtered by folder IDs or category ID",
@@ -9844,7 +9953,14 @@ const docTemplate = `{
                 "suggested_confidence": {
                     "type": "string"
                 },
+                "suggested_confidence_score": {
+                    "type": "number"
+                },
                 "suggested_defect_type": {
+                    "type": "string"
+                },
+                "suggested_engine": {
+                    "description": "SuggestedEngine records which engine's suggestion was snapshotted; \"\" on rows decided\nbefore engines existed and on rows with no snapshot. SuggestedConfidenceScore is the\nnumeric confidence of the DEFECT-TYPE question for typesafe rows (the quantity the\naccuracy metric grades), NULL for generative rows. Both are cleared with the other\nsnapshot columns.",
                     "type": "string"
                 },
                 "suggested_verdict": {
@@ -10057,6 +10173,74 @@ const docTemplate = `{
                 },
                 "test_case_id": {
                     "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_models.TypeSafeSettingsPatch": {
+            "type": "object",
+            "properties": {
+                "allow_auto_failure_analysis": {
+                    "type": "boolean"
+                },
+                "api_key": {
+                    "type": "string"
+                },
+                "clear_api_key": {
+                    "type": "boolean"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "semantic_dedup_enabled": {
+                    "type": "boolean"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                },
+                "verdict_engine_enabled": {
+                    "type": "boolean"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_models.TypeSafeSettingsResponse": {
+            "type": "object",
+            "properties": {
+                "allow_auto_failure_analysis": {
+                    "type": "boolean"
+                },
+                "api_key_masked": {
+                    "type": "string"
+                },
+                "api_key_status": {
+                    "description": "missing | ok | undecryptable",
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "enabled": {
+                    "type": "boolean"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model": {
+                    "type": "string"
+                },
+                "semantic_dedup_enabled": {
+                    "type": "boolean"
+                },
+                "timeout_seconds": {
+                    "type": "integer"
+                },
+                "updated_at": {
+                    "type": "string"
+                },
+                "verdict_engine_enabled": {
+                    "type": "boolean"
                 }
             }
         },

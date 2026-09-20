@@ -9,6 +9,7 @@ import (
 	"ttgo/pkg/tracker/failureanalysis/worker"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
+	"ttgo/pkg/tracker/typesafe"
 
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -24,10 +25,26 @@ type Handler struct {
 	// inflight tracks in-process generation runs so they can be cancelled
 	// from another session (POST /ai-generations/{id}/cancel).
 	inflight *inflightRegistry
+
+	// newTypeSafeClient constructs the TypeSafe.ai client used by TestTypeSafeConnection;
+	// overridable in tests via SetTypeSafeClientFactory.
+	newTypeSafeClient func(apiKey string, timeout time.Duration) typesafe.Client
 }
 
 func NewHandler(s *store.Store, sanitizer *bluemonday.Policy) *Handler {
-	return &Handler{store: s, sanitizer: sanitizer, inflight: newInflightRegistry()}
+	return &Handler{
+		store:     s,
+		sanitizer: sanitizer,
+		inflight:  newInflightRegistry(),
+		newTypeSafeClient: func(k string, to time.Duration) typesafe.Client {
+			return typesafe.NewHTTPClient(k, typesafe.Options{Timeout: to})
+		},
+	}
+}
+
+// SetTypeSafeClientFactory replaces the client constructor (tests only).
+func (h *Handler) SetTypeSafeClientFactory(f func(apiKey string, timeout time.Duration) typesafe.Client) {
+	h.newTypeSafeClient = f
 }
 
 // SetFailureAnalysisDeps wires in the per-job dependency resolver and broadcaster.
