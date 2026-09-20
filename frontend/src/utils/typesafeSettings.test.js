@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formFromSettings, buildTypeSafePatch, keyStatusLabel } from './typesafeSettings.js';
+import { formFromSettings, buildTypeSafePatch, keyStatusLabel, canTestConnection } from './typesafeSettings.js';
 
 const settings = {
     enabled: false, api_key_masked: '', api_key_status: 'missing', model: 'jev-1.13.0', timeout_seconds: 30,
@@ -35,4 +35,25 @@ test('keyStatusLabel explains each status', () => {
     assert.equal(keyStatusLabel(settings), 'No API key stored');
     assert.equal(keyStatusLabel({ ...settings, api_key_status: 'ok', api_key_masked: '…4321' }), 'Key stored (…4321)');
     assert.equal(keyStatusLabel({ ...settings, api_key_status: 'undecryptable' }), 'Stored key cannot be decrypted — enter it again');
+});
+
+test('canTestConnection allows testing the stored key when the input is untouched', () => {
+    const stored = { ...settings, api_key_status: 'ok', api_key_masked: '…4321' };
+    assert.equal(canTestConnection(formFromSettings(stored), stored), true);
+});
+
+test('canTestConnection is false with no stored key', () => {
+    assert.equal(canTestConnection(formFromSettings(settings), settings), false);
+});
+
+test('canTestConnection is false while a new unsaved key is typed', () => {
+    const stored = { ...settings, api_key_status: 'ok', api_key_masked: '…4321' };
+    const form = { ...formFromSettings(stored), api_key: 'ts-new' };
+    assert.equal(canTestConnection(form, stored), false);
+});
+
+test('canTestConnection is false while clear_api_key is pending', () => {
+    const stored = { ...settings, api_key_status: 'ok', api_key_masked: '…4321' };
+    const form = { ...formFromSettings(stored), clear_api_key: true };
+    assert.equal(canTestConnection(form, stored), false);
 });

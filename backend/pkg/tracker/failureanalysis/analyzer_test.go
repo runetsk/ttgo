@@ -353,6 +353,46 @@ func TestAnalyze_DecisionWithoutNarrativeProvider(t *testing.T) {
 	require.Error(t, err, "generative path with no provider is still an error")
 }
 
+// TestAnalyze_EmptyNarrativeTriggersRepair covers F1: a reply that unmarshals cleanly but
+// carries no narrative content ({}, {"error":"quota"}, or a customized template's
+// verdict/confidence-only body) must not be accepted as a valid narrative — it has to fire
+// the same repair retry as invalid JSON.
+func TestAnalyze_EmptyNarrativeTriggersRepair(t *testing.T) {
+	prov := &stubProvider{responses: []string{
+		`{}`,
+		`{"summary":"S","next_action":"N","rationale":"R"}`,
+	}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, 2, prov.calls, "the empty first reply must trigger the repair call")
+	require.Equal(t, models.NarrativeStatusOK, out.NarrativeStatus)
+	require.Equal(t, "S", out.Summary)
+	require.Equal(t, "N", out.NextAction)
+	require.Equal(t, "R", out.Rationale)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict, "decision is preserved")
+}
+
+func TestAnalyze_BothRepliesEmptyIsUnparseable(t *testing.T) {
+	prov := &stubProvider{responses: []string{`{}`, `{}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, 2, prov.calls)
+	require.Equal(t, models.NarrativeStatusUnparseable, out.NarrativeStatus)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict, "decision is preserved")
+}
+
+func TestAnalyze_VerdictOnlyReplyIsUnparseableOnBothTries(t *testing.T) {
+	prov := &stubProvider{responses: []string{
+		`{"verdict":"x","confidence":"high"}`,
+		`{"verdict":"x","confidence":"high"}`,
+	}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, 2, prov.calls)
+	require.Equal(t, models.NarrativeStatusUnparseable, out.NarrativeStatus)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict, "decision is preserved")
+}
+
 func TestAnalyze_GenerativePathPersistsLegacySuggestion(t *testing.T) {
 	prov := &stubProvider{responses: []string{`{"verdict":"environment","confidence":"medium","summary":"s","next_action":"n","rationale":"r"}`}}
 	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov}, baseContext())

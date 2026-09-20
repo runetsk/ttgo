@@ -171,6 +171,13 @@ func TestEvaluate_RejectsInvalidAnswers(t *testing.T) {
 		var te *Error
 		require.ErrorAs(t, err, &te, name)
 		require.Equal(t, CategoryParse, te.Category, name)
+		if name == "wrong type" {
+			// F7: the mismatch message must name the actual and expected types, not a
+			// formatted pointer address (a.Type is *string).
+			require.Contains(t, te.Message, "noul", name)
+			require.Contains(t, te.Message, "choice", name)
+			require.NotContains(t, te.Message, "0x", name)
+		}
 	}
 }
 

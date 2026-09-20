@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { getTypeSafeSettings, updateTypeSafeSettings, testTypeSafeConnection } from '../../api';
 import { toast } from '../../toast';
 import { s, m } from './styles';
-import { formFromSettings, buildTypeSafePatch, keyStatusLabel, TIMEOUT_MIN, TIMEOUT_MAX } from '../../utils/typesafeSettings';
+import { formFromSettings, buildTypeSafePatch, keyStatusLabel, canTestConnection, TIMEOUT_MIN, TIMEOUT_MAX } from '../../utils/typesafeSettings';
 
 /* ── TypeSafe.ai Section: one hosted decision API used by failure analysis ── */
 export default function TypeSafeSettingsCard({ isAdmin }) {
@@ -61,6 +61,8 @@ export default function TypeSafeSettingsCard({ isAdmin }) {
 
     const timeoutValid = Number.isInteger(form.timeout_seconds) && form.timeout_seconds >= TIMEOUT_MIN && form.timeout_seconds <= TIMEOUT_MAX;
     const modelValid = typeof form.model === 'string' && form.model.trim() !== '';
+    const testAllowed = canTestConnection(form, settings);
+    const unsavedKeyChange = !!form.clear_api_key || (typeof form.api_key === 'string' && form.api_key.trim() !== '');
 
     return (
         <section style={s.section} data-testid="typesafe-settings">
@@ -126,9 +128,14 @@ export default function TypeSafeSettingsCard({ isAdmin }) {
                     <button className="primary-btn" onClick={save} disabled={saving || !patch || !timeoutValid || !modelValid} data-testid="typesafe-save">
                         {saving ? 'Saving…' : 'Save'}
                     </button>
-                    <button onClick={runTest} disabled={testing || settings.api_key_status === 'missing'} data-testid="typesafe-test">
+                    <button onClick={runTest} disabled={testing || !testAllowed} data-testid="typesafe-test">
                         {testing ? 'Testing…' : 'Test connection'}
                     </button>
+                    {unsavedKeyChange && (
+                        <span style={{ color: 'var(--text-secondary)', fontSize: 12 }} data-testid="typesafe-test-hint">
+                            Save the new key first
+                        </span>
+                    )}
                     {testResult && (
                         <span style={s.testResult} data-testid="typesafe-test-result">
                             {testResult.ok

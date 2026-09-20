@@ -146,10 +146,7 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 		out.TokenUsageCompletion += tokens(resp2, false)
 		parsed, perr = parseNarrative(resp2.Content)
 		if perr != nil {
-			raw := resp2.Content
-			if len(raw) > 1400 {
-				raw = raw[:1400]
-			}
+			raw := headRunes(resp2.Content, 1400)
 			out.NarrativeStatus = models.NarrativeStatusUnparseable
 			out.Summary = "AI narrative unavailable: unparseable response"
 			out.Rationale = meta.TruncationPrefix + raw
@@ -223,10 +220,7 @@ func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext,
 		totalCompletion += tokens(resp2, false)
 		parsed, parseErr = parseVerdict(resp2.Content)
 		if parseErr != nil {
-			raw := resp2.Content
-			if len(raw) > 1400 {
-				raw = raw[:1400]
-			}
+			raw := headRunes(resp2.Content, 1400)
 			return &AnalyzeResult{
 				Engine: models.AnalysisEngineGenerative, NarrativeStatus: models.NarrativeStatusOK,
 				Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow,
@@ -346,11 +340,9 @@ func tokens(r *llm.ChatResponse, prompt bool) int {
 	return r.Usage.CompletionTokens
 }
 
+// clamp caps s at n runes, never cutting inside a multi-byte sequence.
 func clamp(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
+	return headRunes(s, n)
 }
 
 func firstNonEmpty(vals ...string) string {

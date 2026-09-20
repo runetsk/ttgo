@@ -55,20 +55,6 @@ func (w *Worker) Run(ctx context.Context) {
 // ProcessOnceForTest is an exported alias of processOnce for tests in other packages.
 func (w *Worker) ProcessOnceForTest(ctx context.Context) error { return w.processOnce(ctx) }
 
-// AnalysisRowFrom maps an analyzer result onto a persistable row (representative, not clone).
-func AnalysisRowFrom(res *failureanalysis.AnalyzeResult, resultID string) *models.RunResultAnalysis {
-	return &models.RunResultAnalysis{
-		RunResultID: resultID, Verdict: res.Verdict, Confidence: res.Confidence,
-		Summary: res.Summary, NextAction: res.NextAction, Rationale: res.Rationale,
-		RawResponse: res.RawResponse, ModelName: res.ModelName,
-		TokenUsagePrompt: res.TokenUsagePrompt, TokenUsageCompletion: res.TokenUsageCompletion,
-		Engine: res.Engine, ConfidenceScore: res.ConfidenceScore, VerdictProbabilities: res.VerdictProbabilities,
-		SuggestedDefectType: res.SuggestedDefectType, SuggestedDefectTypeConfidence: res.SuggestedDefectTypeConfidence,
-		DefectTypeProbabilities: res.DefectTypeProbabilities, NarrativeStatus: res.NarrativeStatus,
-		PolicyVersion: res.PolicyVersion, TypeSafeInputTokens: res.TypeSafeInputTokens,
-	}
-}
-
 func (w *Worker) failJob(id, msg string) {
 	if _, err := w.store.UpdateAnalysisJobStatus(id, models.RunAnalysisJobStatusFailed, msg); err != nil {
 		slog.Error("failure-analysis: could not mark job failed", "job_id", id, "error", err)
@@ -181,7 +167,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 			}
 		}
 
-		repRow, err := w.store.CreateAnalysis(AnalysisRowFrom(res, rep.ID))
+		repRow, err := w.store.CreateAnalysis(failureanalysis.AnalysisRowFrom(res, rep.ID))
 		if err != nil {
 			slog.Warn("failure-analysis: persist representative failed", "err", err)
 			continue
@@ -195,7 +181,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 				continue
 			}
 			groupKey, sourceID := g.Key, repRow.ID
-			clone := AnalysisRowFrom(res, sib.ID)
+			clone := failureanalysis.AnalysisRowFrom(res, sib.ID)
 			clone.RawResponse = ""
 			clone.TypeSafeInputTokens = 0
 			clone.TokenUsagePrompt, clone.TokenUsageCompletion = 0, 0

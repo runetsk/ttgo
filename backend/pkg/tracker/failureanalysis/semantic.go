@@ -224,7 +224,7 @@ func sizeOf(v any) int {
 // chunkPairs packs pairs greedily under MaxQuestionsPerRequest and ChunkCharBudget. A pair that
 // cannot fit alone is skipped.
 func chunkPairs(pairs []semPair, redact bool) ([]semChunk, int) {
-	questionSize := sizeOf(sameCauseQuestion(99, 99)) + 16
+	questionSize := sizeOf(sameCauseQuestion(999, 999)) + 16
 	excerptSize := map[string]int{}
 	exSize := func(g *FailureGroup) int {
 		if s, ok := excerptSize[g.Key]; ok {

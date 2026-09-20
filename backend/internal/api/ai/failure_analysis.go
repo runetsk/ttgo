@@ -205,8 +205,16 @@ func (h *Handler) CancelRunAnalysisJob(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, fmt.Errorf("no active analysis job for this run"))
 		return
 	}
-	if _, err := h.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, ""); err != nil {
+	changed, err := h.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, "")
+	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !changed {
+		// The job reached a terminal state (completed/failed) between our read above and the
+		// conditional update — UpdateAnalysisJobStatus only ever writes "cancelled" over a
+		// still-active job, so a false here means there is nothing left to cancel.
+		httpx.Error(w, http.StatusConflict, fmt.Errorf("analysis job is no longer active"))
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

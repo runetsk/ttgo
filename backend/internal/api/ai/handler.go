@@ -6,7 +6,6 @@ import (
 	"time"
 	"ttgo/internal/api/websocket"
 	"ttgo/pkg/tracker/failureanalysis"
-	"ttgo/pkg/tracker/failureanalysis/worker"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
 	"ttgo/pkg/tracker/typesafe"
@@ -77,7 +76,7 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	if err != nil {
 		return nil, err
 	}
-	row := worker.AnalysisRowFrom(res, result.ID)
+	row := failureanalysis.AnalysisRowFrom(res, result.ID)
 	row.CreatedBy = ptrOrNil(userID)
 	row, err = h.store.CreateAnalysis(row)
 	if err != nil {

@@ -72,5 +72,12 @@ func parseNarrative(raw string) (*narrativeJSON, error) {
 	if err := json.Unmarshal([]byte(raw), &n); err != nil {
 		return nil, err
 	}
+	// A reply with no narrative content at all — {}, {"error":"quota"}, or a customized
+	// template's {"verdict":...,"confidence":...} with no summary/next_action/rationale — is
+	// not a usable narrative. An empty summary alone is tolerated when another field has
+	// content (e.g. summary omitted but rationale present).
+	if strings.TrimSpace(n.Summary) == "" && strings.TrimSpace(n.NextAction) == "" && strings.TrimSpace(n.Rationale) == "" {
+		return nil, fmt.Errorf("narrative response has no summary, next_action or rationale")
+	}
 	return &n, nil
 }

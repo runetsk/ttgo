@@ -324,7 +324,11 @@ func validate(raw []byte, req Request) (*Response, error) {
 			return bad("answer %q missing", id)
 		}
 		if a.Type == nil || *a.Type != q.Type {
-			return bad("answer %q has type %v, want %q", id, a.Type, q.Type)
+			gotType := "<missing>"
+			if a.Type != nil {
+				gotType = *a.Type
+			}
+			return bad("answer %q has type %q, want %q", id, gotType, q.Type)
 		}
 		ans := Answer{Type: q.Type, Legend: a.Legend}
 		switch q.Type {

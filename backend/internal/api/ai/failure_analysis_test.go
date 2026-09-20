@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 
 	"github.com/microcosm-cc/bluemonday"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 // ── Settings endpoints ───────────────────────────────────────────────────
@@ -209,6 +211,53 @@ func TestCancelRunAnalysisJob_404WhenNone(t *testing.T) {
 	if rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d: %s", rr.Code, rr.Body.String())
 	}
+}
+
+// TestCancelRunAnalysisJob_FinishedJobIs409 covers F6. The handler reads the job (sees it
+// "running"), then separately writes "cancelled" — CancelRunAnalysisJob's own two-step
+// read-then-write has the same race the worker's claim/complete steps already guard against.
+// If a worker finishes the SAME job in the gap between those two store calls, the conditional
+// UPDATE targeting status IN (queued, running) matches nothing, and that must surface as 409,
+// not the 204 the handler used to send by ignoring UpdateAnalysisJobStatus's "changed" result.
+// A GORM "before update" hook fires exactly once, right before the handler's own UPDATE
+// executes, and completes the job first — reproducing the race deterministically instead of
+// relying on goroutine timing.
+func TestCancelRunAnalysisJob_FinishedJobIs409(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	run := createTestRun(t, env, "Run")
+	job, created, err := env.store.MaybeEnqueueForRun(run, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	require.True(t, created)
+	claimed, err := env.store.MarkAnalysisJobRunning(job.ID)
+	require.NoError(t, err)
+	require.True(t, claimed)
+
+	sqlDB, err := env.store.DB().DB()
+	require.NoError(t, err)
+	var once sync.Once
+	err = env.store.DB().Callback().Update().Before("gorm:update").
+		Register("test:race-finish-before-cancel", func(tx *gorm.DB) {
+			if _, ok := tx.Statement.Model.(*models.RunAnalysisJob); !ok {
+				return
+			}
+			once.Do(func() {
+				_, execErr := sqlDB.Exec("UPDATE run_analysis_jobs SET status = ? WHERE id = ?",
+					models.RunAnalysisJobStatusCompleted, job.ID)
+				require.NoError(t, execErr)
+			})
+		})
+	require.NoError(t, err)
+
+	rr := doRequest(env, "POST", "/api/runs/"+run+"/analysis-job/cancel", nil)
+	require.Equal(t, http.StatusConflict, rr.Code, rr.Body.String())
+	require.Contains(t, rr.Body.String(), "analysis job is no longer active")
+
+	got, err := env.store.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RunAnalysisJobStatusCompleted, got.Status,
+		"the completion that won the race must not be overwritten by the losing cancel")
 }
 
 // ── Valid-run happy paths ────────────────────────────────────────────────

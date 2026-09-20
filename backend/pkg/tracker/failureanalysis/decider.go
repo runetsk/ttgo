@@ -3,6 +3,7 @@ package failureanalysis
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/typesafe"
 )
@@ -36,7 +37,10 @@ func NewTypeSafeDecider(c typesafe.Client, model string) Decider {
 }
 
 func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, error) {
-	state, _ := RenderState(ev)
+	state, meta := RenderState(ev)
+	if meta.TruncationPrefix != "" {
+		slog.Debug("failure-analysis: TypeSafe state trimmed", "prefix", meta.TruncationPrefix)
+	}
 	resp, err := d.client.Evaluate(ctx, typesafe.Request{
 		State: state, Model: d.model,
 		Questions: map[string]typesafe.Question{"verdict": verdictQuestion(), "defect_type": defectTypeQuestion()},

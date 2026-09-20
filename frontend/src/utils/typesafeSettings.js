@@ -29,6 +29,18 @@ export function buildTypeSafePatch(form, original) {
     return Object.keys(patch).length === 0 ? null : patch;
 }
 
+// canTestConnection reports whether the "Test connection" action should be enabled. It only
+// ever exercises the STORED key, so it must be blocked whenever the form holds an unsaved
+// change to that key — a typed-but-unsaved value, or a pending clear — otherwise the button
+// would silently test the old key while the screen implies it's testing what was just typed.
+// It is also blocked when there is no stored key to test at all.
+export function canTestConnection(form, settings) {
+    if (settings?.api_key_status === 'missing') return false;
+    if (form?.clear_api_key) return false;
+    if (typeof form?.api_key === 'string' && form.api_key.trim() !== '') return false;
+    return true;
+}
+
 export function keyStatusLabel(settings) {
     switch (settings?.api_key_status) {
         case 'ok': return `Key stored (${settings.api_key_masked})`;

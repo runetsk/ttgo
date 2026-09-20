@@ -178,6 +178,7 @@ func RenderState(ev Evidence) (map[string]any, PromptMeta) {
 			slog.Debug("failure-analysis: state hard-capped", "bytes", len(b))
 			return state, PromptMeta{TruncationPrefix: makePrefix(append(dropped, "hard cap"))}
 		}
+		slog.Debug("failure-analysis: TypeSafe state field dropped", "field", name, "bytes", len(b))
 		dropped = append(dropped, name)
 	}
 }
