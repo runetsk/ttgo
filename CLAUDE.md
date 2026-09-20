@@ -17,11 +17,12 @@ backend/          Go backend (module: ttgo)
     ratelimit/    Per-IP / per-token rate limiting
     safehttp/     SSRF-guarded outbound HTTP clients
   pkg/tracker/
-    failureanalysis/  AI failure-analysis grouping + worker
+    failureanalysis/  AI failure-analysis grouping + worker; typesafe_questions.go is the ONLY home of TypeSafe questions/thresholds
     llm/              LLM provider clients
     models/           Domain models
     secretbox/        At-rest secret encryption (AES-256-GCM)
     store/            GORM persistence layer
+    typesafe/         TypeSafe.ai System One client (typed questions, calibrated answers)
   docs/           Swagger-generated docs
 
 frontend/         React frontend (Vite)

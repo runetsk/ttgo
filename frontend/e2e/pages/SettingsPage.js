@@ -65,4 +65,16 @@ export class SettingsPage extends BasePage {
     async saveConfiguration() {
         await this.page.getByRole('button', { name: 'Save Configuration' }).click();
     }
+
+    // ── TypeSafe.ai card (AI Generation tab) ────────────────────────────────
+    async openTypeSafeCard() {
+        await this.openTab('AI Generation');
+        await this.page.getByTestId('typesafe-settings').scrollIntoViewIfNeeded();
+    }
+
+    get typesafeKeyInput() { return this.page.getByTestId('typesafe-api-key'); }
+    get typesafeKeyStatus() { return this.page.getByTestId('typesafe-key-status'); }
+    get typesafeSaveButton() { return this.page.getByTestId('typesafe-save'); }
+    get typesafeClearKeyCheckbox() { return this.page.getByTestId('typesafe-clear-key'); }
+    get typesafeModelInput() { return this.page.getByTestId('typesafe-model'); }
 }

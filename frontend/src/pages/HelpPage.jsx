@@ -535,7 +535,7 @@ function AIFailureAnalysisSection() {
             <SectionHeader>Starting an analysis</SectionHeader>
             <Card>
                 <DL items={[
-                    ['Automatically when a run finishes', 'Turn on "Auto-analyze on run completion" under Settings → AI Failure Analysis, and tick "Auto failure analysis" on the provider itself (Add/Edit Provider dialog). The provider checkbox is off by default — until you opt the provider in, nothing is sent on its own.'],
+                    ['Automatically when a run finishes', 'Turn on "Auto-analyze on run completion" under Settings → AI Failure Analysis, and tick "Auto failure analysis" on the provider itself (Add/Edit Provider dialog). The provider checkbox is off by default — until you opt the provider in, nothing is sent on its own. If TypeSafe.ai is enabled, automatic analyses only contact it when "Allow on automatic analysis" is on in the TypeSafe.ai card; manual analyses use it whenever it is enabled.'],
                     ['On demand for a whole run', 'Open a run and click "Analyze failures". A banner shows progress across the failure groups, and you can cancel part-way through.'],
                     ['On demand for one result', 'Open a failing result and analyze just that one — useful when you only care about a single failure, or want to re-analyze after the error changed.'],
                 ]} />
@@ -562,9 +562,10 @@ function AIFailureAnalysisSection() {
                     ['Test data', 'Bad, missing or stale fixture data caused the failure.'],
                     ['Environment', 'Something about the environment or its configuration.'],
                     ['Infrastructure', 'CI, the runner, or the network.'],
-                    ['Unknown', 'The model could not tell — no defect type is suggested.'],
+                    ['Unknown', 'The model could not tell. With TypeSafe.ai a defect type may still be suggested when the evidence points at a source without matching a verdict.'],
                 ]} />
                 <P>Every verdict also carries a confidence of low, medium or high, along with a short summary, a suggested next action, and the reasoning behind it.</P>
+                <P>With TypeSafe.ai enabled, the verdict and the suggested defect type come from a calibrated decision model and the confidence is a real probability-based score; your LLM writes only the explanation.</P>
             </Card>
 
             <SectionHeader>Accepting or overriding the suggestion</SectionHeader>
@@ -585,7 +586,7 @@ function AIFailureAnalysisSection() {
 
             <SectionHeader>How accurate is it?</SectionHeader>
             <Card>
-                <P>Settings &gt; AI Failure Analysis reports how often the AI&apos;s suggestion matched the decision you actually made — overall, per verdict, and split by confidence.</P>
+                <P>Settings &gt; AI Failure Analysis reports how often the AI&apos;s suggestion matched the decision you actually made — overall, per verdict, split by confidence, and per engine (TypeSafe.ai and your LLM are graded separately, because their confidence scores mean different things).</P>
                 <P>The confidence split is the one to read. If agreement drops as confidence drops (say 90%, then 69%, then 43%), the confidence score is meaningful and you can act on it. If it is flat across all three, confidence is not telling you anything useful yet.</P>
                 <Tip>Expect it to be empty at first. Only results you have genuinely triaged are counted — anything still sitting at &quot;To investigate&quot; is treated as not yet triaged, never as a disagreement.</Tip>
             </Card>
@@ -597,6 +598,7 @@ function AIFailureAnalysisSection() {
                     'Secrets are stripped first — API keys, bearer tokens, JWTs, private keys, passwords and email addresses are replaced before anything is sent.',
                     'Automatic analysis needs the provider opted in explicitly ("Auto failure analysis" in the provider dialog), on top of the global setting.',
                     'You control the cap on analyses per run, whether identical failures are grouped, whether redaction runs, and the prompt itself — which you can edit and reset to default.',
+                    'When TypeSafe.ai is enabled, the same redacted failure text is also sent to TypeSafe.ai; automatic analyses need the separate "Allow on automatic analysis" consent in its card.',
                 ]} />
             </Card>
         </div>
