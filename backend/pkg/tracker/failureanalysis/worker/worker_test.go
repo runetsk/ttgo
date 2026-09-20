@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
+	"ttgo/pkg/tracker/typesafe"
 
 	"github.com/stretchr/testify/require"
 )
@@ -107,7 +109,7 @@ func TestWorkerSendsEnrichmentToProvider(t *testing.T) {
 	require.NoError(t, err)
 
 	prov := &capturingProvider{}
-	w := NewWorker(s, prov, nil, 10*time.Millisecond)
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
 	require.NoError(t, w.processOnce(context.Background()))
 
 	got, err := s.GetAnalysisJob(job.ID)
@@ -148,7 +150,7 @@ func TestWorkerHappyPathWithCap(t *testing.T) {
 	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
 	require.NoError(t, err)
 
-	w := NewWorker(s, &verdictProvider{verdict: "product_bug"}, nil, 10*time.Millisecond)
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: &verdictProvider{verdict: "product_bug"}, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	require.NoError(t, w.processOnce(ctx))
@@ -198,10 +200,211 @@ func TestWorkerCancellationStopsAfterCurrentGroup(t *testing.T) {
 	_, err = s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, "")
 	require.NoError(t, err)
 
-	w := NewWorker(s, &verdictProvider{verdict: "flaky_test"}, nil, 10*time.Millisecond)
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: &verdictProvider{verdict: "flaky_test"}, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
 	require.NoError(t, w.processOnce(context.Background()))
 
 	got, err := s.GetAnalysisJob(job.ID)
 	require.NoError(t, err)
 	require.Equal(t, models.RunAnalysisJobStatusCancelled, got.Status)
+}
+
+// staticResolver returns the same deps for every trigger.
+func staticResolver(deps failureanalysis.JobDeps) failureanalysis.DepsResolver {
+	return func(string) (failureanalysis.JobDeps, error) { return deps, nil }
+}
+
+type fakeTS struct {
+	fn    func(req typesafe.Request) (*typesafe.Response, error)
+	calls int
+}
+
+func (f *fakeTS) Evaluate(_ context.Context, req typesafe.Request) (*typesafe.Response, error) {
+	f.calls++
+	return f.fn(req)
+}
+func (f *fakeTS) ListModels(context.Context) ([]typesafe.Model, error) { return nil, nil }
+
+// tsVerdict answers the verdict/defect_type request; pair questions get p(same).
+func tsVerdict(verdict, defect string, pSame float64) func(req typesafe.Request) (*typesafe.Response, error) {
+	return func(req typesafe.Request) (*typesafe.Response, error) {
+		resp := &typesafe.Response{Model: "jev-1.13.0", Answers: map[string]typesafe.Answer{}, Usage: typesafe.Usage{InputTokens: 500}}
+		if _, ok := req.Questions["verdict"]; ok {
+			vp := map[string]float64{"product_bug": 0.02, "flaky_test": 0.02, "environment": 0.02, "test_data": 0.02, "infrastructure": 0.02, "unknown": 0.02}
+			vp[verdict] = 0.9
+			dp := map[string]float64{"product_bug": 0.03, "automation_bug": 0.03, "system_issue": 0.03, "insufficient_evidence": 0.03}
+			dp[defect] = 0.91
+			resp.Answers["verdict"] = typesafe.Answer{Type: "choice", Choice: verdict, Confidence: 0.92, Probabilities: vp}
+			resp.Answers["defect_type"] = typesafe.Answer{Type: "choice", Choice: defect, Confidence: 0.87, Probabilities: dp}
+			return resp, nil
+		}
+		for id := range req.Questions {
+			resp.Answers[id] = typesafe.Answer{Type: "noul", Noul: pSame}
+		}
+		return resp, nil
+	}
+}
+
+// seedRunWithFailures creates a run with the given (failure_type, message) rows, one test case each.
+func seedRunWithFailures(t *testing.T, s *store.Store, rows [][2]string) *models.TestRun {
+	t.Helper()
+	folder, err := s.CreateFolder("Suite", nil)
+	require.NoError(t, err)
+	run := &models.TestRun{Name: "nightly"}
+	require.NoError(t, s.CreateTestRun(run))
+	for i, r := range rows {
+		tc := &models.TestCase{FolderID: folder.ID, Name: "case " + string(rune('A'+i))}
+		require.NoError(t, s.CreateTestCase(tc))
+		id := tc.ID
+		require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &id, TestNameSnapshot: tc.Name,
+			AttemptNumber: 1, Status: models.StatusFail, FailureType: r[0], ErrorMessage: r[1], StartTime: time.Now().Add(time.Duration(i) * time.Minute)}))
+	}
+	return run
+}
+
+func TestWorker_TypeSafeDecidesAndClonesCarryProvenance(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"},
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"}, // same signature → signature clone
+		{"timeout", "Timeout waiting for #checkout button after 7000ms"}, // different signature → semantic candidate
+	})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	ts := &fakeTS{fn: tsVerdict("flaky_test", "automation_bug", 0.95)}
+	deps := failureanalysis.JobDeps{
+		Narrative: &verdictProvider{verdict: "product_bug"}, NarrativeModel: "mock",
+		Decider:  failureanalysis.NewTypeSafeDecider(ts, "jev-1.13.0"),
+		Semantic: &failureanalysis.SemanticDeps{Client: ts, Model: "jev-1.13.0", Redact: true},
+	}
+	w := NewWorker(s, staticResolver(deps), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+
+	got, err := s.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RunAnalysisJobStatusCompleted, got.Status)
+	require.Equal(t, 1, got.UniqueGroups, "semantic merge collapsed both groups")
+	require.Equal(t, 500, got.SemanticInputTokens)
+
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Len(t, analyses, 3)
+	var rep, sigClone, semClone *models.RunResultAnalysis
+	for _, a := range analyses {
+		switch {
+		case a.DedupGroupKey == nil:
+			rep = a
+		case a.DedupMethod == models.DedupMethodSignature:
+			sigClone = a
+		case a.DedupMethod == models.DedupMethodSemantic:
+			semClone = a
+		}
+	}
+	require.NotNil(t, rep)
+	require.Equal(t, models.AnalysisEngineTypeSafe, rep.Engine)
+	require.Equal(t, models.VerdictFlakyTest, rep.Verdict, "TypeSafe's verdict wins over the LLM's product_bug")
+	require.Equal(t, "automation_bug", rep.SuggestedDefectType)
+	require.InDelta(t, 0.92, *rep.ConfidenceScore, 1e-9)
+	require.Equal(t, failureanalysis.PolicyVersion, rep.PolicyVersion)
+	require.Equal(t, 500, rep.TypeSafeInputTokens)
+	require.Equal(t, models.NarrativeStatusOK, rep.NarrativeStatus)
+
+	require.NotNil(t, sigClone)
+	require.Equal(t, "automation_bug", sigClone.SuggestedDefectType)
+	require.Equal(t, 0, sigClone.TypeSafeInputTokens)
+	require.Nil(t, sigClone.DedupPSame)
+	require.Contains(t, sigClone.Rationale, "[Grouped from representative analysis]")
+
+	require.NotNil(t, semClone)
+	require.InDelta(t, 0.95, *semClone.DedupPSame, 1e-9)
+	require.Equal(t, "jev-1.13.0", semClone.DedupModel)
+	require.Equal(t, failureanalysis.SemanticPolicyVersion, semClone.DedupPolicyVersion)
+	require.Contains(t, semClone.Rationale, "[Grouped semantically with representative analysis]")
+	require.Equal(t, models.VerdictFlakyTest, semClone.Verdict)
+}
+
+func TestWorker_SemanticOnlyModeStampsProvenance(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"},
+		{"timeout", "Timeout waiting for #checkout button after 7000ms"},
+	})
+	_, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	ts := &fakeTS{fn: tsVerdict("flaky_test", "automation_bug", 0.95)}
+	deps := failureanalysis.JobDeps{Narrative: &verdictProvider{verdict: "environment"}, NarrativeModel: "mock",
+		Semantic: &failureanalysis.SemanticDeps{Client: ts, Model: "jev-1.13.0"}} // no Decider
+	w := NewWorker(s, staticResolver(deps), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+	analyses, _ := s.GetCurrentAnalysesByRun(run.ID)
+	for _, a := range analyses {
+		require.Equal(t, models.AnalysisEngineGenerative, a.Engine)
+		require.Equal(t, "system_issue", a.SuggestedDefectType, "generative rows persist the legacy mapping")
+		if a.DedupGroupKey != nil {
+			require.Equal(t, models.DedupMethodSemantic, a.DedupMethod)
+			require.Equal(t, "jev-1.13.0", a.DedupModel)
+		}
+	}
+}
+
+func TestWorker_TypeSafeOutageFallsBackToGenerative(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"},
+		{"timeout", "Timeout waiting for #checkout button after 7000ms"},
+	})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	ts := &fakeTS{fn: func(typesafe.Request) (*typesafe.Response, error) {
+		return nil, &typesafe.Error{Status: 529, Category: typesafe.CategoryOverloaded}
+	}}
+	deps := failureanalysis.JobDeps{Narrative: &verdictProvider{verdict: "product_bug"}, NarrativeModel: "mock",
+		Decider: failureanalysis.NewTypeSafeDecider(ts, "m"), Semantic: &failureanalysis.SemanticDeps{Client: ts, Model: "m"}}
+	w := NewWorker(s, staticResolver(deps), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCompleted, got.Status)
+	require.Equal(t, 2, got.UniqueGroups, "semantic pass failed → signature groups kept")
+	analyses, _ := s.GetCurrentAnalysesByRun(run.ID)
+	for _, a := range analyses {
+		require.Equal(t, models.AnalysisEngineGenerative, a.Engine)
+		require.Contains(t, a.Rationale, "[verdict engine: TypeSafe unavailable (overloaded)")
+	}
+}
+
+func TestWorker_NoNarrativeProviderFailsJob(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"timeout", "x"}})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{}), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusFailed, got.Status)
+	require.Contains(t, got.ErrorMessage, "no LLM provider configured")
+}
+
+func TestWorker_CancelDuringLastGroupStaysCancelled(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"timeout", "only one"}})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	// The provider cancels the job while the (last) group is in flight.
+	cancelling := &cancellingProvider{s: s, jobID: job.ID}
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: cancelling, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCancelled, got.Status, "completed must not overwrite cancelled")
+	analyses, _ := s.GetCurrentAnalysesByRun(run.ID)
+	require.Len(t, analyses, 1, "the in-flight group still persists")
+}
+
+type cancellingProvider struct {
+	s     *store.Store
+	jobID string
+}
+
+func (c *cancellingProvider) Chat(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	_, _ = c.s.UpdateAnalysisJobStatus(c.jobID, models.RunAnalysisJobStatusCancelled, "")
+	body, _ := json.Marshal(map[string]string{"verdict": "product_bug", "confidence": "medium", "summary": "s", "next_action": "n", "rationale": "r"})
+	return &llm.ChatResponse{Content: string(body), Model: "mock"}, nil
 }

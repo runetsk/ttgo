@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"ttgo/internal/api/ai"
+	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
@@ -320,8 +321,8 @@ func TestAnalyzeRunResult_SendsEnrichmentToProvider(t *testing.T) {
 
 	h := ai.NewHandler(s, bluemonday.UGCPolicy())
 	prov := &capturingHandlerProvider{}
-	h.SetFailureAnalysisDeps(func() (llm.Provider, string, error) {
-		return prov, "mock-model", nil
+	h.SetFailureAnalysisDeps(func(string) (failureanalysis.JobDeps, error) {
+		return failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock-model"}, nil
 	}, nil)
 
 	req := httptest.NewRequest("POST", "/api/run-results/"+target.ID+"/analyze", nil)
@@ -363,8 +364,8 @@ func seedAnalyzedResult(t *testing.T, verdict string) (h *ai.Handler, runID, res
 	require.NoError(t, s.AddRunResult(result))
 
 	h = ai.NewHandler(s, bluemonday.UGCPolicy())
-	h.SetFailureAnalysisDeps(func() (llm.Provider, string, error) {
-		return &verdictProvider{verdict: verdict}, "mock-model", nil
+	h.SetFailureAnalysisDeps(func(string) (failureanalysis.JobDeps, error) {
+		return failureanalysis.JobDeps{Narrative: &verdictProvider{verdict: verdict}, NarrativeModel: "mock-model"}, nil
 	}, nil)
 	return h, run.ID, result.ID
 }

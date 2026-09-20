@@ -2,11 +2,11 @@ package worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 	"ttgo/pkg/tracker/failureanalysis"
-	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
 )
@@ -21,14 +21,14 @@ type Broadcaster interface {
 // Worker is a polling background job runner.
 type Worker struct {
 	store    *store.Store
-	provider llm.Provider
+	resolve  failureanalysis.DepsResolver
 	bc       Broadcaster
 	interval time.Duration
 }
 
-// NewWorker builds a worker with the given poll interval.
-func NewWorker(s *store.Store, p llm.Provider, bc Broadcaster, interval time.Duration) *Worker {
-	return &Worker{store: s, provider: p, bc: bc, interval: interval}
+// NewWorker builds a worker. resolve is called once per job so admin changes apply without a restart.
+func NewWorker(s *store.Store, resolve failureanalysis.DepsResolver, bc Broadcaster, interval time.Duration) *Worker {
+	return &Worker{store: s, resolve: resolve, bc: bc, interval: interval}
 }
 
 // Run blocks until ctx is cancelled, polling every interval.
@@ -38,7 +38,6 @@ func (w *Worker) Run(ctx context.Context) {
 	} else if n > 0 {
 		slog.Info("failure-analysis: restart sweep marked jobs failed", "count", n)
 	}
-
 	t := time.NewTicker(w.interval)
 	defer t.Stop()
 	for {
@@ -53,36 +52,66 @@ func (w *Worker) Run(ctx context.Context) {
 	}
 }
 
-// ProcessOnceForTest is an exported alias of processOnce, used by tests in
-// other packages. Do not call from production code.
+// ProcessOnceForTest is an exported alias of processOnce for tests in other packages.
 func (w *Worker) ProcessOnceForTest(ctx context.Context) error { return w.processOnce(ctx) }
+
+// AnalysisRowFrom maps an analyzer result onto a persistable row (representative, not clone).
+func AnalysisRowFrom(res *failureanalysis.AnalyzeResult, resultID string) *models.RunResultAnalysis {
+	return &models.RunResultAnalysis{
+		RunResultID: resultID, Verdict: res.Verdict, Confidence: res.Confidence,
+		Summary: res.Summary, NextAction: res.NextAction, Rationale: res.Rationale,
+		RawResponse: res.RawResponse, ModelName: res.ModelName,
+		TokenUsagePrompt: res.TokenUsagePrompt, TokenUsageCompletion: res.TokenUsageCompletion,
+		Engine: res.Engine, ConfidenceScore: res.ConfidenceScore, VerdictProbabilities: res.VerdictProbabilities,
+		SuggestedDefectType: res.SuggestedDefectType, SuggestedDefectTypeConfidence: res.SuggestedDefectTypeConfidence,
+		DefectTypeProbabilities: res.DefectTypeProbabilities, NarrativeStatus: res.NarrativeStatus,
+		PolicyVersion: res.PolicyVersion, TypeSafeInputTokens: res.TypeSafeInputTokens,
+	}
+}
+
+func (w *Worker) failJob(id, msg string) {
+	if _, err := w.store.UpdateAnalysisJobStatus(id, models.RunAnalysisJobStatusFailed, msg); err != nil {
+		slog.Error("failure-analysis: could not mark job failed", "job_id", id, "error", err)
+	}
+}
+
+func (w *Worker) isCancelled(jobID string) bool {
+	cur, err := w.store.GetAnalysisJob(jobID)
+	return err == nil && cur != nil && cur.Status == models.RunAnalysisJobStatusCancelled
+}
 
 // processOnce picks up at most one queued job and runs it to completion.
 func (w *Worker) processOnce(ctx context.Context) error {
-	if w.provider == nil {
-		return nil
-	}
 	job, err := w.store.NextQueuedAnalysisJob()
 	if err != nil || job == nil {
 		return err
 	}
-	if _, err := w.store.MarkAnalysisJobRunning(job.ID); err != nil {
+	claimed, err := w.store.MarkAnalysisJobRunning(job.ID)
+	if err != nil {
 		return fmt.Errorf("mark running: %w", err)
+	}
+	if !claimed {
+		return nil // cancelled between pick-up and claim; the cancel wins
+	}
+
+	deps, err := w.resolve(job.Trigger)
+	if err != nil {
+		w.failJob(job.ID, "resolve dependencies: "+err.Error())
+		return err
+	}
+	if deps.Narrative == nil {
+		w.failJob(job.ID, "no LLM provider configured")
+		return nil
 	}
 
 	settings, err := w.store.GetFailureAnalysisSettings()
 	if err != nil {
-		if _, uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load settings: "+err.Error()); uerr != nil {
-			slog.Error("failure-analysis: could not mark job failed", "job_id", job.ID, "error", uerr)
-		}
+		w.failJob(job.ID, "load settings: "+err.Error())
 		return err
 	}
-
 	failures, err := w.store.ListLatestFailingResults(job.TestRunID)
 	if err != nil {
-		if _, uerr := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusFailed, "load failures: "+err.Error()); uerr != nil {
-			slog.Error("failure-analysis: could not mark job failed", "job_id", job.ID, "error", uerr)
-		}
+		w.failJob(job.ID, "load failures: "+err.Error())
 		return err
 	}
 	total := len(failures)
@@ -93,10 +122,32 @@ func (w *Worker) processOnce(ctx context.Context) error {
 	} else {
 		for _, r := range failures {
 			groups = append(groups, &failureanalysis.FailureGroup{
-				Key:            failureanalysis.Signature(r.FailureType, r.ErrorMessage),
-				Representative: r,
-				Members:        []*models.RunResult{r},
+				Key: failureanalysis.Signature(r.FailureType, r.ErrorMessage), Representative: r, Members: []*models.RunResult{r},
 			})
+		}
+	}
+
+	semanticReport := failureanalysis.SemanticReport{}
+	if settings.DedupEnabled && deps.Semantic != nil {
+		sd := *deps.Semantic
+		sd.Redact = settings.RedactionEnabled
+		merged, rep, serr := failureanalysis.MergeGroupsSemantically(ctx, sd, groups, func() bool { return w.isCancelled(job.ID) })
+		semanticReport = rep
+		switch {
+		case errors.Is(serr, failureanalysis.ErrCancelled):
+			slog.Info("failure-analysis: cancelled during semantic grouping", "job_id", job.ID)
+			return nil
+		case serr != nil && ctx.Err() != nil:
+			return ctx.Err()
+		case serr != nil:
+			slog.Warn("failure-analysis: semantic grouping failed, using signature groups", "job_id", job.ID, "err", serr)
+		default:
+			groups = merged
+			slog.Info("failure-analysis: semantic grouping", "job_id", job.ID, "blocks", rep.Blocks, "candidates", rep.Candidates,
+				"asked", rep.Asked, "requests", rep.Requests, "merged", rep.Merged, "skipped", rep.Skipped, "tokens", rep.InputTokens)
+		}
+		if err := w.store.SetAnalysisJobSemanticTokens(job.ID, rep.InputTokens); err != nil {
+			slog.Warn("failure-analysis: semantic token update failed", "err", err)
 		}
 	}
 	unique := len(groups)
@@ -105,49 +156,32 @@ func (w *Worker) processOnce(ctx context.Context) error {
 	if unique < cap {
 		cap = unique
 	}
-	if cap > len(groups) {
-		cap = len(groups)
-	}
 	groups = groups[:cap]
 
 	covered := 0
 	for i, g := range groups {
-		current, err := w.store.GetAnalysisJob(job.ID)
-		if err == nil && current.Status == models.RunAnalysisJobStatusCancelled {
+		if w.isCancelled(job.ID) {
 			slog.Info("failure-analysis: cancelled mid-job", "job_id", job.ID, "after_group", i)
 			return nil
 		}
-
 		rep := g.Representative
-		// Assemble enrichment (history, linked defects/requirements, steps, env)
-		// from the shared builder, then layer the active settings onto it. The
-		// settings-derived fields are NOT set by BuildContext, so they must be
-		// applied here or redaction and the admin prompt template silently break.
-		// ProviderModel is left "" — the lazy provider fills it downstream.
 		actx := failureanalysis.BuildContext(w.store, rep, time.Now())
 		actx.RedactionEnabled = settings.RedactionEnabled
 		actx.PromptTemplate = settings.PromptTemplate
-		res, err := failureanalysis.Analyze(ctx, w.provider, actx)
+		actx.ProviderModel = deps.NarrativeModel
+		res, err := failureanalysis.Analyze(ctx, deps.Analyze(), actx)
+		if err != nil && ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			slog.Warn("failure-analysis: analyze failed — recording unknown verdict", "err", err, "result_id", rep.ID)
 			res = &failureanalysis.AnalyzeResult{
-				Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow,
-				Summary: "analysis failed: " + err.Error(),
+				Engine: models.AnalysisEngineGenerative, NarrativeStatus: models.NarrativeStatusUnavailable,
+				Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow, Summary: "analysis failed: " + err.Error(),
 			}
 		}
 
-		repRow, err := w.store.CreateAnalysis(&models.RunResultAnalysis{
-			RunResultID:          rep.ID,
-			Verdict:              res.Verdict,
-			Confidence:           res.Confidence,
-			Summary:              res.Summary,
-			NextAction:           res.NextAction,
-			Rationale:            res.Rationale,
-			RawResponse:          res.RawResponse,
-			ModelName:            res.ModelName,
-			TokenUsagePrompt:     res.TokenUsagePrompt,
-			TokenUsageCompletion: res.TokenUsageCompletion,
-		})
+		repRow, err := w.store.CreateAnalysis(AnalysisRowFrom(res, rep.ID))
 		if err != nil {
 			slog.Warn("failure-analysis: persist representative failed", "err", err)
 			continue
@@ -160,19 +194,22 @@ func (w *Worker) processOnce(ctx context.Context) error {
 			if sib.ID == rep.ID {
 				continue
 			}
-			groupKey := g.Key
-			sourceID := repRow.ID
-			cloneRow, err := w.store.CreateAnalysis(&models.RunResultAnalysis{
-				RunResultID:      sib.ID,
-				Verdict:          res.Verdict,
-				Confidence:       res.Confidence,
-				Summary:          res.Summary,
-				NextAction:       res.NextAction,
-				Rationale:        "[Grouped from representative analysis] " + res.Rationale,
-				ModelName:        res.ModelName,
-				DedupGroupKey:    &groupKey,
-				SourceAnalysisID: &sourceID,
-			})
+			groupKey, sourceID := g.Key, repRow.ID
+			clone := AnalysisRowFrom(res, sib.ID)
+			clone.RawResponse = ""
+			clone.TypeSafeInputTokens = 0
+			clone.TokenUsagePrompt, clone.TokenUsageCompletion = 0, 0
+			clone.DedupGroupKey, clone.SourceAnalysisID = &groupKey, &sourceID
+			if p, ok := g.SemanticMembers[sib.ID]; ok {
+				pp := p
+				clone.DedupMethod, clone.DedupPSame = models.DedupMethodSemantic, &pp
+				clone.DedupModel, clone.DedupPolicyVersion = semanticReport.Model, semanticReport.PolicyVersion
+				clone.Rationale = "[Grouped semantically with representative analysis] " + res.Rationale
+			} else {
+				clone.DedupMethod = models.DedupMethodSignature
+				clone.Rationale = "[Grouped from representative analysis] " + res.Rationale
+			}
+			cloneRow, err := w.store.CreateAnalysis(clone)
 			if err != nil {
 				slog.Warn("failure-analysis: persist clone failed", "err", err)
 				continue
@@ -187,15 +224,19 @@ func (w *Worker) processOnce(ctx context.Context) error {
 			slog.Warn("failure-analysis: progress update failed", "err", err)
 		}
 		if w.bc != nil {
-			current, _ := w.store.GetAnalysisJob(job.ID)
-			if current != nil {
+			if current, _ := w.store.GetAnalysisJob(job.ID); current != nil {
 				w.bc.BroadcastRunAnalysisProgress(current, covered)
 			}
 		}
 	}
 
-	if _, err := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, ""); err != nil {
+	changed, err := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, "")
+	if err != nil {
 		return err
+	}
+	if !changed {
+		slog.Info("failure-analysis: job was cancelled before completion", "job_id", job.ID)
+		return nil
 	}
 	if w.bc != nil {
 		if final, _ := w.store.GetAnalysisJob(job.ID); final != nil {

@@ -78,7 +78,9 @@ func TestFailureAnalysisEndToEnd(t *testing.T) {
 		t.Fatalf("MaybeEnqueueForRun: %v", err)
 	}
 
-	w := worker.NewWorker(s, &verdictProvider{verdict: "product_bug"}, nil, 10*time.Millisecond)
+	w := worker.NewWorker(s, failureanalysis.DepsResolver(func(string) (failureanalysis.JobDeps, error) {
+		return failureanalysis.JobDeps{Narrative: &verdictProvider{verdict: "product_bug"}, NarrativeModel: "mock"}, nil
+	}), nil, 10*time.Millisecond)
 	if err := w.ProcessOnceForTest(context.Background()); err != nil {
 		t.Fatalf("ProcessOnceForTest: %v", err)
 	}
