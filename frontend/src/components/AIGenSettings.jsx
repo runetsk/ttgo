@@ -2,6 +2,7 @@ import React from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { s } from './aiSettings/styles';
 import ProviderManager from './aiSettings/ProviderManager';
+import TypeSafeSettingsCard from './aiSettings/TypeSafeSettingsCard';
 import GenerationDefaults from './aiSettings/GenerationDefaults';
 import BudgetSettings from './aiSettings/BudgetSettings';
 import TemplateEditor from './aiSettings/TemplateEditor';
@@ -31,6 +32,9 @@ export default function AIGenSettings() {
 
             {/* ── LLM Providers Section (+ its add/edit/delete modals) ── */}
             <ProviderManager isAdmin={isAdmin} />
+
+            {/* ── TypeSafe.ai decision API (failure analysis) ── */}
+            <TypeSafeSettingsCard isAdmin={isAdmin} />
 
             {/* ── Standard + Parent Prompt Template Sections ── */}
             <TemplateEditor isAdmin={isAdmin} />

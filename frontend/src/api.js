@@ -532,6 +532,15 @@ export const resetFailureAnalysisPrompt = () =>
 export const getFailureAnalysisAccuracy = (days = 30) =>
     api.get('/ai/failure-analysis/accuracy', { params: { days } }).then(r => r.data);
 
+export const getTypeSafeSettings = () =>
+    api.get('/settings/typesafe').then(r => r.data);
+
+export const updateTypeSafeSettings = (patch) =>
+    api.put('/settings/typesafe', patch).then(r => r.data);
+
+export const testTypeSafeConnection = () =>
+    api.post('/settings/typesafe/test').then(r => r.data);
+
 // ── Database Backups (015-database-backups) ──
 export const backups = {
     list: () => api.get('/backups').then(res => res.data),
