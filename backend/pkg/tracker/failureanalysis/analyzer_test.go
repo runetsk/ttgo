@@ -3,6 +3,7 @@ package failureanalysis
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 	"ttgo/pkg/tracker/llm"
@@ -46,7 +47,7 @@ func TestAnalyzeHappyPath(t *testing.T) {
 	prov := &stubProvider{responses: []string{
 		`{"verdict":"product_bug","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`,
 	}}
-	out, err := Analyze(context.Background(), prov, baseContext())
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, baseContext())
 	require.NoError(t, err)
 	require.Equal(t, models.VerdictProductBug, out.Verdict)
 	require.Equal(t, models.ConfidenceHigh, out.Confidence)
@@ -58,7 +59,7 @@ func TestAnalyzeRetriesOnInvalidJSON(t *testing.T) {
 		`this is not json`,
 		`{"verdict":"flaky_test","confidence":"medium","summary":"s","next_action":"n","rationale":"r"}`,
 	}}
-	out, err := Analyze(context.Background(), prov, baseContext())
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, baseContext())
 	require.NoError(t, err)
 	require.Equal(t, 2, prov.calls)
 	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
@@ -66,7 +67,7 @@ func TestAnalyzeRetriesOnInvalidJSON(t *testing.T) {
 
 func TestAnalyzeFallsBackOnTwoInvalidResponses(t *testing.T) {
 	prov := &stubProvider{responses: []string{"nope", "still nope"}}
-	out, err := Analyze(context.Background(), prov, baseContext())
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, baseContext())
 	require.NoError(t, err)
 	require.Equal(t, models.VerdictUnknown, out.Verdict)
 	require.Equal(t, models.ConfidenceLow, out.Confidence)
@@ -77,7 +78,7 @@ func TestAnalyzeAcceptsMixedCaseVerdictAndNumericConfidence(t *testing.T) {
 	prov := &stubProvider{responses: []string{
 		`{"verdict":"Infrastructure","confidence":0.95,"summary":"s","next_action":"n","rationale":"r"}`,
 	}}
-	out, err := Analyze(context.Background(), prov, baseContext())
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, baseContext())
 	require.NoError(t, err)
 	require.Equal(t, models.VerdictInfrastructure, out.Verdict)
 	require.Equal(t, models.ConfidenceHigh, out.Confidence)
@@ -115,7 +116,7 @@ func TestAnalyzeReturnsProviderErrorDirectly(t *testing.T) {
 		responses: []string{""},
 		errs:      []error{errors.New("provider unavailable")},
 	}
-	_, err := Analyze(context.Background(), prov, baseContext())
+	_, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, baseContext())
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "provider unavailable")
 }
@@ -144,7 +145,7 @@ func TestAnalyzeRedactsSimilarFailureMessages(t *testing.T) {
 		{RunStartedAt: time.Now(), Status: "FAIL", ErrorMessage: raw},
 	}
 
-	_, err := Analyze(context.Background(), prov, in)
+	_, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, in)
 	require.NoError(t, err)
 
 	// The enriched history secret must be scrubbed in the rendered prompt.
@@ -165,7 +166,7 @@ func TestAnalyzeLeavesSimilarFailuresRawWhenRedactionDisabled(t *testing.T) {
 		{RunStartedAt: time.Now(), Status: "FAIL", ErrorMessage: raw},
 	}
 
-	_, err := Analyze(context.Background(), prov, in)
+	_, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, in)
 	require.NoError(t, err)
 
 	require.Contains(t, prov.lastPrompt, "abcdefghijklmnopqrstuvwxyz0123456789")
@@ -187,9 +188,161 @@ func TestAnalyzeSendsRollupToProvider(t *testing.T) {
 	}
 	in.SimilarFailuresRollup = "product_bug " + timesGlyph + "2, flaky " + timesGlyph + "1"
 
-	_, err := Analyze(context.Background(), prov, in)
+	_, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, in)
 	require.NoError(t, err)
 
 	// "×N" appears only in the rollup, never in a per-row clause.
 	require.Contains(t, prov.lastPrompt, "product_bug "+timesGlyph+"2, flaky "+timesGlyph+"1")
+}
+
+type recordingProvider struct {
+	stubProvider
+	reqs []llm.ChatRequest
+}
+
+func (r *recordingProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	r.reqs = append(r.reqs, req)
+	return r.stubProvider.Chat(ctx, req)
+}
+
+type fixedDecider struct {
+	d   *Decision
+	err error
+}
+
+func (f fixedDecider) Decide(context.Context, Evidence) (*Decision, error) { return f.d, f.err }
+
+func flakyDecision() *Decision {
+	return &Decision{Verdict: models.VerdictFlakyTest, VerdictConfidence: 0.93,
+		VerdictProbabilities: map[string]float64{"flaky_test": 0.95, "product_bug": 0.03, "environment": 0.02},
+		SuggestedDefectType:  "automation_bug", DefectTypeConfidence: 0.88,
+		DefectTypeProbabilities: map[string]float64{"automation_bug": 0.9, "product_bug": 0.1},
+		Model:                   "jev-1.13.0", InputTokens: 777, PolicyVersion: PolicyVersion}
+}
+
+func TestAnalyze_TypeSafeDecidesGenerativeExplains(t *testing.T) {
+	prov := &recordingProvider{stubProvider: stubProvider{responses: []string{`{"summary":"S","next_action":"N","rationale":"R"}`}}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test", Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Equal(t, models.ConfidenceHigh, out.Confidence)
+	require.InDelta(t, 0.93, *out.ConfidenceScore, 1e-9)
+	require.Equal(t, "automation_bug", out.SuggestedDefectType)
+	require.InDelta(t, 0.88, *out.SuggestedDefectTypeConfidence, 1e-9)
+	require.Equal(t, "S", out.Summary)
+	require.Equal(t, "N", out.NextAction)
+	require.Equal(t, "R", out.Rationale)
+	require.Equal(t, models.NarrativeStatusOK, out.NarrativeStatus)
+	require.Equal(t, PolicyVersion, out.PolicyVersion)
+	require.Equal(t, 777, out.TypeSafeInputTokens)
+	require.Contains(t, out.VerdictProbabilities, `"flaky_test":0.95`)
+
+	require.Len(t, prov.reqs, 1)
+	msgs := prov.reqs[0].Messages
+	require.Equal(t, "system", msgs[0].Role)
+	require.Contains(t, msgs[0].Content, "must not be changed")
+	require.Contains(t, msgs[0].Content, "`flaky_test`")
+	require.Contains(t, msgs[0].Content, "`automation_bug`")
+	require.Contains(t, msgs[0].Content, `{"summary"`)
+	require.NotContains(t, msgs[0].Content, "runner-up", "gap 0.95-0.03 is above RunnerUpMargin")
+	require.Equal(t, "user", msgs[1].Role)
+	require.Contains(t, msgs[1].Content, "expected 401, got 500")
+}
+
+func TestAnalyze_RunnerUpMentionedOnlyUnderMargin(t *testing.T) {
+	d := flakyDecision()
+	d.VerdictProbabilities = map[string]float64{"flaky_test": 0.5, "product_bug": 0.42, "environment": 0.08}
+	prov := &recordingProvider{stubProvider: stubProvider{responses: []string{`{"summary":"S","next_action":"N","rationale":"R"}`}}}
+	_, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: d}}, baseContext())
+	require.NoError(t, err)
+	require.Contains(t, prov.reqs[0].Messages[0].Content, "runner-up verdict was `product_bug`")
+}
+
+func TestAnalyze_CustomizedTemplateExtraFieldsIgnored(t *testing.T) {
+	prov := &stubProvider{responses: []string{`{"verdict":"product_bug","confidence":"high","summary":"S","next_action":"N","rationale":"R"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict, "the LLM's verdict is ignored")
+	require.Equal(t, "S", out.Summary)
+}
+
+func TestAnalyze_UnparseableNarrativeKeepsDecision(t *testing.T) {
+	prov := &stubProvider{responses: []string{"nope", "still nope"}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Equal(t, models.NarrativeStatusUnparseable, out.NarrativeStatus)
+	require.Contains(t, out.Summary, "unparseable")
+	require.Contains(t, out.Rationale, "still nope")
+}
+
+func TestAnalyze_NarrativeProviderErrorsKeepDecision(t *testing.T) {
+	cases := map[string]*stubProvider{
+		"first call":  {errs: []error{errors.New("boom")}},
+		"repair call": {responses: []string{"nope", ""}, errs: []error{nil, errors.New("boom")}},
+	}
+	for name, prov := range cases {
+		out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+		require.NoError(t, err, name)
+		require.Equal(t, models.VerdictFlakyTest, out.Verdict, name)
+		require.Equal(t, models.NarrativeStatusUnavailable, out.NarrativeStatus, name)
+		require.Contains(t, out.Summary, "AI narrative unavailable", name)
+	}
+}
+
+func TestAnalyze_TemplateErrorKeepsDecision(t *testing.T) {
+	in := baseContext()
+	in.PromptTemplate = "{{ .Broken"
+	prov := &stubProvider{responses: []string{`{"summary":"S","next_action":"N","rationale":"R"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, in)
+	require.NoError(t, err)
+	require.Equal(t, models.NarrativeStatusUnavailable, out.NarrativeStatus)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+}
+
+func TestAnalyze_CancelledContextPropagates(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	prov := &stubProvider{errs: []error{context.Canceled}}
+	_, err := Analyze(ctx, AnalyzeDeps{Narrative: prov, Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.ErrorIs(t, err, context.Canceled)
+
+	_, err = Analyze(ctx, AnalyzeDeps{Narrative: prov, Decider: fixedDecider{err: errors.New("typesafe down")}}, baseContext())
+	require.ErrorIs(t, err, context.Canceled, "decider error with a cancelled context must not fall back")
+}
+
+func TestAnalyze_DeciderErrorFallsBackToGenerative(t *testing.T) {
+	prov := &stubProvider{responses: []string{`{"verdict":"product_bug","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, Decider: fixedDecider{err: &typesafeErr{}}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineGenerative, out.Engine)
+	require.Equal(t, models.VerdictProductBug, out.Verdict)
+	require.Equal(t, "product_bug", out.SuggestedDefectType, "generative rows persist the legacy mapping")
+	require.Nil(t, out.ConfidenceScore)
+	require.True(t, strings.HasPrefix(out.Rationale, "[verdict engine: TypeSafe unavailable"), out.Rationale)
+}
+
+type typesafeErr struct{}
+
+func (typesafeErr) Error() string { return "typesafe: rate_limit (HTTP 429): slow down" }
+
+func TestAnalyze_DecisionWithoutNarrativeProvider(t *testing.T) {
+	out, err := Analyze(context.Background(), AnalyzeDeps{Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.NarrativeStatusUnavailable, out.NarrativeStatus)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Contains(t, out.Summary, "no generative provider")
+
+	_, err = Analyze(context.Background(), AnalyzeDeps{}, baseContext())
+	require.Error(t, err, "generative path with no provider is still an error")
+}
+
+func TestAnalyze_GenerativePathPersistsLegacySuggestion(t *testing.T) {
+	prov := &stubProvider{responses: []string{`{"verdict":"environment","confidence":"medium","summary":"s","next_action":"n","rationale":"r"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineGenerative, out.Engine)
+	require.Equal(t, "system_issue", out.SuggestedDefectType)
+	require.Equal(t, models.NarrativeStatusOK, out.NarrativeStatus)
 }
