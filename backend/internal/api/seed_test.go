@@ -1,10 +1,12 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"ttgo/pkg/tracker/store"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -62,4 +64,36 @@ func TestHandleResetAllData_ConfirmationContract(t *testing.T) {
 	status, err = s.GetSeedStatus()
 	require.NoError(t, err)
 	assert.False(t, status.HasDemoData, "the confirmed reset must erase all data")
+}
+
+func TestHandleGetAISeedStatus_ReportsAnswerKey(t *testing.T) {
+	s, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := NewServer(s)
+
+	get := func() (int, map[string]any) {
+		rr := httptest.NewRecorder()
+		srv.handleGetAISeedStatus(rr, httptest.NewRequest(http.MethodGet, "/api/seed/ai", nil))
+		var out map[string]any
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &out))
+		return rr.Code, out
+	}
+
+	code, out := get()
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, false, out["loaded"], "nothing seeded yet")
+	assert.Equal(t, store.AIDemoLatestRunID(), out["latest_run_id"])
+	gt, _ := out["ground_truth"].([]any)
+	require.NotEmpty(t, gt, "the answer key is static and available before seeding")
+	first := gt[0].(map[string]any)
+	assert.NotEmpty(t, first["template_key"])
+	assert.NotEmpty(t, first["sample_message"])
+	assert.NotEmpty(t, first["expected_verdict"])
+	assert.NotEmpty(t, first["expected_defect_type"])
+
+	_, err = s.SeedAIDemoTx()
+	require.NoError(t, err)
+	code, out = get()
+	require.Equal(t, http.StatusOK, code)
+	assert.Equal(t, true, out["loaded"])
 }

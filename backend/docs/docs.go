@@ -6938,29 +6938,50 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
+                    },
+                    {
+                        "BearerAuth": []
                     }
                 ],
-                "description": "Return whether demo data is currently seeded and summary counts.",
+                "description": "Return whether demo data is currently seeded and summary counts.\nReports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; ` + "`" + `ttgo ai compare` + "`" + ` uses it to grade analyses.",
                 "produces": [
+                    "application/json",
                     "application/json"
                 ],
                 "tags": [
+                    "seed",
                     "seed"
                 ],
-                "summary": "Get seed status",
+                "summary": "Get AI demo dataset status and answer key",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object"
+                            "type": "object",
+                            "properties": {
+                                "ground_truth": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AISeedGroundTruth"
+                                    }
+                                },
+                                "latest_run_id": {
+                                    "type": "string"
+                                },
+                                "loaded": {
+                                    "type": "boolean"
+                                }
+                            }
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
                             }
                         }
                     }
@@ -7044,6 +7065,59 @@ const docTemplate = `{
             }
         },
         "/seed/ai": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    },
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Return whether demo data is currently seeded and summary counts.\nReports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; ` + "`" + `ttgo ai compare` + "`" + ` uses it to grade analyses.",
+                "produces": [
+                    "application/json",
+                    "application/json"
+                ],
+                "tags": [
+                    "seed",
+                    "seed"
+                ],
+                "summary": "Get AI demo dataset status and answer key",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "ground_truth": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AISeedGroundTruth"
+                                    }
+                                },
+                                "latest_run_id": {
+                                    "type": "string"
+                                },
+                                "loaded": {
+                                    "type": "boolean"
+                                }
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "error": {
+                                    "type": "string"
+                                }
+                            }
+                        }
+                    }
+                }
+            },
             "post": {
                 "security": [
                     {
@@ -10341,6 +10415,35 @@ const docTemplate = `{
                 },
                 "video": {
                     "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_store.AISeedGroundTruth": {
+            "type": "object",
+            "properties": {
+                "expected_defect_type": {
+                    "type": "string"
+                },
+                "expected_verdict": {
+                    "type": "string"
+                },
+                "failure_type": {
+                    "type": "string"
+                },
+                "latest_run_rows": {
+                    "type": "integer"
+                },
+                "sample_message": {
+                    "type": "string"
+                },
+                "scenario": {
+                    "type": "string"
+                },
+                "template_key": {
+                    "type": "string"
+                },
+                "total_rows": {
+                    "type": "integer"
                 }
             }
         },

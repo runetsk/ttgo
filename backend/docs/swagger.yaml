@@ -945,6 +945,25 @@ definitions:
       video:
         type: string
     type: object
+  ttgo_pkg_tracker_store.AISeedGroundTruth:
+    properties:
+      expected_defect_type:
+        type: string
+      expected_verdict:
+        type: string
+      failure_type:
+        type: string
+      latest_run_rows:
+        type: integer
+      sample_message:
+        type: string
+      scenario:
+        type: string
+      template_key:
+        type: string
+      total_rows:
+        type: integer
+    type: object
   ttgo_pkg_tracker_store.AffectedTestCase:
     properties:
       id:
@@ -5554,24 +5573,39 @@ paths:
       tags:
       - seed
     get:
-      description: Return whether demo data is currently seeded and summary counts.
+      description: |-
+        Return whether demo data is currently seeded and summary counts.
+        Reports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; `ttgo ai compare` uses it to grade analyses.
       produces:
+      - application/json
       - application/json
       responses:
         "200":
           description: OK
           schema:
+            properties:
+              ground_truth:
+                items:
+                  $ref: '#/definitions/ttgo_pkg_tracker_store.AISeedGroundTruth'
+                type: array
+              latest_run_id:
+                type: string
+              loaded:
+                type: boolean
             type: object
         "500":
           description: Internal Server Error
           schema:
-            additionalProperties:
-              type: string
+            properties:
+              error:
+                type: string
             type: object
       security:
       - BearerAuth: []
-      summary: Get seed status
+      - BearerAuth: []
+      summary: Get AI demo dataset status and answer key
       tags:
+      - seed
       - seed
     post:
       description: Load the demo dataset into the database. Replaces existing demo
@@ -5601,6 +5635,41 @@ paths:
       tags:
       - seed
   /seed/ai:
+    get:
+      description: |-
+        Return whether demo data is currently seeded and summary counts.
+        Reports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; `ttgo ai compare` uses it to grade analyses.
+      produces:
+      - application/json
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              ground_truth:
+                items:
+                  $ref: '#/definitions/ttgo_pkg_tracker_store.AISeedGroundTruth'
+                type: array
+              latest_run_id:
+                type: string
+              loaded:
+                type: boolean
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            properties:
+              error:
+                type: string
+            type: object
+      security:
+      - BearerAuth: []
+      - BearerAuth: []
+      summary: Get AI demo dataset status and answer key
+      tags:
+      - seed
+      - seed
     post:
       description: Load the AI failure-analysis demo dataset (30 daily runs x 500
         results with planted failure groups, triage history, and a ground-truth answer

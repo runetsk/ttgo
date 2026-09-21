@@ -178,3 +178,18 @@ func TestSeedAIDemoCoexistsWithClassicDemo(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, withAI, aiDemoCount(t, s, &models.RunResult{}))
 }
+
+func TestAIDemoGroundTruth_ListsEveryPlantedTemplate(t *testing.T) {
+	gt, err := AIDemoGroundTruth()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gt) != len(aiTemplates) {
+		t.Fatalf("got %d entries, want one per template (%d)", len(gt), len(aiTemplates))
+	}
+	for _, g := range gt {
+		if g.TemplateKey == "" || g.SampleMessage == "" || g.ExpectedVerdict == "" || g.ExpectedDefect == "" {
+			t.Fatalf("incomplete entry: %+v", g)
+		}
+	}
+}

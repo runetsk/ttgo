@@ -275,3 +275,17 @@ func markAIDemoEntities(tx *gorm.DB, ds aiDataset) error {
 	}
 	return nil
 }
+
+// AIDemoGroundTruth returns the answer key of the in-app AI demo dataset
+// without touching the database: the planted templates and their expected
+// labels are fixed by DefaultAISeedConfig and aiDemoSeed, so a client can grade
+// analyses of a loaded dataset at any time (GET /api/seed/ai).
+func AIDemoGroundTruth() ([]AISeedGroundTruth, error) {
+	cfg := DefaultAISeedConfig()
+	cfg.Seed = aiDemoSeed
+	_, built, err := buildAIFailureDataset(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return built.GroundTruth, nil
+}

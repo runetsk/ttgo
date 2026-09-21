@@ -39,6 +39,7 @@ func newAICmd() *cobra.Command {
 		providersCmd,
 		newAIGenerateCmd(),
 		newAIAcceptCmd(),
+		newAICompareCmd(),
 		templateCmd,
 	)
 

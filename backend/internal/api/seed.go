@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 	"ttgo/internal/api/httpx"
+	"ttgo/pkg/tracker/store"
 
 	"log/slog"
 )
@@ -19,6 +20,35 @@ import (
 // @Failure      500  {object}  map[string]string
 // @Router       /seed [get]
 // @Security     BearerAuth
+// handleGetAISeedStatus reports the AI demo dataset's state and its answer key.
+// @Summary      Get AI demo dataset status and answer key
+// @Description  Reports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; `ttgo ai compare` uses it to grade analyses.
+// @Tags         seed
+// @Produce      json
+// @Success      200  {object}  object{loaded=bool,latest_run_id=string,ground_truth=[]store.AISeedGroundTruth}
+// @Failure      500  {object}  object{error=string}
+// @Security     BearerAuth
+// @Router       /seed/ai [get]
+func (s *Server) handleGetAISeedStatus(w http.ResponseWriter, r *http.Request) {
+	loaded, err := s.store.HasAIDemoData()
+	if err != nil {
+		slog.ErrorContext(r.Context(), "seed: HasAIDemoData failed", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	gt, err := store.AIDemoGroundTruth()
+	if err != nil {
+		slog.ErrorContext(r.Context(), "seed: AIDemoGroundTruth failed", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"loaded":        loaded,
+		"latest_run_id": store.AIDemoLatestRunID(),
+		"ground_truth":  gt,
+	})
+}
+
 func (s *Server) handleGetSeedStatus(w http.ResponseWriter, r *http.Request) {
 	status, err := s.store.GetSeedStatus()
 	if err != nil {

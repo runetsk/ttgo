@@ -73,3 +73,17 @@ func (c *Client) ResetAITemplate() error {
 	_, _, err := c.PostRaw("/api/settings/ai-gen-template/reset", nil)
 	return err
 }
+
+// ListRunResultAnalyses returns the full analysis history of one run result,
+// newest version first.
+func (c *Client) ListRunResultAnalyses(resultID string) (json.RawMessage, error) {
+	raw, _, err := c.GetRaw("/api/run-results/"+resultID+"/analyses", nil)
+	return raw, err
+}
+
+// GetAISeedStatus returns the AI demo dataset's status and its answer key
+// (admin only).
+func (c *Client) GetAISeedStatus() (json.RawMessage, error) {
+	raw, _, err := c.GetRaw("/api/seed/ai", nil)
+	return raw, err
+}
