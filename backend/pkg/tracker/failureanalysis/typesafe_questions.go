@@ -10,7 +10,7 @@ import (
 // Bump the matching policy version whenever any of them changes: stored analyses
 // record it, so calibration can be read per policy.
 const (
-	PolicyVersion         = "fa-verdict-v2"  // verdict + defect_type questions and thresholds
+	PolicyVersion         = "fa-verdict-v3"  // verdict + defect_type questions and thresholds
 	SemanticPolicyVersion = "fa-semantic-v1" // same-cause question and grouping thresholds
 )
 
@@ -79,9 +79,9 @@ func defectTypeQuestion() typesafe.Question {
 			"Labels in `history` describe other failures; an entry with the same error condition as this failure, and its label, bear on this one. " +
 			"Choose `insufficient_evidence` when no source is identified, or when the evidence supports more than one source and does not distinguish which one caused this failure.",
 		Criteria: map[string]any{
-			"product_bug":          "The evidence identifies the application under test behaving wrongly as the cause, and the fix would be made in the application.",
-			"automation_bug":       "The evidence identifies a fault in the test itself as the cause: a wrong assertion, a wrong locator, a wrong timing assumption, or wrong test data or fixtures, and the fix would be made in the test automation.",
-			"system_issue":         "The evidence identifies the environment, shared infrastructure, or an external system failing or misconfigured as the cause, and the fix would be made outside both the application code and the test code.",
+			"product_bug":          "The evidence identifies the application under test behaving wrongly as the cause, and the fix would be made in the application: a result that contradicts an expectation the test states, or a server error or exception on an operation that `history` shows failing the same way in other runs.",
+			"automation_bug":       "The evidence identifies a fault in the test itself as the cause, and the fix would be made in the test automation: a wrong assertion, a wrong locator, a wrong timing assumption, a wait for a transient element or notification that expired, a stale element handle reused after the page changed, an assertion on timing-dependent data such as an animation, or wrong test data or fixtures. A wait or selector timeout that `history` shows recurring on this test with the same error, or whose matching `history` entries are labeled automation_bug, identifies such a fault.",
+			"system_issue":         "The evidence identifies the environment under test, shared infrastructure, or an external system as the cause, and the fix would be made outside both the application code and the test code: the application's own URL or host not responding or timing out, a dependency not deployed, a misconfiguration of the environment, or an outage or resource failure of a shared system such as a service down, a host unreachable, disk full, out of memory, or a runner or CI agent lost.",
 			DefectTypeInsufficient: "The evidence identifies none of the other three, or supports more than one of them without distinguishing which caused this failure.",
 		},
 	}
