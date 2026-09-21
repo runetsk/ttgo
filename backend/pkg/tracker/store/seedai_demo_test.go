@@ -12,7 +12,7 @@ import (
 // aiDemoTestCfg mirrors aiTestCfg but MUST keep Seed == aiDemoSeed: the
 // status/purge helpers derive their deterministic IDs from that constant.
 func aiDemoTestCfg() AISeedConfig {
-	return AISeedConfig{Seed: aiDemoSeed, Days: 12, ResultsPerRun: 200, TestCases: 250}
+	return AISeedConfig{Seed: aiDemoSeed, Days: 12, ResultsPerRun: 300, TestCases: 350}
 }
 
 func aiDemoCount(t *testing.T, s *Store, model interface{}) int64 {
@@ -33,7 +33,7 @@ func TestSeedAIDemoTxSeedsMarksAndStatus(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, res.ReplacedExisting) // handler stamps it; store default false
 	assert.Equal(t, 12, res.Created.TestRuns)
-	assert.Equal(t, 12*200, res.Created.RunResults)
+	assert.Equal(t, 12*300, res.Created.RunResults)
 	assert.Positive(t, res.FailingRows)
 	assert.NotEmpty(t, res.GroundTruth)
 	assert.Equal(t, AIDemoLatestRunID(), res.LatestRunID)
@@ -164,7 +164,7 @@ func TestSeedAIDemoCoexistsWithClassicDemo(t *testing.T) {
 	_, err = s.seedAIDemoTx(aiDemoTestCfg())
 	require.NoError(t, err)
 	withAI := aiDemoCount(t, s, &models.RunResult{})
-	assert.Equal(t, classicResults+12*200, withAI)
+	assert.Equal(t, classicResults+12*300, withAI)
 
 	// Replacing the classic demo must not touch the AI rows.
 	_, err = s.SeedDemoTx(true)
@@ -211,7 +211,7 @@ func TestAIDemoGroundTruth_ListsEveryPlantedTemplate(t *testing.T) {
 }
 
 func TestAIDataset_LogTailWarnsAboutTheEdgeOnlyForSystemTemplates(t *testing.T) {
-	ds, _, err := buildAIFailureDataset(AISeedConfig{Seed: 1, Days: 12, ResultsPerRun: 200, TestCases: 250})
+	ds, _, err := buildAIFailureDataset(AISeedConfig{Seed: 1, Days: 12, ResultsPerRun: 300, TestCases: 350})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,4 +236,74 @@ func TestAIDataset_LogTailWarnsAboutTheEdgeOnlyForSystemTemplates(t *testing.T) 
 	if hinted == 0 || plain == 0 {
 		t.Fatalf("expected both kinds of rows in the sample: hinted=%d plain=%d", hinted, plain)
 	}
+}
+
+// latestRunFailures counts failing rows of the newest run in a built dataset.
+func latestRunFailures(ds aiDataset, latestRunID string) int {
+	n := 0
+	for _, r := range ds.results {
+		if r.TestRunID == latestRunID && (r.Status == models.StatusFail || r.Status == models.StatusError) {
+			n++
+		}
+	}
+	return n
+}
+
+func TestBuildAIFailureDataset_FailureScaleMultipliesPlantedFailures(t *testing.T) {
+	base := AISeedConfig{Seed: 1, Days: 7, ResultsPerRun: 600, TestCases: 800}
+	ds1, res1, err := buildAIFailureDataset(base)
+	require.NoError(t, err)
+	scaled := base.Scaled(3)
+	require.Equal(t, 3, scaled.FailureScale)
+	require.Equal(t, 1800, scaled.ResultsPerRun)
+	require.Equal(t, 2400, scaled.TestCases)
+	ds3, res3, err := buildAIFailureDataset(scaled)
+	require.NoError(t, err)
+
+	f1, f3 := latestRunFailures(ds1, res1.LatestRunID), latestRunFailures(ds3, res3.LatestRunID)
+	assert.GreaterOrEqual(t, f3, f1*5/2, "scale 3 must roughly triple the newest run's failures (%d -> %d)", f1, f3)
+
+	seen := map[string]bool{}
+	for _, r := range ds3.results {
+		key := r.TestRunID + "|" + r.TestNameSnapshot
+		require.False(t, seen[key], "results must stay unique per (run, case): %s", key)
+		seen[key] = true
+	}
+	// Every template with dedicated cases shows up in the newest run at scale 3.
+	for _, g := range res3.GroundTruth {
+		if g.Scenario == aiScenPersistent || g.Scenario == aiScenLatestIncident || g.Scenario == aiScenSingleton {
+			assert.Positive(t, g.LatestRunRows, "template %s missing from the newest run", g.TemplateKey)
+		}
+	}
+}
+
+func TestAIDemoGroundTruth_CoversTheNewTemplates(t *testing.T) {
+	gt, err := AIDemoGroundTruth()
+	require.NoError(t, err)
+	byKey := map[string]AISeedGroundTruth{}
+	for _, g := range gt {
+		byKey[g.TemplateKey] = g
+	}
+	want := map[string][2]string{
+		"auth-token-expired":           {"environment", "system_issue"},
+		"api-rate-limited-429":         {"environment", "system_issue"},
+		"order-summary-null-typeerror": {"product_bug", "product_bug"},
+		"visual-diff-missing-button":   {"product_bug", "product_bug"},
+		"timezone-date-assertion":      {"product_bug", "product_bug"},
+		"duplicate-fixture-email":      {"test_data", "automation_bug"},
+		"feature-flag-missing":         {"environment", "system_issue"},
+		"runner-disk-full":             {"infrastructure", "system_issue"},
+		"search-count-off-by-one":      {"product_bug", "product_bug"},
+		"session-redirect-loop":        {"product_bug", "product_bug"},
+		"upload-progress-race":         {"flaky_test", "automation_bug"},
+		"payment-gateway-503":          {"infrastructure", "system_issue"},
+	}
+	for key, exp := range want {
+		g, ok := byKey[key]
+		require.True(t, ok, "template %s missing from the answer key", key)
+		assert.Equal(t, exp[0], g.ExpectedVerdict, key)
+		assert.Equal(t, exp[1], g.ExpectedDefect, key)
+		assert.NotEmpty(t, g.SampleMessage, key)
+	}
+	assert.Len(t, gt, 26, "14 original + 12 new templates")
 }

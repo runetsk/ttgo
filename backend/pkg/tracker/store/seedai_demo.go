@@ -28,6 +28,7 @@ func AIDemoLatestRunID() string { return perfID(aiDemoSeed, "ai-run", 0) }
 // AISeedDemoResult is returned by SeedAIDemoTx (and POST /api/seed/ai).
 type AISeedDemoResult struct {
 	ReplacedExisting bool                `json:"replaced_existing"`
+	FailureScale     int                 `json:"failure_scale"`
 	Created          SeedCounts          `json:"created"`
 	FailingRows      int                 `json:"failing_rows"`
 	LabeledRows      int                 `json:"labeled_rows"`
@@ -46,8 +47,15 @@ func (s *Store) HasAIDemoData() (bool, error) {
 // database: purge any previous copy by deterministic ID, insert fresh rows in
 // batches, and mark every entity in demo_seeds so the existing "Remove Demo
 // Data" flow cleans the AI dataset up alongside the classic one.
-func (s *Store) SeedAIDemoTx() (AISeedDemoResult, error) {
-	cfg := DefaultAISeedConfig()
+func (s *Store) SeedAIDemoTx() (AISeedDemoResult, error) { return s.SeedAIDemoTxWithScale(1) }
+
+// SeedAIDemoTxWithScale is SeedAIDemoTx with the planted failures multiplied
+// (see AISeedConfig.Scaled): a heavier benchmark on the same templates and
+// answer key. A larger copy loaded over a smaller one is purged by ID like any
+// reload; rows beyond the smaller copy's IDs are cleaned up by Remove Demo
+// Data through their demo_seeds marks.
+func (s *Store) SeedAIDemoTxWithScale(scale int) (AISeedDemoResult, error) {
+	cfg := DefaultAISeedConfig().Scaled(scale)
 	cfg.Seed = aiDemoSeed
 	return s.seedAIDemoTx(cfg)
 }
@@ -83,10 +91,11 @@ func (s *Store) seedAIDemoTx(cfg AISeedConfig) (AISeedDemoResult, error) {
 			Defects:     len(ds.defects),
 			DefectLinks: len(ds.links),
 		},
-		FailingRows: built.FailingRows,
-		LabeledRows: built.LabeledRows,
-		LatestRunID: built.LatestRunID,
-		GroundTruth: built.GroundTruth,
+		FailingRows:  built.FailingRows,
+		LabeledRows:  built.LabeledRows,
+		LatestRunID:  built.LatestRunID,
+		GroundTruth:  built.GroundTruth,
+		FailureScale: cfg.scale(),
 	}, nil
 }
 

@@ -49,6 +49,7 @@ func run(args []string, out io.Writer) error {
 	days := fs.Int("days", 30, "ai profile only — daily runs to generate (newest = today)")
 	perRun := fs.Int("per-run", 500, "ai profile only — results per run")
 	nCases := fs.Int("cases", 600, "ai profile only — test-case catalog size")
+	failureScale := fs.Int("failure-scale", 1, "ai profile only — multiply each planted template's dedicated cases and the latest-run incident slice (1-5); raise -per-run and -cases to make room")
 	seed := fs.Uint64("seed", 1, "seed for deterministic data generation")
 	users := fs.Int("users", 10, "number of perf users to create")
 	tokens := fs.Int("tokens", 100, "number of write-scoped API tokens (keep >= peak VUs so ingest load spreads across token rows rather than hammering last_used_at on a few)")
@@ -148,8 +149,12 @@ func run(args []string, out io.Writer) error {
 			absDB, *tier, res.Folders, res.Categories, res.TestCases,
 			len(res.IngestPool), res.TestRuns, res.RunResults)
 	case "ai":
+		if *failureScale < 1 || *failureScale > 5 {
+			return fmt.Errorf("-failure-scale must be between 1 and 5")
+		}
 		cfg := store.DefaultAISeedConfig()
 		cfg.Seed, cfg.Days, cfg.ResultsPerRun, cfg.TestCases = *seed, *days, *perRun, *nCases
+		cfg.FailureScale = *failureScale
 		res, err := s.SeedAIFailureDataset(cfg)
 		if err != nil {
 			return fmt.Errorf("seed ai dataset: %w", err)

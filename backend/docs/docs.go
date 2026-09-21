@@ -6938,50 +6938,29 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "BearerAuth": []
                     }
                 ],
-                "description": "Return whether demo data is currently seeded and summary counts.\nReports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; ` + "`" + `ttgo ai compare` + "`" + ` uses it to grade analyses.",
+                "description": "Return whether demo data is currently seeded and summary counts.",
                 "produces": [
-                    "application/json",
                     "application/json"
                 ],
                 "tags": [
-                    "seed",
                     "seed"
                 ],
-                "summary": "Get AI demo dataset status and answer key",
+                "summary": "Get seed status",
                 "responses": {
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "properties": {
-                                "ground_truth": {
-                                    "type": "array",
-                                    "items": {
-                                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AISeedGroundTruth"
-                                    }
-                                },
-                                "latest_run_id": {
-                                    "type": "string"
-                                },
-                                "loaded": {
-                                    "type": "boolean"
-                                }
-                            }
+                            "type": "object"
                         }
                     },
                     "500": {
                         "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
-                            "properties": {
-                                "error": {
-                                    "type": "string"
-                                }
+                            "additionalProperties": {
+                                "type": "string"
                             }
                         }
                     }
@@ -7069,18 +7048,13 @@ const docTemplate = `{
                 "security": [
                     {
                         "BearerAuth": []
-                    },
-                    {
-                        "BearerAuth": []
                     }
                 ],
-                "description": "Return whether demo data is currently seeded and summary counts.\nReports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; ` + "`" + `ttgo ai compare` + "`" + ` uses it to grade analyses.",
+                "description": "Reports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; ` + "`" + `ttgo ai compare` + "`" + ` uses it to grade analyses.",
                 "produces": [
-                    "application/json",
                     "application/json"
                 ],
                 "tags": [
-                    "seed",
                     "seed"
                 ],
                 "summary": "Get AI demo dataset status and answer key",
@@ -7125,6 +7099,9 @@ const docTemplate = `{
                     }
                 ],
                 "description": "Load the AI failure-analysis demo dataset (30 daily runs x 500 results with planted failure groups, triage history, and a ground-truth answer key). Replaces a previously loaded AI demo dataset. Admin only.",
+                "consumes": [
+                    "application/json"
+                ],
                 "produces": [
                     "application/json"
                 ],
@@ -7132,6 +7109,21 @@ const docTemplate = `{
                     "seed"
                 ],
                 "summary": "Seed AI failure-analysis demo data",
+                "parameters": [
+                    {
+                        "description": "Optional: multiply the planted failures (1-5); omit for the default dataset",
+                        "name": "body",
+                        "in": "body",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "failure_scale": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    }
+                ],
                 "responses": {
                     "201": {
                         "description": "Created",

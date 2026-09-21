@@ -11,7 +11,7 @@ import (
 
 func aiTestCfg() AISeedConfig {
 	// 12 days so the "fixed" template window (age 25..10) is actually entered.
-	return AISeedConfig{Seed: 1, Days: 12, ResultsPerRun: 200, TestCases: 250}
+	return AISeedConfig{Seed: 1, Days: 12, ResultsPerRun: 300, TestCases: 350}
 }
 
 func TestSeedAIFailureDatasetCounts(t *testing.T) {
@@ -62,8 +62,8 @@ func TestSeedAIFailureDatasetLatestRunGroups(t *testing.T) {
 	require.NotEmpty(t, rows)
 
 	groups := failureanalysis.GroupFailures(rows)
-	assert.GreaterOrEqual(t, len(groups), 8, "latest run should have a realistic spread of failure groups")
-	assert.LessOrEqual(t, len(groups), 12, "planted templates must not shatter into per-row groups")
+	assert.GreaterOrEqual(t, len(groups), 15, "latest run should have a realistic spread of failure groups")
+	assert.LessOrEqual(t, len(groups), 30, "planted templates must not shatter into per-row groups")
 
 	// The latest-run incident slice is the biggest group.
 	assert.GreaterOrEqual(t, len(groups[0].Members), 20)

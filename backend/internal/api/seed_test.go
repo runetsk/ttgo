@@ -97,3 +97,39 @@ func TestHandleGetAISeedStatus_ReportsAnswerKey(t *testing.T) {
 	require.Equal(t, http.StatusOK, code)
 	assert.Equal(t, true, out["loaded"])
 }
+
+func TestHandleCreateAISeed_FailureScale(t *testing.T) {
+	s, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := NewServer(s)
+	post := func(body string) (int, map[string]any) {
+		var r *http.Request
+		if body == "" {
+			r = httptest.NewRequest(http.MethodPost, "/api/seed/ai", nil)
+		} else {
+			r = httptest.NewRequest(http.MethodPost, "/api/seed/ai", strings.NewReader(body))
+			r.Header.Set("Content-Type", "application/json")
+		}
+		rr := httptest.NewRecorder()
+		srv.handleCreateAISeed(rr, r)
+		var out map[string]any
+		_ = json.Unmarshal(rr.Body.Bytes(), &out)
+		return rr.Code, out
+	}
+
+	code, out := post(`{"failure_scale": 0}`)
+	assert.Equal(t, http.StatusBadRequest, code, "scale below 1 is refused: %v", out)
+	code, out = post(`{"failure_scale": 6}`)
+	assert.Equal(t, http.StatusBadRequest, code, "scale above 5 is refused: %v", out)
+	code, out = post(`{"failure_scale": "x"}`)
+	assert.Equal(t, http.StatusBadRequest, code, "malformed body is refused: %v", out)
+
+	code, base := post("")
+	require.Equal(t, http.StatusCreated, code, "no body keeps the default dataset: %v", base)
+	assert.EqualValues(t, 1, base["failure_scale"])
+
+	code, scaled := post(`{"failure_scale": 2}`)
+	require.Equal(t, http.StatusCreated, code, "%v", scaled)
+	assert.EqualValues(t, 2, scaled["failure_scale"])
+	assert.Greater(t, scaled["failing_rows"].(float64), base["failing_rows"].(float64)*1.5, "scale 2 plants many more failures")
+}

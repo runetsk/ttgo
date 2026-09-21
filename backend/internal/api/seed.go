@@ -2,6 +2,9 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"time"
 	"ttgo/internal/api/httpx"
@@ -20,6 +23,16 @@ import (
 // @Failure      500  {object}  map[string]string
 // @Router       /seed [get]
 // @Security     BearerAuth
+func (s *Server) handleGetSeedStatus(w http.ResponseWriter, r *http.Request) {
+	status, err := s.store.GetSeedStatus()
+	if err != nil {
+		slog.ErrorContext(r.Context(), "seed: GetSeedStatus failed", "error", err)
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, status)
+}
+
 // handleGetAISeedStatus reports the AI demo dataset's state and its answer key.
 // @Summary      Get AI demo dataset status and answer key
 // @Description  Reports whether the AI failure-analysis demo dataset is loaded, the deterministic id of its newest run, and the planted templates' expected verdict and defect type. The answer key is static, so it is available before seeding; `ttgo ai compare` uses it to grade analyses.
@@ -47,16 +60,6 @@ func (s *Server) handleGetAISeedStatus(w http.ResponseWriter, r *http.Request) {
 		"latest_run_id": store.AIDemoLatestRunID(),
 		"ground_truth":  gt,
 	})
-}
-
-func (s *Server) handleGetSeedStatus(w http.ResponseWriter, r *http.Request) {
-	status, err := s.store.GetSeedStatus()
-	if err != nil {
-		slog.ErrorContext(r.Context(), "seed: GetSeedStatus failed", "error", err)
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
-	}
-	httpx.JSON(w, http.StatusOK, status)
 }
 
 // handleCreateSeed loads the demo dataset, optionally replacing existing demo data.
@@ -122,6 +125,8 @@ func (s *Server) handleCreateSeed(w http.ResponseWriter, r *http.Request) {
 // @Success      201  {object}  object
 // @Failure      409  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
+// @Accept       json
+// @Param        body  body  object{failure_scale=int}  false  "Optional: multiply the planted failures (1-5); omit for the default dataset"
 // @Router       /seed/ai [post]
 // @Security     BearerAuth
 func (s *Server) handleCreateAISeed(w http.ResponseWriter, r *http.Request) {
@@ -137,8 +142,14 @@ func (s *Server) handleCreateAISeed(w http.ResponseWriter, r *http.Request) {
 		userID = user.ID
 	}
 
+	scale, err := aiSeedScale(r)
+	if err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+
 	start := time.Now()
-	slog.InfoContext(r.Context(), "seed: ai demo operation started", "user_id", userID)
+	slog.InfoContext(r.Context(), "seed: ai demo operation started", "user_id", userID, "failure_scale", scale)
 
 	replaced, err := s.store.HasAIDemoData()
 	if err != nil {
@@ -147,7 +158,7 @@ func (s *Server) handleCreateAISeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.store.SeedAIDemoTx()
+	result, err := s.store.SeedAIDemoTxWithScale(scale)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "seed: ai demo operation failed", "duration", time.Since(start), "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
@@ -274,4 +285,29 @@ func (s *Server) handleResetAllData(w http.ResponseWriter, r *http.Request) {
 
 	slog.WarnContext(r.Context(), "admin/reset: completed, all data erased", "duration", time.Since(start))
 	httpx.JSON(w, http.StatusOK, counts)
+}
+
+// aiSeedScale reads the optional {"failure_scale": n} body of POST /seed/ai.
+// No body, an empty body, or a body without the field means the default
+// dataset (scale 1).
+func aiSeedScale(r *http.Request) (int, error) {
+	if r.Body == nil || r.ContentLength == 0 {
+		return 1, nil
+	}
+	var req struct {
+		FailureScale *int `json:"failure_scale"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			return 1, nil
+		}
+		return 0, fmt.Errorf("invalid body: %w", err)
+	}
+	if req.FailureScale == nil {
+		return 1, nil
+	}
+	if *req.FailureScale < 1 || *req.FailureScale > 5 {
+		return 0, fmt.Errorf("failure_scale must be between 1 and 5")
+	}
+	return *req.FailureScale, nil
 }

@@ -21,11 +21,33 @@ type AISeedConfig struct {
 	Days          int // one run per day, newest = today
 	ResultsPerRun int
 	TestCases     int
+	FailureScale  int // multiplies every template's dedicated cases and the newest run's incident slice; 0 or 1 = as designed
 }
 
 // DefaultAISeedConfig mirrors a mid-size project: 30 daily runs x 500 results.
 func DefaultAISeedConfig() AISeedConfig {
 	return AISeedConfig{Seed: 1, Days: 30, ResultsPerRun: 500, TestCases: 600}
+}
+
+// Scaled returns the config with n times the planted failures: dedicated cases
+// and the incident slice grow by n, and the catalog and run size grow with them
+// so the role map still fits in front of the latest-run specials.
+func (c AISeedConfig) Scaled(n int) AISeedConfig {
+	if n < 1 {
+		n = 1
+	}
+	c.FailureScale = n
+	c.ResultsPerRun *= n
+	c.TestCases *= n
+	return c
+}
+
+// scale is the effective failure multiplier (never below 1).
+func (c AISeedConfig) scale() int {
+	if c.FailureScale < 1 {
+		return 1
+	}
+	return c.FailureScale
 }
 
 // Scenario kinds for planted failure templates.
@@ -269,6 +291,145 @@ var aiTemplates = []aiTemplate{
 		},
 		stack: func(rng *rand.Rand, msg string) string { return netStack(msg, rng) },
 	},
+	{
+		key: "auth-token-expired", failureType: "http",
+		verdict: models.VerdictEnvironment, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 4, startAge: 5, endAge: 0,
+		caseStem: "Orders — list orders for the signed-in buyer",
+		message: func(_ *rand.Rand, _ string) string {
+			return "GET /api/v1/orders returned 401 Unauthorized: bearer token for service account qa-nightly@staging expired (rotate STAGING_QA_TOKEN in the environment secrets)"
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "ApiClient", "get", "orders.spec.js", rng)
+		},
+	},
+	{
+		key: "api-rate-limited-429", failureType: "http",
+		verdict: models.VerdictEnvironment, status: models.StatusFail,
+		scenario: aiScenFlaky, cases: 12,
+		caseStem: "Search — query suggestions while typing",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("GET /api/v1/search/suggest?q=lam returned 429 Too Many Requests: staging gateway quota 60 req/min per shard exhausted (retry-after 30s, request req-9%07d)", rng.IntN(10000000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "SearchPage", "suggest", "search.spec.js", rng)
+		},
+	},
+	{
+		key: "order-summary-null-typeerror", failureType: "exception",
+		verdict: models.VerdictProductBug, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 5, startAge: 8, endAge: 0,
+		caseStem: "Orders — summary shows the shipping estimate",
+		message: func(_ *rand.Rand, _ string) string {
+			return "TypeError: Cannot read properties of null (reading 'status') thrown by the application at OrderSummary.render (static/js/OrderSummary.4f2c1a.js:88:21); captured from the browser console"
+		},
+		stack: func(rng *rand.Rand, msg string) string { return appStack(msg, "OrderSummary", "render", rng) },
+	},
+	{
+		key: "visual-diff-missing-button", failureType: "assertion",
+		verdict: models.VerdictProductBug, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 3, startAge: 2, endAge: 0,
+		caseStem: "Checkout — summary matches the visual baseline",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("Screenshot mismatch: checkout-summary.png differs from baseline by 23.1%% (threshold 0.1%%): the \"Place order\" button is absent from the captured frame (%d pixels changed)", 40000+rng.IntN(9000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "CheckoutPage", "assertScreenshot", "checkout-visual.spec.js", rng)
+		},
+	},
+	{
+		key: "timezone-date-assertion", failureType: "assertion",
+		verdict: models.VerdictProductBug, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 3, startAge: 16, endAge: 0,
+		caseStem: "Invoices — issue date shown in the account timezone",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("AssertionError: expected invoice %d issue date '2026-07-22' but the page shows '2026-07-21' (account timezone Europe/Vilnius; server rendered the date in UTC)", 30000+rng.IntN(9000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "InvoicePage", "assertIssueDate", "invoices.spec.js", rng)
+		},
+	},
+	{
+		key: "duplicate-fixture-email", failureType: "http",
+		verdict: models.VerdictTestData, status: models.StatusFail,
+		scenario: aiScenFlaky, cases: 10,
+		caseStem: "Signup — create an account with a fixture email",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("POST /api/v1/users returned 409 Conflict: email qa-signup-%04d@fixtures.local already exists (fixture reused by a parallel shard)", rng.IntN(10000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "SignupApi", "createUser", "signup.spec.js", rng)
+		},
+	},
+	{
+		key: "feature-flag-missing", failureType: "assertion",
+		verdict: models.VerdictEnvironment, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 4, startAge: 11, endAge: 0,
+		caseStem: "Loyalty — points balance visible on the profile",
+		message: func(_ *rand.Rand, _ string) string {
+			return "Precondition failed: feature flag LOYALTY_POINTS is not enabled in environment staging; the loyalty panel cannot render"
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "ProfilePage", "requireLoyaltyPanel", "loyalty.spec.js", rng)
+		},
+	},
+	{
+		key: "runner-disk-full", failureType: "exception",
+		verdict: models.VerdictInfrastructure, status: models.StatusError,
+		scenario: aiScenBackground,
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("ENOSPC: no space left on device, write 'artifacts/trace-%06d.zip' (runner ci-agent-07, /var/lib/runner 100%% used)", rng.IntN(1000000))
+		},
+		stack: func(rng *rand.Rand, msg string) string { return fsStack(msg, rng) },
+	},
+	{
+		key: "search-count-off-by-one", failureType: "assertion",
+		verdict: models.VerdictProductBug, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 2, startAge: 6, endAge: 0,
+		caseStem: "Search — in-stock filter returns every matching SKU",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("AssertionError: expected 12 in-stock results for 'lamp' but got 11: sku TTGO-%04d is in stock (qty 3) yet absent from the response", 1000+rng.IntN(9000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "SearchPage", "assertInStockResults", "search.spec.js", rng)
+		},
+	},
+	{
+		key: "session-redirect-loop", failureType: "assertion",
+		verdict: models.VerdictProductBug, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 3, startAge: 4, endAge: 0,
+		caseStem: "Auth — dashboard loads after sign-in",
+		message: func(_ *rand.Rand, _ string) string {
+			return "Navigation loop: after a successful sign-in the app bounced /login → /dashboard → /login 5 times (session cookie set; csrf token missing from the /dashboard request)"
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "LoginPage", "expectDashboard", "auth.spec.js", rng)
+		},
+	},
+	{
+		key: "upload-progress-race", failureType: "assertion",
+		verdict: models.VerdictFlakyTest, status: models.StatusFail,
+		scenario: aiScenFlaky, cases: 12,
+		caseStem: "Attachments — upload progress reaches 100%",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("AssertionError: expected upload progress to read 100%% within 5000ms; last sampled value 96.%04d%% when the assertion ran", rng.IntN(10000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "AttachmentsPage", "waitForUploadComplete", "attachments.spec.js", rng)
+		},
+	},
+	{
+		key: "payment-gateway-503", failureType: "http",
+		verdict: models.VerdictInfrastructure, status: models.StatusError,
+		scenario: aiScenPersistent, cases: 3, startAge: 1, endAge: 0,
+		caseStem: "Payments — authorize a card through the gateway",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("POST /api/v1/payments/authorize returned 503 Service Unavailable: upstream sandbox-gateway.pay.example circuit open (incident PAY-%04d)", 1000+rng.IntN(9000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "PaymentsApi", "authorize", "payments.spec.js", rng)
+		},
+	},
 }
 
 var aiAreas = [...]string{"Checkout", "Payments", "Profile", "Search", "Inventory", "Reports", "Auth", "Notifications"}
@@ -335,7 +496,7 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 	}
 	next := 0
 	for ti := range aiTemplates {
-		for k := 0; k < aiTemplates[ti].cases; k++ {
+		for k := 0; k < aiTemplates[ti].cases*cfg.scale(); k++ {
 			if next >= cfg.TestCases {
 				return aiDataset{}, AISeedResult{}, fmt.Errorf("test cases (%d) too few for the template role map (%d needed)", cfg.TestCases, next+1)
 			}
@@ -345,7 +506,7 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 	}
 	// The newest run covers case indices [0, ResultsPerRun); the latest-run
 	// specials must land inside it, past the dedicated-role block.
-	latestIncLo, latestIncHi := cfg.ResultsPerRun-100, cfg.ResultsPerRun-75
+	latestIncLo, latestIncHi := cfg.ResultsPerRun-75-25*cfg.scale(), cfg.ResultsPerRun-75
 	singletonCase := cfg.ResultsPerRun - 70
 	if latestIncLo <= next {
 		return aiDataset{}, AISeedResult{}, fmt.Errorf("results per run (%d) too small: latest-run incident slice would overlap the %d dedicated role cases", cfg.ResultsPerRun, next)
@@ -649,4 +810,18 @@ func (t *aiTemplate) scoredVerdict() string {
 		return ""
 	}
 	return t.verdict
+}
+
+// appStack renders an application exception captured from the browser console.
+func appStack(msg, component, method string, rng *rand.Rand) string {
+	return fmt.Sprintf(
+		"%s\n    at %s.%s (static/js/%s.4f2c1a.js:%d:%d)\n    at renderWithHooks (static/js/vendor-react.js:%d:%d)\n    captured by pages/console.js:%d",
+		msg, component, method, component, 40+rng.IntN(200), 3+rng.IntN(30), 15000+rng.IntN(500), 10+rng.IntN(20), 12+rng.IntN(40))
+}
+
+// fsStack renders a Node filesystem error raised while the runner wrote artifacts.
+func fsStack(msg string, rng *rand.Rand) string {
+	return fmt.Sprintf(
+		"Error: %s\n    at Object.writeSync (node:fs:%d:%d)\n    at TraceWriter.flush (lib/artifacts.js:%d:%d)",
+		msg, 900+rng.IntN(100), 3+rng.IntN(20), 40+rng.IntN(60), 5+rng.IntN(12))
 }
