@@ -20,7 +20,11 @@ import (
 )
 
 const (
-	DefaultBaseURL          = "https://api.typesafe.ai"
+	DefaultBaseURL = "https://api.typesafe.ai"
+	// EnvBaseURL names the operator-set environment variable that replaces
+	// DefaultBaseURL when Options.BaseURL is empty — for gateways that serve the
+	// same System One endpoint under another host (OpenRouter: https://openrouter.ai/api).
+	EnvBaseURL              = "TYPESAFE_BASE_URL"
 	MaxResponseBytes        = 10 << 20
 	ProbabilitySumTolerance = 0.02
 	defaultTimeout          = 30 * time.Second
@@ -98,6 +102,9 @@ type HTTPClient struct {
 func NewHTTPClient(apiKey string, opts Options) *HTTPClient {
 	c := &HTTPClient{apiKey: apiKey, baseURL: strings.TrimRight(opts.BaseURL, "/"),
 		maxAttempts: opts.MaxAttempts, http: opts.HTTP, sleep: opts.sleep, jitter: rand.Float64}
+	if c.baseURL == "" {
+		c.baseURL = strings.TrimRight(os.Getenv(EnvBaseURL), "/")
+	}
 	if c.baseURL == "" {
 		c.baseURL = DefaultBaseURL
 	}

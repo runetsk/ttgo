@@ -201,3 +201,17 @@ func TestListModels(t *testing.T) {
 	require.Len(t, ms, 1)
 	require.Equal(t, "2026-09-01", ms[0].ReleaseDate)
 }
+
+func TestNewHTTPClient_BaseURLFallsBackToEnv(t *testing.T) {
+	t.Setenv(EnvBaseURL, "https://openrouter.ai/api/")
+	if got := NewHTTPClient("k", Options{}).baseURL; got != "https://openrouter.ai/api" {
+		t.Fatalf("env base URL: got %q", got)
+	}
+	if got := NewHTTPClient("k", Options{BaseURL: "https://explicit.example/"}).baseURL; got != "https://explicit.example" {
+		t.Fatalf("explicit option must win over env: got %q", got)
+	}
+	t.Setenv(EnvBaseURL, "")
+	if got := NewHTTPClient("k", Options{}).baseURL; got != DefaultBaseURL {
+		t.Fatalf("empty env must fall back to the default: got %q", got)
+	}
+}

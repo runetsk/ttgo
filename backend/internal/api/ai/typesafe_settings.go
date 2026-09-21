@@ -104,16 +104,41 @@ func (h *Handler) TestTypeSafeConnection(w http.ResponseWriter, r *http.Request)
 		fail(string(typesafe.CategoryAuth), "no API key stored")
 		return
 	}
-	client := h.newTypeSafeClient(key, time.Duration(settings.TimeoutSeconds)*time.Second)
-	ms, err := client.ListModels(r.Context())
-	if err != nil {
+	report := func(err error) {
 		var te *typesafe.Error
 		if errors.As(err, &te) {
 			fail(string(te.Category), te.Message)
 			return
 		}
 		fail(string(typesafe.CategoryNetwork), err.Error())
+	}
+	client := h.newTypeSafeClient(key, time.Duration(settings.TimeoutSeconds)*time.Second)
+	ms, err := client.ListModels(r.Context())
+	if err != nil {
+		report(err)
 		return
 	}
+	if len(ms) == 0 {
+		// Gateways such as OpenRouter serve the System One endpoint but not
+		// TypeSafe's model list, so an empty list proves nothing about the key.
+		// Prove key and model with the cheapest valid evaluation instead.
+		if _, err := client.Evaluate(r.Context(), probeRequest(settings.Model)); err != nil {
+			report(err)
+			return
+		}
+		ms = []typesafe.Model{{Name: settings.Model}}
+	}
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{"ok": true, "models": ms})
+}
+
+// probeRequest is a one-question, one-line System One call used only by the
+// connection test when the endpoint lists no models.
+func probeRequest(model string) typesafe.Request {
+	return typesafe.Request{
+		Model: model,
+		State: "TTGO connection probe.",
+		Questions: map[string]typesafe.Question{
+			"probe": {Type: "noul", Instructions: "Is this state a connection probe?"},
+		},
+	}
 }

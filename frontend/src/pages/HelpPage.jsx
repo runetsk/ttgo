@@ -566,6 +566,7 @@ function AIFailureAnalysisSection() {
                 ]} />
                 <P>Every verdict also carries a confidence of low, medium or high, along with a short summary, a suggested next action, and the reasoning behind it.</P>
                 <P>With TypeSafe.ai enabled, the verdict and the suggested defect type come from a calibrated decision model and the confidence is a real probability-based score; your LLM writes only the explanation.</P>
+                <P>The server reaches TypeSafe.ai at api.typesafe.ai. To go through a gateway that serves the same System One endpoint, start the server with TYPESAFE_BASE_URL set — for OpenRouter, https://openrouter.ai/api with an OpenRouter key and the model jev-1.13 or jev-latest. Gateways do not list models, so the card&apos;s connection test then sends one tiny evaluation to prove the key instead.</P>
             </Card>
 
             <SectionHeader>Accepting or overriding the suggestion</SectionHeader>

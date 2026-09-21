@@ -23,6 +23,20 @@
       }
     },
     {
+      "name": "backend-ai-openrouter",
+      "runtimeExecutable": "go",
+      "runtimeArgs": ["run", "-tags", "sqlite_fts5", "./cmd/server"],
+      "cwd": "backend",
+      "port": 8090,
+      "env": {
+        "DB_PATH": "../perf/.scratch/perf-ai.db",
+        "ADMIN_EMAIL": "admin@example.com",
+        "ADMIN_PASSWORD": "changeme123",
+        "LISTEN_ADDR": ":8090",
+        "TYPESAFE_BASE_URL": "https://openrouter.ai/api"
+      }
+    },
+    {
       "name": "frontend",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
