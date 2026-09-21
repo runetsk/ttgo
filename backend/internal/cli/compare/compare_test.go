@@ -229,3 +229,24 @@ func TestGradingNote_OnlyWhenAnAnswerKeyMatchedNothing(t *testing.T) {
 		t.Fatal("graded rows need no note")
 	}
 }
+
+func TestPivot_FailedCallsAreNotAColumn(t *testing.T) {
+	results := []Result{{ID: "r1", Name: "A", Status: "FAIL", ErrorMessage: "boom"}}
+	analyses := map[string][]Analysis{"r1": {
+		{Version: 1, Engine: "typesafe", ModelName: "jev-1.13", Verdict: "product_bug", Confidence: "high", PolicyVersion: "fa-verdict-v3"},
+		// A generative call that failed is stored with no model name, an unknown
+		// verdict and low confidence; it is nobody's answer.
+		{Version: 2, Engine: "generative", ModelName: "", Verdict: "unknown", Confidence: "low", NarrativeStatus: "unavailable"},
+		{Version: 3, Engine: "generative", ModelName: "gpt", Verdict: "product_bug", Confidence: "high"},
+	}}
+	rep := Pivot(results, analyses)
+	if len(rep.Columns) != 2 {
+		t.Fatalf("failed calls must not form a column: %+v", rep.Columns)
+	}
+	if rep.FailedCalls != 1 {
+		t.Fatalf("failed calls are counted: %d", rep.FailedCalls)
+	}
+	if rep.Rows[0].Cells["generative/"] != nil {
+		t.Fatal("no cell for the failed call")
+	}
+}

@@ -86,6 +86,9 @@ type Report struct {
 	RunName string   `json:"run_name"`
 	Columns []Column `json:"columns"`
 	Rows    []Row    `json:"rows"`
+	// FailedCalls counts stored analyses of failed LLM calls (no model name,
+	// unknown verdict); they are nobody's answer and form no column.
+	FailedCalls int `json:"failed_calls"`
 }
 
 // Abstention is the suggested defect type TypeSafe returns when the evidence
@@ -196,6 +199,10 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 	for _, r := range results {
 		row := Row{Result: r, Cells: map[string]*Cell{}}
 		for _, a := range analyses[r.ID] {
+			if a.Engine == "generative" && a.ModelName == "" {
+				rep.FailedCalls++
+				continue
+			}
 			key := columnKey(a)
 			if cur := row.Cells[key]; cur != nil && cur.Version >= a.Version {
 				continue
@@ -415,7 +422,11 @@ func cellText(c *Cell) (verdict, defect string) {
 // Render writes the human-readable table and summary.
 func Render(w io.Writer, rep Report, s Summary) {
 	graded := s.Ungraded < s.Rows
-	fmt.Fprintf(w, "Run: %s (%s) — %d failing results, %d engine column(s)\n\n", rep.RunName, rep.RunID, s.Rows, len(rep.Columns))
+	fmt.Fprintf(w, "Run: %s (%s) — %d failing results, %d engine column(s)", rep.RunName, rep.RunID, s.Rows, len(rep.Columns))
+	if rep.FailedCalls > 0 {
+		fmt.Fprintf(w, "; %d stored analysis version(s) are failed LLM calls and are not counted", rep.FailedCalls)
+	}
+	fmt.Fprint(w, "\n\n")
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	hdr := []string{"", "TEST", "ERROR"}
 	for _, c := range rep.Columns {
