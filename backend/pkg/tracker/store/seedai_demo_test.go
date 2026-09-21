@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -187,9 +188,52 @@ func TestAIDemoGroundTruth_ListsEveryPlantedTemplate(t *testing.T) {
 	if len(gt) != len(aiTemplates) {
 		t.Fatalf("got %d entries, want one per template (%d)", len(gt), len(aiTemplates))
 	}
+	byKey := map[string]AISeedGroundTruth{}
 	for _, g := range gt {
-		if g.TemplateKey == "" || g.SampleMessage == "" || g.ExpectedVerdict == "" || g.ExpectedDefect == "" {
+		byKey[g.TemplateKey] = g
+		if g.TemplateKey == "" || g.SampleMessage == "" || g.ExpectedDefect == "" {
 			t.Fatalf("incomplete entry: %+v", g)
 		}
+		if g.ExpectedVerdict == "" && g.TemplateKey != "stale-checkout-selector" {
+			t.Fatalf("only the stale-locator template is unscored on verdict: %+v", g)
+		}
+	}
+	// A runner killed by an out-of-memory condition is what the product calls
+	// infrastructure ("CI, the runner, or the network"), not an unknown.
+	if oom := byKey["runner-heap-oom"]; oom.ExpectedVerdict != "infrastructure" || oom.ExpectedDefect != "system_issue" {
+		t.Fatalf("runner-heap-oom: %+v", oom)
+	}
+	// A stale locator is an automation bug, and the verdict vocabulary has no
+	// option for it: the key grades that template on its defect type only.
+	if stale := byKey["stale-checkout-selector"]; stale.ExpectedVerdict != "" || stale.ExpectedDefect != "automation_bug" {
+		t.Fatalf("stale-checkout-selector: %+v", stale)
+	}
+}
+
+func TestAIDataset_LogTailWarnsAboutTheEdgeOnlyForSystemTemplates(t *testing.T) {
+	ds, _, err := buildAIFailureDataset(AISeedConfig{Seed: 1, Days: 12, ResultsPerRun: 200, TestCases: 250})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hinted, plain := 0, 0
+	for _, r := range ds.results {
+		if r.ErrorMessage == "" {
+			continue
+		}
+		edge := strings.Contains(r.LogText, "cdn-edge")
+		switch r.FailureType {
+		case "timeout", "network":
+			if edge {
+				hinted++
+			}
+		default:
+			if edge {
+				t.Fatalf("a %s failure must not carry the transient-502 hint that points at the environment: %q", r.FailureType, r.LogText)
+			}
+			plain++
+		}
+	}
+	if hinted == 0 || plain == 0 {
+		t.Fatalf("expected both kinds of rows in the sample: hinted=%d plain=%d", hinted, plain)
 	}
 }

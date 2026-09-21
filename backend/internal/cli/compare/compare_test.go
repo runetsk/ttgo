@@ -87,7 +87,7 @@ func TestGrade_MatchesTemplatesAndScoresPerColumn(t *testing.T) {
 	}
 	s := Summarize(rep)
 	ts := s.Columns[0]
-	if ts.Graded != 2 || ts.VerdictCorrect != 1 || ts.DefectCorrect != 1 {
+	if ts.Graded != 2 || ts.VerdictGraded != 2 || ts.VerdictCorrect != 1 || ts.DefectCorrect != 1 {
 		t.Fatalf("typesafe grading: %+v", ts)
 	}
 	if ts.ByConfidence["high"].Graded != 1 || ts.ByConfidence["high"].VerdictCorrect != 1 || ts.ByConfidence["low"].VerdictCorrect != 0 {
@@ -99,6 +99,53 @@ func TestGrade_MatchesTemplatesAndScoresPerColumn(t *testing.T) {
 	}
 	if s.Ungraded != 1 {
 		t.Fatalf("ungraded rows: %d", s.Ungraded)
+	}
+}
+
+func TestGrade_EmptyExpectedVerdictScoresDefectTypeOnly(t *testing.T) {
+	rep := Pivot(sampleResults(), sampleAnalyses())
+	gt := []GroundTruth{
+		{TemplateKey: "checkout-total-mismatch", SampleMessage: sampleResults()[0].ErrorMessage, ExpectedVerdict: "product_bug", ExpectedDefectType: "product_bug"},
+		// A stale locator has no verdict in the taxonomy: the key leaves the verdict
+		// empty and the template is graded on its defect type alone.
+		{TemplateKey: "toast-wait-timeout", SampleMessage: sampleResults()[2].ErrorMessage, ExpectedVerdict: "", ExpectedDefectType: "automation_bug"},
+	}
+	Grade(&rep, gt)
+	s := Summarize(rep)
+	ts := s.Columns[0]
+	if ts.Graded != 2 || ts.DefectCorrect != 2 {
+		t.Fatalf("both matched rows are graded on defect type: %+v", ts)
+	}
+	if ts.VerdictGraded != 1 || ts.VerdictCorrect != 1 {
+		t.Fatalf("only the row with an expected verdict counts toward verdict accuracy: %+v", ts)
+	}
+	high := ts.ByConfidence["high"]
+	if high.Graded != 2 || high.VerdictGraded != 1 || high.VerdictCorrect != 1 || high.DefectCorrect != 2 {
+		t.Fatalf("bucket keeps the two denominators apart: %+v", high)
+	}
+	if s.Ungraded != 1 {
+		t.Fatalf("ungraded rows: %d", s.Ungraded)
+	}
+}
+
+func TestPivot_PolicyVersionSplitsTypeSafeColumns(t *testing.T) {
+	results := []Result{{ID: "r1", Name: "A", Status: "FAIL", ErrorMessage: "boom"}}
+	analyses := map[string][]Analysis{"r1": {
+		{Version: 1, Engine: "typesafe", ModelName: "jev-1.13", Verdict: "unknown", Confidence: "medium", PolicyVersion: "fa-verdict-v1"},
+		{Version: 2, Engine: "generative", ModelName: "gpt", Verdict: "product_bug", Confidence: "high"},
+		{Version: 3, Engine: "typesafe", ModelName: "jev-1.13", Verdict: "product_bug", Confidence: "high", PolicyVersion: "fa-verdict-v2"},
+	}}
+	rep := Pivot(results, analyses)
+	keys := []string{}
+	for _, c := range rep.Columns {
+		keys = append(keys, c.Key)
+	}
+	want := []string{"typesafe/jev-1.13@fa-verdict-v1", "typesafe/jev-1.13@fa-verdict-v2", "generative/gpt"}
+	if len(keys) != 3 || keys[0] != want[0] || keys[1] != want[1] || keys[2] != want[2] {
+		t.Fatalf("columns: %v, want %v", keys, want)
+	}
+	if rep.Rows[0].Cells[want[1]].Verdict != "product_bug" || rep.Rows[0].Cells[want[0]].Verdict != "unknown" {
+		t.Fatalf("each policy keeps its own cell: %+v", rep.Rows[0].Cells)
 	}
 }
 

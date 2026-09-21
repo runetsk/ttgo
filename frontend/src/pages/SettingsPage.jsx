@@ -985,7 +985,7 @@ function DemoDataSettings() {
                                             <tr key={g.template_key} style={{ borderTop: '1px solid var(--border-color)' }}>
                                                 <td style={{ padding: '4px 12px 4px 0', fontFamily: 'monospace' }}>{g.template_key}</td>
                                                 <td style={{ padding: '4px 12px 4px 0' }}>{g.scenario}</td>
-                                                <td style={{ padding: '4px 12px 4px 0' }}>{g.expected_verdict}</td>
+                                                <td style={{ padding: '4px 12px 4px 0' }} title={g.expected_verdict ? undefined : 'No verdict in the vocabulary fits this failure; grade its defect type only'}>{g.expected_verdict || 'any'}</td>
                                                 <td style={{ padding: '4px 12px 4px 0' }}>{g.expected_defect_type}</td>
                                                 <td style={{ padding: '4px 0' }}>{g.total_rows} ({g.latest_run_rows})</td>
                                             </tr>

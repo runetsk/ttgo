@@ -71,17 +71,18 @@ type AISeedResult struct {
 // text identical across instances and confine variability to parts the dedup
 // normalizer strips: numbers of 4+ digits, 0x-hex, ISO timestamps, path dirs.
 type aiTemplate struct {
-	key         string
-	failureType string
-	verdict     string                 // ground-truth verdict (models.Verdict*)
-	status      models.ExecutionStatus // FAIL or ERROR
-	scenario    string
-	cases       int // dedicated catalog cases (persistent/fixed/flaky scenarios)
-	startAge    int // active when startAge >= run age >= endAge (days; persistent: endAge 0)
-	endAge      int
-	caseStem    string // test-case display name stem for dedicated cases
-	message     func(rng *rand.Rand, ts string) string
-	stack       func(rng *rand.Rand, msg string) string
+	key             string
+	failureType     string
+	verdict         string                 // ground-truth verdict (models.Verdict*)
+	status          models.ExecutionStatus // FAIL or ERROR
+	scenario        string
+	cases           int // dedicated catalog cases (persistent/fixed/flaky scenarios)
+	startAge        int // active when startAge >= run age >= endAge (days; persistent: endAge 0)
+	endAge          int
+	caseStem        string // test-case display name stem for dedicated cases
+	verdictUnscored bool   // no verdict in the vocabulary fits this failure; the answer key grades its defect type only
+	message         func(rng *rand.Rand, ts string) string
+	stack           func(rng *rand.Rand, msg string) string
 }
 
 // expectedDefect maps the ground-truth verdict to the human triage label used
@@ -160,7 +161,8 @@ var aiTemplates = []aiTemplate{
 	},
 	{
 		key: "stale-checkout-selector", failureType: "element",
-		verdict: models.VerdictTestData, status: models.StatusFail,
+		verdictUnscored: true,
+		verdict:         models.VerdictTestData, status: models.StatusFail,
 		scenario: aiScenPersistent, cases: 5, startAge: 30, endAge: 0,
 		caseStem: "Checkout — submit order via saved card",
 		message: func(_ *rand.Rand, _ string) string {
@@ -260,7 +262,7 @@ var aiTemplates = []aiTemplate{
 	},
 	{
 		key: "runner-heap-oom", failureType: "exception",
-		verdict: models.VerdictUnknown, status: models.StatusError,
+		verdict: models.VerdictInfrastructure, status: models.StatusError,
 		scenario: aiScenSingleton,
 		message: func(rng *rand.Rand, _ string) string {
 			return fmt.Sprintf("Runner process terminated: JavaScript heap out of memory (rss %d)", 2_000_000_000+rng.IntN(400_000_000))
@@ -285,8 +287,16 @@ func aiSteps(area string) json.RawMessage {
 	return b
 }
 
-func aiLogText(msg, ts1, ts2 string) string {
-	return fmt.Sprintf("[%s] [info] scenario started (worker 3, shard 2/4)\n[%s] [warn] retrying request once after transient 502 from cdn-edge\n[%s] [error] %s", ts1, ts1, ts2, msg)
+// aiLogText renders a failing result's log tail. The transient-502 retry
+// warning accompanies only network and timeout failures: on every other
+// template it was a uniform hint pointing at the environment, which biased
+// the engines being benchmarked.
+func aiLogText(msg, failureType, ts1, ts2 string) string {
+	middle := "[info] fixture set qa-nightly ready (12 records)"
+	if failureType == "timeout" || failureType == "network" {
+		middle = "[warn] retrying request once after transient 502 from cdn-edge"
+	}
+	return fmt.Sprintf("[%s] [info] scenario started (worker 3, shard 2/4)\n[%s] %s\n[%s] [error] %s", ts1, ts1, middle, ts2, msg)
 }
 
 // aiDataset holds the fully-generated AI demo entities before insertion, so
@@ -409,7 +419,7 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 		gt[ti] = AISeedGroundTruth{
 			TemplateKey: t.key, FailureType: t.failureType,
 			SampleMessage:   t.message(rand.New(rand.NewPCG(cfg.Seed, 7)), now.UTC().Format("2006-01-02T15:04:05Z")),
-			ExpectedVerdict: t.verdict, ExpectedDefect: t.expectedDefect(), Scenario: t.scenario,
+			ExpectedVerdict: t.scoredVerdict(), ExpectedDefect: t.expectedDefect(), Scenario: t.scenario,
 		}
 	}
 
@@ -486,7 +496,7 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 				res.ErrorMessage = msg
 				res.StackTrace = t.stack(rng, msg)
 				res.FailureType = t.failureType
-				res.LogText = aiLogText(msg, start.Add(-40*time.Second).UTC().Format("2006-01-02T15:04:05Z"), ts)
+				res.LogText = aiLogText(msg, t.failureType, start.Add(-40*time.Second).UTC().Format("2006-01-02T15:04:05Z"), ts)
 				res.DurationMs = 100 + rng.Int64N(4900)
 				if t.failureType == "timeout" {
 					res.DurationMs = 30000 + rng.Int64N(16000)
@@ -630,4 +640,13 @@ func (s *Store) SeedAIFailureDataset(cfg AISeedConfig) (AISeedResult, error) {
 		return AISeedResult{}, err
 	}
 	return res, nil
+}
+
+// scoredVerdict is the verdict the answer key expects, or "" when no verdict in
+// the vocabulary fits and the template is graded on its defect type only.
+func (t *aiTemplate) scoredVerdict() string {
+	if t.verdictUnscored {
+		return ""
+	}
+	return t.verdict
 }

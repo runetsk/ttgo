@@ -10,7 +10,7 @@ import (
 // Bump the matching policy version whenever any of them changes: stored analyses
 // record it, so calibration can be read per policy.
 const (
-	PolicyVersion         = "fa-verdict-v1"  // verdict + defect_type questions and thresholds
+	PolicyVersion         = "fa-verdict-v2"  // verdict + defect_type questions and thresholds
 	SemanticPolicyVersion = "fa-semantic-v1" // same-cause question and grouping thresholds
 )
 
@@ -41,7 +41,7 @@ const (
 // HistoryNote is a constant sent inside the state so the model reads history correctly.
 // It says "other", not "earlier": the query window ends at analysis time and excludes only
 // the current run, so a re-analysis of an old result can include later failures.
-const HistoryNote = "Other FAILED or ERRORED runs of this same test from the last 30 days, excluding this run. Passing runs are not listed. Labels are what a person assigned to those other failures, not to this one."
+const HistoryNote = "Other FAILED or ERRORED runs of this same test from the last 30 days, excluding this run. Passing runs are not listed. Labels are what a person assigned to those other failures; an entry with the same error condition as this failure, and its label, bear on this one."
 
 // verdictOptions returns the six verdicts in a stable order.
 func verdictOptions() []string {
@@ -59,12 +59,12 @@ func verdictQuestion() typesafe.Question {
 		Type: "choice",
 		Instructions: "Which listed cause does the evidence in `failure`, `test`, `history`, and `linked_defects` identify as the cause of this failure? " +
 			"A timeout, a failed assertion, an error message, a connection error, or a successful retry on its own does not identify a cause. " +
-			"Entries in `history` are other failures of the same test and their labels describe those failures, not this one. " +
+			"Entries in `history` are other failures of the same test. When an entry shows the same error condition as this failure, that entry and its human label are evidence about this failure; otherwise they describe a different failure. " +
 			"Choose `unknown` when no listed cause is identified, or when the evidence supports more than one listed cause and does not distinguish which one caused this failure.",
 		Criteria: map[string]any{
-			models.VerdictProductBug:     "The evidence identifies incorrect application behavior against an expectation the test states, and attributes the failure to the application. A failed assertion, an application error, or the absence of evidence for another cause is alone insufficient. A linked defect in `linked_defects` that describes this same incorrect behavior is supporting evidence.",
-			models.VerdictFlakyTest:      "The evidence identifies a test-side synchronization, timing, or stale-handle fault that caused this failure: the test acted before the application reached the state the test assumed, reused an element or handle after the page changed, or asserted on timing-dependent data. A successful retry or intermittent execution alone does not identify a test fault.",
-			models.VerdictEnvironment:    "The evidence identifies a specific missing or incorrect configuration of the test environment as the cause: an environment variable, browser, driver, credential, feature flag, base URL, or a dependency not deployed in this environment. A configuration value merely appearing in the evidence is insufficient.",
+			models.VerdictProductBug:     "The evidence identifies incorrect application behavior as the cause: the application produced a result that contradicts an expectation the test states, or the application answered an operation with a server error or exception and `history` shows the same operation failing the same way in other runs. A single failed assertion or application error with no stated expectation and no recurrence is insufficient. A linked defect describing this same incorrect behavior, or `history` entries with the same error labeled product_bug, are supporting evidence.",
+			models.VerdictFlakyTest:      "The evidence identifies a test-side synchronization, timing, or stale-handle fault as the cause: the test acted before the application reached the state the test assumed, reused an element or handle after the page changed, asserted on timing-dependent data such as an animation or a transient notification, or its wait for such an element expired while the operation itself is not shown to have failed. A wait or selector timeout that `history` shows recurring on this test with the same error, or whose matching `history` entries are labeled automation_bug, identifies such a fault. A successful retry alone is insufficient.",
+			models.VerdictEnvironment:    "The evidence identifies the environment under test as the cause: its base URL or an application host that does not respond or times out on navigation or connection, a dependency not deployed there, or a specific missing or incorrect configuration such as an environment variable, browser, driver, credential, feature flag, or base URL. A navigation timeout or connection failure against the application's own URL identifies the environment unless the evidence names a runner, network, or CI fault instead. A configuration value merely appearing in the evidence is insufficient.",
 			models.VerdictTestData:       "The evidence identifies missing, stale, already-consumed, duplicated, or malformed fixture or input data as the cause. A record absent from application output alone is insufficient.",
 			models.VerdictInfrastructure: "The evidence identifies an outage or resource failure of a shared system as the cause: a service reported as down, a host unreachable across operations, disk full, out of memory, a container, runner, or CI agent lost. Connection, DNS, and TLS errors alone do not distinguish an outage from a configuration or application fault.",
 			models.VerdictUnknown:        "No other option's cause is identified, or the evidence supports more than one listed cause without distinguishing them. This includes a deterministic wrong assertion or wrong locator in the test code, which this vocabulary has no option for.",
@@ -76,7 +76,7 @@ func defectTypeQuestion() typesafe.Question {
 	return typesafe.Question{
 		Type: "choice",
 		Instructions: "Which source of this failure does the evidence in `failure`, `test`, `history`, and `linked_defects` identify: the application code, the test automation or its fixtures, the environment or an external system, or is the evidence insufficient? " +
-			"Labels in `history` describe other failures, not this one. " +
+			"Labels in `history` describe other failures; an entry with the same error condition as this failure, and its label, bear on this one. " +
 			"Choose `insufficient_evidence` when no source is identified, or when the evidence supports more than one source and does not distinguish which one caused this failure.",
 		Criteria: map[string]any{
 			"product_bug":          "The evidence identifies the application under test behaving wrongly as the cause, and the fix would be made in the application.",

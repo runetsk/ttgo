@@ -29,6 +29,7 @@ type Analysis struct {
 	Version                       int      `json:"version"`
 	Engine                        string   `json:"engine"`
 	ModelName                     string   `json:"model_name"`
+	PolicyVersion                 string   `json:"policy_version"`
 	Verdict                       string   `json:"verdict"`
 	Confidence                    string   `json:"confidence"`
 	ConfidenceScore               *float64 `json:"confidence_score"`
@@ -40,7 +41,8 @@ type Analysis struct {
 	TypeSafeInputTokens           int      `json:"typesafe_input_tokens"`
 }
 
-// GroundTruth is one planted template of the AI demo dataset.
+// GroundTruth is one planted template of the AI demo dataset. An empty
+// ExpectedVerdict means the template is graded on its defect type only.
 type GroundTruth struct {
 	TemplateKey        string `json:"template_key"`
 	SampleMessage      string `json:"sample_message"`
@@ -48,11 +50,13 @@ type GroundTruth struct {
 	ExpectedDefectType string `json:"expected_defect_type"`
 }
 
-// Column is one engine/model pair that analyzed at least one row.
+// Column is one engine/model pair (and, for TypeSafe, one question-set policy
+// version) that analyzed at least one row.
 type Column struct {
 	Key    string `json:"key"`
 	Engine string `json:"engine"`
 	Model  string `json:"model"`
+	Policy string `json:"policy,omitempty"`
 }
 
 // Cell is the latest analysis of one row by one column.
@@ -173,9 +177,18 @@ func ParseGroundTruth(raw []byte) ([]GroundTruth, error) {
 	return obj.GroundTruth, nil
 }
 
-func columnKey(a Analysis) string { return a.Engine + "/" + a.ModelName }
+// columnKey names the column an analysis belongs to. TypeSafe rows carry the
+// question-set policy version, so a re-analysis under a new policy lands in
+// its own column next to the old one instead of replacing it.
+func columnKey(a Analysis) string {
+	key := a.Engine + "/" + a.ModelName
+	if a.PolicyVersion != "" {
+		key += "@" + a.PolicyVersion
+	}
+	return key
+}
 
-// Pivot builds the report: one column per engine/model pair, one row per
+// Pivot builds the report: one column per engine/model(/policy), one row per
 // result, each cell the latest version that column produced for that row.
 func Pivot(results []Result, analyses map[string][]Analysis) Report {
 	rep := Report{}
@@ -194,7 +207,7 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 				Tokens:          a.TypeSafeInputTokens + a.TokenUsagePrompt + a.TokenUsageCompletion,
 			}
 			if _, ok := seen[key]; !ok {
-				seen[key] = Column{Key: key, Engine: a.Engine, Model: a.ModelName}
+				seen[key] = Column{Key: key, Engine: a.Engine, Model: a.ModelName, Policy: a.PolicyVersion}
 			}
 		}
 		row.Disagree = disagree(row.Cells)
@@ -211,7 +224,10 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 		if a.Engine != b.Engine {
 			return a.Engine < b.Engine
 		}
-		return a.Model < b.Model
+		if a.Model != b.Model {
+			return a.Model < b.Model
+		}
+		return a.Policy < b.Policy
 	})
 	return rep
 }
@@ -248,9 +264,11 @@ func Grade(rep *Report, gt []GroundTruth) {
 	}
 }
 
-// BucketStats is grading within one confidence label.
+// BucketStats is grading within one confidence label. Graded counts rows
+// scored on defect type; VerdictGraded the subset whose key names a verdict.
 type BucketStats struct {
 	Graded         int `json:"graded"`
+	VerdictGraded  int `json:"verdict_graded"`
 	VerdictCorrect int `json:"verdict_correct"`
 	DefectCorrect  int `json:"defect_correct"`
 }
@@ -265,6 +283,7 @@ type ColumnStats struct {
 	MeanScore      float64                `json:"mean_confidence_score"`
 	Tokens         int                    `json:"tokens"`
 	Graded         int                    `json:"graded"`
+	VerdictGraded  int                    `json:"verdict_graded"`
 	VerdictCorrect int                    `json:"verdict_correct"`
 	DefectCorrect  int                    `json:"defect_correct"`
 	ByConfidence   map[string]BucketStats `json:"by_confidence"`
@@ -312,13 +331,17 @@ func Summarize(rep Report) Summary {
 				cs.Graded++
 				b := cs.ByConfidence[c.Confidence]
 				b.Graded++
-				if c.Verdict == row.Expected.ExpectedVerdict {
-					cs.VerdictCorrect++
-					b.VerdictCorrect++
-				}
 				if c.DefectType == row.Expected.ExpectedDefectType {
 					cs.DefectCorrect++
 					b.DefectCorrect++
+				}
+				if row.Expected.ExpectedVerdict != "" {
+					cs.VerdictGraded++
+					b.VerdictGraded++
+					if c.Verdict == row.Expected.ExpectedVerdict {
+						cs.VerdictCorrect++
+						b.VerdictCorrect++
+					}
 				}
 				cs.ByConfidence[c.Confidence] = b
 			}
@@ -415,7 +438,11 @@ func Render(w io.Writer, rep Report, s Summary) {
 		if graded {
 			exp := "—"
 			if row.Expected != nil {
-				exp = row.Expected.ExpectedVerdict + " / " + row.Expected.ExpectedDefectType
+				ev := row.Expected.ExpectedVerdict
+				if ev == "" {
+					ev = "any"
+				}
+				exp = ev + " / " + row.Expected.ExpectedDefectType
 			}
 			line = append(line, exp)
 		}
@@ -432,10 +459,12 @@ func Render(w io.Writer, rep Report, s Summary) {
 		}
 		fmt.Fprintf(w, ", %d abstained, %d tokens", cs.Abstained, cs.Tokens)
 		if cs.Graded > 0 {
-			fmt.Fprintf(w, "; graded %d: verdict %s, defect type %s", cs.Graded, pct(cs.VerdictCorrect, cs.Graded), pct(cs.DefectCorrect, cs.Graded))
+			fmt.Fprintf(w, "; verdict %s of %d, defect type %s of %d",
+				pct(cs.VerdictCorrect, cs.VerdictGraded), cs.VerdictGraded, pct(cs.DefectCorrect, cs.Graded), cs.Graded)
 			for _, label := range []string{"high", "medium", "low"} {
 				if b, ok := cs.ByConfidence[label]; ok {
-					fmt.Fprintf(w, " · %s %s of %d", label, pct(b.VerdictCorrect, b.Graded), b.Graded)
+					fmt.Fprintf(w, " · %s: verdict %s of %d, defect %s of %d",
+						label, pct(b.VerdictCorrect, b.VerdictGraded), b.VerdictGraded, pct(b.DefectCorrect, b.Graded), b.Graded)
 				}
 			}
 		}
