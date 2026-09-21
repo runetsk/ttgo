@@ -95,6 +95,27 @@ type Report struct {
 // does not point at a source.
 const Abstention = "insufficient_evidence"
 
+// isAbstention reports whether a stored or expected defect type means "no
+// suggestion": the analyzer stores a withheld or insufficient answer as "",
+// the answer key writes an expected abstention as the human label
+// to_investigate, and the question option itself is insufficient_evidence.
+func isAbstention(defectType string) bool {
+	switch defectType {
+	case "", Abstention, "to_investigate":
+		return true
+	}
+	return false
+}
+
+// defectMatch compares a suggestion with an expectation, treating every
+// abstention spelling as the same answer.
+func defectMatch(got, want string) bool {
+	if isAbstention(want) {
+		return isAbstention(got)
+	}
+	return got == want
+}
+
 var (
 	uuidRe   = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
 	hexRe    = regexp.MustCompile(`\b[0-9a-f]{12,}\b`)
@@ -285,7 +306,10 @@ type ColumnStats struct {
 	Key            string                 `json:"key"`
 	Analyzed       int                    `json:"analyzed"`
 	Verdicts       map[string]int         `json:"verdicts"`
-	Abstained      int                    `json:"abstained"`
+	Abstained      int                    `json:"abstained"`      // rows where the suggestion was withheld
+	Issued         int                    `json:"issued"`         // rows with a suggestion
+	IssuedGraded   int                    `json:"issued_graded"`  // graded rows with a suggestion
+	IssuedCorrect  int                    `json:"issued_correct"` // ...of which correct (conditional accuracy)
 	Scored         int                    `json:"scored"`
 	MeanScore      float64                `json:"mean_confidence_score"`
 	Tokens         int                    `json:"tokens"`
@@ -327,7 +351,10 @@ func Summarize(rep Report) Summary {
 			cs.Analyzed++
 			cs.Verdicts[c.Verdict]++
 			cs.Tokens += c.Tokens
-			if c.DefectType == Abstention {
+			issued := !isAbstention(c.DefectType)
+			if issued {
+				cs.Issued++
+			} else {
 				cs.Abstained++
 			}
 			if c.Score != nil {
@@ -338,9 +365,16 @@ func Summarize(rep Report) Summary {
 				cs.Graded++
 				b := cs.ByConfidence[c.Confidence]
 				b.Graded++
-				if c.DefectType == row.Expected.ExpectedDefectType {
+				ok := defectMatch(c.DefectType, row.Expected.ExpectedDefectType)
+				if ok {
 					cs.DefectCorrect++
 					b.DefectCorrect++
+				}
+				if issued {
+					cs.IssuedGraded++
+					if ok {
+						cs.IssuedCorrect++
+					}
 				}
 				if row.Expected.ExpectedVerdict != "" {
 					cs.VerdictGraded++
@@ -375,7 +409,7 @@ func Summarize(rep Report) Summary {
 				if a.Verdict == b.Verdict {
 					p.VerdictAgree++
 				}
-				if a.DefectType == b.DefectType {
+				if defectMatch(a.DefectType, b.DefectType) {
 					p.DefectAgree++
 				}
 			}
@@ -468,10 +502,11 @@ func Render(w io.Writer, rep Report, s Summary) {
 		if cs.Scored > 0 {
 			fmt.Fprintf(w, ", mean confidence %.0f%%", cs.MeanScore*100)
 		}
-		fmt.Fprintf(w, ", %d abstained, %d tokens", cs.Abstained, cs.Tokens)
+		fmt.Fprintf(w, ", suggestions issued %d / withheld %d, %d tokens", cs.Issued, cs.Abstained, cs.Tokens)
 		if cs.Graded > 0 {
-			fmt.Fprintf(w, "; verdict %s of %d, defect type %s of %d",
-				pct(cs.VerdictCorrect, cs.VerdictGraded), cs.VerdictGraded, pct(cs.DefectCorrect, cs.Graded), cs.Graded)
+			fmt.Fprintf(w, "; verdict %s of %d, defect type %s of %d (issued: %s of %d)",
+				pct(cs.VerdictCorrect, cs.VerdictGraded), cs.VerdictGraded, pct(cs.DefectCorrect, cs.Graded), cs.Graded,
+				pct(cs.IssuedCorrect, cs.IssuedGraded), cs.IssuedGraded)
 			for _, label := range []string{"high", "medium", "low"} {
 				if b, ok := cs.ByConfidence[label]; ok {
 					fmt.Fprintf(w, " · %s: verdict %s of %d, defect %s of %d",

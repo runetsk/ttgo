@@ -250,3 +250,56 @@ func TestPivot_FailedCallsAreNotAColumn(t *testing.T) {
 		t.Fatal("no cell for the failed call")
 	}
 }
+
+func abstentionFixture() ([]Result, map[string][]Analysis) {
+	results := []Result{
+		{ID: "w1", Name: "WS #1", Status: "FAIL", ErrorMessage: "WebSocket closed unexpectedly during background sync (code 1006)"},
+		{ID: "w2", Name: "WS #2", Status: "FAIL", ErrorMessage: "WebSocket closed unexpectedly during background sync (code 1006)"},
+		{ID: "w3", Name: "WS #3", Status: "FAIL", ErrorMessage: "WebSocket closed unexpectedly during background sync (code 1006)"},
+	}
+	analyses := map[string][]Analysis{
+		// A withheld suggestion is stored as "" (below the gate or the explicit
+		// insufficient_evidence option); both mean the engine abstained.
+		"w1": {{Version: 1, Engine: "typesafe", ModelName: "jev", Verdict: "unknown", Confidence: "medium", SuggestedDefectType: ""},
+			{Version: 2, Engine: "generative", ModelName: "gpt", Verdict: "unknown", Confidence: "low", SuggestedDefectType: "insufficient_evidence"}},
+		"w2": {{Version: 1, Engine: "typesafe", ModelName: "jev", Verdict: "unknown", Confidence: "medium", SuggestedDefectType: "system_issue"},
+			{Version: 2, Engine: "generative", ModelName: "gpt", Verdict: "infrastructure", Confidence: "high", SuggestedDefectType: "system_issue"}},
+		"w3": {{Version: 1, Engine: "typesafe", ModelName: "jev", Verdict: "unknown", Confidence: "medium", SuggestedDefectType: ""},
+			{Version: 2, Engine: "generative", ModelName: "gpt", Verdict: "environment", Confidence: "high", SuggestedDefectType: "system_issue"}},
+	}
+	return results, analyses
+}
+
+func TestSummarize_WithheldSuggestionsAreAbstentions(t *testing.T) {
+	rep := Pivot(abstentionFixture())
+	s := Summarize(rep)
+	ts, gen := s.Columns[0], s.Columns[1]
+	if ts.Abstained != 2 || ts.Issued != 1 {
+		t.Fatalf("typesafe: empty suggestions are abstentions: %+v", ts)
+	}
+	if gen.Abstained != 1 || gen.Issued != 2 {
+		t.Fatalf("generative: insufficient_evidence is an abstention: %+v", gen)
+	}
+}
+
+func TestGrade_AbstentionIsCanonical(t *testing.T) {
+	results, analyses := abstentionFixture()
+	rep := Pivot(results, analyses)
+	// The seed's answer key writes an abstention as the human label to_investigate.
+	Grade(&rep, []GroundTruth{{TemplateKey: "ws-close-1006", SampleMessage: results[0].ErrorMessage, ExpectedVerdict: "unknown", ExpectedDefectType: "to_investigate"}})
+	s := Summarize(rep)
+	ts, gen := s.Columns[0], s.Columns[1]
+	if ts.Graded != 3 || ts.DefectCorrect != 2 {
+		t.Fatalf("typesafe: two withheld suggestions match an expected abstention, system_issue does not: %+v", ts)
+	}
+	if gen.DefectCorrect != 1 {
+		t.Fatalf("generative: insufficient_evidence matches an expected abstention: %+v", gen)
+	}
+	// Conditional accuracy counts only issued suggestions on graded rows.
+	if ts.IssuedGraded != 1 || ts.IssuedCorrect != 0 {
+		t.Fatalf("typesafe issued: %+v", ts)
+	}
+	if gen.IssuedGraded != 2 || gen.IssuedCorrect != 0 {
+		t.Fatalf("generative issued: %+v", gen)
+	}
+}
