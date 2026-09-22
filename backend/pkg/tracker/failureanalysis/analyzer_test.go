@@ -417,3 +417,16 @@ func TestAnalyze_TypeSafeGetsTheFullLog(t *testing.T) {
 	logTail := fc.calls[0].State.(map[string]any)["failure"].(map[string]any)["log_tail"].(string)
 	require.True(t, strings.HasPrefix(logTail, marker), "Jev is given the whole log, not the 2,000-character tail")
 }
+
+func TestAnalyze_DerivedSuggestionIsMarkedOnTheRow(t *testing.T) {
+	fc := &fakeClient{fn: func(typesafe.Request) (*typesafe.Response, error) {
+		return decisionResponse("product_bug", 0.96, 0.9, DefectTypeInsufficient, 0.9, 0.8), nil
+	}}
+	prov := &stubProvider{responses: []string{`{"summary":"s","next_action":"n","rationale":"r"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Decider: NewTypeSafeDecider(fc, "jev"), Narrative: prov, NarrativeModel: "m"}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, "product_bug", out.SuggestedDefectType)
+	require.Equal(t, models.SuggestionSourceVerdict, out.SuggestionSource)
+	row := AnalysisRowFrom(out, "rr1")
+	require.Equal(t, models.SuggestionSourceVerdict, row.SuggestionSource)
+}

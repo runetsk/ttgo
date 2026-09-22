@@ -55,3 +55,14 @@ func TestSnapshotKey_SeparatesSameVerdictDifferentSuggestion(t *testing.T) {
 	require.NotEqual(t, snapshotKeyFor(a), snapshotKeyFor(c))
 	require.Equal(t, snapshotKeyFor(a), snapshotKeyFor(&models.RunResultAnalysis{Verdict: "unknown", Confidence: "low", Engine: "typesafe", SuggestedDefectType: "automation_bug", SuggestedDefectTypeConfidence: f(0.9)}))
 }
+
+func TestSnapshotValues_DerivedSuggestionIsItsOwnEngine(t *testing.T) {
+	a := &models.RunResultAnalysis{Verdict: "product_bug", Confidence: "high", Engine: models.AnalysisEngineTypeSafe,
+		ConfidenceScore: f(0.96), SuggestedDefectType: "product_bug", SuggestedDefectTypeConfidence: f(0.96),
+		SuggestionSource: models.SuggestionSourceVerdict}
+	v := snapshotValues(a, time.Date(2026, 9, 22, 9, 0, 0, 0, time.UTC))
+	require.Equal(t, models.AnalysisEngineTypeSafeDerived, v["suggested_engine"], "graded apart from question-answered suggestions")
+	require.Equal(t, "product_bug", v["suggested_defect_type"])
+	require.Equal(t, "high", v["suggested_confidence"])
+	require.InDelta(t, 0.96, *(v["suggested_confidence_score"].(*float64)), 1e-9)
+}

@@ -140,6 +140,9 @@ var ValidVerdicts = map[string]bool{
 	VerdictTestData: true, VerdictInfrastructure: true, VerdictUnknown: true,
 }
 
+// SuggestionSourceVerdict marks a suggestion derived from the verdict (see RunResultAnalysis).
+const SuggestionSourceVerdict = "verdict"
+
 // SuggestedDefectType maps an AI failure-analysis verdict to the defect_type it suggests.
 // The mapping is lossy (6 verdicts -> 4 defect types): flaky_test and test_data both suggest
 // "automation_bug"; environment and infrastructure both suggest "system_issue". "unknown" and
@@ -173,6 +176,10 @@ var ValidConfidences = map[string]bool{
 const (
 	AnalysisEngineGenerative = "generative" // the configured chat LLM decided the verdict
 	AnalysisEngineTypeSafe   = "typesafe"   // TypeSafe.ai System One decided; the LLM only narrated
+	// AnalysisEngineTypeSafeDerived is a triage-snapshot bucket, not an analysis engine: a
+	// TypeSafe row whose suggestion was derived from a confident verdict because the
+	// defect-type question abstained. Graded apart from question-answered suggestions.
+	AnalysisEngineTypeSafeDerived = "typesafe-derived"
 )
 
 // Narrative outcomes for a TypeSafe-decided analysis. Generative rows are always "ok".
@@ -234,7 +241,11 @@ type RunResultAnalysis struct {
 	// No read path may derive it from Verdict any more.
 	SuggestedDefectType           string   `json:"suggested_defect_type" gorm:"default:''"`
 	SuggestedDefectTypeConfidence *float64 `json:"suggested_defect_type_confidence,omitempty"`
-	DefectTypeProbabilities       string   `json:"defect_type_probabilities,omitempty" gorm:"type:text"`
+	// SuggestionSource is "" when the suggestion came from the defect-type question (or the
+	// generative mapping) and SuggestionSourceVerdict when TypeSafe's question abstained and
+	// the suggestion was derived from a verdict at or above VerdictHighMin.
+	SuggestionSource        string `json:"suggestion_source,omitempty" gorm:"default:''"`
+	DefectTypeProbabilities string `json:"defect_type_probabilities,omitempty" gorm:"type:text"`
 
 	NarrativeStatus     string `json:"narrative_status" gorm:"not null;default:'ok'"`
 	PolicyVersion       string `json:"policy_version,omitempty"`

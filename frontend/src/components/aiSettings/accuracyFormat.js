@@ -115,7 +115,7 @@ export function verdictRows(report) {
         }));
 }
 
-const ENGINE_LABELS = { typesafe: 'TypeSafe', generative: 'LLM' };
+const ENGINE_LABELS = { typesafe: 'TypeSafe', 'typesafe-derived': 'TypeSafe (from verdict)', generative: 'LLM' };
 
 // engineRows shapes one confidence ladder per engine. Ladders are per engine because generative
 // confidence is self-reported by the LLM while TypeSafe's is calibrated on the defect-type

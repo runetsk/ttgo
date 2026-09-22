@@ -36,3 +36,14 @@ test('groupingNote distinguishes signature and semantic clones', () => {
     assert.equal(groupingNote({ dedup_group_key: 'k', dedup_method: '' }), 'Grouped with an identical failure');
     assert.equal(groupingNote({ dedup_group_key: 'k', dedup_method: 'semantic', dedup_p_same: 0.93 }), 'Grouped semantically (p = 0.93)');
 });
+
+test('analysisMetaParts says when the suggestion was derived from the verdict', () => {
+    const parts = analysisMetaParts({
+        engine: 'typesafe', model_name: 'jev', confidence_score: 0.96,
+        suggested_defect_type: 'product_bug', suggested_defect_type_confidence: 0.96, suggestion_source: 'verdict',
+    });
+    assert.ok(parts.some((p) => p.includes('from the verdict')), JSON.stringify(parts));
+    assert.ok(parts.some((p) => p.includes('(0.96, from the verdict)')), JSON.stringify(parts));
+    const asked = analysisMetaParts({ engine: 'typesafe', suggested_defect_type: 'product_bug', suggested_defect_type_confidence: 0.7 });
+    assert.ok(!asked.some((p) => p.includes('from the verdict')), 'a question-answered suggestion is not marked');
+});

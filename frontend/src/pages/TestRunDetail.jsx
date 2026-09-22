@@ -82,6 +82,7 @@ export default function TestRunDetail() {
                     verdict: d.verdict,
                     suggested_defect_type: d.suggested_defect_type,
                     suggested_defect_type_confidence: d.suggested_defect_type_confidence ?? null,
+                    suggestion_source: d.suggestion_source || '',
                     confidence: d.confidence,
                     confidence_score: d.confidence_score ?? null,
                     engine: d.engine || 'generative',

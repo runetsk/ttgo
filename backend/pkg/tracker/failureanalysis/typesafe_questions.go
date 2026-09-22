@@ -10,7 +10,7 @@ import (
 // Bump the matching policy version whenever any of them changes: stored analyses
 // record it, so calibration can be read per policy.
 const (
-	PolicyVersion         = "fa-verdict-v3"  // verdict + defect_type questions and thresholds
+	PolicyVersion         = "fa-verdict-v4"  // verdict + defect_type questions, thresholds and the derived-suggestion rule
 	SemanticPolicyVersion = "fa-semantic-v1" // same-cause question and grouping thresholds
 )
 

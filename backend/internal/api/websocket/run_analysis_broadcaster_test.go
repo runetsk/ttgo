@@ -76,6 +76,7 @@ func TestBroadcastRunResultAnalysisCreated_FullTypeSafePayload(t *testing.T) {
 		SuggestedDefectType:           "automation_bug",
 		SuggestedDefectTypeConfidence: &defectTypeConfidence,
 		NarrativeStatus:               models.NarrativeStatusOK,
+		SuggestionSource:              models.SuggestionSourceVerdict,
 		DedupGroupKey:                 &dedupGroupKey,
 		DedupMethod:                   models.DedupMethodSemantic,
 		DedupPSame:                    &dedupPSame,
@@ -105,6 +106,7 @@ func TestBroadcastRunResultAnalysisCreated_FullTypeSafePayload(t *testing.T) {
 		require.Equal(t, models.ConfidenceHigh, ev.Data["confidence"])
 		require.Equal(t, confidenceScore, ev.Data["confidence_score"])
 		require.Equal(t, models.AnalysisEngineTypeSafe, ev.Data["engine"])
+		require.Equal(t, models.SuggestionSourceVerdict, ev.Data["suggestion_source"])
 		require.Equal(t, "jev-1.13.0", ev.Data["model_name"])
 		require.Equal(t, models.NarrativeStatusOK, ev.Data["narrative_status"])
 		require.Equal(t, dedupGroupKey, ev.Data["dedup_group_key"])

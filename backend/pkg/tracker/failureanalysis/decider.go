@@ -17,6 +17,7 @@ type Decision struct {
 	SuggestedDefectType     string
 	DefectTypeConfidence    float64
 	DefectTypeProbabilities map[string]float64
+	SuggestionSource        string // models.SuggestionSourceVerdict when derived from the verdict
 	Model                   string // versioned id from the response
 	InputTokens             int
 	PolicyVersion           string
@@ -60,14 +61,24 @@ func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, e
 		return nil, &typesafe.Error{Category: typesafe.CategoryParse, Message: fmt.Sprintf("verdict %q is not a known verdict", v.Choice)}
 	}
 	dt := resp.Answers["defect_type"]
-	suggested := dt.Choice
+	suggested, source, suggestedConf := dt.Choice, "", dt.Confidence
 	if suggested == DefectTypeInsufficient || dt.Confidence < DefectTypeSuggestMin || !models.ValidDefectTypes[suggested] {
 		suggested = ""
 	}
+	// The defect-type question abstains far more often than the verdict is wrong: on the
+	// benchmark every withheld suggestion under a high-confidence verdict would have been
+	// right. Derive it through the same mapping the generative path uses, carry the
+	// verdict's confidence, and mark the source so calibration grades it separately.
+	if suggested == "" && v.Choice != models.VerdictUnknown && v.Confidence >= VerdictHighMin {
+		if derived := models.SuggestedDefectType(v.Choice); derived != "" {
+			suggested, source, suggestedConf = derived, models.SuggestionSourceVerdict, v.Confidence
+		}
+	}
 	return &Decision{
 		Verdict: v.Choice, VerdictConfidence: v.Confidence, VerdictProbabilities: v.Probabilities,
-		SuggestedDefectType: suggested, DefectTypeConfidence: dt.Confidence, DefectTypeProbabilities: dt.Probabilities,
-		Model: resp.Model, InputTokens: resp.Usage.InputTokens, PolicyVersion: PolicyVersion,
+		SuggestedDefectType: suggested, DefectTypeConfidence: suggestedConf, DefectTypeProbabilities: dt.Probabilities,
+		SuggestionSource: source,
+		Model:            resp.Model, InputTokens: resp.Usage.InputTokens, PolicyVersion: PolicyVersion,
 	}, nil
 }
 

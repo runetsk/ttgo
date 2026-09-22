@@ -48,6 +48,7 @@ type AnalyzeResult struct {
 	VerdictProbabilities          string // JSON
 	SuggestedDefectType           string
 	SuggestedDefectTypeConfidence *float64
+	SuggestionSource              string
 	DefectTypeProbabilities       string // JSON
 	NarrativeStatus               string
 	PolicyVersion                 string
@@ -95,6 +96,7 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 		VerdictProbabilities:          jsonOrEmpty(decision.VerdictProbabilities),
 		SuggestedDefectType:           decision.SuggestedDefectType,
 		SuggestedDefectTypeConfidence: f64ptr(decision.DefectTypeConfidence),
+		SuggestionSource:              decision.SuggestionSource,
 		DefectTypeProbabilities:       jsonOrEmpty(decision.DefectTypeProbabilities),
 		PolicyVersion:                 decision.PolicyVersion,
 		TypeSafeInputTokens:           decision.InputTokens,

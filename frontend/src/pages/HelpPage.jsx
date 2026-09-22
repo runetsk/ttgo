@@ -587,7 +587,7 @@ function AIFailureAnalysisSection() {
 
             <SectionHeader>How accurate is it?</SectionHeader>
             <Card>
-                <P>Settings &gt; AI Failure Analysis reports how often the AI&apos;s suggestion matched the decision you actually made — overall, per verdict, split by confidence, and per engine (TypeSafe.ai and your LLM are graded separately, because their confidence scores mean different things).</P>
+                <P>Settings &gt; AI Failure Analysis reports how often the AI&apos;s suggestion matched the decision you actually made — overall, per verdict, split by confidence, and per engine (TypeSafe.ai and your LLM are graded separately, because their confidence scores mean different things). A third ladder, &quot;TypeSafe (from verdict)&quot;, covers suggestions TypeSafe.ai derived from a high-confidence verdict because its defect-type question abstained; the card marks those &quot;from the verdict&quot;.</P>
                 <P>The confidence split is the one to read. If agreement drops as confidence drops (say 90%, then 69%, then 43%), the confidence score is meaningful and you can act on it. If it is flat across all three, confidence is not telling you anything useful yet.</P>
                 <Tip>Expect it to be empty at first. Only results you have genuinely triaged are counted — anything still sitting at &quot;To investigate&quot; is treated as not yet triaged, never as a disagreement.</Tip>
             </Card>

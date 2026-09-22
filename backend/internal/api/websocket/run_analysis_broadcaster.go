@@ -47,6 +47,7 @@ func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisCreated(a *models.Run
 		"verdict":                          a.Verdict,
 		"suggested_defect_type":            a.SuggestedDefectType,
 		"suggested_defect_type_confidence": a.SuggestedDefectTypeConfidence,
+		"suggestion_source":                a.SuggestionSource,
 		"confidence":                       a.Confidence,
 		"confidence_score":                 a.ConfidenceScore,
 		"engine":                           a.Engine,

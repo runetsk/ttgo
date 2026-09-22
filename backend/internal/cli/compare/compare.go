@@ -35,6 +35,7 @@ type Analysis struct {
 	ConfidenceScore               *float64 `json:"confidence_score"`
 	SuggestedDefectType           string   `json:"suggested_defect_type"`
 	SuggestedDefectTypeConfidence *float64 `json:"suggested_defect_type_confidence"`
+	SuggestionSource              string   `json:"suggestion_source"`
 	NarrativeStatus               string   `json:"narrative_status"`
 	TokenUsagePrompt              int      `json:"token_usage_prompt"`
 	TokenUsageCompletion          int      `json:"token_usage_completion"`
@@ -61,14 +62,15 @@ type Column struct {
 
 // Cell is the latest analysis of one row by one column.
 type Cell struct {
-	Version         int      `json:"version"`
-	Verdict         string   `json:"verdict"`
-	Confidence      string   `json:"confidence"`
-	Score           *float64 `json:"confidence_score,omitempty"`
-	DefectType      string   `json:"suggested_defect_type"`
-	DefectScore     *float64 `json:"suggested_defect_type_confidence,omitempty"`
-	NarrativeStatus string   `json:"narrative_status,omitempty"`
-	Tokens          int      `json:"tokens"`
+	Version          int      `json:"version"`
+	Verdict          string   `json:"verdict"`
+	Confidence       string   `json:"confidence"`
+	Score            *float64 `json:"confidence_score,omitempty"`
+	DefectType       string   `json:"suggested_defect_type"`
+	DefectScore      *float64 `json:"suggested_defect_type_confidence,omitempty"`
+	SuggestionSource string   `json:"suggestion_source,omitempty"`
+	NarrativeStatus  string   `json:"narrative_status,omitempty"`
+	Tokens           int      `json:"tokens"`
 }
 
 // Row is one failing result with its cell per column.
@@ -231,8 +233,8 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 			row.Cells[key] = &Cell{
 				Version: a.Version, Verdict: a.Verdict, Confidence: a.Confidence, Score: a.ConfidenceScore,
 				DefectType: a.SuggestedDefectType, DefectScore: a.SuggestedDefectTypeConfidence,
-				NarrativeStatus: a.NarrativeStatus,
-				Tokens:          a.TypeSafeInputTokens + a.TokenUsagePrompt + a.TokenUsageCompletion,
+				SuggestionSource: a.SuggestionSource, NarrativeStatus: a.NarrativeStatus,
+				Tokens: a.TypeSafeInputTokens + a.TokenUsagePrompt + a.TokenUsageCompletion,
 			}
 			if _, ok := seen[key]; !ok {
 				seen[key] = Column{Key: key, Engine: a.Engine, Model: a.ModelName, Policy: a.PolicyVersion}
@@ -308,6 +310,7 @@ type ColumnStats struct {
 	Verdicts       map[string]int         `json:"verdicts"`
 	Abstained      int                    `json:"abstained"`      // rows where the suggestion was withheld
 	Issued         int                    `json:"issued"`         // rows with a suggestion
+	Derived        int                    `json:"derived"`        // ...of which derived from the verdict (TypeSafe)
 	IssuedGraded   int                    `json:"issued_graded"`  // graded rows with a suggestion
 	IssuedCorrect  int                    `json:"issued_correct"` // ...of which correct (conditional accuracy)
 	Scored         int                    `json:"scored"`
@@ -354,6 +357,9 @@ func Summarize(rep Report) Summary {
 			issued := !isAbstention(c.DefectType)
 			if issued {
 				cs.Issued++
+				if c.SuggestionSource == "verdict" {
+					cs.Derived++
+				}
 			} else {
 				cs.Abstained++
 			}
@@ -502,7 +508,11 @@ func Render(w io.Writer, rep Report, s Summary) {
 		if cs.Scored > 0 {
 			fmt.Fprintf(w, ", mean confidence %.0f%%", cs.MeanScore*100)
 		}
-		fmt.Fprintf(w, ", suggestions issued %d / withheld %d, %d tokens", cs.Issued, cs.Abstained, cs.Tokens)
+		fmt.Fprintf(w, ", suggestions issued %d", cs.Issued)
+		if cs.Derived > 0 {
+			fmt.Fprintf(w, " (%d derived from the verdict)", cs.Derived)
+		}
+		fmt.Fprintf(w, " / withheld %d, %d tokens", cs.Abstained, cs.Tokens)
 		if cs.Graded > 0 {
 			fmt.Fprintf(w, "; verdict %s of %d, defect type %s of %d (issued: %s of %d)",
 				pct(cs.VerdictCorrect, cs.VerdictGraded), cs.VerdictGraded, pct(cs.DefectCorrect, cs.Graded), cs.Graded,

@@ -22,7 +22,9 @@ export function analysisMetaParts(analysis) {
     if (c) parts.push(`confidence ${c}`);
     if (analysis.suggested_defect_type) {
         const dc = fmt(analysis.suggested_defect_type_confidence);
-        parts.push(`suggested defect type: ${suggestionLabel(analysis.suggested_defect_type)}${dc ? ` (${dc})` : ''}`);
+        const derived = analysis.suggestion_source === 'verdict';
+        const detail = [dc, derived ? 'from the verdict' : null].filter(Boolean).join(', ');
+        parts.push(`suggested defect type: ${suggestionLabel(analysis.suggested_defect_type)}${detail ? ` (${detail})` : ''}`);
     } else {
         parts.push('no defect type suggested');
     }

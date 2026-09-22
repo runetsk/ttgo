@@ -234,3 +234,13 @@ test('engineRows tolerates a missing or empty by_engine', () => {
     assert.deepEqual(engineRows({ by_engine: [] }), []);
     assert.deepEqual(engineRows({ by_engine: [{ engine: 'typesafe', total: 0 }] }), []);
 });
+
+test('engineRows labels suggestions derived from a confident verdict as their own ladder', () => {
+    const rows = engineRows({
+        by_engine: [
+            { engine: 'typesafe', total: 3, agreed: 3, rate: 1, by_confidence: [{ confidence: 'high', total: 3, agreed: 3, rate: 1 }] },
+            { engine: 'typesafe-derived', total: 2, agreed: 2, rate: 1, by_confidence: [{ confidence: 'high', total: 2, agreed: 2, rate: 1 }] },
+        ],
+    });
+    assert.deepEqual(rows.map((r) => [r.key, r.label]), [['typesafe', 'TypeSafe'], ['typesafe-derived', 'TypeSafe (from verdict)']]);
+});

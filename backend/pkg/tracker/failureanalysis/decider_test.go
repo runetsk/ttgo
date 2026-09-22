@@ -103,3 +103,38 @@ func TestDecider_ShrinksAndRetriesOnceOnOversized(t *testing.T) {
 	require.True(t, te.Oversized)
 	require.Len(t, always.calls, 2, "no endless retry")
 }
+
+func TestDecider_DerivesTheSuggestionFromAConfidentVerdictWhenTheQuestionAbstains(t *testing.T) {
+	decide := func(verdict string, vconf float64, defect string, dconf float64) *Decision {
+		fc := &fakeClient{fn: func(typesafe.Request) (*typesafe.Response, error) {
+			return decisionResponse(verdict, vconf, 0.9, defect, dconf, 0.8), nil
+		}}
+		d, err := NewTypeSafeDecider(fc, "jev").Decide(context.Background(), BuildEvidence(baseContext()))
+		require.NoError(t, err)
+		return d
+	}
+	// The question abstains, the verdict is confident: derive through the same mapping the LLM path uses.
+	d := decide("flaky_test", 0.95, DefectTypeInsufficient, 0.85)
+	require.Equal(t, "automation_bug", d.SuggestedDefectType)
+	require.Equal(t, models.SuggestionSourceVerdict, d.SuggestionSource)
+	require.Equal(t, 0.95, d.DefectTypeConfidence, "a derived suggestion carries the verdict's confidence")
+
+	// Below the gate on the question, same rule.
+	d = decide("environment", 0.92, "system_issue", 0.30)
+	require.Equal(t, "system_issue", d.SuggestedDefectType)
+	require.Equal(t, models.SuggestionSourceVerdict, d.SuggestionSource)
+
+	// An unknown verdict derives nothing; neither does a verdict below VerdictHighMin.
+	d = decide("unknown", 0.95, DefectTypeInsufficient, 0.85)
+	require.Empty(t, d.SuggestedDefectType)
+	require.Empty(t, d.SuggestionSource)
+	d = decide("product_bug", 0.80, DefectTypeInsufficient, 0.85)
+	require.Empty(t, d.SuggestedDefectType)
+	require.Empty(t, d.SuggestionSource)
+
+	// A question that answered keeps its own answer and confidence, unmarked.
+	d = decide("product_bug", 0.95, "product_bug", 0.7)
+	require.Equal(t, "product_bug", d.SuggestedDefectType)
+	require.Empty(t, d.SuggestionSource)
+	require.Equal(t, 0.7, d.DefectTypeConfidence)
+}

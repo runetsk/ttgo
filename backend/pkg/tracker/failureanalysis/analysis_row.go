@@ -14,6 +14,7 @@ func AnalysisRowFrom(res *AnalyzeResult, resultID string) *models.RunResultAnaly
 		Engine: res.Engine, ConfidenceScore: res.ConfidenceScore, VerdictProbabilities: res.VerdictProbabilities,
 		SuggestedDefectType: res.SuggestedDefectType, SuggestedDefectTypeConfidence: res.SuggestedDefectTypeConfidence,
 		DefectTypeProbabilities: res.DefectTypeProbabilities, NarrativeStatus: res.NarrativeStatus,
-		PolicyVersion: res.PolicyVersion, TypeSafeInputTokens: res.TypeSafeInputTokens,
+		SuggestionSource: res.SuggestionSource,
+		PolicyVersion:    res.PolicyVersion, TypeSafeInputTokens: res.TypeSafeInputTokens,
 	}
 }

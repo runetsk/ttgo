@@ -303,3 +303,15 @@ func TestGrade_AbstentionIsCanonical(t *testing.T) {
 		t.Fatalf("generative issued: %+v", gen)
 	}
 }
+
+func TestSummarize_CountsDerivedSuggestions(t *testing.T) {
+	results := []Result{{ID: "r1", Name: "A", Status: "FAIL", ErrorMessage: "a"}, {ID: "r2", Name: "B", Status: "FAIL", ErrorMessage: "b"}}
+	analyses := map[string][]Analysis{
+		"r1": {{Version: 1, Engine: "typesafe", ModelName: "jev", Verdict: "product_bug", Confidence: "high", SuggestedDefectType: "product_bug", SuggestionSource: "verdict"}},
+		"r2": {{Version: 1, Engine: "typesafe", ModelName: "jev", Verdict: "product_bug", Confidence: "high", SuggestedDefectType: "product_bug"}},
+	}
+	s := Summarize(Pivot(results, analyses))
+	if s.Columns[0].Issued != 2 || s.Columns[0].Derived != 1 {
+		t.Fatalf("derived suggestions are issued and counted separately: %+v", s.Columns[0])
+	}
+}

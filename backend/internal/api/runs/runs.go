@@ -441,6 +441,9 @@ func snapshotValues(a *models.RunResultAnalysis, decidedAt time.Time) map[string
 	if engine == "" {
 		engine = models.AnalysisEngineGenerative
 	}
+	if engine == models.AnalysisEngineTypeSafe && a.SuggestionSource == models.SuggestionSourceVerdict {
+		engine = models.AnalysisEngineTypeSafeDerived // graded apart: the confidence is the verdict's
+	}
 	v := map[string]interface{}{
 		"suggested_verdict":          a.Verdict,
 		"suggested_defect_type":      a.SuggestedDefectType,
@@ -449,7 +452,7 @@ func snapshotValues(a *models.RunResultAnalysis, decidedAt time.Time) map[string
 		"suggested_confidence_score": nil,
 		"decided_at":                 decidedAt,
 	}
-	if engine == models.AnalysisEngineTypeSafe && a.SuggestedDefectTypeConfidence != nil {
+	if a.Engine == models.AnalysisEngineTypeSafe && a.SuggestedDefectTypeConfidence != nil {
 		score := *a.SuggestedDefectTypeConfidence
 		v["suggested_confidence"] = snapshotBucket(score)
 		v["suggested_confidence_score"] = &score
