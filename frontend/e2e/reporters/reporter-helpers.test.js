@@ -119,3 +119,22 @@ test('buildResultBody keeps the tail of an oversized log and omits log_text on a
     });
     assert.equal(passed.log_text, undefined);
 });
+
+test('buildResultBody strips ANSI colour codes from the error, the stack and the log', () => {
+    const esc = '\u001b';
+    const body = buildResultBody({
+        result: {
+            status: 'failed', duration: 10, retry: 0,
+            error: {
+                message: `Error: ${esc}[2mexpect(${esc}[22m${esc}[31mreceived${esc}[39m${esc}[2m).${esc}[22mtoBe`,
+                stack: `Error: boom\n    at ${esc}[90mfile.js:1:1${esc}[39m`,
+            },
+            stdout: [`${esc}[32m✓${esc}[39m step ok\n`],
+            stderr: [],
+        },
+        testCaseId: 'tc6', name: 'a.spec.js › ansi',
+    });
+    assert.equal(body.error_message, 'Error: expect(received).toBe');
+    assert.equal(body.stack_trace, 'Error: boom\n    at file.js:1:1');
+    assert.equal(body.log_text, '✓ step ok\n');
+});

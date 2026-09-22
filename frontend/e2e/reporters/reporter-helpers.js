@@ -8,7 +8,15 @@ export function testCaseName(test) {
     return test.titlePath().filter(Boolean).slice(1).join(' › ');
 }
 
+// Playwright colours its expect messages and stack frames; the escape codes are
+// noise on the run page and in the AI evidence.
+const ANSI = new RegExp(String.fromCharCode(27) + '\\[[0-9;?]*[ -/]*[@-~]', 'g');
+function stripAnsi(s) {
+    return s ? String(s).replace(ANSI, '') : '';
+}
+
 function truncate(s, max = 4000) {
+    s = stripAnsi(s);
     if (!s) return '';
     return s.length > max ? `${s.slice(0, max)}\n…[truncated]` : s;
 }
@@ -73,6 +81,7 @@ export function extractSteps(result) {
 const LOG_TEXT_MAX = 200000;
 
 function tailTruncate(s, max = LOG_TEXT_MAX) {
+    s = stripAnsi(s);
     if (!s) return '';
     return s.length > max ? `…[truncated]\n${s.slice(-max)}` : s;
 }
