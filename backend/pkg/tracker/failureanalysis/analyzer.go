@@ -72,7 +72,7 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 	var decision *Decision
 	fallbackPrefix := ""
 	if deps.Decider != nil {
-		d, err := deps.Decider.Decide(ctx, ev)
+		d, err := deps.Decider.Decide(ctx, BuildEvidenceWithBudget(in, TypeSafeBudget()))
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

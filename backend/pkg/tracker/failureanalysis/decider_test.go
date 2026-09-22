@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/typesafe"
@@ -71,4 +72,34 @@ func TestDecider_PropagatesClientErrors(t *testing.T) {
 	fc := &fakeClient{fn: func(req typesafe.Request) (*typesafe.Response, error) { return nil, want }}
 	_, err := NewTypeSafeDecider(fc, "m").Decide(context.Background(), BuildEvidence(baseContext()))
 	require.True(t, errors.Is(err, want))
+}
+
+func TestDecider_ShrinksAndRetriesOnceOnOversized(t *testing.T) {
+	fc := &fakeClient{}
+	fc.fn = func(req typesafe.Request) (*typesafe.Response, error) {
+		if len(fc.calls) == 1 {
+			return nil, &typesafe.Error{Status: 422, Oversized: true, Message: "context limit exceeded"}
+		}
+		return decisionResponse("product_bug", 0.95, 0.9, "product_bug", 0.9, 0.9), nil
+	}
+	in := baseContext()
+	in.Result.LogText = strings.Repeat("l", 40000)
+	ev := BuildEvidenceWithBudget(in, TypeSafeBudget())
+	d, err := NewTypeSafeDecider(fc, "jev").Decide(context.Background(), ev)
+	require.NoError(t, err)
+	require.Equal(t, "product_bug", d.Verdict)
+	require.Len(t, fc.calls, 2, "one shrink-and-retry")
+	first := fc.calls[0].State.(map[string]any)["failure"].(map[string]any)["log_tail"].(string)
+	second := fc.calls[1].State.(map[string]any)["failure"].(map[string]any)["log_tail"].(string)
+	require.Len(t, first, 40000)
+	require.Less(t, len(second), len(first), "the retry sends a smaller state")
+
+	always := &fakeClient{fn: func(typesafe.Request) (*typesafe.Response, error) {
+		return nil, &typesafe.Error{Status: 422, Oversized: true, Message: "context limit exceeded"}
+	}}
+	_, err = NewTypeSafeDecider(always, "jev").Decide(context.Background(), ev)
+	var te *typesafe.Error
+	require.ErrorAs(t, err, &te)
+	require.True(t, te.Oversized)
+	require.Len(t, always.calls, 2, "no endless retry")
 }

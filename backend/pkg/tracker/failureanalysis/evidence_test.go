@@ -195,3 +195,46 @@ func TestBuildPrompt_RuneSafeCaps(t *testing.T) {
 	require.True(t, utf8.ValidString(prompt), "BuildPrompt must never cut inside a multi-byte rune")
 	require.Equal(t, 500+StackTraceHeadCap+LogTextTailCap+2, utf8.RuneCountInString(prompt))
 }
+
+func TestBuildEvidence_TypeSafeBudgetKeepsTheWholeLog(t *testing.T) {
+	marker := "UNIQUE-LOG-START-MARKER"
+	in := baseContext()
+	in.Result.LogText = marker + " " + strings.Repeat("l", 35000) // a 5,000-word log
+	in.Result.ErrorMessage = strings.Repeat("e", 9000)
+	in.Result.StackTrace = strings.Repeat("s", 9000)
+	b := TypeSafeBudget()
+	ev := BuildEvidenceWithBudget(in, b)
+	require.True(t, strings.HasPrefix(ev.LogText, marker), "the whole log is kept when it fits the budget")
+	require.Len(t, ev.ErrorMessage, 9000)
+	require.Len(t, ev.StackTrace, 9000)
+	require.Equal(t, b.StateChars, ev.StateCap)
+
+	in.Result.LogText = strings.Repeat("x", 100000) + " END"
+	ev = BuildEvidenceWithBudget(in, b)
+	require.Len(t, ev.LogText, b.LogTail)
+	require.True(t, strings.HasSuffix(ev.LogText, " END"), "an oversized log keeps its tail")
+
+	// The generative path is unchanged: the default builder keeps today's caps and
+	// the prompt re-caps even a large Evidence.
+	gen := BuildEvidence(in)
+	require.Len(t, gen.LogText, LogTextTailCap)
+	require.Zero(t, gen.StateCap)
+	in.Result.LogText = marker + " " + strings.Repeat("l", 35000)
+	prompt, _, err := BuildPrompt(BuildEvidenceWithBudget(in, b).PromptInput(DefaultPromptTemplate))
+	require.NoError(t, err)
+	require.NotContains(t, prompt, marker, "the LLM prompt still sees only the log tail")
+}
+
+func TestRenderState_HonoursTheEvidenceStateCap(t *testing.T) {
+	in := baseContext()
+	in.Result.LogText = strings.Repeat("l", 40000)
+	ev := BuildEvidenceWithBudget(in, TypeSafeBudget())
+	state, meta := RenderState(ev)
+	require.Empty(t, meta.TruncationPrefix, "40k of log fits the TypeSafe state bound")
+	require.Len(t, state["failure"].(map[string]any)["log_tail"], 40000)
+
+	ev.StateCap = 0 // the default bound
+	state, meta = RenderState(ev)
+	require.NotEmpty(t, meta.TruncationPrefix, "the default 40k bound must trim")
+	require.Empty(t, state["failure"].(map[string]any)["log_tail"], "the log is the first block dropped")
+}

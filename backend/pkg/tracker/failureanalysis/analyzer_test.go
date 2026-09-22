@@ -401,3 +401,19 @@ func TestAnalyze_GenerativePathPersistsLegacySuggestion(t *testing.T) {
 	require.Equal(t, "system_issue", out.SuggestedDefectType)
 	require.Equal(t, models.NarrativeStatusOK, out.NarrativeStatus)
 }
+
+func TestAnalyze_TypeSafeGetsTheFullLog(t *testing.T) {
+	marker := "UNIQUE-LOG-START-MARKER"
+	in := baseContext()
+	in.Result.LogText = marker + " " + strings.Repeat("l", 30000)
+	fc := &fakeClient{fn: func(typesafe.Request) (*typesafe.Response, error) {
+		return decisionResponse("product_bug", 0.95, 0.9, "product_bug", 0.9, 0.9), nil
+	}}
+	prov := &stubProvider{responses: []string{`{"summary":"s","next_action":"n","rationale":"r"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Decider: NewTypeSafeDecider(fc, "jev"), Narrative: prov, NarrativeModel: "m"}, in)
+	require.NoError(t, err)
+	require.Equal(t, "typesafe", string(out.Engine))
+	require.Len(t, fc.calls, 1)
+	logTail := fc.calls[0].State.(map[string]any)["failure"].(map[string]any)["log_tail"].(string)
+	require.True(t, strings.HasPrefix(logTail, marker), "Jev is given the whole log, not the 2,000-character tail")
+}

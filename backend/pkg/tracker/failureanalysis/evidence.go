@@ -38,6 +38,39 @@ type Evidence struct {
 	SimilarFailuresRollup                              string
 	LinkedDefects                                      []LinkedDefect
 	LinkedRequirements                                 []LinkedRequirement
+	StateCap                                           int // bound on the rendered JSON state; 0 = StateCharCap
+}
+
+// Budget is an engine's allowance for the three large text fields (runes) and
+// for the rendered state. Every other cap is shared.
+type Budget struct {
+	ErrorHead, StackHead, LogTail int
+	StateChars                    int // 0 = StateCharCap
+}
+
+// TypeSafe budget (spec §6 revised 2026-09-22): Jev is asked to read the failure
+// as recorded, its window is 32k tokens of state, and a filled window costs a
+// tenth of a cent, so it gets the whole log tail up to 48,000 characters and
+// 16,000 characters each of error and stack inside a 64,000-character state
+// (up to about 32k tokens: logs full of ids and timestamps tokenize near two
+// characters per token). The ladder still trims a larger state, and the
+// decider retries an oversized rejection once at half the bound. The LLM
+// prompt keeps its own, smaller caps.
+const (
+	TypeSafeErrorHeadCap = 16000
+	TypeSafeStackHeadCap = 16000
+	TypeSafeLogTailCap   = 48000
+	TypeSafeStateCharCap = 64000
+)
+
+// GenerativeBudget is the allowance the LLM prompt has always had.
+func GenerativeBudget() Budget {
+	return Budget{ErrorHead: ErrorMessageHeadCap, StackHead: StackTraceHeadCap, LogTail: LogTextTailCap}
+}
+
+// TypeSafeBudget is the allowance for the Jev state.
+func TypeSafeBudget() Budget {
+	return Budget{ErrorHead: TypeSafeErrorHeadCap, StackHead: TypeSafeStackHeadCap, LogTail: TypeSafeLogTailCap, StateChars: TypeSafeStateCharCap}
 }
 
 // headRunes / tailRunes are rune-safe: they never cut inside a multi-byte sequence.
@@ -70,6 +103,12 @@ func tailRunes(s string, n int) string {
 // BuildEvidence applies redaction (when enabled) and every per-field cap. It never mutates
 // the caller's AnalyzeContext or RunResult.
 func BuildEvidence(in AnalyzeContext) Evidence {
+	return BuildEvidenceWithBudget(in, GenerativeBudget())
+}
+
+// BuildEvidenceWithBudget builds the evidence with an engine's allowance for the
+// error message, stack head, log tail and state bound.
+func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 	r := in.Result
 	red := func(s string) string {
 		if in.RedactionEnabled {
@@ -85,9 +124,10 @@ func BuildEvidence(in AnalyzeContext) Evidence {
 		OS:                    headRunes(in.OS, EnvFieldCap),
 		AppVersion:            headRunes(in.AppVersion, EnvFieldCap),
 		FailureType:           headRunes(r.FailureType, EnvFieldCap),
-		ErrorMessage:          headRunes(red(r.ErrorMessage), ErrorMessageHeadCap),
-		StackTrace:            headRunes(red(r.StackTrace), StackTraceHeadCap),
-		LogText:               tailRunes(red(r.LogText), LogTextTailCap),
+		ErrorMessage:          headRunes(red(r.ErrorMessage), b.ErrorHead),
+		StackTrace:            headRunes(red(r.StackTrace), b.StackHead),
+		LogText:               tailRunes(red(r.LogText), b.LogTail),
+		StateCap:              b.StateChars,
 		SimilarFailuresRollup: headRunes(in.SimilarFailuresRollup, RollupCap),
 	}
 	steps := in.Steps
@@ -163,11 +203,15 @@ func applyHardCap(ev *Evidence) {
 // with the per-field caps, kept as the safety net); if it is exhausted the hard cap truncates
 // stack then error, so the result is always <= StateCharCap.
 func RenderState(ev Evidence) (map[string]any, PromptMeta) {
+	bound := ev.StateCap
+	if bound <= 0 {
+		bound = StateCharCap
+	}
 	var dropped []string
 	for {
 		state := stateObject(ev)
 		b, _ := json.Marshal(state)
-		if len(b) <= StateCharCap {
+		if len(b) <= bound {
 			return state, PromptMeta{TruncationPrefix: makePrefix(dropped)}
 		}
 		name, ok := dropNext(&ev)
