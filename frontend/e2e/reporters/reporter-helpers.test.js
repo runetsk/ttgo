@@ -89,3 +89,33 @@ test('extractSteps returns [] when there are no test.step entries', () => {
     assert.deepEqual(extractSteps({ steps: [{ category: 'pw:api', title: 'x' }] }), []);
     assert.deepEqual(extractSteps({}), []);
 });
+
+test('buildResultBody attaches captured stdout and stderr as log_text on failure', () => {
+    const body = buildResultBody({
+        result: {
+            status: 'failed', duration: 10, retry: 0,
+            error: { message: 'boom', stack: 'at x' },
+            stdout: ['step 1 ok\n', Buffer.from('step 2 ok\n')],
+            stderr: ['warn: slow response\n'],
+        },
+        testCaseId: 'tc3',
+        name: 'a.spec.js › logs',
+    });
+    assert.equal(body.log_text, 'step 1 ok\nstep 2 ok\n[stderr] warn: slow response\n');
+});
+
+test('buildResultBody keeps the tail of an oversized log and omits log_text on a pass', () => {
+    const big = 'x'.repeat(250000) + 'THE END';
+    const failed = buildResultBody({
+        result: { status: 'failed', duration: 10, retry: 0, error: { message: 'boom' }, stdout: [big], stderr: [] },
+        testCaseId: 'tc4', name: 'a.spec.js › big',
+    });
+    assert.ok(failed.log_text.length <= 200000 + 40, `capped: ${failed.log_text.length}`);
+    assert.ok(failed.log_text.endsWith('THE END'), 'the tail is what the analysis needs');
+    assert.ok(failed.log_text.startsWith('…[truncated]'), 'the cut is marked at the head');
+    const passed = buildResultBody({
+        result: { status: 'passed', duration: 10, retry: 0, stdout: ['noise\n'], stderr: [] },
+        testCaseId: 'tc5', name: 'a.spec.js › ok',
+    });
+    assert.equal(passed.log_text, undefined);
+});

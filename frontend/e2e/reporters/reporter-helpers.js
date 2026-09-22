@@ -41,6 +41,8 @@ export function buildResultBody({ result, testCaseId, name, environment = 'e2e',
         body.error_message = truncate(err.message ?? '');
         body.stack_trace = truncate(err.stack ?? '');
         body.failure_type = result.status; // 'failed' | 'timedOut' | 'interrupted'
+        const log = capturedLog(result);
+        if (log) body.log_text = tailTruncate(log);
     }
 
     // The create endpoint copies defect_type verbatim — it does NOT apply the
@@ -64,4 +66,24 @@ export function extractSteps(result) {
         }
     }
     return steps;
+}
+
+// Logs are read by the AI failure analysis from the END (TypeSafe gets up to
+// 48,000 characters of tail, the LLM 2,000), so an oversized log keeps its tail.
+const LOG_TEXT_MAX = 200000;
+
+function tailTruncate(s, max = LOG_TEXT_MAX) {
+    if (!s) return '';
+    return s.length > max ? `…[truncated]\n${s.slice(-max)}` : s;
+}
+
+// capturedLog joins the attempt's stdout and stderr chunks (Playwright hands
+// them over as strings or Buffers) into one text, stderr lines marked.
+export function capturedLog(result) {
+    const text = (chunks) => (chunks || []).map((c) => (Buffer.isBuffer(c) ? c.toString('utf8') : String(c ?? ''))).join('');
+    const out = text(result.stdout);
+    const err = text(result.stderr);
+    if (!err) return out;
+    const marked = err.split('\n').map((line, i, all) => (line === '' && i === all.length - 1 ? '' : `[stderr] ${line}`)).join('\n');
+    return out + marked;
 }

@@ -207,8 +207,10 @@ The Playwright e2e suite can push its own results into a running TTGO instance a
 a test run. It is opt-in: set `TTGO_REPORT_TOKEN` (a **write**-scoped API token from
 **Settings → API Tokens**) and the reporter auto-provisions a `Playwright E2E` folder,
 category, and one test case per Playwright test, then records each run with per-test
-pass/fail, duration, and failure details. With the token unset, the suite behaves exactly
-as before.
+pass/fail, duration, and failure details: the error message, the stack, the failure
+screenshot, and the test's captured stdout and stderr as the result's log (stderr lines
+marked, the last 200,000 characters kept), which the AI failure analysis reads. With the
+token unset, the suite behaves exactly as before.
 
 ```bash
 cd frontend
