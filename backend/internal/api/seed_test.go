@@ -133,3 +133,28 @@ func TestHandleCreateAISeed_FailureScale(t *testing.T) {
 	assert.EqualValues(t, 2, scaled["failure_scale"])
 	assert.Greater(t, scaled["failing_rows"].(float64), base["failing_rows"].(float64)*1.5, "scale 2 plants many more failures")
 }
+
+func TestHandleCreateAISeed_LogWords(t *testing.T) {
+	s, err := newTestStore(t)
+	require.NoError(t, err)
+	srv := NewServer(s)
+	post := func(body string) (int, map[string]any) {
+		r := httptest.NewRequest(http.MethodPost, "/api/seed/ai", strings.NewReader(body))
+		r.Header.Set("Content-Type", "application/json")
+		rr := httptest.NewRecorder()
+		srv.handleCreateAISeed(rr, r)
+		var out map[string]any
+		_ = json.Unmarshal(rr.Body.Bytes(), &out)
+		return rr.Code, out
+	}
+	code, out := post(`{"log_words": 20001}`)
+	assert.Equal(t, http.StatusBadRequest, code, "%v", out)
+
+	code, out = post(`{"failure_scale": 1, "log_words": 1000}`)
+	require.Equal(t, http.StatusCreated, code, "%v", out)
+	assert.EqualValues(t, 1000, out["log_words"])
+	rows, err := s.ListLatestFailingResults(store.AIDemoLatestRunID())
+	require.NoError(t, err)
+	require.NotEmpty(t, rows)
+	assert.GreaterOrEqual(t, len(strings.Fields(rows[0].LogText)), 800, "seeded failures carry a log of the requested size")
+}

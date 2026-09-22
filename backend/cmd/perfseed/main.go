@@ -50,6 +50,7 @@ func run(args []string, out io.Writer) error {
 	perRun := fs.Int("per-run", 500, "ai profile only — results per run")
 	nCases := fs.Int("cases", 600, "ai profile only — test-case catalog size")
 	failureScale := fs.Int("failure-scale", 1, "ai profile only — multiply each planted template's dedicated cases and the latest-run incident slice (1-5); raise -per-run and -cases to make room")
+	logWords := fs.Int("log-words", 0, "ai profile only — plant a realistic log of about this many words on every failing row (0 = the three-line tail; max 20000)")
 	seed := fs.Uint64("seed", 1, "seed for deterministic data generation")
 	users := fs.Int("users", 10, "number of perf users to create")
 	tokens := fs.Int("tokens", 100, "number of write-scoped API tokens (keep >= peak VUs so ingest load spreads across token rows rather than hammering last_used_at on a few)")
@@ -154,7 +155,11 @@ func run(args []string, out io.Writer) error {
 		}
 		cfg := store.DefaultAISeedConfig()
 		cfg.Seed, cfg.Days, cfg.ResultsPerRun, cfg.TestCases = *seed, *days, *perRun, *nCases
+		if *logWords < 0 || *logWords > 20000 {
+			return fmt.Errorf("-log-words must be between 0 and 20000")
+		}
 		cfg.FailureScale = *failureScale
+		cfg.LogWords = *logWords
 		res, err := s.SeedAIFailureDataset(cfg)
 		if err != nil {
 			return fmt.Errorf("seed ai dataset: %w", err)

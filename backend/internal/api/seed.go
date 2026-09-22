@@ -126,7 +126,7 @@ func (s *Server) handleCreateSeed(w http.ResponseWriter, r *http.Request) {
 // @Failure      409  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
 // @Accept       json
-// @Param        body  body  object{failure_scale=int}  false  "Optional: multiply the planted failures (1-5); omit for the default dataset"
+// @Param        body  body  object{failure_scale=int,log_words=int}  false  "Optional: multiply the planted failures (1-5) and/or plant a realistic log of about log_words words (0-20000) on every failing row; omit for the default dataset"
 // @Router       /seed/ai [post]
 // @Security     BearerAuth
 func (s *Server) handleCreateAISeed(w http.ResponseWriter, r *http.Request) {
@@ -142,14 +142,14 @@ func (s *Server) handleCreateAISeed(w http.ResponseWriter, r *http.Request) {
 		userID = user.ID
 	}
 
-	scale, err := aiSeedScale(r)
+	opts, err := parseAISeedOptions(r)
 	if err != nil {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
 	start := time.Now()
-	slog.InfoContext(r.Context(), "seed: ai demo operation started", "user_id", userID, "failure_scale", scale)
+	slog.InfoContext(r.Context(), "seed: ai demo operation started", "user_id", userID, "failure_scale", opts.FailureScale, "log_words", opts.LogWords)
 
 	replaced, err := s.store.HasAIDemoData()
 	if err != nil {
@@ -158,7 +158,7 @@ func (s *Server) handleCreateAISeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := s.store.SeedAIDemoTxWithScale(scale)
+	result, err := s.store.SeedAIDemoTxWithOptions(opts.FailureScale, opts.LogWords)
 	if err != nil {
 		slog.ErrorContext(r.Context(), "seed: ai demo operation failed", "duration", time.Since(start), "error", err)
 		httpx.Error(w, http.StatusInternalServerError, err)
@@ -287,27 +287,41 @@ func (s *Server) handleResetAllData(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, counts)
 }
 
-// aiSeedScale reads the optional {"failure_scale": n} body of POST /seed/ai.
-// No body, an empty body, or a body without the field means the default
-// dataset (scale 1).
-func aiSeedScale(r *http.Request) (int, error) {
+// aiSeedOptions holds the optional body of POST /seed/ai.
+type aiSeedOptions struct {
+	FailureScale int
+	LogWords     int
+}
+
+// parseAISeedOptions reads the optional {"failure_scale": n, "log_words": m} body of
+// POST /seed/ai. No body, an empty body, or a body without a field means that
+// field's default: scale 1, the three-line log tail.
+func parseAISeedOptions(r *http.Request) (aiSeedOptions, error) {
+	opts := aiSeedOptions{FailureScale: 1}
 	if r.Body == nil || r.ContentLength == 0 {
-		return 1, nil
+		return opts, nil
 	}
 	var req struct {
 		FailureScale *int `json:"failure_scale"`
+		LogWords     *int `json:"log_words"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		if errors.Is(err, io.EOF) {
-			return 1, nil
+			return opts, nil
 		}
-		return 0, fmt.Errorf("invalid body: %w", err)
+		return opts, fmt.Errorf("invalid body: %w", err)
 	}
-	if req.FailureScale == nil {
-		return 1, nil
+	if req.FailureScale != nil {
+		if *req.FailureScale < 1 || *req.FailureScale > 5 {
+			return opts, fmt.Errorf("failure_scale must be between 1 and 5")
+		}
+		opts.FailureScale = *req.FailureScale
 	}
-	if *req.FailureScale < 1 || *req.FailureScale > 5 {
-		return 0, fmt.Errorf("failure_scale must be between 1 and 5")
+	if req.LogWords != nil {
+		if *req.LogWords < 0 || *req.LogWords > 20000 {
+			return opts, fmt.Errorf("log_words must be between 0 and 20000")
+		}
+		opts.LogWords = *req.LogWords
 	}
-	return *req.FailureScale, nil
+	return opts, nil
 }

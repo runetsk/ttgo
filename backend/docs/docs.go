@@ -7111,13 +7111,16 @@ const docTemplate = `{
                 "summary": "Seed AI failure-analysis demo data",
                 "parameters": [
                     {
-                        "description": "Optional: multiply the planted failures (1-5); omit for the default dataset",
+                        "description": "Optional: multiply the planted failures (1-5) and/or plant a realistic log of about log_words words (0-20000) on every failing row; omit for the default dataset",
                         "name": "body",
                         "in": "body",
                         "schema": {
                             "type": "object",
                             "properties": {
                                 "failure_scale": {
+                                    "type": "integer"
+                                },
+                                "log_words": {
                                     "type": "integer"
                                 }
                             }

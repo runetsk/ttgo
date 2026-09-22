@@ -307,3 +307,36 @@ func TestAIDemoGroundTruth_CoversTheNewTemplates(t *testing.T) {
 	}
 	assert.Len(t, gt, 26, "14 original + 12 new templates")
 }
+
+func TestAIDataset_LogWordsPlantsRealisticLogsOnFailures(t *testing.T) {
+	cfg := AISeedConfig{Seed: 1, Days: 7, ResultsPerRun: 300, TestCases: 350, LogWords: 1500}
+	ds, _, err := buildAIFailureDataset(cfg)
+	require.NoError(t, err)
+	checked := 0
+	for _, r := range ds.results {
+		if r.Status != models.StatusFail && r.Status != models.StatusError {
+			continue
+		}
+		words := len(strings.Fields(r.LogText))
+		require.GreaterOrEqual(t, words, 1200, "a %d-word budget must produce a log of that order: got %d", cfg.LogWords, words)
+		require.LessOrEqual(t, words, 2000, "the log must not run far past the budget: got %d", words)
+		require.True(t, strings.HasSuffix(strings.TrimSpace(r.LogText), r.ErrorMessage), "the log ends with the failure line")
+		require.Contains(t, r.LogText, "[info]")
+		if r.FailureType != "timeout" && r.FailureType != "network" {
+			require.NotContains(t, r.LogText, "cdn-edge", "the transient-502 hint stays confined to network and timeout failures")
+		}
+		checked++
+	}
+	require.Positive(t, checked)
+
+	// Without the option the log tail keeps its three-line shape.
+	cfg.LogWords = 0
+	ds, _, err = buildAIFailureDataset(cfg)
+	require.NoError(t, err)
+	for _, r := range ds.results {
+		if r.Status == models.StatusFail {
+			require.Equal(t, 3, len(strings.Split(strings.TrimSpace(r.LogText), "\n")))
+			break
+		}
+	}
+}

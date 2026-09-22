@@ -5660,13 +5660,16 @@ paths:
         results with planted failure groups, triage history, and a ground-truth answer
         key). Replaces a previously loaded AI demo dataset. Admin only.
       parameters:
-      - description: 'Optional: multiply the planted failures (1-5); omit for the
-          default dataset'
+      - description: 'Optional: multiply the planted failures (1-5) and/or plant a
+          realistic log of about log_words words (0-20000) on every failing row; omit
+          for the default dataset'
         in: body
         name: body
         schema:
           properties:
             failure_scale:
+              type: integer
+            log_words:
               type: integer
           type: object
       produces:

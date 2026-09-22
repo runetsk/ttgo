@@ -29,6 +29,7 @@ func AIDemoLatestRunID() string { return perfID(aiDemoSeed, "ai-run", 0) }
 type AISeedDemoResult struct {
 	ReplacedExisting bool                `json:"replaced_existing"`
 	FailureScale     int                 `json:"failure_scale"`
+	LogWords         int                 `json:"log_words"`
 	Created          SeedCounts          `json:"created"`
 	FailingRows      int                 `json:"failing_rows"`
 	LabeledRows      int                 `json:"labeled_rows"`
@@ -55,8 +56,16 @@ func (s *Store) SeedAIDemoTx() (AISeedDemoResult, error) { return s.SeedAIDemoTx
 // reload; rows beyond the smaller copy's IDs are cleaned up by Remove Demo
 // Data through their demo_seeds marks.
 func (s *Store) SeedAIDemoTxWithScale(scale int) (AISeedDemoResult, error) {
+	return s.SeedAIDemoTxWithOptions(scale, 0)
+}
+
+// SeedAIDemoTxWithOptions is SeedAIDemoTxWithScale with a log budget: when
+// logWords > 0 every failing row carries a realistic log of about that many
+// words (see aiLongLog) instead of the three-line tail.
+func (s *Store) SeedAIDemoTxWithOptions(scale, logWords int) (AISeedDemoResult, error) {
 	cfg := DefaultAISeedConfig().Scaled(scale)
 	cfg.Seed = aiDemoSeed
+	cfg.LogWords = logWords
 	return s.seedAIDemoTx(cfg)
 }
 
@@ -96,6 +105,7 @@ func (s *Store) seedAIDemoTx(cfg AISeedConfig) (AISeedDemoResult, error) {
 		LatestRunID:  built.LatestRunID,
 		GroundTruth:  built.GroundTruth,
 		FailureScale: cfg.scale(),
+		LogWords:     cfg.LogWords,
 	}, nil
 }
 

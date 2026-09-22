@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand/v2"
+	"strings"
 	"time"
 	"ttgo/pkg/tracker/models"
 
@@ -22,6 +23,7 @@ type AISeedConfig struct {
 	ResultsPerRun int
 	TestCases     int
 	FailureScale  int // multiplies every template's dedicated cases and the newest run's incident slice; 0 or 1 = as designed
+	LogWords      int // 0 = the three-line log tail; otherwise every failing row carries a realistic log of about this many words that ends with the failure line
 }
 
 // DefaultAISeedConfig mirrors a mid-size project: 30 daily runs x 500 results.
@@ -657,7 +659,12 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 				res.ErrorMessage = msg
 				res.StackTrace = t.stack(rng, msg)
 				res.FailureType = t.failureType
-				res.LogText = aiLogText(msg, t.failureType, start.Add(-40*time.Second).UTC().Format("2006-01-02T15:04:05Z"), ts)
+				if cfg.LogWords > 0 {
+					logRNG := rand.New(rand.NewPCG(cfg.Seed, uint64(r*cfg.ResultsPerRun+j)))
+					res.LogText = aiLongLog(logRNG, cases[caseIdx].Name, t.failureType, msg, start.Add(-40*time.Second), cfg.LogWords)
+				} else {
+					res.LogText = aiLogText(msg, t.failureType, start.Add(-40*time.Second).UTC().Format("2006-01-02T15:04:05Z"), ts)
+				}
 				res.DurationMs = 100 + rng.Int64N(4900)
 				if t.failureType == "timeout" {
 					res.DurationMs = 30000 + rng.Int64N(16000)
@@ -824,4 +831,51 @@ func fsStack(msg string, rng *rand.Rand) string {
 	return fmt.Sprintf(
 		"Error: %s\n    at Object.writeSync (node:fs:%d:%d)\n    at TraceWriter.flush (lib/artifacts.js:%d:%d)",
 		msg, 900+rng.IntN(100), 3+rng.IntN(20), 40+rng.IntN(60), 5+rng.IntN(12))
+}
+
+// aiLongLog renders a realistic test log of about `words` words for a failing
+// result: timestamped step, request, wait and fixture lines with the occasional
+// warning, the transient-502 hint only on network and timeout failures (same
+// rule as aiLogText), and the failure line last. Deterministic per row. It is
+// what a Playwright reporter would upload as log_text for a test of that length.
+func aiLongLog(rng *rand.Rand, testName, failureType, msg string, start time.Time, words int) string {
+	actions := [...]string{
+		"navigated to /%s and waited for the page to become idle (%dms)",
+		"clicked [data-test=%s-submit] and waited for the network to settle (%dms)",
+		"GET /api/v1/%s returned 200 in %dms (cache miss, 3 upstream calls)",
+		"POST /api/v1/%s returned 201 in %dms with a small JSON body",
+		"waited for selector .%s-panel to be visible (took %dms)",
+		"filled the %s form with fixture values and submitted it (%dms)",
+		"assertion passed: %s count equals the API payload (%d items)",
+		"screenshot captured for step %s (%d KB)",
+		"loaded fixture set qa-nightly/%s (%d records)",
+		"scrolled the %s list to the end and read %d rows",
+	}
+	resources := [...]string{"checkout", "cart", "orders", "profile", "search", "inventory", "reports", "auth", "notifications", "payments"}
+	var b strings.Builder
+	count := 0
+	write := func(line string) {
+		b.WriteString(line)
+		b.WriteByte('\n')
+		count += strings.Count(line, " ") + 1
+	}
+	ts := start
+	stamp := func() string { return ts.UTC().Format("2006-01-02T15:04:05Z") }
+	write(fmt.Sprintf("[%s] [info] scenario started: %s (worker %d, shard %d/4)", stamp(), testName, 1+rng.IntN(6), 1+rng.IntN(4)))
+	for i := 1; count < words; i++ {
+		ts = ts.Add(time.Duration(120+rng.IntN(900)) * time.Millisecond)
+		res := resources[rng.IntN(len(resources))]
+		if i%17 == 0 {
+			write(fmt.Sprintf("[%s] [warn] response from /api/v1/%s took %dms, above the 800ms budget; continuing", stamp(), res, 900+rng.IntN(1500)))
+			continue
+		}
+		write(fmt.Sprintf("[%s] [info] step %d: "+actions[rng.IntN(len(actions))], stamp(), i, res, 40+rng.IntN(700)))
+	}
+	if failureType == "timeout" || failureType == "network" {
+		ts = ts.Add(2 * time.Second)
+		write(fmt.Sprintf("[%s] [warn] retrying request once after transient 502 from cdn-edge", stamp()))
+	}
+	ts = ts.Add(time.Duration(300+rng.IntN(2000)) * time.Millisecond)
+	b.WriteString(fmt.Sprintf("[%s] [error] %s", stamp(), msg))
+	return b.String()
 }
