@@ -13,6 +13,7 @@ import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { latestAttempts, applyResultDelta } from '../utils/runResults';
 import { isFailureStatus } from '../utils/resultStatus';
+import { shouldReplaceAnalysis } from '../utils/analysisMeta.js';
 import DefectsTab from './testRunDetail/DefectsTab';
 import TimelineTab from './testRunDetail/TimelineTab';
 import CompareTab from './testRunDetail/CompareTab';
@@ -74,9 +75,8 @@ export default function TestRunDetail() {
         if (event.type === 'run_result_analysis.created') {
             const d = event.data || {};
             if (!d.run_result_id) return;
-            setCurrentAnalyses((prev) => ({
-                ...prev,
-                [d.run_result_id]: {
+            setCurrentAnalyses((prev) => {
+                const incoming = {
                     id: d.analysis_id,
                     version: d.version,
                     verdict: d.verdict,
@@ -88,11 +88,19 @@ export default function TestRunDetail() {
                     engine: d.engine || 'generative',
                     model_name: d.model_name || '',
                     narrative_status: d.narrative_status || 'ok',
+                    decision_status: d.decision_status || 'ok',
+                    error_category: d.error_category || '',
+                    takeover_from_verdict: d.takeover_from_verdict || '',
+                    takeover_from_confidence: d.takeover_from_confidence ?? null,
+                    job_id: d.job_id || null,
                     dedup_group_key: d.dedup_group_key || null,
                     dedup_method: d.dedup_method || '',
                     dedup_p_same: d.dedup_p_same ?? null,
-                },
-            }));
+                };
+                // Explain can fill in an older version and broadcasts it; never roll the grid back.
+                if (!shouldReplaceAnalysis(prev[d.run_result_id], incoming)) return prev;
+                return { ...prev, [d.run_result_id]: incoming };
+            });
             return;
         }
         const d = event.data;

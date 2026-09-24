@@ -8,6 +8,7 @@ import { inDateRange } from '../../utils/dateFilter';
 import RunResultDetail from '../../components/RunResultDetail';
 import CommentsPanel from '../../components/CommentsPanel';
 import AIVerdictBadge from '../../components/AIVerdictBadge';
+import { isFailedAnalysis } from '../../utils/analysisMeta.js';
 import RunAnalysisBanner from '../../components/RunAnalysisBanner';
 import RunResultsToolbar from '../../components/RunResultsToolbar';
 import { useRunViewPreference } from '../../hooks/useRunViewPreference';
@@ -1092,7 +1093,7 @@ function AIVerdictCell({ result, analysis, onAnalyze }) {
                 onClick={async (e) => {
                     e.stopPropagation();
                     setLoading(true);
-                    try { await onAnalyze(); } finally { setLoading(false); }
+                    try { await onAnalyze(); } catch { /* toasted by the API interceptor */ } finally { setLoading(false); }
                 }}
                 disabled={loading}
                 style={{ padding: '2px 10px', fontSize: 11 }}
@@ -1109,6 +1110,8 @@ function AIVerdictCell({ result, analysis, onAnalyze }) {
             engine={analysis.engine}
             modelName={analysis.model_name}
             confidenceScore={analysis.confidence_score}
+            failed={isFailedAnalysis(analysis)}
+            errorCategory={analysis.error_category}
         />
     );
 }

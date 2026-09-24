@@ -528,17 +528,31 @@ function AIFailureAnalysisSection() {
 
             <SectionHeader>What it does</SectionHeader>
             <Card>
-                <P>When a test fails, TTGO can ask your configured LLM to work out <em>why</em> it failed and propose how it should be classified. The AI only ever suggests — you decide, and the decisions you make are what reveal how far the AI can be trusted.</P>
+                <P>When a test fails, TTGO can ask your configured LLM, or TypeSafe.ai&apos;s decision model, to work out <em>why</em> it failed and propose how it should be classified. The AI only ever suggests — you decide, and the decisions you make are what reveal how far the AI can be trusted.</P>
                 <P>Only failing results (Failed and Error) are analyzed. Passing results are never sent anywhere.</P>
             </Card>
 
             <SectionHeader>Starting an analysis</SectionHeader>
             <Card>
                 <DL items={[
-                    ['Automatically when a run finishes', 'Turn on "Auto-analyze on run completion" under Settings → AI Failure Analysis, and tick "Auto failure analysis" on the provider itself (Add/Edit Provider dialog). The provider checkbox is off by default — until you opt the provider in, nothing is sent on its own. If TypeSafe.ai is enabled, automatic analyses only contact it when "Allow on automatic analysis" is on in the TypeSafe.ai card; manual analyses use it whenever it is enabled.'],
-                    ['On demand for a whole run', 'Open a run and click "Analyze failures". A banner shows progress across the failure groups, and you can cancel part-way through.'],
+                    ['Automatically when a run finishes', 'Turn on "Auto-analyze on run completion" in the AI Failure Analysis card (Settings → AI Generation), and tick "Auto failure analysis" on the provider itself (Add/Edit Provider dialog). The provider checkbox is off by default — until you opt the provider in, nothing is sent on its own. If TypeSafe.ai is enabled, automatic analyses only contact it when "Allow on automatic analysis" is on in the TypeSafe.ai card; manual analyses use it whenever it is enabled.'],
+                    ['On demand for a whole run', 'Open a run and click "Analyze failures". A banner shows progress across the failure groups, and you can cancel part-way through. When the job ends, the banner says how many groups were decided, failed or left without an explanation, and which pipeline ran; if any failed, "Retry failed groups" re-analyzes only those.'],
                     ['On demand for one result', 'Open a failing result and analyze just that one — useful when you only care about a single failure, or want to re-analyze after the error changed.'],
                 ]} />
+            </Card>
+
+            <SectionHeader>Settings</SectionHeader>
+            <Card>
+                <P>Settings → AI Generation holds two cards for failure analysis. Both save with the Save button in their header and show &quot;Unsaved changes&quot; until you do.</P>
+                <DL items={[
+                    ['AI Failure Analysis card', 'Switches for "Auto-analyze on run completion", "Deduplicate similar failures" and "Redact secrets"; the cap on failure groups analyzed per run; "Groups analyzed at once" (4 by default, 1 to 8), which runs that many groups side by side and is the setting to lower if your LLM provider answers with rate-limit errors; the prompt template; and the accuracy report described below.'],
+                    ['TypeSafe.ai card: status', 'A pill next to the title shows the saved state: On, Off, No API key, or Key unreadable (the stored key can no longer be decrypted; enter it again).'],
+                    ['Connection', 'The API key is stored encrypted and shown masked. Test connection checks the stored key with one small request, so save a new key before testing it; "Remove the stored key" deletes it on the next save. The model is pinned to jev-1.13.0 by default, because confidence thresholds are tuned per version. The timeout is how long one TypeSafe answer may take before it counts as unavailable.'],
+                    ['What TypeSafe does', '"Use for failure verdicts" lets TypeSafe decide the verdict and the suggested defect type. "Semantic failure grouping" merges failure groups that share a cause even when the error text differs. "Allow on automatic analysis" is TypeSafe\'s own consent for runs analyzed on completion; manual analyses use TypeSafe whenever it is enabled.'],
+                    ['How your LLM helps', '"Write an explanation with the default LLM", "Use the default LLM when TypeSafe is unavailable" and "Ask the LLM when TypeSafe\'s confidence is below" only matter while TypeSafe decides verdicts, so they are greyed out with a note when "Use for failure verdicts" is off. Each is explained under Verdicts and confidence.'],
+                    ['What an analysis will do', 'A panel at the bottom of the TypeSafe.ai card spells out, for an analysis started by hand and one started by run completion, who decides, who explains, what happens when TypeSafe is unsure or unavailable, and whether any failure data reaches the LLM. It follows the switches as you change them, before you save.'],
+                ]} />
+                <P>The server reaches TypeSafe.ai at api.typesafe.ai. To go through a gateway that serves the same System One endpoint, start the server with TYPESAFE_BASE_URL set — for OpenRouter, https://openrouter.ai/api with an OpenRouter key and the model jev-1.13 or jev-latest. Gateways do not list models, so Test connection then sends one tiny evaluation to prove the key instead.</P>
             </Card>
 
             <SectionHeader>What the AI is given</SectionHeader>
@@ -546,7 +560,7 @@ function AIFailureAnalysisSection() {
                 <P>The model sees more than the error message. Each analysis carries the context a human would want before judging:</P>
                 <UL items={[
                     'The failure itself — failure type, error message, stack trace, and the tail of the log',
-                    "This test's own recent history — how it has failed over the last 30 days",
+                    "This test's own recent history — how it failed in the 30 days before this failure, never anything recorded after it",
                     'How your team triaged those earlier failures — the defect types you picked',
                     'Defects and requirements linked to the test case',
                     'The steps that ran, plus browser, OS, environment and app version',
@@ -562,11 +576,24 @@ function AIFailureAnalysisSection() {
                     ['Test data', 'Bad, missing or stale fixture data caused the failure.'],
                     ['Environment', 'Something about the environment or its configuration.'],
                     ['Infrastructure', 'CI, the runner, or the network.'],
-                    ['Unknown', 'The model could not tell. With TypeSafe.ai a defect type may still be suggested when the evidence points at a source without matching a verdict.'],
+                    ['Unknown', 'The model could not tell. With TypeSafe.ai a defect type is still suggested when the evidence points at the test itself (an automation bug), the one cause the verdicts above have no name for.'],
                 ]} />
                 <P>Every verdict also carries a confidence of low, medium or high, along with a short summary, a suggested next action, and the reasoning behind it.</P>
-                <P>With TypeSafe.ai enabled, the verdict and the suggested defect type come from a calibrated decision model and the confidence is a real probability-based score; your LLM writes only the explanation.</P>
-                <P>The server reaches TypeSafe.ai at api.typesafe.ai. To go through a gateway that serves the same System One endpoint, start the server with TYPESAFE_BASE_URL set — for OpenRouter, https://openrouter.ai/api with an OpenRouter key and the model jev-1.13 or jev-latest. Gateways do not list models, so the card&apos;s connection test then sends one tiny evaluation to prove the key instead.</P>
+                <P>With TypeSafe.ai enabled, the verdict and the suggested defect type come from a calibrated decision model and the confidence is a real probability-based score; your LLM writes only the explanation. Switch off &quot;Write an explanation with the default LLM&quot; in the TypeSafe.ai card to store the classification alone: each failure group is then decided in well under a second, and the analysis card shows a short notice with an Explain button that asks your LLM for the explanation later, without changing the verdict. To let your LLM take over when TypeSafe.ai is unsure, set &quot;Ask the LLM when TypeSafe&apos;s confidence is below (%)&quot;: a verdict under that confidence is decided and explained by your default LLM instead, the analysis is graded as the LLM&apos;s, and its rationale starts with what TypeSafe.ai said. 0 (the default) never asks; 90 hands over every medium- and low-confidence verdict. If the LLM cannot be reached, or its reply cannot be read, TypeSafe.ai&apos;s decision is kept.</P>
+                <P>&quot;Use the default LLM when TypeSafe is unavailable&quot; decides what happens when TypeSafe.ai cannot be reached: on, your LLM decides instead and the analysis says so; off, the attempt is recorded as failed and can be retried. A missing or unreadable TypeSafe.ai key counts as unavailable. With explanations, takeover and fallback all off, no failure data is sent to the LLM at all. The card spells out the resulting route for manual and automatic analyses before you save.</P>
+                <P>An analysis that could not be made — the provider timed out, rate-limited, or twice returned a reply that was cut off or unreadable — is shown as &quot;Analysis failed&quot; with the cause, never as an Unknown verdict. Unknown always means the engine looked and could not tell.</P>
+            </Card>
+
+            <SectionHeader>Reading an analysis</SectionHeader>
+            <Card>
+                <P>Open a failing result and switch to its AI Analysis tab.</P>
+                <DL items={[
+                    ['Badge and meta line', 'The badge shows the verdict and its confidence. The line beside it names the engine and model, TypeSafe\'s confidence score, and the suggested defect type, marked "from the verdict" when a confident verdict set it.'],
+                    ['Taken over by the LLM', 'When TypeSafe was unsure and your LLM decided, a note under the badge says what TypeSafe had answered and with what confidence.'],
+                    ['No explanation yet', 'A TypeSafe decision stored without an explanation shows one notice instead of empty Summary and Next action boxes. Explain asks your LLM to write it (Retry explanation if an earlier attempt failed); the verdict and suggestion do not change and no new version is created.'],
+                    ['Analysis failed', 'A dashed "Analysis failed" badge and a red card name the cause, such as timed out, rate limited, or TypeSafe.ai key missing. Nothing was decided, so Re-analyze to try again, or use "Retry failed groups" on the run to redo every failed group at once.'],
+                    ['Versions', 'Every analysis is kept. Re-analyze adds a new version, and the version pills switch between them; the run grid always shows the newest.'],
+                ]} />
             </Card>
 
             <SectionHeader>Accepting or overriding the suggestion</SectionHeader>
@@ -587,7 +614,7 @@ function AIFailureAnalysisSection() {
 
             <SectionHeader>How accurate is it?</SectionHeader>
             <Card>
-                <P>Settings &gt; AI Failure Analysis reports how often the AI&apos;s suggestion matched the decision you actually made — overall, per verdict, split by confidence, and per engine (TypeSafe.ai and your LLM are graded separately, because their confidence scores mean different things). A third ladder, &quot;TypeSafe (from verdict)&quot;, covers suggestions TypeSafe.ai derived from a high-confidence verdict because its defect-type question abstained; the card marks those &quot;from the verdict&quot;.</P>
+                <P>The accuracy report in the AI Failure Analysis card (Settings → AI Generation) shows how often the AI&apos;s suggestion matched the decision you actually made — overall, per verdict, split by confidence, and per engine (TypeSafe.ai and your LLM are graded separately, because their confidence scores mean different things). A third ladder, &quot;TypeSafe (from verdict)&quot;, covers suggestions set by a confident TypeSafe.ai verdict (0.85 or more) where its separate defect-type question held back or named another source; the card marks those &quot;from the verdict&quot;. When the verdict is unknown, TypeSafe.ai suggests a defect type only if it points at the test itself (automation bug).</P>
                 <P>The confidence split is the one to read. If agreement drops as confidence drops (say 90%, then 69%, then 43%), the confidence score is meaningful and you can act on it. If it is flat across all three, confidence is not telling you anything useful yet.</P>
                 <Tip>Expect it to be empty at first. Only results you have genuinely triaged are counted — anything still sitting at &quot;To investigate&quot; is treated as not yet triaged, never as a disagreement.</Tip>
             </Card>
@@ -595,10 +622,11 @@ function AIFailureAnalysisSection() {
             <SectionHeader>Privacy and control</SectionHeader>
             <Card>
                 <UL items={[
-                    'Failure text goes to the LLM provider you configure, and nowhere else.',
-                    'Secrets are stripped first — API keys, bearer tokens, JWTs, private keys, passwords and email addresses are replaced before anything is sent.',
+                    'Failure text goes only to the LLM provider you configure and, when you enable it, TypeSafe.ai. The "What an analysis will do" panel in the TypeSafe.ai card shows which of the two a given setup uses.',
+                    'With "Redact secrets" on (the default), API keys, bearer tokens, JWTs, private keys, passwords and email addresses are replaced before anything is sent, in every field that leaves the server: the error, stack and log, but also the test name, failure type, steps, environment details and linked defect and requirement titles.',
+                    'Switching AI features off in Settings stops failure analysis on the server as well: nothing is analyzed or queued until it is back on.',
                     'Automatic analysis needs the provider opted in explicitly ("Auto failure analysis" in the provider dialog), on top of the global setting.',
-                    'You control the cap on analyses per run, whether identical failures are grouped, whether redaction runs, and the prompt itself — which you can edit and reset to default.',
+                    'You control the cap on analyses per run, how many failure groups are analyzed at once (4 by default; lower it if your LLM provider rate-limits), whether identical failures are grouped, whether redaction runs, and the prompt itself — which you can edit and reset to default.',
                     'When TypeSafe.ai is enabled, the same redacted failure text is also sent to TypeSafe.ai; automatic analyses need the separate "Allow on automatic analysis" consent in its card.',
                 ]} />
             </Card>

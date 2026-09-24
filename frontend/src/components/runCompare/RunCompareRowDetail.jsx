@@ -1,6 +1,7 @@
 import React from 'react';
 import StatusPill from './StatusPill';
 import AIVerdictBadge from '../AIVerdictBadge';
+import { isFailedAnalysis } from '../../utils/analysisMeta.js';
 import { formatDuration } from '../analytics/utils';
 
 const DEFECT_LABELS = {
@@ -28,7 +29,8 @@ function Pane({ title, result, verdict, aiEnabled }) {
             <KV k="Defect type">{result && result.defect_type ? (DEFECT_LABELS[result.defect_type] || result.defect_type) : '—'}</KV>
             {aiEnabled && (
                 <KV k="AI verdict">{verdict ? <AIVerdictBadge verdict={verdict.verdict} confidence={verdict.confidence} dedupGroup={!!verdict.dedup_group_key}
-                    engine={verdict.engine} modelName={verdict.model_name} confidenceScore={verdict.confidence_score} /> : '—'}</KV>
+                    engine={verdict.engine} modelName={verdict.model_name} confidenceScore={verdict.confidence_score}
+                    failed={isFailedAnalysis(verdict)} errorCategory={verdict.error_category} /> : '—'}</KV>
             )}
             <KV k="Error">{result && result.error_message
                 ? <code style={{ fontSize: '0.72rem', color: 'var(--accent-red)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{result.error_message}</code>

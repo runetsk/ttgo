@@ -502,8 +502,19 @@ export const aiImport = {
 };
 
 // ── AI Failure Analysis ──
+// A failed attempt is stored too: the server answers 502 with { error, analysis }. The error is
+// toasted by the interceptor; the call resolves with the stored row so the card can show it.
 export const analyzeRunResult = (runResultId) =>
-    api.post(`/run-results/${runResultId}/analyze`).then(r => r.data);
+    api.post(`/run-results/${runResultId}/analyze`).then(r => r.data).catch((err) => {
+        const stored = err?.response?.data?.analysis;
+        if (stored) return stored;
+        throw err;
+    });
+
+// Explain asks the default LLM for the explanation a stored TypeSafe decision lacks; it
+// resolves with the same analysis, its decision unchanged.
+export const explainAnalysis = (runResultId, analysisId) =>
+    api.post(`/run-results/${runResultId}/analyses/${analysisId}/explain`).then(r => r.data);
 
 export const listRunResultAnalyses = (runResultId) =>
     api.get(`/run-results/${runResultId}/analyses`).then(r => r.data);
@@ -519,6 +530,9 @@ export const getRunAnalysisJob = (runId) =>
 
 export const cancelRunAnalysisJob = (runId) =>
     api.post(`/runs/${runId}/analysis-job/cancel`).then(r => r.data);
+
+export const retryFailedRunAnalysis = (runId) =>
+    api.post(`/runs/${runId}/analysis-job/retry-failed`).then(r => r.data);
 
 export const getFailureAnalysisSettings = () =>
     api.get('/settings/ai-failure-analysis').then(r => r.data);

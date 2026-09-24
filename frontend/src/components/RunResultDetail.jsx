@@ -3,12 +3,12 @@ import DefectLinkPanel from './DefectLinkPanel';
 import CommentsPanel from './CommentsPanel';
 import ScreenshotGallery from './ScreenshotGallery';
 import AIVerdictBadge from './AIVerdictBadge';
-import { analyzeRunResult, listRunResultAnalyses, uploadScreenshots } from '../api';
+import { analyzeRunResult, explainAnalysis, listRunResultAnalyses, uploadScreenshots } from '../api';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
 import { isManualStepResults } from '../utils/stepResults';
 import { isFailureStatus } from '../utils/resultStatus';
-import { analysisMetaParts, narrativeNotice, groupingNote } from '../utils/analysisMeta.js';
+import { analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, explainAction, takeoverNote } from '../utils/analysisMeta.js';
 import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
@@ -20,6 +20,7 @@ const RunResultDetail = ({ result, attempts }) => {
     const [analyses, setAnalyses] = useState(null);
     const [selectedVersion, setSelectedVersion] = useState(null);
     const [analyzing, setAnalyzing] = useState(false);
+    const [explaining, setExplaining] = useState(false);
     const { aiFeaturesEnabled } = useAIGeneration();
     const [galleryOpen, setGalleryOpen] = useState(false);
     const [galleryIndex, setGalleryIndex] = useState(0);
@@ -183,7 +184,8 @@ const RunResultDetail = ({ result, attempts }) => {
                                     {tab.key === 'ai' && analyses && analyses[0] && (
                                         <span style={{ marginLeft: 6, verticalAlign: 'middle' }}>
                                             <AIVerdictBadge verdict={analyses[0].verdict} confidence={analyses[0].confidence} dedupGroup={!!analyses[0].dedup_group_key}
-                                                engine={analyses[0].engine} modelName={analyses[0].model_name} confidenceScore={analyses[0].confidence_score} />
+                                                engine={analyses[0].engine} modelName={analyses[0].model_name} confidenceScore={analyses[0].confidence_score}
+                                                failed={isFailedAnalysis(analyses[0])} errorCategory={analyses[0].error_category} />
                                         </span>
                                     )}
                                 </button>
@@ -243,6 +245,8 @@ const RunResultDetail = ({ result, attempts }) => {
                                             const row = await analyzeRunResult(activeResult.id);
                                             setAnalyses([row]);
                                             setSelectedVersion(row.version);
+                                        } catch {
+                                            // toasted by the API interceptor
                                         } finally {
                                             setAnalyzing(false);
                                         }
@@ -259,11 +263,25 @@ const RunResultDetail = ({ result, attempts }) => {
                                             const row = await analyzeRunResult(activeResult.id);
                                             setAnalyses([row, ...analyses]);
                                             setSelectedVersion(row.version);
+                                        } catch {
+                                            // toasted by the API interceptor
                                         } finally {
                                             setAnalyzing(false);
                                         }
                                     }}
                                     reAnalyzing={analyzing}
+                                    onExplain={async (a) => {
+                                        setExplaining(true);
+                                        try {
+                                            const row = await explainAnalysis(activeResult.id, a.id);
+                                            setAnalyses((prev) => prev.map((x) => (x.id === row.id ? row : x)));
+                                        } catch {
+                                            // toasted by the API interceptor
+                                        } finally {
+                                            setExplaining(false);
+                                        }
+                                    }}
+                                    explaining={explaining}
                                     versions={analyses}
                                     selectedVersion={selectedVersion}
                                     onSelectVersion={setSelectedVersion}
@@ -515,12 +533,25 @@ const RunResultDetail = ({ result, attempts }) => {
     );
 };
 
-function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, versions, selectedVersion, onSelectVersion }) {
+// The analysis card's secondary actions (Re-analyze, Explain) share one look.
+const cardActionBtn = {
+    padding: '6px 14px', fontSize: '0.78rem', fontWeight: 600,
+    color: 'var(--accent-indigo)', background: 'rgba(99,102,241,0.06)',
+    border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6,
+    display: 'inline-flex', alignItems: 'center', gap: 6,
+};
+
+function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explaining, versions, selectedVersion, onSelectVersion }) {
     const [showRationale, setShowRationale] = useState(false);
     if (!analysis) return null;
 
-    const failed = typeof analysis.summary === 'string' && /^analysis failed\s*:/i.test(analysis.summary);
-    const failureMessage = failed ? analysis.summary.replace(/^analysis failed\s*:\s*/i, '') : null;
+    const failed = isFailedAnalysis(analysis);
+    const action = explainAction(analysis);
+    // A decision without an explanation: one notice and the Explain button instead of empty
+    // Summary and Next-action boxes. An unreadable explanation keeps its raw text under Rationale.
+    const compact = !!action && analysis.narrative_status !== 'unparseable';
+    const reason = analysis.narrative_status === 'unavailable' ? analysis.summary : null;
+    const takeover = takeoverNote(analysis);
     const hasNextAction = !!(analysis.next_action && analysis.next_action.trim() && analysis.next_action.trim() !== '—');
     const hasRationale = !!(analysis.rationale && analysis.rationale.trim() && analysis.rationale.trim() !== '—');
 
@@ -530,7 +561,8 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, versions, selected
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <AIVerdictBadge verdict={analysis.verdict} confidence={analysis.confidence} dedupGroup={!!analysis.dedup_group_key}
-                        engine={analysis.engine} modelName={analysis.model_name} confidenceScore={analysis.confidence_score} />
+                        engine={analysis.engine} modelName={analysis.model_name} confidenceScore={analysis.confidence_score}
+                        failed={failed} errorCategory={analysis.error_category} />
                     {groupingNote(analysis) && (
                         <span title={groupingNote(analysis)} style={{ color: 'var(--text-secondary)', fontSize: 11 }} data-testid="analysis-grouping-note">
                             ↳ {groupingNote(analysis)}
@@ -548,9 +580,26 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, versions, selected
                 </div>
             </div>
 
+            {takeover && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }} data-testid="analysis-takeover-note">
+                    ↳ {takeover}
+                </div>
+            )}
+
             {narrativeNotice(analysis) && (
-                <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)' }} data-testid="analysis-narrative-notice">
-                    {narrativeNotice(analysis)}
+                // The button sits under the text, not at the far end of the row: the detail panel is as
+                // wide as the results grid, which can run well past the viewport.
+                <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }} data-testid="analysis-narrative-notice">
+                    <div>
+                        {narrativeNotice(analysis)}
+                        {reason && <div style={{ marginTop: 4, fontSize: '0.78rem' }} data-testid="analysis-narrative-reason">{reason}</div>}
+                    </div>
+                    {action && onExplain && (
+                        <button onClick={() => onExplain(analysis)} disabled={explaining} data-testid="analysis-explain"
+                            style={{ ...cardActionBtn, cursor: explaining ? 'wait' : 'pointer', opacity: explaining ? 0.6 : 1 }}>
+                            {explaining ? 'Explaining…' : action}
+                        </button>
+                    )}
                 </div>
             )}
 
@@ -560,14 +609,17 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, versions, selected
                     background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.25)',
                     borderRadius: 6, padding: '10px 12px',
                 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: 'var(--accent-red)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                        <span>⚠️</span> Analysis failed
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, color: 'var(--accent-red)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em' }} data-testid="analysis-failed-heading">
+                        <span>⚠️</span> {failureHeading(analysis)}
                     </div>
                     <div style={{ fontSize: '0.82rem', fontFamily: 'monospace', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                        {failureMessage}
+                        {failureMessage(analysis)}
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 6 }}>
+                        No decision was made. Re-analyze to try again.
                     </div>
                 </div>
-            ) : (
+            ) : compact ? null : (
                 <div>
                     <div style={{ fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: 4 }}>Summary</div>
                     <div style={{ fontSize: '0.88rem', lineHeight: 1.5, color: 'var(--text-primary)' }}>{analysis.summary || <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>No summary provided.</span>}</div>
@@ -575,7 +627,7 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, versions, selected
             )}
 
             {/* Next action callout */}
-            {!failed && (
+            {!failed && !compact && (
                 <div style={{
                     background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.22)',
                     borderRadius: 6, padding: '10px 12px',
@@ -621,14 +673,7 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, versions, selected
                 <button
                     onClick={onReAnalyze}
                     disabled={reAnalyzing}
-                    style={{
-                        padding: '6px 14px', fontSize: '0.78rem', fontWeight: 600,
-                        color: 'var(--accent-indigo)', background: 'rgba(99,102,241,0.06)',
-                        border: '1px solid rgba(99,102,241,0.3)', borderRadius: 6,
-                        cursor: reAnalyzing ? 'wait' : 'pointer',
-                        opacity: reAnalyzing ? 0.6 : 1,
-                        display: 'inline-flex', alignItems: 'center', gap: 6,
-                    }}
+                    style={{ ...cardActionBtn, cursor: reAnalyzing ? 'wait' : 'pointer', opacity: reAnalyzing ? 0.6 : 1 }}
                 >
                     <span style={{ fontSize: '0.9rem' }}>↻</span>
                     {reAnalyzing ? 'Re-analyzing…' : 'Re-analyze'}

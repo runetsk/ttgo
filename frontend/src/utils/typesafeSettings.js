@@ -4,7 +4,85 @@
 export const TIMEOUT_MIN = 5;
 export const TIMEOUT_MAX = 300;
 
-const FIELDS = ['enabled', 'model', 'timeout_seconds', 'verdict_engine_enabled', 'semantic_dedup_enabled', 'allow_auto_failure_analysis'];
+const FIELDS = ['enabled', 'model', 'timeout_seconds', 'verdict_engine_enabled', 'narrative_enabled', 'escalate_below_pct', 'llm_fallback_enabled', 'semantic_dedup_enabled', 'allow_auto_failure_analysis'];
+
+// escalationValid: the "ask the LLM below N%" threshold is a whole percentage, 0 (never) to 100.
+export function escalationValid(pct) {
+    return Number.isInteger(pct) && pct >= 0 && pct <= 100;
+}
+
+// escalationNote explains the threshold in words under the input.
+export function escalationNote(pct) {
+    if (!escalationValid(pct)) return 'Enter a whole number from 0 to 100.';
+    if (pct === 0) return 'Off: TypeSafe decides every verdict it can.';
+    if (pct === 100) return 'Every verdict below 100% goes to the LLM, which in practice is almost all of them.';
+    return `Verdicts TypeSafe gives less than ${pct}% confidence are decided by your default LLM instead; the analysis notes what TypeSafe said.`;
+}
+
+// defaultProvider picks the LLM provider failure analysis uses: the enabled default.
+export function defaultProvider(providers) {
+    return (providers || []).find((p) => p.is_default && p.enabled) || null;
+}
+
+// describeRoute says, in words, what a manual and an automatic analysis will do with the
+// settings on screen. It mirrors the server's resolver (internal/api/failure_analysis_worker.go):
+// TypeSafe decides when it is on, keyed and used for verdicts (automatic runs also need its
+// consent flag); the LLM is attached only for what the switches ask of it, and automatic runs
+// use it only when the provider is approved for automatic analysis. TypeSafe selected without a
+// usable key counts as unavailable, not as switched off, so the fallback switch applies.
+export function describeRoute(form, keyStored, provider) {
+    const llmName = !provider ? null
+        : !provider.model_name || provider.label === provider.model_name ? provider.label
+            : `${provider.label} (${provider.model_name})`;
+    const route = (auto) => {
+        const selected = !!form?.enabled && !!form?.verdict_engine_enabled && (!auto || !!form?.allow_auto_failure_analysis);
+        const decider = selected && keyStored;
+        const llmReason = !provider ? 'no default LLM provider is set'
+            : auto && !provider.allow_auto_failure_analysis ? 'the default LLM provider is not approved for automatic analysis'
+                : null;
+        const llm = llmReason ? null : llmName;
+        if (selected && !keyStored) {
+            if (!form.llm_fallback_enabled) {
+                return ['TypeSafe has no usable API key and the LLM fallback is off, so every attempt is recorded as failed until the key is saved again. No failure data is sent to the LLM.'];
+            }
+            return llm
+                ? [`TypeSafe has no usable API key, so ${llm} decides and explains in one call as its fallback.`]
+                : [`Every attempt fails: TypeSafe has no usable API key and ${llmReason}.`];
+        }
+        if (!decider) {
+            return llm
+                ? [`${llm} decides and explains in one call.`]
+                : [`Nothing can analyze: ${llmReason}${form?.enabled ? '' : ' and TypeSafe is off'}.`];
+        }
+        const pct = form.escalate_below_pct ?? 0;
+        const usesLLM = !!form.narrative_enabled || pct > 0 || !!form.llm_fallback_enabled;
+        const out = [`TypeSafe (${form.model}) decides.`];
+        if (pct > 0) out.push(llm ? `Below ${pct}% confidence ${llm} decides instead.` : `Below ${pct}%: no LLM to take over (${llmReason}), so TypeSafe's decision stands.`);
+        if (form.narrative_enabled) out.push(llm ? `${llm} writes the explanation.` : `No explanation: ${llmReason}.`);
+        else out.push('No explanation is written; use Explain on an analysis to ask for one.');
+        if (form.llm_fallback_enabled) out.push(llm ? `If TypeSafe is unavailable, ${llm} decides.` : `If TypeSafe is unavailable the attempt fails (${llmReason}).`);
+        else out.push('If TypeSafe is unavailable the attempt is recorded as failed.');
+        if (!usesLLM) out.push('No failure data is sent to the LLM.');
+        return out;
+    };
+    return { manual: route(false), auto: route(true) };
+}
+
+// typesafeStatus summarises the saved settings for the card's header pill.
+export function typesafeStatus(settings) {
+    if (!settings?.enabled) return { label: 'Off', tone: 'muted' };
+    switch (settings.api_key_status) {
+        case 'ok': return { label: 'On', tone: 'green' };
+        case 'undecryptable': return { label: 'Key unreadable', tone: 'red' };
+        default: return { label: 'No API key', tone: 'amber' };
+    }
+}
+
+// verdictDependencyNote explains why the explanation, fallback and takeover settings are
+// greyed out: they only change anything while TypeSafe decides the verdict.
+export function verdictDependencyNote(form) {
+    return form?.verdict_engine_enabled ? null : 'Only used while "Use for failure verdicts" is on.';
+}
 
 // formFromSettings turns the masked server response into editable form state. The key input
 // starts empty: blank means "keep the stored key" on save.

@@ -6,6 +6,7 @@ import {
     getFailureAnalysisAccuracy,
 } from '../api';
 import { summarizeAccuracy, confidenceRows, verdictRows, engineRows } from './aiSettings/accuracyFormat';
+import { ToggleCard } from './aiSettings/SettingsControls';
 import { toast } from '../toast';
 
 // Rolling window for the accuracy panel. Matches the backend default so the
@@ -33,6 +34,7 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
         return (
             settings.enabled_on_completion !== original.enabled_on_completion ||
             settings.max_analyses_per_run !== original.max_analyses_per_run ||
+            settings.parallel_groups !== original.parallel_groups ||
             settings.dedup_enabled !== original.dedup_enabled ||
             settings.redaction_enabled !== original.redaction_enabled ||
             settings.prompt_template !== original.prompt_template
@@ -58,6 +60,7 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
             const next = await updateFailureAnalysisSettings({
                 enabled_on_completion: settings.enabled_on_completion,
                 max_analyses_per_run:  settings.max_analyses_per_run,
+                parallel_groups:       settings.parallel_groups,
                 dedup_enabled:         settings.dedup_enabled,
                 redaction_enabled:     settings.redaction_enabled,
                 prompt_template:       settings.prompt_template,
@@ -116,7 +119,7 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
 
             {/* Toggles */}
             <div style={s.togglesGrid}>
-                <Toggle
+                <ToggleCard
                     icon={
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
@@ -128,8 +131,9 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
                     checked={settings.enabled_on_completion}
                     disabled={!isAdmin}
                     onChange={(v) => update({ enabled_on_completion: v })}
+                    testId="fa-enabled_on_completion"
                 />
-                <Toggle
+                <ToggleCard
                     icon={
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
@@ -142,8 +146,9 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
                     checked={settings.dedup_enabled}
                     disabled={!isAdmin}
                     onChange={(v) => update({ dedup_enabled: v })}
+                    testId="fa-dedup_enabled"
                 />
-                <Toggle
+                <ToggleCard
                     icon={
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
@@ -155,6 +160,7 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
                     checked={settings.redaction_enabled}
                     disabled={!isAdmin}
                     onChange={(v) => update({ redaction_enabled: v })}
+                    testId="fa-redaction_enabled"
                 />
             </div>
 
@@ -174,6 +180,28 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
                     disabled={!isAdmin}
                     value={settings.max_analyses_per_run}
                     onChange={(e) => update({ max_analyses_per_run: parseInt(e.target.value, 10) || 0 })}
+                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }}
+                />
+            </div>
+
+            {/* Groups analyzed at once */}
+            <div style={s.fieldRow}>
+                <div style={s.fieldLabelCol}>
+                    <label style={s.fieldLabel} htmlFor="fa-parallel-groups">Groups analyzed at once</label>
+                    <p style={s.fieldHint}>
+                        How many failure groups a run&apos;s analysis works on at the same time. Nearly all of the time is waiting for TypeSafe.ai and the LLM, so more at once finishes a run sooner. Lower it if your LLM provider answers with rate-limit errors. 1 to 8.
+                    </p>
+                </div>
+                <input
+                    id="fa-parallel-groups"
+                    data-testid="fa-parallel-groups"
+                    className="modern-input"
+                    type="number"
+                    min={1}
+                    max={8}
+                    disabled={!isAdmin}
+                    value={settings.parallel_groups ?? 4}
+                    onChange={(e) => update({ parallel_groups: parseInt(e.target.value, 10) || 0 })}
                     style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }}
                 />
             </div>
@@ -336,47 +364,6 @@ function AccuracyPanel() {
     );
 }
 
-function Toggle({ icon, iconColor, label, desc, checked, disabled, onChange }) {
-    return (
-        <label
-            style={{
-                ...s.toggleCard,
-                borderColor: checked ? 'rgba(99,102,241,0.35)' : 'var(--border-color)',
-                background: checked ? 'rgba(99,102,241,0.04)' : 'var(--bg-tertiary)',
-                cursor: disabled ? 'not-allowed' : 'pointer',
-                opacity: disabled ? 0.7 : 1,
-            }}
-        >
-            <div style={{ ...s.toggleIcon, color: iconColor, borderColor: `${iconColor}33`, background: `${iconColor}14` }}>
-                {icon}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={s.toggleLabel}>{label}</div>
-                <div style={s.toggleDesc}>{desc}</div>
-            </div>
-            <span
-                style={{
-                    ...s.switch,
-                    background: checked ? 'var(--accent-indigo)' : 'rgba(148,163,184,0.35)',
-                }}
-            >
-                <span
-                    style={{
-                        ...s.switchKnob,
-                        transform: checked ? 'translateX(16px)' : 'translateX(0)',
-                    }}
-                />
-            </span>
-            <input
-                type="checkbox"
-                checked={checked}
-                disabled={disabled}
-                onChange={(e) => onChange(e.target.checked)}
-                style={{ position: 'absolute', opacity: 0, pointerEvents: 'none' }}
-            />
-        </label>
-    );
-}
 
 const s = {
     section: {
@@ -427,58 +414,6 @@ const s = {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
         gap: 10,
-    },
-    toggleCard: {
-        position: 'relative',
-        display: 'flex',
-        alignItems: 'flex-start',
-        gap: 10,
-        padding: '12px 14px',
-        borderRadius: 10,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--border-color)',
-        background: 'var(--bg-tertiary)',
-        transition: 'background 0.15s, border-color 0.15s',
-    },
-    toggleIcon: {
-        width: 30, height: 30,
-        borderRadius: 8,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'transparent',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-    },
-    toggleLabel: {
-        fontSize: '0.86rem',
-        fontWeight: 600,
-        color: 'var(--text-primary)',
-        marginBottom: 2,
-    },
-    toggleDesc: {
-        fontSize: '0.76rem',
-        color: 'var(--text-secondary)',
-        lineHeight: 1.5,
-    },
-    switch: {
-        position: 'relative',
-        width: 34, height: 18,
-        borderRadius: 10,
-        transition: 'background 0.15s',
-        flexShrink: 0,
-        marginTop: 4,
-    },
-    switchKnob: {
-        position: 'absolute',
-        top: 2, left: 2,
-        width: 14, height: 14,
-        borderRadius: '50%',
-        background: '#fff',
-        transition: 'transform 0.15s',
-        boxShadow: '0 1px 2px rgba(0,0,0,0.25)',
     },
     fieldRow: {
         display: 'flex',

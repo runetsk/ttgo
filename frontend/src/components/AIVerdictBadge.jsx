@@ -1,5 +1,5 @@
 import React from 'react';
-import { badgeTitle } from '../utils/analysisMeta.js';
+import { badgeTitle, failureHeading } from '../utils/analysisMeta.js';
 
 const COLORS = {
     product_bug:    { bg: '#3d2020', fg: '#ff9d9d' },
@@ -21,7 +21,19 @@ const LABELS = {
 
 const CONF_SHORT = { low: 'low', medium: 'med', high: 'high' };
 
-export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine, modelName, confidenceScore, style }) {
+// failed: the attempt made no decision, so there is no verdict to show (its stored "unknown" is
+// a placeholder, not TypeSafe's or the LLM's answer).
+export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine, modelName, confidenceScore, failed, errorCategory, style }) {
+    if (failed) {
+        return (
+            <span title={failureHeading({ error_category: errorCategory })} data-testid="ai-verdict-failed" style={{
+                background: COLORS.product_bug.bg, color: COLORS.product_bug.fg, border: '1px dashed currentColor',
+                padding: '1px 7px', borderRadius: 10, fontSize: 11, whiteSpace: 'nowrap', ...style,
+            }}>
+                Analysis failed
+            </span>
+        );
+    }
     const color = COLORS[verdict] || COLORS.unknown;
     const title = badgeTitle({ engine, model_name: modelName, confidence_score: confidenceScore });
     return (
