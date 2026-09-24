@@ -98,12 +98,20 @@ type AIGenCoverageConfig struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
+// Failure groups a job analyzes at once. Each group's TypeSafe and LLM calls run in their own
+// goroutine; the store writes stay on one. The cap keeps a job inside common provider rate limits.
+const (
+	DefaultParallelGroups = 4
+	MaxParallelGroups     = 8
+)
+
 // AIFailureAnalysisSettings stores admin configuration for the AI failure-analysis feature.
 // Singleton pattern — single row with fixed ID "singleton".
 type AIFailureAnalysisSettings struct {
 	ID                    string    `json:"id"                      gorm:"primaryKey"` // always "singleton"
 	EnabledOnCompletion   bool      `json:"enabled_on_completion"   gorm:"not null;default:false"`
 	MaxAnalysesPerRun     int       `json:"max_analyses_per_run"    gorm:"not null;default:20"`
+	ParallelGroups        int       `json:"parallel_groups"         gorm:"not null;default:4"` // failure groups analyzed at once by a job, 1..MaxParallelGroups
 	DedupEnabled          bool      `json:"dedup_enabled"           gorm:"not null;default:true"`
 	RedactionEnabled      bool      `json:"redaction_enabled"       gorm:"not null;default:true"`
 	PromptTemplate        string    `json:"prompt_template"         gorm:"type:text;not null"`
@@ -115,8 +123,10 @@ type AIFailureAnalysisSettings struct {
 // AIFeatureSettings is the global master switch for all AI capabilities
 // (test generation, AI import, failure analysis). Singleton pattern — single
 // row with fixed ID "singleton". Enabled defaults to true so AI is on out of
-// the box. Enforcement is frontend-only: when disabled the UI hides every AI
-// surface, but the AI endpoints remain callable.
+// the box. When disabled the UI hides every AI surface; failure analysis also
+// enforces it server-side (no job runs, single-result analysis and Explain
+// answer 409, nothing is queued on run completion). Test generation and AI
+// import still rely on the frontend check.
 type AIFeatureSettings struct {
 	ID        string    `json:"id"      gorm:"primaryKey"` // always "singleton"
 	Enabled   bool      `json:"enabled" gorm:"not null;default:true"`
@@ -187,6 +197,15 @@ const (
 	NarrativeStatusOK          = "ok"
 	NarrativeStatusUnavailable = "unavailable" // no narrative provider, or it failed
 	NarrativeStatusUnparseable = "unparseable" // narrative came back but was not valid JSON twice
+	NarrativeStatusSkipped     = "skipped"     // explanations switched off in TypeSafe settings; decision only
+)
+
+// Decision outcome of an analysis attempt. "unknown" is a model's answer; a failed attempt
+// (provider error, reply cut off or unreadable twice, TypeSafe unavailable with no LLM
+// fallback) produced no decision at all.
+const (
+	DecisionStatusOK     = "ok"
+	DecisionStatusFailed = "failed"
 )
 
 // How a dedup clone was attached to its representative.
@@ -242,8 +261,9 @@ type RunResultAnalysis struct {
 	SuggestedDefectType           string   `json:"suggested_defect_type" gorm:"default:''"`
 	SuggestedDefectTypeConfidence *float64 `json:"suggested_defect_type_confidence,omitempty"`
 	// SuggestionSource is "" when the suggestion came from the defect-type question (or the
-	// generative mapping) and SuggestionSourceVerdict when TypeSafe's question abstained and
-	// the suggestion was derived from a verdict at or above VerdictHighMin.
+	// generative mapping) and SuggestionSourceVerdict when it was derived from a confident
+	// TypeSafe verdict because the question abstained (policy v4, verdict >= 0.90) or abstained
+	// or disagreed (v5, verdict >= failureanalysis.VerdictDecidesSuggestionMin).
 	SuggestionSource        string `json:"suggestion_source,omitempty" gorm:"default:''"`
 	DefectTypeProbabilities string `json:"defect_type_probabilities,omitempty" gorm:"type:text"`
 
@@ -257,6 +277,31 @@ type RunResultAnalysis struct {
 	DedupPSame         *float64 `json:"dedup_p_same,omitempty"`
 	DedupModel         string   `json:"dedup_model,omitempty"`
 	DedupPolicyVersion string   `json:"dedup_policy_version,omitempty"`
+
+	// DecisionStatus separates a decision ("ok") from an attempt that produced none
+	// ("failed"). A failed row keeps Verdict "unknown" only for compatibility: readers must
+	// check this field, never the verdict, an empty model name or the summary text.
+	DecisionStatus string `json:"decision_status" gorm:"not null;default:'ok'"`
+	// ErrorCategory names why a failed attempt failed (timeout, rate_limit, truncated,
+	// unparseable, ...), or why a kept TypeSafe decision has no LLM takeover.
+	ErrorCategory string `json:"error_category,omitempty" gorm:"default:''"`
+	// JobID is the analysis job that produced the row; nil for single-result analyses.
+	JobID *string `json:"job_id,omitempty" gorm:"index"`
+	// Takeover provenance: TypeSafe's own decision when its confidence was below the
+	// takeover threshold and the LLM decided instead. Empty on every other row.
+	TakeoverFromVerdict    string   `json:"takeover_from_verdict,omitempty" gorm:"default:''"`
+	TakeoverFromConfidence *float64 `json:"takeover_from_confidence,omitempty"`
+	TakeoverFromDefectType string   `json:"takeover_from_defect_type,omitempty" gorm:"default:''"`
+	// Stage timing and call accounting for this attempt (representatives only; clones are 0).
+	DecisionMs   int    `json:"decision_ms,omitempty" gorm:"column:decision_ms"`
+	LLMMs        int    `json:"llm_ms,omitempty" gorm:"column:llm_ms"`
+	LLMCalls     int    `json:"llm_calls,omitempty" gorm:"column:llm_calls"`
+	FinishReason string `json:"finish_reason,omitempty" gorm:"column:finish_reason"`
+}
+
+// Failed reports whether the analysis attempt produced no decision.
+func (a *RunResultAnalysis) Failed() bool {
+	return a != nil && a.DecisionStatus == DecisionStatusFailed
 }
 
 // RunAnalysisJob tracks a batch/auto analysis of a TestRun.
@@ -278,6 +323,25 @@ type RunAnalysisJob struct {
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 
 	SemanticInputTokens int `json:"semantic_input_tokens" gorm:"default:0"` // TypeSafe tokens used by semantic grouping
+
+	// Pipeline is a JSON snapshot of the route the job ran with (decider, narrator,
+	// explanations, takeover threshold, fallback, reply cap), PipelineLabel its short name.
+	Pipeline      string `json:"pipeline,omitempty" gorm:"type:text"`
+	PipelineLabel string `json:"pipeline_label,omitempty"`
+	// RetryFailedOnly: re-analyze only the groups whose current analysis failed.
+	RetryFailedOnly bool `json:"retry_failed_only" gorm:"not null;default:false"`
+}
+
+// RunAnalysisJobOutcomes summarises what a job's representative analyses produced.
+type RunAnalysisJobOutcomes struct {
+	Groups             int `json:"groups"`              // representative analyses the job stored
+	Decided            int `json:"decided"`             // a decision, including a valid "unknown"
+	Failed             int `json:"failed"`              // no decision: the attempt failed
+	Unknown            int `json:"unknown"`             // decided "unknown" (a valid abstention)
+	NoExplanation      int `json:"no_explanation"`      // decided, explanation unavailable or unreadable
+	ExplanationSkipped int `json:"explanation_skipped"` // decided, explanations switched off
+	TakenOver          int `json:"taken_over"`          // decided by the LLM below the TypeSafe threshold
+	FailedRows         int `json:"failed_rows"`         // failing results left without a decision
 }
 
 // GeneratedStep is a single step in a generated test case draft.

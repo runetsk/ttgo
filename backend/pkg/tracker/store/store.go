@@ -290,6 +290,9 @@ func (s *Store) bootstrapDB() error {
 	if err := s.backfillSnapshotEngine(); err != nil {
 		return fmt.Errorf("failed to backfill snapshot engine: %w", err)
 	}
+	if err := s.backfillFailedAnalyses(); err != nil {
+		return fmt.Errorf("failed to backfill failed analyses: %w", err)
+	}
 
 	// Encrypt any pre-existing plaintext integration/LLM secrets at rest (F-016).
 	if err := s.backfillEncryptSecrets(); err != nil {
@@ -478,6 +481,20 @@ func (s *Store) backfillAnalysisSuggestions() error {
 		         ELSE '' END
 		 WHERE engine = 'generative' AND suggested_defect_type = ''
 		   AND verdict IN ('product_bug','flaky_test','test_data','environment','infrastructure')`).Error
+}
+
+// backfillFailedAnalyses marks analyses recorded before decision_status existed that are
+// really failed attempts: a provider error (no model name, "analysis failed:" summary) or a
+// reply that could not be parsed twice. Idempotent: it only touches rows still marked ok.
+func (s *Store) backfillFailedAnalyses() error {
+	if err := s.db.Exec(`
+		UPDATE run_result_analyses SET decision_status = 'failed', error_category = 'error'
+		 WHERE decision_status = 'ok' AND model_name = '' AND summary LIKE 'analysis failed:%'`).Error; err != nil {
+		return err
+	}
+	return s.db.Exec(`
+		UPDATE run_result_analyses SET decision_status = 'failed', error_category = 'unparseable'
+		 WHERE decision_status = 'ok' AND engine = 'generative' AND summary LIKE 'AI returned unparseable response%'`).Error
 }
 
 // backfillSnapshotEngine attributes every pre-existing triage snapshot to the generative

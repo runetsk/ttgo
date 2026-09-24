@@ -124,7 +124,7 @@ func TestDecider_DerivesTheSuggestionFromAConfidentVerdictWhenTheQuestionAbstain
 	require.Equal(t, "system_issue", d.SuggestedDefectType)
 	require.Equal(t, models.SuggestionSourceVerdict, d.SuggestionSource)
 
-	// An unknown verdict derives nothing; neither does a verdict below VerdictHighMin.
+	// An unknown verdict derives nothing; neither does a verdict below VerdictDecidesSuggestionMin.
 	d = decide("unknown", 0.95, DefectTypeInsufficient, 0.85)
 	require.Empty(t, d.SuggestedDefectType)
 	require.Empty(t, d.SuggestionSource)
@@ -137,4 +137,43 @@ func TestDecider_DerivesTheSuggestionFromAConfidentVerdictWhenTheQuestionAbstain
 	require.Equal(t, "product_bug", d.SuggestedDefectType)
 	require.Empty(t, d.SuggestionSource)
 	require.Equal(t, 0.7, d.DefectTypeConfidence)
+}
+
+// TestSuggestion_VerdictDecidesWhereItIsSure replays the benchmark answers that motivated policy
+// v5 (numbers from the 2026-09-22 decisions-only pass), plus the rule's other branches.
+func TestSuggestion_VerdictDecidesWhereItIsSure(t *testing.T) {
+	ans := func(choice string, conf float64) typesafe.Answer {
+		return typesafe.Answer{Type: "choice", Choice: choice, Confidence: conf}
+	}
+	cases := []struct {
+		name           string
+		verdict        typesafe.Answer
+		defect         typesafe.Answer
+		want, wantFrom string
+		wantConf       float64
+	}{
+		// Runner out of memory: v4 withheld (verdict under 0.90, question at 0.22); v5 derives.
+		{"confident verdict fills a withheld question", ans("infrastructure", 0.88), ans("system_issue", 0.22), "system_issue", models.SuggestionSourceVerdict, 0.88},
+		// WebSocket close: the question named a system source the verdict could not pick.
+		{"unknown verdict drops a system source", ans("unknown", 0.52), ans("system_issue", 0.77), "", "", 0.77},
+		{"unknown verdict drops a product source", ans("unknown", 0.60), ans("product_bug", 0.90), "", "", 0.90},
+		{"unknown verdict keeps a test-code fault", ans("unknown", 0.60), ans("automation_bug", 0.80), "automation_bug", "", 0.80},
+		// Rate-limit quota: verdict unsure between infrastructure and environment, question sure of the bucket.
+		{"unsure verdict leaves the question's answer", ans("infrastructure", 0.51), ans("system_issue", 0.85), "system_issue", "", 0.85},
+		{"unsure verdict does not override a disagreeing answer", ans("infrastructure", 0.60), ans("automation_bug", 0.70), "automation_bug", "", 0.70},
+		{"confident verdict overrides a disagreeing answer", ans("flaky_test", 0.95), ans("product_bug", 0.80), "automation_bug", models.SuggestionSourceVerdict, 0.95},
+		{"agreeing answer keeps its own confidence", ans("product_bug", 1.0), ans("product_bug", 0.94), "product_bug", "", 0.94},
+		{"threshold is inclusive", ans("environment", VerdictDecidesSuggestionMin), ans(DefectTypeInsufficient, 0.9), "system_issue", models.SuggestionSourceVerdict, VerdictDecidesSuggestionMin},
+		{"just under the threshold withholds as before", ans("environment", 0.84), ans(DefectTypeInsufficient, 0.9), "", "", 0.9},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, from, conf := suggestion(c.verdict, c.defect)
+			require.Equal(t, c.want, got)
+			require.Equal(t, c.wantFrom, from)
+			require.InDelta(t, c.wantConf, conf, 1e-9)
+		})
+	}
+	require.Less(t, VerdictDecidesSuggestionMin, VerdictHighMin, "v5 lets a verdict below the high bucket decide")
+	require.Equal(t, "fa-verdict-v5", PolicyVersion, "a rule change is a new policy, so calibration can be read per policy")
 }

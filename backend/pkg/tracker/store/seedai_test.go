@@ -2,6 +2,7 @@ package store
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -155,6 +156,9 @@ func TestSeedAIListRecentResultsNewestExecutionFirst(t *testing.T) {
 func TestSeedAIFailureDatasetDeterministic(t *testing.T) {
 	s1, s2 := newTestStore(t), newTestStore(t)
 	cfg := aiTestCfg()
+	// One clock for both seedings: the staging-nav-timeout message carries a
+	// timestamp, so two seedings a second apart would differ on the real clock.
+	cfg.Now = time.Now().Truncate(time.Second)
 
 	res1, err := s1.SeedAIFailureDataset(cfg)
 	require.NoError(t, err)

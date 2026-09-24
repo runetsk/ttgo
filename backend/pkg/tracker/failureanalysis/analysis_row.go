@@ -6,6 +6,10 @@ import "ttgo/pkg/tracker/models"
 // It lives here (not in the worker package) because it is a pure mapper shared by the
 // background worker and the synchronous HTTP handler — neither should depend on the other.
 func AnalysisRowFrom(res *AnalyzeResult, resultID string) *models.RunResultAnalysis {
+	status := res.DecisionStatus
+	if status == "" {
+		status = models.DecisionStatusOK
+	}
 	return &models.RunResultAnalysis{
 		RunResultID: resultID, Verdict: res.Verdict, Confidence: res.Confidence,
 		Summary: res.Summary, NextAction: res.NextAction, Rationale: res.Rationale,
@@ -16,5 +20,9 @@ func AnalysisRowFrom(res *AnalyzeResult, resultID string) *models.RunResultAnaly
 		DefectTypeProbabilities: res.DefectTypeProbabilities, NarrativeStatus: res.NarrativeStatus,
 		SuggestionSource: res.SuggestionSource,
 		PolicyVersion:    res.PolicyVersion, TypeSafeInputTokens: res.TypeSafeInputTokens,
+		DecisionStatus: status, ErrorCategory: res.ErrorCategory,
+		TakeoverFromVerdict: res.TakeoverFromVerdict, TakeoverFromConfidence: res.TakeoverFromConfidence,
+		TakeoverFromDefectType: res.TakeoverFromDefectType,
+		DecisionMs:             res.DecisionMs, LLMMs: res.LLMMs, LLMCalls: res.LLMCalls, FinishReason: res.FinishReason,
 	}
 }

@@ -3,6 +3,11 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"ttgo/pkg/tracker/failureanalysis"
@@ -14,10 +19,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newStore opens a temp-file database: jobs analyze groups concurrently, and with :memory:
+// every pooled connection would get its own empty database.
 func newStore(t *testing.T) *store.Store {
 	t.Helper()
-	s, err := store.New(":memory:")
+	dir := t.TempDir()
+	t.Chdir(dir) // the store creates backups/ in the working directory
+	s, err := store.New(filepath.Join(dir, "test.db"))
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() }) // Windows cannot remove an open SQLite file
 	return s
 }
 
@@ -40,11 +50,21 @@ func (p *verdictProvider) Chat(_ context.Context, _ llm.ChatRequest) (*llm.ChatR
 
 // capturingProvider records the rendered prompt from the first chat message so
 // tests can assert what enrichment actually reached the model.
-type capturingProvider struct{ lastPrompt string }
+type capturingProvider struct {
+	mu         sync.Mutex
+	lastPrompt string
+}
 
 func (c *capturingProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if len(req.Messages) > 0 {
-		c.lastPrompt = req.Messages[0].Content
+		for _, m := range req.Messages { // the evidence travels in the user message; SYSTEM goes separately
+			if m.Role == "user" {
+				c.lastPrompt = m.Content
+				break
+			}
+		}
 	}
 	body, _ := json.Marshal(map[string]string{
 		"verdict": "product_bug", "confidence": "medium",
@@ -215,11 +235,11 @@ func staticResolver(deps failureanalysis.JobDeps) failureanalysis.DepsResolver {
 
 type fakeTS struct {
 	fn    func(req typesafe.Request) (*typesafe.Response, error)
-	calls int
+	calls atomic.Int32
 }
 
 func (f *fakeTS) Evaluate(_ context.Context, req typesafe.Request) (*typesafe.Response, error) {
-	f.calls++
+	f.calls.Add(1)
 	return f.fn(req)
 }
 func (f *fakeTS) ListModels(context.Context) ([]typesafe.Model, error) { return nil, nil }
@@ -383,6 +403,100 @@ func TestWorker_NoNarrativeProviderFailsJob(t *testing.T) {
 	require.Contains(t, got.ErrorMessage, "no LLM provider configured")
 }
 
+// countingProvider wraps verdictProvider and counts narrative calls.
+type countingProvider struct {
+	verdictProvider
+	calls atomic.Int32
+}
+
+func (c *countingProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	c.calls.Add(1)
+	return c.verdictProvider.Chat(ctx, req)
+}
+
+// truncatingProvider always stops at the token limit with incomplete JSON.
+type truncatingProvider struct{}
+
+func (truncatingProvider) Chat(_ context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	return &llm.ChatResponse{Content: `{"verdict":"environ`, FinishReason: "length", Model: "verbose",
+		Usage: &llm.ChatUsage{PromptTokens: 50, CompletionTokens: failureanalysis.ReplyTokenCap}}, nil
+}
+
+func TestWorker_CutOffReplyIsStoredAsFailedCall(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"timeout", "Timeout waiting for #checkout button after 5000ms"}})
+	_, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: truncatingProvider{}, NarrativeModel: "verbose"}), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Len(t, analyses, 1)
+	for _, a := range analyses {
+		require.Equal(t, models.DecisionStatusFailed, a.DecisionStatus, "a cut-off reply is a failed attempt, not a decision")
+		require.Equal(t, "truncated", a.ErrorCategory)
+		require.Equal(t, "verbose", a.ModelName, "the failed attempt keeps the model it tried")
+		require.NotNil(t, a.JobID, "the row carries the job that produced it")
+		require.True(t, strings.HasPrefix(a.Summary, "analysis failed: "), a.Summary)
+		require.Contains(t, a.Summary, "cut off at the length limit")
+		require.Equal(t, 100, a.TokenUsagePrompt, "the failed row keeps what both calls cost")
+		require.Equal(t, 2*failureanalysis.ReplyTokenCap, a.TokenUsageCompletion)
+	}
+}
+
+func TestWorker_DeciderWithoutNarratorStillRuns(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"timeout", "Timeout waiting for #checkout button after 5000ms"}})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	ts := &fakeTS{fn: tsVerdict("flaky_test", "automation_bug", 0.95)}
+	deps := failureanalysis.JobDeps{Decider: failureanalysis.NewTypeSafeDecider(ts, "jev-1.13.0")}
+	w := NewWorker(s, staticResolver(deps), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCompleted, got.Status, "a TypeSafe decider can produce analyses without any LLM provider")
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Len(t, analyses, 1)
+	for _, a := range analyses {
+		require.Equal(t, models.AnalysisEngineTypeSafe, a.Engine)
+		require.Equal(t, models.VerdictFlakyTest, a.Verdict)
+		require.Equal(t, models.NarrativeStatusUnavailable, a.NarrativeStatus)
+	}
+}
+
+func TestWorker_ExplanationsOffStoreDecisionsWithoutCallingLLM(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"},
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"}, // signature clone
+	})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	ts := &fakeTS{fn: tsVerdict("flaky_test", "automation_bug", 0.95)}
+	prov := &countingProvider{verdictProvider: verdictProvider{verdict: "product_bug"}}
+	deps := failureanalysis.JobDeps{
+		Narrative: prov, NarrativeModel: "mock", NarrativeSkipped: true,
+		Decider: failureanalysis.NewTypeSafeDecider(ts, "jev-1.13.0"),
+	}
+	w := NewWorker(s, staticResolver(deps), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCompleted, got.Status)
+	require.Equal(t, int32(0), prov.calls.Load(), "explanations off: the narrator is never called")
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Len(t, analyses, 2)
+	for _, a := range analyses {
+		require.Equal(t, models.VerdictFlakyTest, a.Verdict)
+		require.Equal(t, "automation_bug", a.SuggestedDefectType)
+		require.Equal(t, models.NarrativeStatusSkipped, a.NarrativeStatus)
+		require.Equal(t, 0, a.TokenUsagePrompt+a.TokenUsageCompletion)
+	}
+}
+
 func TestWorker_CancelDuringLastGroupStaysCancelled(t *testing.T) {
 	s := newStore(t)
 	run := seedRunWithFailures(t, s, [][2]string{{"timeout", "only one"}})
@@ -407,4 +521,289 @@ func (c *cancellingProvider) Chat(_ context.Context, _ llm.ChatRequest) (*llm.Ch
 	_, _ = c.s.UpdateAnalysisJobStatus(c.jobID, models.RunAnalysisJobStatusCancelled, "")
 	body, _ := json.Marshal(map[string]string{"verdict": "product_bug", "confidence": "medium", "summary": "s", "next_action": "n", "rationale": "r"})
 	return &llm.ChatResponse{Content: string(body), Model: "mock"}, nil
+}
+
+func TestWorker_StampsJobIDAndPipeline(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"},
+		{"timeout", "Timeout waiting for #checkout button after 5000ms"}, // signature clone
+	})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	ts := &fakeTS{fn: tsVerdict("flaky_test", "automation_bug", 0.95)}
+	deps := failureanalysis.JobDeps{
+		Narrative: &verdictProvider{verdict: "product_bug"}, NarrativeModel: "mock",
+		Decider: failureanalysis.NewTypeSafeDecider(ts, "jev-1.13.0"), DeciderModel: "jev-1.13.0",
+	}
+	w := NewWorker(s, staticResolver(deps), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+
+	got, err := s.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, "TypeSafe jev-1.13.0, explained by mock", got.PipelineLabel)
+	require.Contains(t, got.Pipeline, `"decider":"jev-1.13.0"`)
+	require.Contains(t, got.Pipeline, `"reply_token_cap":2048`)
+
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Len(t, analyses, 2)
+	for _, a := range analyses {
+		require.NotNil(t, a.JobID)
+		require.Equal(t, job.ID, *a.JobID, "representative and clone both carry the job")
+	}
+	o, err := s.AnalysisJobOutcomes(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, o.Groups)
+	require.Equal(t, 1, o.Decided)
+	require.Equal(t, 0, o.Failed)
+}
+
+func TestWorker_RetryFailedOnlyReanalyzesFailedGroups(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"assertion", "first failure"}, {"assertion", "second failure"}})
+	failing, err := s.ListLatestFailingResults(run.ID)
+	require.NoError(t, err)
+	require.Len(t, failing, 2)
+	failedID, okID := failing[0].ID, failing[1].ID
+	_, err = s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: failedID, Verdict: models.VerdictUnknown,
+		Confidence: models.ConfidenceLow, DecisionStatus: models.DecisionStatusFailed, ErrorCategory: "timeout"})
+	require.NoError(t, err)
+	_, err = s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: okID, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh})
+	require.NoError(t, err)
+
+	job, created, err := s.EnqueueRetryFailedForRun(run.ID, "")
+	require.NoError(t, err)
+	require.True(t, created)
+	require.True(t, job.RetryFailedOnly)
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: &verdictProvider{verdict: "environment"}, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+
+	retried, err := s.ListAnalysesForResult(failedID)
+	require.NoError(t, err)
+	require.Len(t, retried, 2, "the failed group was analyzed again")
+	require.Equal(t, models.VerdictEnvironment, retried[0].Verdict)
+	untouched, err := s.ListAnalysesForResult(okID)
+	require.NoError(t, err)
+	require.Len(t, untouched, 1, "a group with a decision is left alone")
+}
+
+// blockingProvider holds every call until its context ends.
+type blockingProvider struct{ started chan struct{} }
+
+func (b *blockingProvider) Chat(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	select {
+	case b.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestWorker_CancelAbandonsTheRequestInFlight(t *testing.T) {
+	old := cancelPoll
+	cancelPoll = 20 * time.Millisecond
+	defer func() { cancelPoll = old }()
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"assertion", "slow one"}})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	prov := &blockingProvider{started: make(chan struct{}, 1)}
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { done <- w.processOnce(context.Background()) }()
+	<-prov.started
+	_, err = s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, "")
+	require.NoError(t, err)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("the job kept waiting on a provider request after it was cancelled")
+	}
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCancelled, got.Status)
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Empty(t, analyses, "an abandoned request stores nothing")
+}
+
+func TestWorker_GroupDeadlineRecordsATimeout(t *testing.T) {
+	old := GroupDeadline
+	GroupDeadline = 50 * time.Millisecond
+	defer func() { GroupDeadline = old }()
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"assertion", "never answers"}})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: &blockingProvider{started: make(chan struct{}, 1)}, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCompleted, got.Status, "one slow group does not sink the job")
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Len(t, analyses, 1)
+	for _, a := range analyses {
+		require.Equal(t, models.DecisionStatusFailed, a.DecisionStatus)
+		require.Equal(t, "timeout", a.ErrorCategory)
+		require.Equal(t, "mock", a.ModelName)
+	}
+	o, err := s.AnalysisJobOutcomes(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, o.Failed)
+	require.Equal(t, 1, o.FailedRows)
+}
+
+// overlapProvider holds each call briefly and records how many were in flight at once.
+type overlapProvider struct {
+	mu            sync.Mutex
+	inFlight, max int
+	calls         int
+}
+
+func (p *overlapProvider) Chat(ctx context.Context, _ llm.ChatRequest) (*llm.ChatResponse, error) {
+	p.mu.Lock()
+	p.inFlight++
+	p.calls++
+	if p.inFlight > p.max {
+		p.max = p.inFlight
+	}
+	p.mu.Unlock()
+	select { // long enough for the other slots to fill
+	case <-time.After(150 * time.Millisecond):
+	case <-ctx.Done():
+	}
+	p.mu.Lock()
+	p.inFlight--
+	p.mu.Unlock()
+	return (&verdictProvider{verdict: "product_bug"}).Chat(ctx, llm.ChatRequest{})
+}
+
+func TestWorker_AnalyzesGroupsInParallel(t *testing.T) {
+	for _, parallel := range []int{1, 3} {
+		t.Run(fmt.Sprintf("parallel_groups=%d", parallel), func(t *testing.T) {
+			s := newStore(t)
+			run := seedRunWithFailures(t, s, [][2]string{
+				{"assertion", "one"}, {"assertion", "two"}, {"assertion", "three"}, {"assertion", "four"}, {"assertion", "five"},
+			})
+			_, err := s.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{
+				MaxAnalysesPerRun: 10, DedupEnabled: true, RedactionEnabled: true, PromptTemplate: failureanalysis.DefaultPromptTemplate,
+				ParallelGroups: parallel,
+			})
+			require.NoError(t, err)
+			job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+			require.NoError(t, err)
+			prov := &overlapProvider{}
+			w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+			require.NoError(t, w.processOnce(context.Background()))
+
+			require.Equal(t, parallel, prov.max, "at most parallel_groups calls in flight, and that many when there is work")
+			require.Equal(t, 5, prov.calls)
+			got, err := s.GetAnalysisJob(job.ID)
+			require.NoError(t, err)
+			require.Equal(t, models.RunAnalysisJobStatusCompleted, got.Status)
+			require.Equal(t, 5, got.AnalyzedCount, "progress counts finished groups")
+			analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+			require.NoError(t, err)
+			require.Len(t, analyses, 5, "every group is stored by the single writer")
+		})
+	}
+}
+
+func TestWorker_CancelStopsStartingNewGroups(t *testing.T) {
+	old := cancelPoll
+	cancelPoll = 20 * time.Millisecond
+	defer func() { cancelPoll = old }()
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{
+		{"assertion", "one"}, {"assertion", "two"}, {"assertion", "three"}, {"assertion", "four"}, {"assertion", "five"},
+	})
+	_, err := s.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{
+		MaxAnalysesPerRun: 10, DedupEnabled: true, RedactionEnabled: true, PromptTemplate: failureanalysis.DefaultPromptTemplate,
+		ParallelGroups: 2,
+	})
+	require.NoError(t, err)
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	prov := &blockingProvider{started: make(chan struct{}, 5)}
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+
+	done := make(chan error, 1)
+	go func() { done <- w.processOnce(context.Background()) }()
+	<-prov.started
+	<-prov.started // both slots busy
+	_, err = s.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCancelled, "")
+	require.NoError(t, err)
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("a cancelled job kept waiting on its in-flight groups")
+	}
+	require.Len(t, prov.started, 0, "no group started after the cancel")
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCancelled, got.Status)
+	analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+	require.NoError(t, err)
+	require.Empty(t, analyses, "abandoned groups store nothing")
+}
+
+func TestParallelGroupsBounds(t *testing.T) {
+	require.Equal(t, 1, parallelGroups(0), "a row from before the setting runs one at a time")
+	require.Equal(t, 1, parallelGroups(-3))
+	require.Equal(t, 4, parallelGroups(4))
+	require.Equal(t, models.MaxParallelGroups, parallelGroups(99))
+}
+
+func TestWorker_ShutdownBeforeAnyGroupIsNotCompletion(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"assertion", "one"}, {"assertion", "two"}})
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	prov := &countingProvider{verdictProvider: verdictProvider{verdict: "product_bug"}}
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // the server is stopping
+	require.ErrorIs(t, w.processOnce(ctx), context.Canceled)
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusRunning, got.Status, "left for the restart sweep, never marked completed")
+	require.Equal(t, int32(0), prov.calls.Load())
+}
+
+// stoppingProvider stops the server during the first call and still answers it.
+type stoppingProvider struct {
+	verdictProvider
+	stop  context.CancelFunc
+	calls atomic.Int32
+}
+
+func (p *stoppingProvider) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	if p.calls.Add(1) == 1 {
+		p.stop()
+	}
+	return p.verdictProvider.Chat(ctx, req)
+}
+
+func TestWorker_ShutdownBetweenGroupsIsNotCompletion(t *testing.T) {
+	s := newStore(t)
+	run := seedRunWithFailures(t, s, [][2]string{{"assertion", "one"}, {"assertion", "two"}, {"assertion", "three"}})
+	_, err := s.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{
+		MaxAnalysesPerRun: 10, DedupEnabled: true, RedactionEnabled: true, PromptTemplate: failureanalysis.DefaultPromptTemplate,
+		ParallelGroups: 1,
+	})
+	require.NoError(t, err)
+	job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	ctx, stop := context.WithCancel(context.Background())
+	defer stop()
+	prov := &stoppingProvider{verdictProvider: verdictProvider{verdict: "product_bug"}, stop: stop}
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+
+	require.ErrorIs(t, w.processOnce(ctx), context.Canceled)
+	require.Equal(t, int32(1), prov.calls.Load(), "no group starts after the server stops")
+	got, _ := s.GetAnalysisJob(job.ID)
+	require.Equal(t, models.RunAnalysisJobStatusRunning, got.Status, "two groups never ran, so the job is not complete")
 }

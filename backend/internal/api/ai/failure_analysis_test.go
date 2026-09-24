@@ -309,7 +309,12 @@ type capturingHandlerProvider struct{ lastPrompt string }
 
 func (c *capturingHandlerProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if len(req.Messages) > 0 {
-		c.lastPrompt = req.Messages[0].Content
+		for _, m := range req.Messages { // the evidence travels in the user message; SYSTEM goes separately
+			if m.Role == "user" {
+				c.lastPrompt = m.Content
+				break
+			}
+		}
 	}
 	return &llm.ChatResponse{
 		Content: `{"verdict":"product_bug","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`,
@@ -674,4 +679,88 @@ func createTestRun(t *testing.T, env *testEnv, name string) string {
 		t.Fatal("create run: empty ID")
 	}
 	return resp.ID
+}
+
+// TestAnalyzeRunResult_HistoryStopsAtTheAnalyzedResult re-analyzes a failure from an older
+// run: a failure of the same test in a run BEFORE it is history, one in a run AFTER it is
+// not, and neither is its human label. Before the fix the window ended at now, so the
+// later run's failure and label reached the model.
+func TestAnalyzeRunResult_HistoryStopsAtTheAnalyzedResult(t *testing.T) {
+	t.Chdir(t.TempDir())
+	s, err := store.New(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+
+	folder, err := s.CreateFolder("Checkout Suite", nil)
+	require.NoError(t, err)
+	tc := &models.TestCase{FolderID: folder.ID, Name: "Checkout flow"}
+	require.NoError(t, s.CreateTestCase(tc))
+	tcID := tc.ID
+
+	ran := time.Now().Add(-5 * 24 * time.Hour)
+	addFailure := func(runName, msg, label string, start time.Time) *models.RunResult {
+		run := &models.TestRun{Name: runName}
+		require.NoError(t, s.CreateTestRun(run))
+		rr := &models.RunResult{
+			TestRunID: run.ID, TestCaseID: &tcID, TestNameSnapshot: "Checkout flow",
+			AttemptNumber: 1, Status: models.StatusFail, FailureType: "assertion",
+			ErrorMessage: msg, DefectType: label, StartTime: start,
+		}
+		require.NoError(t, s.AddRunResult(rr))
+		return rr
+	}
+	addFailure("before", "EARLIER_FAILURE_MARKER", "product_bug", ran.Add(-24*time.Hour))
+	addFailure("after", "LATER_FAILURE_MARKER", "system_issue", ran.Add(24*time.Hour))
+	target := addFailure("analyzed", "current failure", "", ran)
+
+	_, err = s.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{
+		MaxAnalysesPerRun: 5, DedupEnabled: true, RedactionEnabled: false,
+	})
+	require.NoError(t, err)
+
+	h := ai.NewHandler(s, bluemonday.UGCPolicy())
+	prov := &capturingHandlerProvider{}
+	h.SetFailureAnalysisDeps(func(string) (failureanalysis.JobDeps, error) {
+		return failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock-model"}, nil
+	}, nil)
+	req := httptest.NewRequest("POST", "/api/run-results/"+target.ID+"/analyze", nil)
+	req.SetPathValue("id", target.ID)
+	rr := httptest.NewRecorder()
+	h.AnalyzeRunResult(rr, req)
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+
+	require.Contains(t, prov.lastPrompt, "EARLIER_FAILURE_MARKER", "a failure before the analyzed one is history")
+	require.NotContains(t, prov.lastPrompt, "LATER_FAILURE_MARKER", "a failure after the analyzed one is not")
+	require.NotContains(t, prov.lastPrompt, "(human: system_issue)", "nor is the label it was given")
+	require.NotContains(t, prov.lastPrompt, "system_issue ×", "nor does the label reach the rollup")
+	require.Contains(t, prov.lastPrompt, "(human: product_bug)")
+}
+
+func TestFailureAnalysisSettings_ParallelGroups(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	body := func(extra map[string]interface{}) map[string]interface{} {
+		b := map[string]interface{}{
+			"enabled_on_completion": false, "max_analyses_per_run": 20, "dedup_enabled": true,
+			"redaction_enabled": true, "prompt_template": "x",
+		}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+	for _, bad := range []int{0, 9, -1} {
+		rr := doRequest(env, "PUT", "/api/settings/ai-failure-analysis", body(map[string]interface{}{"parallel_groups": bad}))
+		require.Equal(t, http.StatusBadRequest, rr.Code, "parallel_groups=%d: %s", bad, rr.Body.String())
+	}
+	rr := doRequest(env, "PUT", "/api/settings/ai-failure-analysis", body(map[string]interface{}{"parallel_groups": 2}))
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var got models.AIFailureAnalysisSettings
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, 2, got.ParallelGroups)
+
+	rr = doRequest(env, "PUT", "/api/settings/ai-failure-analysis", body(nil))
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+	require.Equal(t, 2, got.ParallelGroups, "omitting the field keeps the stored value")
 }

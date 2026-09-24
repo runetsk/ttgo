@@ -28,6 +28,18 @@ type Decider interface {
 	Decide(ctx context.Context, ev Evidence) (*Decision, error)
 }
 
+// unavailableDecider stands in for TypeSafe when it is selected but cannot be used as
+// configured. Every decision fails with the configured error, so the analyzer applies the
+// LLM-fallback switch exactly as it does for an outage: with the fallback on the LLM decides
+// and the analysis says TypeSafe was unavailable; with it off the attempt is recorded as
+// failed and no failure data reaches the LLM.
+type unavailableDecider struct{ err error }
+
+// NewUnavailableDecider returns a Decider whose every call fails with err.
+func NewUnavailableDecider(err error) Decider { return unavailableDecider{err: err} }
+
+func (d unavailableDecider) Decide(context.Context, Evidence) (*Decision, error) { return nil, d.err }
+
 type typesafeDecider struct {
 	client typesafe.Client
 	model  string
@@ -61,25 +73,47 @@ func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, e
 		return nil, &typesafe.Error{Category: typesafe.CategoryParse, Message: fmt.Sprintf("verdict %q is not a known verdict", v.Choice)}
 	}
 	dt := resp.Answers["defect_type"]
-	suggested, source, suggestedConf := dt.Choice, "", dt.Confidence
-	if suggested == DefectTypeInsufficient || dt.Confidence < DefectTypeSuggestMin || !models.ValidDefectTypes[suggested] {
-		suggested = ""
-	}
-	// The defect-type question abstains far more often than the verdict is wrong: on the
-	// benchmark every withheld suggestion under a high-confidence verdict would have been
-	// right. Derive it through the same mapping the generative path uses, carry the
-	// verdict's confidence, and mark the source so calibration grades it separately.
-	if suggested == "" && v.Choice != models.VerdictUnknown && v.Confidence >= VerdictHighMin {
-		if derived := models.SuggestedDefectType(v.Choice); derived != "" {
-			suggested, source, suggestedConf = derived, models.SuggestionSourceVerdict, v.Confidence
-		}
-	}
+	suggested, source, suggestedConf := suggestion(v, dt)
 	return &Decision{
 		Verdict: v.Choice, VerdictConfidence: v.Confidence, VerdictProbabilities: v.Probabilities,
 		SuggestedDefectType: suggested, DefectTypeConfidence: suggestedConf, DefectTypeProbabilities: dt.Probabilities,
 		SuggestionSource: source,
 		Model:            resp.Model, InputTokens: resp.Usage.InputTokens, PolicyVersion: PolicyVersion,
 	}, nil
+}
+
+// suggestion turns the two answers into the stored defect-type suggestion (policy
+// fa-verdict-v5). The verdict wins where it is sure:
+//
+//   - A verdict at VerdictDecidesSuggestionMin or above, other than unknown, decides the
+//     suggestion through the same mapping the generative path uses, whether the defect-type
+//     question abstained or named another source. It carries the verdict's confidence and is
+//     marked SuggestionSourceVerdict so calibration grades it separately. When the question
+//     agrees, its own answer and confidence are kept.
+//   - Under an unknown verdict, only automation_bug stands: a fault in the test code (a wrong
+//     locator or assertion) is the one cause the verdict options cannot name, while a product
+//     or system source the verdict could not pick is not claimed.
+//   - Otherwise the question's answer stands when it names a source at DefectTypeSuggestMin
+//     or above.
+//
+// The defect-type confidence is returned even when nothing is suggested, as before.
+func suggestion(v, dt typesafe.Answer) (defectType, source string, confidence float64) {
+	answered := dt.Choice
+	if answered == DefectTypeInsufficient || dt.Confidence < DefectTypeSuggestMin || !models.ValidDefectTypes[answered] {
+		answered = ""
+	}
+	if v.Choice != models.VerdictUnknown && v.Confidence >= VerdictDecidesSuggestionMin {
+		if mapped := models.SuggestedDefectType(v.Choice); mapped != "" {
+			if answered == mapped {
+				return answered, "", dt.Confidence
+			}
+			return mapped, models.SuggestionSourceVerdict, v.Confidence
+		}
+	}
+	if v.Choice == models.VerdictUnknown && answered != "automation_bug" {
+		return "", "", dt.Confidence
+	}
+	return answered, "", dt.Confidence
 }
 
 // evaluate renders the state and asks both questions in one request.

@@ -18,7 +18,7 @@ func (s *Store) seedTypeSafeSettings() error {
 		now := time.Now()
 		row = models.TypeSafeSettings{
 			ID: models.TypeSafeSettingsID, Enabled: false, Model: models.TypeSafeDefaultModel,
-			TimeoutSeconds: 30, VerdictEngineEnabled: true, SemanticDedupEnabled: true,
+			TimeoutSeconds: 30, VerdictEngineEnabled: true, NarrativeEnabled: true, LLMFallbackEnabled: true, SemanticDedupEnabled: true,
 			AllowAutoFailureAnalysis: false, CreatedAt: now, UpdatedAt: now,
 		}
 		return s.db.Create(&row).Error
@@ -54,7 +54,8 @@ func (s *Store) TypeSafeSettingsResponse() (models.TypeSafeSettingsResponse, err
 	}
 	resp := models.TypeSafeSettingsResponse{
 		ID: row.ID, Enabled: row.Enabled, Model: row.Model, TimeoutSeconds: row.TimeoutSeconds,
-		VerdictEngineEnabled: row.VerdictEngineEnabled, SemanticDedupEnabled: row.SemanticDedupEnabled,
+		VerdictEngineEnabled: row.VerdictEngineEnabled, NarrativeEnabled: row.NarrativeEnabled, LLMFallbackEnabled: row.LLMFallbackEnabled,
+		EscalateBelowPct: row.EscalateBelowPct, SemanticDedupEnabled: row.SemanticDedupEnabled,
 		AllowAutoFailureAnalysis: row.AllowAutoFailureAnalysis, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		APIKeyStatus: models.TypeSafeKeyStatusMissing,
 	}
@@ -93,6 +94,15 @@ func (s *Store) UpdateTypeSafeSettings(p models.TypeSafeSettingsPatch) (*models.
 	}
 	if p.VerdictEngineEnabled != nil {
 		updates["verdict_engine_enabled"] = *p.VerdictEngineEnabled
+	}
+	if p.NarrativeEnabled != nil {
+		updates["narrative_enabled"] = *p.NarrativeEnabled
+	}
+	if p.EscalateBelowPct != nil {
+		updates["escalate_below_pct"] = *p.EscalateBelowPct
+	}
+	if p.LLMFallbackEnabled != nil {
+		updates["llm_fallback_enabled"] = *p.LLMFallbackEnabled
 	}
 	if p.SemanticDedupEnabled != nil {
 		updates["semantic_dedup_enabled"] = *p.SemanticDedupEnabled

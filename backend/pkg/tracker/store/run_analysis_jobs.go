@@ -13,6 +13,10 @@ import (
 // returns the existing active (queued/running) job if one is already in
 // flight. created==true only when a new row was written.
 func (s *Store) MaybeEnqueueForRun(runID, trigger, createdBy string) (*models.RunAnalysisJob, bool, error) {
+	return s.maybeEnqueue(runID, trigger, createdBy, false)
+}
+
+func (s *Store) maybeEnqueue(runID, trigger, createdBy string, retryFailedOnly bool) (*models.RunAnalysisJob, bool, error) {
 	// activeJob returns the current queued/running job for the run, if any.
 	activeJob := func() (*models.RunAnalysisJob, error) {
 		var j models.RunAnalysisJob
@@ -38,6 +42,8 @@ func (s *Store) MaybeEnqueueForRun(runID, trigger, createdBy string) (*models.Ru
 		Trigger:   trigger,
 		Status:    models.RunAnalysisJobStatusQueued,
 		CreatedAt: time.Now(),
+
+		RetryFailedOnly: retryFailedOnly,
 	}
 	if createdBy != "" {
 		job.CreatedBy = &createdBy
@@ -162,4 +168,23 @@ func (s *Store) SweepRunningAnalysisJobs() (int64, error) {
 			"completed_at":  &now,
 		})
 	return r.RowsAffected, r.Error
+}
+
+// EnqueueRetryFailedForRun queues a job that re-analyzes only the groups whose current
+// analysis failed. Like MaybeEnqueueForRun it returns an already active job instead.
+func (s *Store) EnqueueRetryFailedForRun(runID, createdBy string) (*models.RunAnalysisJob, bool, error) {
+	return s.maybeEnqueue(runID, models.RunAnalysisJobTriggerManual, createdBy, true)
+}
+
+// SetAnalysisJobPipeline records the route a job runs with.
+func (s *Store) SetAnalysisJobPipeline(id, pipelineJSON, label string) error {
+	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).
+		Updates(map[string]interface{}{"pipeline": pipelineJSON, "pipeline_label": label}).Error
+}
+
+// ListAnalysisJobsForRun returns every analysis job of a run, newest first.
+func (s *Store) ListAnalysisJobsForRun(runID string) ([]*models.RunAnalysisJob, error) {
+	var out []*models.RunAnalysisJob
+	err := s.db.Where("test_run_id = ?", runID).Order("created_at DESC").Find(&out).Error
+	return out, err
 }

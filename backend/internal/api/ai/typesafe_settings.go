@@ -33,7 +33,7 @@ func (h *Handler) GetTypeSafeSettings(w http.ResponseWriter, r *http.Request) {
 // UpdateTypeSafeSettings applies a partial update (admin).
 //
 // @Summary      Update TypeSafe settings
-// @Description  Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300.
+// @Description  Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300. escalate_below_pct must be 0..100 (0 = never ask the LLM to decide).
 // @Tags         ai-settings
 // @Accept       json
 // @Produce      json
@@ -59,6 +59,10 @@ func (h *Handler) UpdateTypeSafeSettings(w http.ResponseWriter, r *http.Request)
 	}
 	if p.TimeoutSeconds != nil && (*p.TimeoutSeconds < 5 || *p.TimeoutSeconds > 300) {
 		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "timeout_seconds must be between 5 and 300"})
+		return
+	}
+	if p.EscalateBelowPct != nil && (*p.EscalateBelowPct < 0 || *p.EscalateBelowPct > 100) {
+		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "escalate_below_pct must be between 0 and 100"})
 		return
 	}
 	if _, err := h.store.UpdateTypeSafeSettings(p); err != nil {

@@ -20,12 +20,41 @@ func TestTypeSafeSettings_SeededDefaults(t *testing.T) {
 	require.Equal(t, models.TypeSafeDefaultModel, got.Model)
 	require.Equal(t, 30, got.TimeoutSeconds)
 	require.True(t, got.VerdictEngineEnabled)
+	require.True(t, got.NarrativeEnabled)
 	require.True(t, got.SemanticDedupEnabled)
 	require.False(t, got.AllowAutoFailureAnalysis)
 	resp, err := s.TypeSafeSettingsResponse()
 	require.NoError(t, err)
 	require.Equal(t, models.TypeSafeKeyStatusMissing, resp.APIKeyStatus)
 	require.Equal(t, "", resp.APIKeyMasked)
+	require.True(t, resp.NarrativeEnabled)
+}
+
+func TestTypeSafeSettings_NarrativeSwitchRoundTrips(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{NarrativeEnabled: tsBool(false)})
+	require.NoError(t, err)
+	require.False(t, got.NarrativeEnabled)
+	resp, err := s.TypeSafeSettingsResponse()
+	require.NoError(t, err)
+	require.False(t, resp.NarrativeEnabled)
+	got, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{Enabled: tsBool(true)})
+	require.NoError(t, err)
+	require.False(t, got.NarrativeEnabled, "a patch that omits the field leaves it alone")
+}
+
+func TestTypeSafeSettings_EscalationThresholdDefaultsOffAndRoundTrips(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetTypeSafeSettings()
+	require.NoError(t, err)
+	require.Equal(t, 0, got.EscalateBelowPct, "never escalate unless an admin opts in")
+	pct := 90
+	got, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{EscalateBelowPct: &pct})
+	require.NoError(t, err)
+	require.Equal(t, 90, got.EscalateBelowPct)
+	resp, err := s.TypeSafeSettingsResponse()
+	require.NoError(t, err)
+	require.Equal(t, 90, resp.EscalateBelowPct)
 }
 
 func TestTypeSafeSettings_KeyEncryptedAndMasked(t *testing.T) {

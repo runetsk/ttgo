@@ -25,6 +25,7 @@ type mockSource struct {
 	historyCalls int
 	gotTCID      string
 	gotSince     time.Time
+	gotBefore    time.Time
 	gotLimit     int
 	gotExclude   string
 }
@@ -40,9 +41,10 @@ func (m *mockSource) ListRequirementsByTestCase(tcID string) ([]*models.Requirem
 	return m.reqs, m.reqsErr
 }
 
-func (m *mockSource) ListRecentFailuresByTestCase(tcID string, since time.Time, limit int, excludeRunID string) ([]*models.RunResult, error) {
+func (m *mockSource) ListRecentFailuresByTestCase(tcID string, since, before time.Time, limit int, excludeRunID string) ([]*models.RunResult, error) {
 	m.historyCalls++
 	m.gotSince = since
+	m.gotBefore = before
 	m.gotLimit = limit
 	m.gotExclude = excludeRunID
 	return m.history, m.historyErr
@@ -128,6 +130,7 @@ func TestBuildContextMapsAllSlots(t *testing.T) {
 	require.Equal(t, "run-current", src.gotExclude)
 	require.Equal(t, SimilarFailuresMax, src.gotLimit)
 	require.True(t, src.gotSince.Equal(now.AddDate(0, 0, -enrichHistoryDays)))
+	require.True(t, src.gotBefore.Equal(now), "a result with no time of its own ends its history at now")
 }
 
 func TestBuildContextSourceErrorsAreBestEffort(t *testing.T) {
@@ -267,3 +270,19 @@ func TestRollupDefectTypesTieBreakAlphabetical(t *testing.T) {
 type errContext string
 
 func (e errContext) Error() string { return string(e) }
+
+func TestBuildContextHistoryEndsWhenTheResultRan(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	ran := time.Date(2026, 9, 21, 3, 0, 0, 0, time.UTC)
+
+	src := &mockSource{}
+	BuildContext(src, &models.RunResult{TestRunID: "old-run", TestCaseID: strptr("tc1"), StartTime: ran, CreatedAt: ran.Add(time.Minute)}, now)
+	require.True(t, src.gotBefore.Equal(ran), "analyzing an older run must not see what came after it: %v", src.gotBefore)
+	require.True(t, src.gotSince.Equal(ran.AddDate(0, 0, -enrichHistoryDays)), "the 30-day lookback counts back from the result")
+
+	// Recorded without timing (a manual result): when its row was written.
+	written := time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC)
+	BuildContext(src, &models.RunResult{TestRunID: "manual-run", TestCaseID: strptr("tc1"), CreatedAt: written}, now)
+	require.True(t, src.gotBefore.Equal(written), "%v", src.gotBefore)
+	require.True(t, src.gotSince.Equal(written.AddDate(0, 0, -enrichHistoryDays)))
+}

@@ -11,19 +11,31 @@ import (
 )
 
 func newAICompareCmd() *cobra.Command {
-	var answerKeyPath string
+	var answerKeyPath, jobID string
+	var byJob bool
 	cmd := &cobra.Command{
 		Use:   "compare <run-id>",
 		Short: "Compare AI failure-analysis engines on a run",
 		Long: `Pivots every stored analysis of the run's failing results by engine and model
 (TypeSafe vs generative LLMs), taking the latest version per column, flags the
-rows where the engines disagree, and grades each column against the AI demo
+rows where the columns disagree, and grades each column against the AI demo
 dataset's answer key when the run's failures match its planted templates.
 
 Re-analyzing a run with another engine or model adds a column; nothing is
-overwritten. With -o json the full pivot and summary are printed for scripting.`,
+overwritten. Failed attempts show as FAILED cells and are counted, not graded.
+
+--job <id> limits the report to what one analysis job stored (an id prefix is
+enough). --by-job makes one column per job instead, labelled by the pipeline the
+job ran (decider, narrator, explanations, takeover threshold, fallback), so two
+passes with the same model but different settings stay apart. Analyses made
+outside a job (a single re-analyze) are left out of both.
+
+With -o json the full pivot and summary are printed for scripting.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if jobID != "" && byJob {
+				return fmt.Errorf("--job and --by-job cannot be combined")
+			}
 			c, err := newClient()
 			if err != nil {
 				return err
@@ -35,6 +47,25 @@ overwritten. With -o json the full pivot and summary are printed for scripting.`
 			name, results, err := compare.ParseRun(raw)
 			if err != nil {
 				return err
+			}
+			var opts compare.Options
+			if jobID != "" || byJob {
+				raw, err := c.ListAnalysisJobs(args[0])
+				if err != nil {
+					return fmt.Errorf("analysis jobs of run %s: %w", args[0], err)
+				}
+				jobs, err := compare.ParseJobs(raw)
+				if err != nil {
+					return err
+				}
+				opts = compare.Options{ByJob: byJob, Jobs: jobs}
+				if jobID != "" {
+					j, err := compare.ResolveJob(jobs, jobID)
+					if err != nil {
+						return err
+					}
+					opts.Job = j.ID
+				}
 			}
 			histories := map[string][]compare.Analysis{}
 			for _, r := range results {
@@ -48,7 +79,7 @@ overwritten. With -o json the full pivot and summary are printed for scripting.`
 				}
 				histories[r.ID] = list
 			}
-			rep := compare.Pivot(results, histories)
+			rep := compare.PivotWith(results, histories, opts)
 			rep.RunID, rep.RunName = args[0], name
 
 			gt, note := loadAnswerKey(c, answerKeyPath)
@@ -74,6 +105,8 @@ overwritten. With -o json the full pivot and summary are printed for scripting.`
 	}
 	cmd.Flags().StringVar(&answerKeyPath, "answer-key", "",
 		"JSON answer key to grade against (a saved GET /api/seed/ai response or a perfseed manifest) instead of fetching it from the server")
+	cmd.Flags().StringVar(&jobID, "job", "", "only the analyses stored by this analysis job (id or unique prefix)")
+	cmd.Flags().BoolVar(&byJob, "by-job", false, "one column per analysis job, labelled by its pipeline, instead of per engine/model")
 	return cmd
 }
 

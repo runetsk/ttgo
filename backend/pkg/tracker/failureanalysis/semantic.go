@@ -203,14 +203,16 @@ func candidatePairs(groups []*FailureGroup) ([]semPair, int) {
 
 func excerpt(g *FailureGroup, redact bool) map[string]any {
 	r := g.Representative
-	msg, stack := r.ErrorMessage, r.StackTrace
+	msg, stack, name, ftype := r.ErrorMessage, r.StackTrace, r.TestNameSnapshot, r.FailureType
 	if redact {
-		msg, stack = Redact(msg), Redact(stack)
+		// failure_type is free text from the results API, so it is redacted like the rest.
+		// The id is the group signature, a SHA-1 hash, and carries no failure text.
+		msg, stack, name, ftype = Redact(msg), Redact(stack), Redact(name), Redact(ftype)
 	}
 	return map[string]any{
 		"id":            g.Key,
-		"test_name":     headRunes(r.TestNameSnapshot, TestNameCap),
-		"failure_type":  headRunes(r.FailureType, EnvFieldCap),
+		"test_name":     headRunes(name, TestNameCap),
+		"failure_type":  headRunes(ftype, EnvFieldCap),
 		"error_message": headRunes(msg, ExcerptErrorChars),
 		"stack_head":    headRunes(stack, ExcerptStackChars),
 	}

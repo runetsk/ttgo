@@ -28,6 +28,9 @@ func (s *Store) CreateAnalysis(a *models.RunResultAnalysis) (*models.RunResultAn
 	if a.NarrativeStatus == "" {
 		a.NarrativeStatus = models.NarrativeStatusOK
 	}
+	if a.DecisionStatus == "" {
+		a.DecisionStatus = models.DecisionStatusOK
+	}
 	if a.Engine == models.AnalysisEngineGenerative && a.SuggestedDefectType == "" {
 		a.SuggestedDefectType = models.SuggestedDefectType(a.Verdict)
 	}
@@ -109,4 +112,83 @@ func (s *Store) GetCurrentAnalysesByRun(runID string) (map[string]*models.RunRes
 		out[r.RunResultID] = r
 	}
 	return out, nil
+}
+
+// GetAnalysisByID returns one analysis version, or (nil, nil) when it does not exist.
+func (s *Store) GetAnalysisByID(id string) (*models.RunResultAnalysis, error) {
+	var out models.RunResultAnalysis
+	err := s.db.Where("id = ?", id).Take(&out).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// NarrativeUpdate is an explanation written after the decision was stored (on-demand
+// "Explain"). Token and timing fields are added to what the analysis already recorded.
+type NarrativeUpdate struct {
+	Summary, NextAction, Rationale, NarrativeStatus string
+	AddPrompt, AddCompletion, AddLLMMs, AddLLMCalls int
+	FinishReason                                    string
+}
+
+// UpdateAnalysisNarrative fills in the explanation of an existing analysis without touching
+// its decision. The decision stays immutable; only the narrative fields change.
+func (s *Store) UpdateAnalysisNarrative(id string, u NarrativeUpdate) (*models.RunResultAnalysis, error) {
+	err := s.db.Model(&models.RunResultAnalysis{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"summary":                u.Summary,
+		"next_action":            u.NextAction,
+		"rationale":              u.Rationale,
+		"narrative_status":       u.NarrativeStatus,
+		"token_usage_prompt":     gorm.Expr("token_usage_prompt + ?", u.AddPrompt),
+		"token_usage_completion": gorm.Expr("token_usage_completion + ?", u.AddCompletion),
+		"llm_ms":                 gorm.Expr("llm_ms + ?", u.AddLLMMs),
+		"llm_calls":              gorm.Expr("llm_calls + ?", u.AddLLMCalls),
+		"finish_reason":          u.FinishReason,
+	}).Error
+	if err != nil {
+		return nil, err
+	}
+	return s.GetAnalysisByID(id)
+}
+
+// FailedResultIDsForRun returns the failing results of a run whose current analysis is a
+// failed attempt, so a retry can re-analyze just those.
+func (s *Store) FailedResultIDsForRun(runID string) (map[string]bool, error) {
+	current, err := s.GetCurrentAnalysesByRun(runID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]bool{}
+	for id, a := range current {
+		if a.Failed() {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+// AnalysisJobOutcomes counts what a job's analyses produced. Representatives are the rows
+// the job analyzed itself (no source analysis); FailedRows counts clones too.
+func (s *Store) AnalysisJobOutcomes(jobID string) (models.RunAnalysisJobOutcomes, error) {
+	var o models.RunAnalysisJobOutcomes
+	err := s.db.Raw(`
+		SELECT
+		  COUNT(*) AS groups,
+		  COALESCE(SUM(CASE WHEN decision_status = 'ok' THEN 1 ELSE 0 END), 0) AS decided,
+		  COALESCE(SUM(CASE WHEN decision_status = 'failed' THEN 1 ELSE 0 END), 0) AS failed,
+		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND verdict = 'unknown' THEN 1 ELSE 0 END), 0) AS unknown,
+		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND narrative_status IN ('unavailable', 'unparseable') THEN 1 ELSE 0 END), 0) AS no_explanation,
+		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND narrative_status = 'skipped' THEN 1 ELSE 0 END), 0) AS explanation_skipped,
+		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND takeover_from_verdict != '' THEN 1 ELSE 0 END), 0) AS taken_over
+		FROM run_result_analyses WHERE job_id = ? AND source_analysis_id IS NULL`, jobID).Scan(&o).Error
+	if err != nil {
+		return o, err
+	}
+	err = s.db.Raw(`SELECT COUNT(*) FROM run_result_analyses WHERE job_id = ? AND decision_status = 'failed'`, jobID).
+		Scan(&o.FailedRows).Error
+	return o, err
 }

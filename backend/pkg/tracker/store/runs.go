@@ -1323,9 +1323,11 @@ func (s *Store) ListLatestFailingResults(runID string) ([]*models.RunResult, err
 }
 
 // ListRecentFailuresByTestCase returns the most recent FAIL/ERROR RunResults for
-// a single test case within the [since, now] window, newest first, capped at
+// a single test case that started within [since, before), newest first, capped at
 // limit. The run identified by excludeRunID is left out so a result's own run
-// never appears in its own history block.
+// never appears in its own history block, and the exclusive upper bound keeps
+// failures that happened after the analyzed one (and the labels people gave
+// them) out of it.
 //
 // Feeds the failure-analysis enrichment builder with this test's recent triage
 // history (each row carries its human DefectType label). Rides the composite
@@ -1336,7 +1338,7 @@ func (s *Store) ListLatestFailingResults(runID string) ([]*models.RunResult, err
 // best-effort, so a missing test case (deleted → NULL test_case_id) is not an
 // error. Status is matched UPPERCASE (models.StatusFail/StatusError), mirroring
 // ListLatestFailingResults.
-func (s *Store) ListRecentFailuresByTestCase(tcID string, since time.Time, limit int, excludeRunID string) ([]*models.RunResult, error) {
+func (s *Store) ListRecentFailuresByTestCase(tcID string, since, before time.Time, limit int, excludeRunID string) ([]*models.RunResult, error) {
 	if tcID == "" || limit <= 0 {
 		return nil, nil
 	}
@@ -1344,9 +1346,12 @@ func (s *Store) ListRecentFailuresByTestCase(tcID string, since time.Time, limit
 	err := s.db.
 		Where("test_case_id = ?", tcID).
 		Where("status IN ('FAIL','ERROR')").
-		Where("start_time >= ?", since).
+		// Compared as instants: start_time is stored as text with the offset it was written
+		// with (a reporter's UTC next to the server's local time), and text comparison would
+		// let a later failure slip under the bound. test_case_id still narrows by index.
+		Where("julianday(start_time) >= julianday(?) AND julianday(start_time) < julianday(?)", since, before).
 		Where("test_run_id != ?", excludeRunID).
-		Order("start_time DESC").
+		Order("julianday(start_time) DESC").
 		Limit(limit).
 		Find(&results).Error
 	if err != nil {

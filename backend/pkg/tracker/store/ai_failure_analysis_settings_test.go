@@ -99,3 +99,21 @@ func TestSeedFailureAnalysisPreservesCustomizedPrompt(t *testing.T) {
 	require.Equal(t, custom, got.PromptTemplate)
 	require.Equal(t, failureanalysis.DefaultPromptTemplate, got.DefaultPromptTemplate)
 }
+
+func TestFailureAnalysisSettings_ParallelGroups(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	require.Equal(t, models.DefaultParallelGroups, got.ParallelGroups, "a new install analyzes groups four at a time")
+
+	base := models.AIFailureAnalysisSettings{MaxAnalysesPerRun: 20, DedupEnabled: true, RedactionEnabled: true, PromptTemplate: "p"}
+	withSix := base
+	withSix.ParallelGroups = 6
+	got, err = s.UpdateFailureAnalysisSettings(&withSix)
+	require.NoError(t, err)
+	require.Equal(t, 6, got.ParallelGroups)
+
+	got, err = s.UpdateFailureAnalysisSettings(&base) // a caller that predates the setting
+	require.NoError(t, err)
+	require.Equal(t, 6, got.ParallelGroups, "0 keeps the stored value")
+}

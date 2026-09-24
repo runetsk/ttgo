@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/typesafe"
@@ -53,6 +54,22 @@ type AnalyzeResult struct {
 	NarrativeStatus               string
 	PolicyVersion                 string
 	TypeSafeInputTokens           int
+
+	// DecisionStatus is models.DecisionStatusOK for a decision and DecisionStatusFailed for an
+	// attempt that produced none; ErrorCategory says why (or why a takeover did not happen).
+	DecisionStatus string
+	ErrorCategory  string
+
+	// Takeover provenance: TypeSafe's own decision when the LLM decided below the threshold.
+	TakeoverFromVerdict    string
+	TakeoverFromConfidence *float64
+	TakeoverFromDefectType string
+
+	// Stage timing and call accounting.
+	DecisionMs   int
+	LLMMs        int
+	LLMCalls     int
+	FinishReason string
 }
 
 func jsonOrEmpty(m map[string]float64) string {
@@ -65,19 +82,115 @@ func jsonOrEmpty(m map[string]float64) string {
 
 func f64ptr(v float64) *float64 { return &v }
 
+// ReplyTokenCap bounds every failure-analysis LLM reply (the generative verdict and the
+// TypeSafe narrative). Providers bill generated tokens only, so the cap costs nothing on short
+// replies. It was 1,024, which verbose models such as deepseek-v4.1-flash overran twice in a
+// row, leaving JSON that could not be parsed. It is not higher than 2,048 because a slow model
+// writing 4,096 tokens outlasts the default 90-second provider timeout; a reply cut off at
+// 2,048 gets a retry that asks for brevity instead.
+const ReplyTokenCap = 2048
+
+// TransportAttempts bounds each LLM call: one retry on a transient provider failure (rate
+// limit, 5xx, network), honouring Retry-After. JSON repair is a separate, single follow-up.
+const TransportAttempts = 2
+
+// ErrReplyTruncated: the LLM's reply stopped at ReplyTokenCap on the first call and on the
+// repair retry, so no complete JSON came back. It is a failed call, not an "unknown" verdict.
+var ErrReplyTruncated = errors.New("LLM reply cut off at the length limit twice")
+
+// ErrTypeSafeUnavailable wraps a TypeSafe failure that was not handed to the LLM, because the
+// LLM fallback is switched off or no LLM is available. The attempt is recorded as failed.
+var ErrTypeSafeUnavailable = errors.New("TypeSafe.ai unavailable and the LLM fallback is off")
+
+// ErrNoNarrator: an explanation was requested but no LLM provider is available.
+var ErrNoNarrator = errors.New("no LLM provider is available to write the explanation")
+
+// usageError carries the tokens an LLM exchange consumed before it failed, so a failed
+// analysis still records what it cost. errors.Is and errors.As see through it.
+type usageError struct {
+	err                error
+	prompt, completion int
+}
+
+func (e *usageError) Error() string { return e.err.Error() }
+func (e *usageError) Unwrap() error { return e.err }
+
+// UsageFromError returns the prompt and completion tokens an analysis consumed before it
+// failed with err, or zeros when err carries none.
+func UsageFromError(err error) (prompt, completion int) {
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return ue.prompt, ue.completion
+	}
+	return 0, 0
+}
+
+// callStats accumulates what the LLM calls of one analysis cost in time and attempts.
+type callStats struct {
+	calls, ms int
+	finish    string
+}
+
+// chat sends one request with bounded transient retries and records the attempts.
+func (s *callStats) chat(ctx context.Context, p llm.Provider, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	start := time.Now()
+	resp, retries, err := llm.ChatWithRetry(ctx, p, req, llm.RetryOptions{MaxAttempts: TransportAttempts})
+	s.calls += 1 + retries
+	s.ms += int(time.Since(start).Milliseconds())
+	if resp != nil {
+		s.finish = resp.FinishReason
+	}
+	return resp, err
+}
+
+func (s *callStats) apply(out *AnalyzeResult) {
+	out.LLMCalls += s.calls
+	out.LLMMs += s.ms
+	if s.finish != "" {
+		out.FinishReason = s.finish
+	}
+}
+
+// FailedResult is the record of an attempt that produced no decision: the engine and model
+// that were tried, why it failed, and the tokens it consumed. Shared by the batch worker and
+// the single-result handler so both store failures the same way.
+func FailedResult(err error, deps AnalyzeDeps) *AnalyzeResult {
+	p, c := UsageFromError(err)
+	res := &AnalyzeResult{
+		Engine: models.AnalysisEngineGenerative, ModelName: deps.NarrativeModel,
+		Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow,
+		Summary:         "analysis failed: " + err.Error(),
+		NarrativeStatus: models.NarrativeStatusUnavailable,
+		DecisionStatus:  models.DecisionStatusFailed, ErrorCategory: errCategory(err),
+		TokenUsagePrompt: p, TokenUsageCompletion: c,
+	}
+	if errors.Is(err, ErrTypeSafeUnavailable) {
+		res.Engine, res.ModelName, res.PolicyVersion = models.AnalysisEngineTypeSafe, deps.DeciderModel, PolicyVersion
+	}
+	return res
+}
+
 // Analyze runs the cascade (spec §6): TypeSafe decides when a Decider is present, the generative
-// provider narrates; without a decider (or when it fails) the generative provider decides as today.
+// provider narrates; without a decider (or when it fails and the fallback is on) the generative
+// provider decides as today.
 func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeResult, error) {
 	ev := BuildEvidence(in)
 
 	var decision *Decision
 	fallbackPrefix := ""
+	decisionMs := 0
 	if deps.Decider != nil {
+		start := time.Now()
 		d, err := deps.Decider.Decide(ctx, BuildEvidenceWithBudget(in, TypeSafeBudget()))
+		decisionMs = int(time.Since(start).Milliseconds())
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		if err != nil {
+			if deps.NoLLMFallback || deps.Narrative == nil {
+				slog.Warn("failure-analysis: TypeSafe decision failed and the LLM fallback is off", "err", err)
+				return nil, fmt.Errorf("%w: %w", ErrTypeSafeUnavailable, err)
+			}
 			slog.Warn("failure-analysis: TypeSafe decision failed, using generative verdict", "err", err)
 			fallbackPrefix = "[verdict engine: TypeSafe unavailable (" + errCategory(err) + "); used generative] "
 		} else {
@@ -85,10 +198,77 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 		}
 	}
 	if decision == nil {
-		return analyzeGenerative(ctx, deps, in, ev, fallbackPrefix)
+		res, err := analyzeGenerative(ctx, deps, in, ev, fallbackPrefix)
+		if res != nil {
+			res.DecisionMs = decisionMs
+		}
+		return res, err
 	}
 
-	out := &AnalyzeResult{
+	// Takeover: TypeSafe is not confident enough, so the LLM decides as the generative
+	// pipeline would. The row is an LLM analysis (graded on the LLM ladder); it records
+	// TypeSafe's own decision and carries TypeSafe's tokens because both ran.
+	escalationFailed := ""
+	esc := &AnalyzeResult{}
+	if deps.EscalateBelow > 0 && deps.Narrative != nil && decision.VerdictConfidence < deps.EscalateBelow {
+		prefix := fmt.Sprintf("[verdict engine: TypeSafe unsure (%s at %.2f, below %.2f); the LLM decided] ",
+			decision.Verdict, decision.VerdictConfidence, deps.EscalateBelow)
+		res, err := analyzeGenerative(ctx, deps, in, ev, prefix)
+		if abandoned(ctx) {
+			return nil, ctx.Err()
+		}
+		switch {
+		case err == nil && res.DecisionStatus != models.DecisionStatusFailed:
+			res.TypeSafeInputTokens = decision.InputTokens
+			res.DecisionMs = decisionMs
+			res.TakeoverFromVerdict = decision.Verdict
+			res.TakeoverFromConfidence = f64ptr(decision.VerdictConfidence)
+			res.TakeoverFromDefectType = decision.SuggestedDefectType
+			return res, nil
+		case err == nil:
+			// Two unreadable replies are not an LLM verdict; TypeSafe's decision stands.
+			slog.Warn("failure-analysis: LLM takeover reply unparseable, keeping TypeSafe's decision")
+			escalationFailed = "unparseable"
+			esc = res
+		default:
+			slog.Warn("failure-analysis: LLM takeover failed, keeping TypeSafe's decision", "err", err)
+			escalationFailed = errCategory(err)
+			esc.TokenUsagePrompt, esc.TokenUsageCompletion = UsageFromError(err)
+		}
+	}
+
+	out := decisionResult(decision)
+	out.DecisionMs = decisionMs
+	if escalationFailed != "" {
+		// The LLM was just asked and failed; do not call it again to narrate. Its tokens and
+		// time were still spent, so they are recorded.
+		out.TokenUsagePrompt, out.TokenUsageCompletion = esc.TokenUsagePrompt, esc.TokenUsageCompletion
+		out.LLMMs, out.LLMCalls, out.FinishReason = esc.LLMMs, esc.LLMCalls, esc.FinishReason
+		out.ErrorCategory = escalationFailed
+		out.NarrativeStatus = models.NarrativeStatusUnavailable
+		out.Summary = "The LLM could not be asked to decide (" + escalationFailed + "); TypeSafe's low-confidence decision is kept."
+		return out, nil
+	}
+	if deps.NarrativeSkipped {
+		out.NarrativeStatus = models.NarrativeStatusSkipped
+		out.Summary = "No explanation: explanations are switched off in the TypeSafe.ai settings; the classification above is TypeSafe's decision."
+		return out, nil
+	}
+	if deps.Narrative == nil {
+		reason := deps.LLMUnavailableReason
+		if reason == "" {
+			reason = "no generative provider is configured"
+		}
+		out.NarrativeStatus = models.NarrativeStatusUnavailable
+		out.Summary = "Narrative unavailable: " + reason + "."
+		return out, nil
+	}
+	return narrate(ctx, deps, in, ev, decision, out)
+}
+
+// decisionResult is a TypeSafe decision as a stored analysis, before any explanation.
+func decisionResult(decision *Decision) *AnalyzeResult {
+	return &AnalyzeResult{
 		Engine:                        models.AnalysisEngineTypeSafe,
 		Verdict:                       decision.Verdict,
 		Confidence:                    confidenceBucket(decision.VerdictConfidence),
@@ -102,43 +282,48 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 		TypeSafeInputTokens:           decision.InputTokens,
 		ModelName:                     decision.Model,
 		NarrativeStatus:               models.NarrativeStatusOK,
+		DecisionStatus:                models.DecisionStatusOK,
 	}
-	if deps.Narrative == nil {
-		out.NarrativeStatus = models.NarrativeStatusUnavailable
-		out.Summary = "Narrative unavailable: no generative provider is configured."
-		return out, nil
-	}
+}
 
+// narrate asks the LLM to explain a fixed decision and writes the explanation into out.
+// Provider failures never fail the analysis: the decision stands and the narrative is marked
+// unavailable or unparseable.
+func narrate(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext, ev Evidence, decision *Decision, out *AnalyzeResult) (*AnalyzeResult, error) {
 	pin := ev.PromptInput(in.PromptTemplate)
 	pin.DecidedVerdict, pin.DecidedConfidence, pin.DecidedDefectType = decision.Verdict, out.Confidence, decision.SuggestedDefectType
 	prompt, meta, err := BuildPrompt(pin)
 	if err != nil {
 		return narrativeUnavailable(out, "template error", meta), nil
 	}
+	_, user := SplitSystemPrompt(prompt)
 	req := llm.ChatRequest{
 		Model: firstNonEmpty(deps.NarrativeModel, in.ProviderModel),
 		Messages: []llm.ChatMessage{
 			{Role: "system", Content: narrativeSystemMessage(decision)},
-			{Role: "user", Content: prompt},
+			{Role: "user", Content: user},
 		},
-		Temperature: 0.2, MaxTokens: 1024, ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
+		Temperature: 0.2, MaxTokens: ReplyTokenCap, ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 	}
-	resp, err := deps.Narrative.Chat(ctx, req)
-	if ctx.Err() != nil {
+	stats := &callStats{}
+	defer stats.apply(out)
+	resp, err := stats.chat(ctx, deps.Narrative, req)
+	if abandoned(ctx) {
 		return nil, ctx.Err()
 	}
 	if err != nil {
 		return narrativeUnavailable(out, errCategory(err), meta), nil
 	}
-	out.TokenUsagePrompt, out.TokenUsageCompletion = tokens(resp, true), tokens(resp, false)
+	out.TokenUsagePrompt += tokens(resp, true)
+	out.TokenUsageCompletion += tokens(resp, false)
 	parsed, perr := parseNarrative(resp.Content)
 	if perr != nil {
 		retry := req
 		retry.Messages = append(retry.Messages,
 			llm.ChatMessage{Role: "assistant", Content: resp.Content},
-			llm.ChatMessage{Role: "user", Content: "Your previous response was not valid JSON. Return only the JSON object."})
-		resp2, err2 := deps.Narrative.Chat(ctx, retry)
-		if ctx.Err() != nil {
+			llm.ChatMessage{Role: "user", Content: repairMessage(resp)})
+		resp2, err2 := stats.chat(ctx, deps.Narrative, retry)
+		if abandoned(ctx) {
 			return nil, ctx.Err()
 		}
 		if err2 != nil {
@@ -147,6 +332,9 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 		out.TokenUsagePrompt += tokens(resp2, true)
 		out.TokenUsageCompletion += tokens(resp2, false)
 		parsed, perr = parseNarrative(resp2.Content)
+		if perr != nil && replyTruncated(resp2) {
+			return narrativeUnavailable(out, "truncated", meta), nil
+		}
 		if perr != nil {
 			raw := headRunes(resp2.Content, 1400)
 			out.NarrativeStatus = models.NarrativeStatusUnparseable
@@ -157,11 +345,30 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 		}
 		resp = resp2
 	}
+	out.NarrativeStatus = models.NarrativeStatusOK
 	out.Summary = clamp(parsed.Summary, 400)
 	out.NextAction = clamp(parsed.NextAction, 200)
 	out.Rationale = meta.TruncationPrefix + clamp(parsed.Rationale, 1500)
 	out.RawResponse = resp.Content
 	return out, nil
+}
+
+// Explain writes an explanation for an already stored TypeSafe decision (on-demand "Explain"
+// or "Retry explanation"). The decision itself is not re-run and does not change; the result
+// carries only the narrative fields and what the LLM calls cost.
+func Explain(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext, a *models.RunResultAnalysis) (*AnalyzeResult, error) {
+	if deps.Narrative == nil {
+		return nil, ErrNoNarrator
+	}
+	decision := &Decision{Verdict: a.Verdict, SuggestedDefectType: a.SuggestedDefectType}
+	if a.ConfidenceScore != nil {
+		decision.VerdictConfidence = *a.ConfidenceScore
+	}
+	if a.VerdictProbabilities != "" {
+		_ = json.Unmarshal([]byte(a.VerdictProbabilities), &decision.VerdictProbabilities)
+	}
+	out := &AnalyzeResult{Confidence: a.Confidence, NarrativeStatus: models.NarrativeStatusOK}
+	return narrate(ctx, deps, in, BuildEvidence(in), decision, out)
 }
 
 func narrativeUnavailable(out *AnalyzeResult, reason string, meta PromptMeta) *AnalyzeResult {
@@ -172,8 +379,35 @@ func narrativeUnavailable(out *AnalyzeResult, reason string, meta PromptMeta) *A
 	return out
 }
 
+// replyTruncated reports whether the provider stopped the reply at the token limit
+// ("length" for OpenAI-compatible APIs, "max_tokens" for Anthropic).
+func replyTruncated(r *llm.ChatResponse) bool {
+	if r == nil {
+		return false
+	}
+	return strings.EqualFold(r.FinishReason, "length") || strings.EqualFold(r.FinishReason, "max_tokens")
+}
+
+// repairMessage is the follow-up for a reply that could not be parsed: a cut-off reply is
+// asked to shorten, anything else to return only the JSON object.
+func repairMessage(first *llm.ChatResponse) string {
+	if replyTruncated(first) {
+		return "Your previous response was cut off at the length limit. Return the complete JSON object again with every field brief."
+	}
+	return "Your previous response was not valid JSON. Return only the JSON object."
+}
+
+// abandoned reports whether ctx was cancelled (the job was cancelled, the server is stopping,
+// or the caller went away), as opposed to running out of its deadline. An abandoned analysis
+// stores nothing. A deadline hit after TypeSafe decided is not abandonment: the decision is
+// kept and the takeover or explanation is recorded as unavailable (category timeout).
+func abandoned(ctx context.Context) bool { return errors.Is(ctx.Err(), context.Canceled) }
+
 // errCategory extracts a short category label from provider/typesafe errors for prefixes.
 func errCategory(err error) string {
+	if errors.Is(err, ErrReplyTruncated) {
+		return "truncated"
+	}
 	var pe *llm.ProviderError
 	if errors.As(err, &pe) {
 		return string(pe.Category)
@@ -182,11 +416,14 @@ func errCategory(err error) string {
 	if errors.As(err, &te) {
 		return string(te.Category)
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "timeout"
+	}
 	return "error"
 }
 
-// analyzeGenerative is the pre-TypeSafe path, unchanged except that it runs on the capped
-// evidence and persists the legacy suggestion mapping.
+// analyzeGenerative is the pre-TypeSafe path: the LLM decides and explains in one call.
+// It runs on the capped evidence and persists the legacy suggestion mapping.
 func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext, ev Evidence, prefix string) (*AnalyzeResult, error) {
 	if deps.Narrative == nil {
 		return nil, fmt.Errorf("no LLM provider configured")
@@ -197,12 +434,13 @@ func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext,
 	}
 	req := llm.ChatRequest{
 		Model:          firstNonEmpty(deps.NarrativeModel, in.ProviderModel),
-		Messages:       []llm.ChatMessage{{Role: "user", Content: prompt}},
+		Messages:       generativeMessages(prompt),
 		Temperature:    0.2,
-		MaxTokens:      1024,
+		MaxTokens:      ReplyTokenCap,
 		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 	}
-	resp, err := deps.Narrative.Chat(ctx, req)
+	stats := &callStats{}
+	resp, err := stats.chat(ctx, deps.Narrative, req)
 	if err != nil {
 		return nil, fmt.Errorf("llm call: %w", err)
 	}
@@ -211,19 +449,25 @@ func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext,
 	totalCompletion := tokens(resp, false)
 	if parseErr != nil {
 		retryReq := req
-		retryReq.Messages = append(retryReq.Messages,
+		retryReq.Messages = append(append([]llm.ChatMessage(nil), req.Messages...),
 			llm.ChatMessage{Role: "assistant", Content: resp.Content},
-			llm.ChatMessage{Role: "user", Content: "Your previous response was not valid JSON. Return only the JSON object."})
-		resp2, err2 := deps.Narrative.Chat(ctx, retryReq)
+			llm.ChatMessage{Role: "user", Content: repairMessage(resp)})
+		resp2, err2 := stats.chat(ctx, deps.Narrative, retryReq)
 		if err2 != nil {
-			return nil, fmt.Errorf("llm retry: %w", err2)
+			return nil, &usageError{err: fmt.Errorf("llm retry: %w", err2), prompt: totalPrompt, completion: totalCompletion}
 		}
 		totalPrompt += tokens(resp2, true)
 		totalCompletion += tokens(resp2, false)
 		parsed, parseErr = parseVerdict(resp2.Content)
+		if parseErr != nil && replyTruncated(resp2) {
+			// No complete answer came back: a failed call, not the model saying "unknown".
+			return nil, fmt.Errorf("llm call: %w", &usageError{err: ErrReplyTruncated, prompt: totalPrompt, completion: totalCompletion})
+		}
 		if parseErr != nil {
+			// Two complete but unreadable replies: no decision. The row keeps the raw text for
+			// inspection and is marked failed, never counted as the model's "unknown".
 			raw := headRunes(resp2.Content, 1400)
-			return &AnalyzeResult{
+			out := &AnalyzeResult{
 				Engine: models.AnalysisEngineGenerative, NarrativeStatus: models.NarrativeStatusOK,
 				Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow,
 				Summary: "AI returned unparseable response — see rationale", NextAction: "Review raw response manually",
@@ -231,11 +475,15 @@ func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext,
 				ModelName:            firstNonEmpty(resp2.Model, deps.NarrativeModel, in.ProviderModel),
 				TokenUsagePrompt:     totalPrompt,
 				TokenUsageCompletion: totalCompletion,
-			}, nil
+				DecisionStatus:       models.DecisionStatusFailed,
+				ErrorCategory:        "unparseable",
+			}
+			stats.apply(out)
+			return out, nil
 		}
 		resp = resp2
 	}
-	return &AnalyzeResult{
+	out := &AnalyzeResult{
 		Engine: models.AnalysisEngineGenerative, NarrativeStatus: models.NarrativeStatusOK,
 		Verdict: parsed.Verdict, Confidence: parsed.Confidence,
 		SuggestedDefectType:  models.SuggestedDefectType(parsed.Verdict),
@@ -246,7 +494,21 @@ func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext,
 		ModelName:            firstNonEmpty(resp.Model, deps.NarrativeModel, in.ProviderModel),
 		TokenUsagePrompt:     totalPrompt,
 		TokenUsageCompletion: totalCompletion,
-	}, nil
+		DecisionStatus:       models.DecisionStatusOK,
+	}
+	stats.apply(out)
+	return out, nil
+}
+
+// generativeMessages sends the template's SYSTEM block as a real system message and the
+// rest, which carries the untrusted evidence, as the user message. A template without the
+// SYSTEM:/USER: markers is sent as a single user message, as before.
+func generativeMessages(prompt string) []llm.ChatMessage {
+	system, user := SplitSystemPrompt(prompt)
+	if system == "" {
+		return []llm.ChatMessage{{Role: "user", Content: user}}
+	}
+	return []llm.ChatMessage{{Role: "system", Content: system}, {Role: "user", Content: user}}
 }
 
 type verdictJSON struct {

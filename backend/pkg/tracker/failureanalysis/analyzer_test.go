@@ -131,7 +131,12 @@ type capturingProvider struct {
 
 func (c *capturingProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	if len(req.Messages) > 0 {
-		c.lastPrompt = req.Messages[0].Content
+		for _, m := range req.Messages { // the evidence travels in the user message; SYSTEM goes separately
+			if m.Role == "user" {
+				c.lastPrompt = m.Content
+				break
+			}
+		}
 	}
 	return &llm.ChatResponse{
 		Content: `{"verdict":"product_bug","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`,
@@ -243,7 +248,7 @@ func TestAnalyze_TypeSafeDecidesGenerativeExplains(t *testing.T) {
 	require.Len(t, prov.reqs, 1)
 	msgs := prov.reqs[0].Messages
 	require.Equal(t, "system", msgs[0].Role)
-	require.Contains(t, msgs[0].Content, "must not be changed")
+	require.Contains(t, msgs[0].Content, "do not change it")
 	require.Contains(t, msgs[0].Content, "`flaky_test`")
 	require.Contains(t, msgs[0].Content, "`automation_bug`")
 	require.Contains(t, msgs[0].Content, `{"summary"`)
@@ -351,6 +356,174 @@ func TestAnalyze_DecisionWithoutNarrativeProvider(t *testing.T) {
 
 	_, err = Analyze(context.Background(), AnalyzeDeps{}, baseContext())
 	require.Error(t, err, "generative path with no provider is still an error")
+}
+
+// finishProvider returns one scripted reply per call, each with a finish reason, and records
+// the requests it received.
+type finishProvider struct {
+	replies [][2]string // {content, finish reason}
+	reqs    []llm.ChatRequest
+}
+
+func (f *finishProvider) Chat(_ context.Context, req llm.ChatRequest) (*llm.ChatResponse, error) {
+	r := f.replies[len(f.reqs)]
+	f.reqs = append(f.reqs, req)
+	return &llm.ChatResponse{Content: r[0], FinishReason: r[1], Model: "deepseek-test",
+		Usage: &llm.ChatUsage{PromptTokens: 100, CompletionTokens: ReplyTokenCap}}, nil
+}
+
+const cutOff = `{"verdict":"environment","confidence":"high","summary":"The staging host`
+
+func TestReplyTruncated_RecognisesBothProviderSpellings(t *testing.T) {
+	require.True(t, replyTruncated(&llm.ChatResponse{FinishReason: "length"}))
+	require.True(t, replyTruncated(&llm.ChatResponse{FinishReason: "max_tokens"}))
+	require.True(t, replyTruncated(&llm.ChatResponse{FinishReason: "MAX_TOKENS"}))
+	require.False(t, replyTruncated(&llm.ChatResponse{FinishReason: "stop"}))
+	require.False(t, replyTruncated(&llm.ChatResponse{}))
+	require.False(t, replyTruncated(nil))
+}
+
+func TestAnalyze_ReplyCutOffTwiceIsAFailedCall(t *testing.T) {
+	prov := &finishProvider{replies: [][2]string{{cutOff, "length"}, {cutOff, "length"}}}
+	_, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "deepseek-test"}, baseContext())
+	require.ErrorIs(t, err, ErrReplyTruncated, "no complete answer is a failed call, not an unknown verdict")
+	require.Equal(t, "truncated", errCategory(err))
+	p, c := UsageFromError(err)
+	require.Equal(t, 200, p, "both calls' prompt tokens travel with the error")
+	require.Equal(t, 2*ReplyTokenCap, c, "both calls' completion tokens travel with the error")
+	require.Len(t, prov.reqs, 2)
+	require.Equal(t, ReplyTokenCap, prov.reqs[0].MaxTokens)
+	last := prov.reqs[1].Messages[len(prov.reqs[1].Messages)-1]
+	require.Contains(t, last.Content, "cut off at the length limit", "the retry says what went wrong")
+}
+
+func TestAnalyze_ReplyCutOffThenCompleteIsKept(t *testing.T) {
+	prov := &finishProvider{replies: [][2]string{
+		{cutOff, "length"},
+		{`{"verdict":"environment","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`, "stop"},
+	}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "deepseek-test"}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.VerdictEnvironment, out.Verdict)
+	require.Equal(t, 2*ReplyTokenCap, out.TokenUsageCompletion, "both calls are accounted")
+
+	// A malformed reply that was not cut off keeps the original repair message and outcome.
+	bad := &finishProvider{replies: [][2]string{{"not json", "stop"}, {"still not json", "stop"}}}
+	out, err = Analyze(context.Background(), AnalyzeDeps{Narrative: bad, NarrativeModel: "deepseek-test"}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.VerdictUnknown, out.Verdict)
+	require.Contains(t, out.Summary, "unparseable")
+	require.Contains(t, bad.reqs[1].Messages[len(bad.reqs[1].Messages)-1].Content, "not valid JSON")
+}
+
+func TestAnalyze_NarrativeCutOffTwiceKeepsDecision(t *testing.T) {
+	prov := &finishProvider{replies: [][2]string{{`{"summary":"The`, "length"}, {`{"summary":"The`, "length"}}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "m", Decider: fixedDecider{d: flakyDecision()}}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Equal(t, models.NarrativeStatusUnavailable, out.NarrativeStatus)
+	require.Equal(t, "AI narrative unavailable: truncated", out.Summary)
+	require.Equal(t, ReplyTokenCap, prov.reqs[0].MaxTokens)
+}
+
+func TestAnalyze_EscalationCutOffTwiceKeepsTypeSafeDecision(t *testing.T) {
+	unsure := flakyDecision()
+	unsure.VerdictConfidence = 0.60
+	prov := &finishProvider{replies: [][2]string{{cutOff, "length"}, {cutOff, "length"}}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "m", Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine, "a cut-off LLM answer does not replace TypeSafe's decision")
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Contains(t, out.Summary, "(truncated)")
+	require.Len(t, prov.reqs, 2, "no third call to narrate")
+	require.Equal(t, 2*ReplyTokenCap, out.TokenUsageCompletion, "the failed takeover's tokens are recorded on the kept decision")
+	require.Equal(t, 200, out.TokenUsagePrompt)
+}
+
+func TestAnalyze_EscalationUnparseableTwiceKeepsTypeSafeDecision(t *testing.T) {
+	unsure := flakyDecision()
+	unsure.VerdictConfidence = 0.60
+	prov := &finishProvider{replies: [][2]string{{"not json", "stop"}, {`{"type": "json_object"}`, "stop"}}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "m", Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine, "an unreadable LLM reply does not replace TypeSafe's decision")
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Equal(t, "automation_bug", out.SuggestedDefectType)
+	require.Equal(t, models.NarrativeStatusUnavailable, out.NarrativeStatus)
+	require.Contains(t, out.Summary, "(unparseable)")
+	require.Len(t, prov.reqs, 2, "no third call to narrate")
+	require.Equal(t, 2*ReplyTokenCap, out.TokenUsageCompletion)
+
+	// Without a TypeSafe decision the same replies still produce the stored unknown, as before.
+	prov2 := &finishProvider{replies: [][2]string{{"not json", "stop"}, {`{"type": "json_object"}`, "stop"}}}
+	out2, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov2, NarrativeModel: "m"}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.VerdictUnknown, out2.Verdict)
+	require.Contains(t, out2.Summary, "unparseable")
+}
+
+func TestAnalyze_LowConfidenceEscalatesToLLM(t *testing.T) {
+	unsure := flakyDecision()
+	unsure.Verdict, unsure.VerdictConfidence = models.VerdictUnknown, 0.52
+	prov := &stubProvider{responses: []string{`{"verdict":"environment","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test", Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90, NarrativeSkipped: true}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineGenerative, out.Engine, "the LLM decided, so it is graded as the LLM")
+	require.Equal(t, models.VerdictEnvironment, out.Verdict)
+	require.Equal(t, "system_issue", out.SuggestedDefectType, "defect type follows the LLM's verdict")
+	require.True(t, strings.HasPrefix(out.Rationale, "[verdict engine: TypeSafe unsure (unknown at 0.52, below 0.90); the LLM decided] "), out.Rationale)
+	require.Equal(t, 777, out.TypeSafeInputTokens, "both engines ran, both are accounted")
+	require.Equal(t, 1, prov.calls, "one LLM call decides and explains, even with explanations off")
+	require.Empty(t, out.PolicyVersion)
+}
+
+func TestAnalyze_ConfidentDecisionIsNotEscalated(t *testing.T) {
+	prov := &stubProvider{responses: []string{`{"summary":"S","next_action":"N","rationale":"R"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test", Decider: fixedDecider{d: flakyDecision()}, EscalateBelow: 0.90}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine, "0.93 is at or above 0.90")
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+
+	unsure := flakyDecision()
+	unsure.VerdictConfidence = 0.40
+	out, err = Analyze(context.Background(), AnalyzeDeps{Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine, "no LLM configured: nothing to escalate to")
+}
+
+func TestAnalyze_FailedEscalationKeepsTypeSafeDecision(t *testing.T) {
+	unsure := flakyDecision()
+	unsure.VerdictConfidence = 0.60
+	prov := &stubProvider{errs: []error{&llm.ProviderError{Category: llm.ErrCatTimeout, Message: "t"}}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test", Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Equal(t, models.NarrativeStatusUnavailable, out.NarrativeStatus)
+	require.Contains(t, out.Summary, "timeout")
+	require.Equal(t, 1, prov.calls, "the narrator is not called again after the LLM just failed")
+}
+
+func TestAnalyze_NarrativeSkippedStoresDecisionWithoutCallingProvider(t *testing.T) {
+	prov := &stubProvider{responses: []string{`{"summary":"s","next_action":"n","rationale":"r"}`}}
+	out, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "mock", Decider: fixedDecider{d: flakyDecision()}, NarrativeSkipped: true}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.NarrativeStatusSkipped, out.NarrativeStatus)
+	require.Equal(t, models.AnalysisEngineTypeSafe, out.Engine)
+	require.Equal(t, models.VerdictFlakyTest, out.Verdict)
+	require.Equal(t, 0, prov.calls, "explanations off: the LLM is never called")
+	require.Equal(t, 0, out.TokenUsagePrompt+out.TokenUsageCompletion)
+	require.Contains(t, out.Summary, "switched off")
+	require.Empty(t, out.Rationale)
+
+	// The provider is kept so a TypeSafe failure still falls back to a generative verdict.
+	deciderErr := &typesafe.Error{Category: typesafe.CategoryRateLimit, Status: 429, Message: "slow down"}
+	prov2 := &stubProvider{responses: []string{`{"verdict":"product_bug","confidence":"high","summary":"s","next_action":"n","rationale":"r"}`}}
+	out2, err := Analyze(context.Background(), AnalyzeDeps{Narrative: prov2, NarrativeModel: "mock", Decider: fixedDecider{err: deciderErr}, NarrativeSkipped: true}, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineGenerative, out2.Engine)
+	require.Equal(t, 1, prov2.calls, "fallback still uses the provider")
 }
 
 // TestAnalyze_EmptyNarrativeTriggersRepair covers F1: a reply that unmarshals cleanly but

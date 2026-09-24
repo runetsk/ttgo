@@ -67,6 +67,8 @@ func TestTypeSafeSettings_PutValidation(t *testing.T) {
 		"empty model":   {"model": ""},
 		"timeout low":   {"timeout_seconds": 1},
 		"timeout high":  {"timeout_seconds": 999},
+		"escalate low":  {"escalate_below_pct": -1},
+		"escalate high": {"escalate_below_pct": 101},
 	} {
 		rr := doRequest(env, "PUT", "/api/settings/typesafe", body)
 		if rr.Code != http.StatusUnprocessableEntity {

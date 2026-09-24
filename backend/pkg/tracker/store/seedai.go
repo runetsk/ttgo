@@ -24,6 +24,10 @@ type AISeedConfig struct {
 	TestCases     int
 	FailureScale  int // multiplies every template's dedicated cases and the newest run's incident slice; 0 or 1 = as designed
 	LogWords      int // 0 = the three-line log tail; otherwise every failing row carries a realistic log of about this many words that ends with the failure line
+	// Now anchors the dataset (the newest run is "today", and one planted message
+	// carries a timestamp). Zero = the current time; tests pin it so two seedings
+	// with the same config produce the same data.
+	Now time.Time
 }
 
 // DefaultAISeedConfig mirrors a mid-size project: 30 daily runs x 500 results.
@@ -530,7 +534,10 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 	const incidentAge = 6
 
 	rng := rand.New(rand.NewPCG(cfg.Seed, cfg.Seed^0x9e3779b97f4a7c15))
-	now := time.Now()
+	now := cfg.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
 
 	// --- Folders / categories / catalog ------------------------------------
 	rootID := perfID(cfg.Seed, "ai-folder-root", 0)

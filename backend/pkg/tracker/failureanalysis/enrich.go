@@ -22,7 +22,7 @@ import (
 type EnrichmentSource interface {
 	ListDefectsByTestCase(string) ([]models.Defect, error)
 	ListRequirementsByTestCase(string) ([]*models.Requirement, error)
-	ListRecentFailuresByTestCase(string, time.Time, int, string) ([]*models.RunResult, error)
+	ListRecentFailuresByTestCase(string, time.Time, time.Time, int, string) ([]*models.RunResult, error)
 }
 
 // Enrichment window/limits for the historical-failure lookup.
@@ -54,6 +54,10 @@ type stepDTO struct {
 // the RunResult (no query); a result with a nil/empty TestCaseID (deleted test
 // case) still gets those, and the three cross-entity queries are skipped.
 //
+// History covers the 30 days before the analyzed result ran and nothing after it:
+// analyzing an older run must not see later runs' failures or the labels people
+// gave them. now is used only for a result with no time of its own.
+//
 // Callers layer PromptTemplate/RedactionEnabled/ProviderModel onto the result.
 func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time) AnalyzeContext {
 	ctx := AnalyzeContext{
@@ -82,8 +86,9 @@ func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time)
 		ctx.LinkedRequirements = mapRequirements(reqs)
 	}
 
-	since := now.AddDate(0, 0, -enrichHistoryDays)
-	if hist, err := src.ListRecentFailuresByTestCase(tcID, since, enrichHistoryLimit, result.TestRunID); err != nil {
+	before := historyAnchor(result, now)
+	since := before.AddDate(0, 0, -enrichHistoryDays)
+	if hist, err := src.ListRecentFailuresByTestCase(tcID, since, before, enrichHistoryLimit, result.TestRunID); err != nil {
 		slog.Warn("failure-analysis: enrich history failed", "err", err, "test_case_id", tcID)
 	} else {
 		ctx.SimilarFailures = mapSimilarFailures(hist)
@@ -91,6 +96,16 @@ func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time)
 	}
 
 	return ctx
+}
+
+// historyAnchor is when the analyzed failure happened, the end of its history window:
+// its start time, or when its row was written if it was recorded without timing (the
+// same fallback dedup uses to order a group), or now for a result never stored.
+func historyAnchor(result *models.RunResult, now time.Time) time.Time {
+	if t := startTime(result); !t.IsZero() {
+		return t
+	}
+	return now
 }
 
 // buildSteps decodes RunResult.Steps into prompt steps, scrubbing HTML from the

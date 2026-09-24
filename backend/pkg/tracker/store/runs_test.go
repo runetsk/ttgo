@@ -897,7 +897,7 @@ func TestListRecentFailuresByTestCase(t *testing.T) {
 	since := now.Add(-30 * 24 * time.Hour)
 
 	// Full window, generous limit: newest-first, stale row excluded by the window.
-	got, err := s.ListRecentFailuresByTestCase(tc.ID, since, 5, "")
+	got, err := s.ListRecentFailuresByTestCase(tc.ID, since, now, 5, "")
 	require.NoError(t, err)
 	require.Len(t, got, 3, "the 40-day-old failure is outside the 30-day window")
 	assert.Equal(t, fresh.ID, got[0].ID, "start_time DESC: newest first")
@@ -905,17 +905,17 @@ func TestListRecentFailuresByTestCase(t *testing.T) {
 	assert.Equal(t, old.ID, got[2].ID)
 
 	// LIMIT caps the set to the two newest.
-	limited, err := s.ListRecentFailuresByTestCase(tc.ID, since, 2, "")
+	limited, err := s.ListRecentFailuresByTestCase(tc.ID, since, now, 2, "")
 	require.NoError(t, err)
 	require.Len(t, limited, 2, "LIMIT 2 returns only the two newest")
 	assert.Equal(t, fresh.ID, limited[0].ID)
 	assert.Equal(t, mid.ID, limited[1].ID)
 
 	// Guards: empty tcID and non-positive limit both short-circuit to (nil, nil).
-	none, err := s.ListRecentFailuresByTestCase("", since, 5, "")
+	none, err := s.ListRecentFailuresByTestCase("", since, now, 5, "")
 	require.NoError(t, err)
 	assert.Nil(t, none, "empty tcID returns nil")
-	none, err = s.ListRecentFailuresByTestCase(tc.ID, since, 0, "")
+	none, err = s.ListRecentFailuresByTestCase(tc.ID, since, now, 0, "")
 	require.NoError(t, err)
 	assert.Nil(t, none, "non-positive limit returns nil")
 }
@@ -961,8 +961,65 @@ func TestListRecentFailuresByTestCaseExclusions(t *testing.T) {
 		Status: models.StatusFail, StartTime: now.Add(-1 * time.Hour),
 	}))
 
-	got, err := s.ListRecentFailuresByTestCase(tc.ID, since, 10, curRun.ID)
+	got, err := s.ListRecentFailuresByTestCase(tc.ID, since, now, 10, curRun.ID)
 	require.NoError(t, err)
 	require.Len(t, got, 1, "only the prior FAIL/ERROR for this test case survives the filters")
 	assert.Equal(t, priorFail.ID, got[0].ID)
+}
+
+func TestListRecentFailuresByTestCaseEndsBeforeTheAnchor(t *testing.T) {
+	s := newTestStore(t)
+	folder, _ := s.CreateFolder("Root", nil)
+	tc := &models.TestCase{Name: "Login", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc))
+
+	// The analyzed failure ran five days ago; history is what was known then.
+	anchor := time.Now().Add(-5 * 24 * time.Hour)
+	seedFail := func(name string, start time.Time) *models.RunResult {
+		run := &models.TestRun{Name: name}
+		require.NoError(t, s.CreateTestRun(run))
+		rr := &models.RunResult{
+			TestRunID: run.ID, TestCaseID: &tc.ID, TestNameSnapshot: tc.Name,
+			Status: models.StatusFail, StartTime: start, ErrorMessage: name, DefectType: "product_bug",
+		}
+		require.NoError(t, s.AddRunResult(rr))
+		return rr
+	}
+	earlier := seedFail("earlier", anchor.Add(-24*time.Hour))
+	seedFail("same instant", anchor)
+	seedFail("later", anchor.Add(24*time.Hour))
+	seedFail("latest", time.Now().Add(-time.Hour))
+
+	got, err := s.ListRecentFailuresByTestCase(tc.ID, anchor.AddDate(0, 0, -30), anchor, 10, "")
+	require.NoError(t, err)
+	require.Len(t, got, 1, "failures at or after the analyzed one, and their labels, are not history")
+	assert.Equal(t, earlier.ID, got[0].ID)
+}
+
+// Timestamps keep the offset they were written with (a reporter's UTC beside the server's
+// local time); the window and the order must follow the instant, not the text.
+func TestListRecentFailuresByTestCaseComparesInstantsAcrossOffsets(t *testing.T) {
+	s := newTestStore(t)
+	folder, _ := s.CreateFolder("Root", nil)
+	tc := &models.TestCase{Name: "Login", FolderID: folder.ID}
+	require.NoError(t, s.CreateTestCase(tc))
+	eest := time.FixedZone("EEST", 3*3600)
+	seedFail := func(name string, start time.Time) *models.RunResult {
+		run := &models.TestRun{Name: name}
+		require.NoError(t, s.CreateTestRun(run))
+		rr := &models.RunResult{TestRunID: run.ID, TestCaseID: &tc.ID, TestNameSnapshot: tc.Name,
+			Status: models.StatusFail, StartTime: start, ErrorMessage: name}
+		require.NoError(t, s.AddRunResult(rr))
+		return rr
+	}
+	anchor := time.Date(2026, 9, 24, 10, 0, 0, 0, eest)                                 // 07:00Z
+	seedFail("later, in UTC", time.Date(2026, 9, 24, 8, 30, 0, 0, time.UTC))            // 08:30Z: after, text sorts before
+	older := seedFail("earlier, local", time.Date(2026, 9, 24, 7, 50, 0, 0, eest))      // 04:50Z
+	newer := seedFail("earlier, in UTC", time.Date(2026, 9, 24, 5, 10, 0, 0, time.UTC)) // 05:10Z: text sorts before 07:50+03
+
+	got, err := s.ListRecentFailuresByTestCase(tc.ID, anchor.AddDate(0, 0, -30), anchor, 10, "")
+	require.NoError(t, err)
+	require.Len(t, got, 2, "the UTC failure 90 minutes after the anchor is not history")
+	require.Equal(t, newer.ID, got[0].ID, "newest instant first, whatever the offset")
+	require.Equal(t, older.ID, got[1].ID)
 }

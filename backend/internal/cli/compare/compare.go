@@ -40,6 +40,73 @@ type Analysis struct {
 	TokenUsagePrompt              int      `json:"token_usage_prompt"`
 	TokenUsageCompletion          int      `json:"token_usage_completion"`
 	TypeSafeInputTokens           int      `json:"typesafe_input_tokens"`
+	DecisionStatus                string   `json:"decision_status"`
+	ErrorCategory                 string   `json:"error_category"`
+	JobID                         *string  `json:"job_id"`
+}
+
+// failedAttempt reports whether an analysis is a failed attempt rather than an answer.
+// Servers from before decision_status stored a failed call as a generative row with no
+// model name.
+func failedAttempt(a Analysis) bool {
+	if a.DecisionStatus != "" {
+		return a.DecisionStatus == "failed"
+	}
+	return a.Engine == "generative" && a.ModelName == ""
+}
+
+// Job is one analysis job of the run (the wire shape of GET /api/runs/{id}/analysis-jobs).
+type Job struct {
+	ID              string `json:"id"`
+	Status          string `json:"status"`
+	PipelineLabel   string `json:"pipeline_label"`
+	RetryFailedOnly bool   `json:"retry_failed_only"`
+	CreatedAt       string `json:"created_at"`
+}
+
+// ParseJobs reads GET /api/runs/{id}/analysis-jobs.
+func ParseJobs(raw []byte) ([]Job, error) {
+	var list []Job
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return nil, fmt.Errorf("decode analysis jobs: %w", err)
+	}
+	return list, nil
+}
+
+// ResolveJob finds a job by its id or a unique prefix of it (the by-job columns show
+// the first eight characters).
+func ResolveJob(jobs []Job, idOrPrefix string) (Job, error) {
+	var hits []Job
+	for _, j := range jobs {
+		if j.ID == idOrPrefix {
+			return j, nil
+		}
+		if strings.HasPrefix(j.ID, idOrPrefix) {
+			hits = append(hits, j)
+		}
+	}
+	switch len(hits) {
+	case 1:
+		return hits[0], nil
+	case 0:
+		return Job{}, fmt.Errorf("no analysis job %q on this run", idOrPrefix)
+	}
+	return Job{}, fmt.Errorf("%q matches %d analysis jobs; give more of the id", idOrPrefix, len(hits))
+}
+
+func shortID(id string) string {
+	if len(id) > 8 {
+		return id[:8]
+	}
+	return id
+}
+
+// Options narrows or regroups the pivot. The zero value pivots every analysis by
+// engine and model.
+type Options struct {
+	Job   string // keep only the analyses this job stored
+	ByJob bool   // one column per job, labelled by its pipeline, instead of per engine/model
+	Jobs  []Job  // the run's jobs: labels and order for by-job columns
 }
 
 // GroundTruth is one planted template of the AI demo dataset. An empty
@@ -58,6 +125,8 @@ type Column struct {
 	Engine string `json:"engine"`
 	Model  string `json:"model"`
 	Policy string `json:"policy,omitempty"`
+	Job    string `json:"job,omitempty"`   // by-job columns: the job id
+	Label  string `json:"label,omitempty"` // by-job columns: the job's pipeline
 }
 
 // Cell is the latest analysis of one row by one column.
@@ -71,6 +140,8 @@ type Cell struct {
 	SuggestionSource string   `json:"suggestion_source,omitempty"`
 	NarrativeStatus  string   `json:"narrative_status,omitempty"`
 	Tokens           int      `json:"tokens"`
+	Failed           bool     `json:"failed,omitempty"` // a failed attempt: no decision
+	ErrorCategory    string   `json:"error_category,omitempty"`
 }
 
 // Row is one failing result with its cell per column.
@@ -88,9 +159,16 @@ type Report struct {
 	RunName string   `json:"run_name"`
 	Columns []Column `json:"columns"`
 	Rows    []Row    `json:"rows"`
-	// FailedCalls counts stored analyses of failed LLM calls (no model name,
-	// unknown verdict); they are nobody's answer and form no column.
+	// FailedCalls counts failed attempts that name no engine model (stored before
+	// decision_status existed); they cannot be placed in a column. A failed attempt
+	// that names its model is a failed cell of that column.
 	FailedCalls int `json:"failed_calls"`
+	// Job is the job the report is limited to (--job); JobLabel its pipeline.
+	Job      string `json:"job,omitempty"`
+	JobLabel string `json:"job_label,omitempty"`
+	// Excluded counts stored analyses left out because they belong to another job or,
+	// grouped by job, to none (a single re-analyze).
+	Excluded int `json:"excluded,omitempty"`
 }
 
 // Abstention is the suggested defect type TypeSafe returns when the evidence
@@ -217,16 +295,44 @@ func columnKey(a Analysis) string {
 // Pivot builds the report: one column per engine/model(/policy), one row per
 // result, each cell the latest version that column produced for that row.
 func Pivot(results []Result, analyses map[string][]Analysis) Report {
-	rep := Report{}
+	return PivotWith(results, analyses, Options{})
+}
+
+// PivotWith is Pivot limited to one job (opts.Job) or with one column per job
+// (opts.ByJob). A job's column holds everything that job stored, whichever engine
+// decided each row (a takeover or a fallback puts an LLM answer in a TypeSafe job).
+func PivotWith(results []Result, analyses map[string][]Analysis, opts Options) Report {
+	rep := Report{Job: opts.Job}
+	labels := map[string]string{}
+	order := map[string]int{}
+	for i, j := range opts.Jobs {
+		labels[j.ID] = j.PipelineLabel
+		order[j.ID] = i
+	}
+	rep.JobLabel = labels[opts.Job]
 	seen := map[string]Column{}
 	for _, r := range results {
 		row := Row{Result: r, Cells: map[string]*Cell{}}
 		for _, a := range analyses[r.ID] {
-			if a.Engine == "generative" && a.ModelName == "" {
+			job := ""
+			if a.JobID != nil {
+				job = *a.JobID
+			}
+			if (opts.Job != "" && job != opts.Job) || (opts.ByJob && job == "") {
+				rep.Excluded++
+				continue
+			}
+			failed := failedAttempt(a)
+			if failed && a.ModelName == "" && !opts.ByJob {
 				rep.FailedCalls++
 				continue
 			}
 			key := columnKey(a)
+			col := Column{Key: key, Engine: a.Engine, Model: a.ModelName, Policy: a.PolicyVersion}
+			if opts.ByJob {
+				key = "job " + shortID(job)
+				col = Column{Key: key, Job: job, Label: labels[job]}
+			}
 			if cur := row.Cells[key]; cur != nil && cur.Version >= a.Version {
 				continue
 			}
@@ -235,9 +341,10 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 				DefectType: a.SuggestedDefectType, DefectScore: a.SuggestedDefectTypeConfidence,
 				SuggestionSource: a.SuggestionSource, NarrativeStatus: a.NarrativeStatus,
 				Tokens: a.TypeSafeInputTokens + a.TokenUsagePrompt + a.TokenUsageCompletion,
+				Failed: failed, ErrorCategory: a.ErrorCategory,
 			}
 			if _, ok := seen[key]; !ok {
-				seen[key] = Column{Key: key, Engine: a.Engine, Model: a.ModelName, Policy: a.PolicyVersion}
+				seen[key] = col
 			}
 		}
 		row.Disagree = disagree(row.Cells)
@@ -248,6 +355,18 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 	}
 	sort.Slice(rep.Columns, func(i, j int) bool {
 		a, b := rep.Columns[i], rep.Columns[j]
+		if opts.ByJob {
+			// Oldest job first (the API lists newest first); unknown jobs last.
+			oa, okA := order[a.Job]
+			ob, okB := order[b.Job]
+			if okA != okB {
+				return okA
+			}
+			if oa != ob {
+				return oa > ob
+			}
+			return a.Key < b.Key
+		}
 		if (a.Engine == "typesafe") != (b.Engine == "typesafe") {
 			return a.Engine == "typesafe"
 		}
@@ -265,6 +384,9 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 func disagree(cells map[string]*Cell) bool {
 	first, n := "", 0
 	for _, c := range cells {
+		if c.Failed {
+			continue // no answer to disagree with
+		}
 		if n == 0 {
 			first = c.Verdict
 		} else if c.Verdict != first {
@@ -306,7 +428,9 @@ type BucketStats struct {
 // ColumnStats summarizes one column.
 type ColumnStats struct {
 	Key            string                 `json:"key"`
-	Analyzed       int                    `json:"analyzed"`
+	Analyzed       int                    `json:"analyzed"` // rows with a decision
+	Failed         int                    `json:"failed"`   // rows whose latest attempt failed: not analyzed, not graded
+	FailedGraded   int                    `json:"failed_graded"`
 	Verdicts       map[string]int         `json:"verdicts"`
 	Abstained      int                    `json:"abstained"`      // rows where the suggestion was withheld
 	Issued         int                    `json:"issued"`         // rows with a suggestion
@@ -349,6 +473,14 @@ func Summarize(rep Report) Summary {
 		for _, row := range rep.Rows {
 			c := row.Cells[col.Key]
 			if c == nil {
+				continue
+			}
+			if c.Failed {
+				cs.Failed++
+				cs.Tokens += c.Tokens
+				if row.Expected != nil {
+					cs.FailedGraded++
+				}
 				continue
 			}
 			cs.Analyzed++
@@ -408,7 +540,7 @@ func Summarize(rep Report) Summary {
 			p := PairAgreement{A: rep.Columns[i].Key, B: rep.Columns[j].Key}
 			for _, row := range rep.Rows {
 				a, b := row.Cells[p.A], row.Cells[p.B]
-				if a == nil || b == nil {
+				if a == nil || b == nil || a.Failed || b.Failed {
 					continue
 				}
 				p.Compared++
@@ -445,6 +577,13 @@ func cellText(c *Cell) (verdict, defect string) {
 	if c == nil {
 		return "—", "—"
 	}
+	if c.Failed {
+		cat := c.ErrorCategory
+		if cat == "" {
+			cat = "error"
+		}
+		return "FAILED (" + cat + ")", "—"
+	}
 	conf := c.Confidence
 	if c.Score != nil {
 		conf = fmt.Sprintf("%s %.0f%%", c.Confidence, *c.Score*100)
@@ -462,11 +601,31 @@ func cellText(c *Cell) (verdict, defect string) {
 // Render writes the human-readable table and summary.
 func Render(w io.Writer, rep Report, s Summary) {
 	graded := s.Ungraded < s.Rows
-	fmt.Fprintf(w, "Run: %s (%s) — %d failing results, %d engine column(s)", rep.RunName, rep.RunID, s.Rows, len(rep.Columns))
+	fmt.Fprintf(w, "Run: %s (%s) — %d failing results, %d column(s)", rep.RunName, rep.RunID, s.Rows, len(rep.Columns))
 	if rep.FailedCalls > 0 {
-		fmt.Fprintf(w, "; %d stored analysis version(s) are failed LLM calls and are not counted", rep.FailedCalls)
+		fmt.Fprintf(w, "; %d stored analysis version(s) are failed calls that name no model and are not counted", rep.FailedCalls)
 	}
-	fmt.Fprint(w, "\n\n")
+	fmt.Fprintln(w)
+	if rep.Job != "" {
+		label := rep.JobLabel
+		if label == "" {
+			label = "pipeline not recorded"
+		}
+		fmt.Fprintf(w, "Job: %s — %s\n", rep.Job, label)
+	}
+	for _, c := range rep.Columns {
+		if c.Job != "" {
+			label := c.Label
+			if label == "" {
+				label = "pipeline not recorded"
+			}
+			fmt.Fprintf(w, "%s = %s — %s\n", strings.ToUpper(c.Key), c.Job, label)
+		}
+	}
+	if rep.Excluded > 0 {
+		fmt.Fprintf(w, "%d stored analysis version(s) belong to no selected job and are left out\n", rep.Excluded)
+	}
+	fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	hdr := []string{"", "TEST", "ERROR"}
 	for _, c := range rep.Columns {
@@ -501,10 +660,13 @@ func Render(w io.Writer, rep Report, s Summary) {
 	}
 	tw.Flush()
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "! = the engines disagree on the verdict")
+	fmt.Fprintln(w, "! = the columns disagree on the verdict")
 	fmt.Fprintln(w)
 	for _, cs := range s.Columns {
 		fmt.Fprintf(w, "%s: %d analyzed", cs.Key, cs.Analyzed)
+		if cs.Failed > 0 {
+			fmt.Fprintf(w, ", %d failed (no decision; not graded)", cs.Failed)
+		}
 		if cs.Scored > 0 {
 			fmt.Fprintf(w, ", mean confidence %.0f%%", cs.MeanScore*100)
 		}

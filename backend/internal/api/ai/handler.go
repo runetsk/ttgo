@@ -2,6 +2,7 @@ package ai
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 	"ttgo/internal/api/websocket"
@@ -58,10 +59,16 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 		return nil, fmt.Errorf("no LLM provider configured")
 	}
 	deps, err := h.resolveDeps(models.RunAnalysisJobTriggerManual)
+	if errors.Is(err, failureanalysis.ErrAIDisabled) {
+		return nil, err
+	}
 	if err != nil {
 		return nil, fmt.Errorf("llm provider unavailable: %w", err)
 	}
-	if deps.Narrative == nil {
+	if !deps.CanAnalyze() {
+		if deps.LLMUnavailableReason != "" {
+			return nil, fmt.Errorf("cannot analyze: %s", deps.LLMUnavailableReason)
+		}
 		return nil, fmt.Errorf("no LLM provider configured")
 	}
 	settings, err := h.store.GetFailureAnalysisSettings()
@@ -73,8 +80,15 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	actx.PromptTemplate = settings.PromptTemplate
 	actx.ProviderModel = deps.NarrativeModel
 	res, err := failureanalysis.Analyze(ctx, deps.Analyze(), actx)
+	var attemptErr error
 	if err != nil {
-		return nil, err
+		if ctx.Err() != nil {
+			return nil, err // the request was abandoned; nothing was attempted to completion
+		}
+		// Record the failed attempt like the batch worker does, so the version history shows
+		// it with the engine, model, category and tokens it cost; then report the failure.
+		attemptErr = err
+		res = failureanalysis.FailedResult(err, deps.Analyze())
 	}
 	row := failureanalysis.AnalysisRowFrom(res, result.ID)
 	row.CreatedBy = ptrOrNil(userID)
@@ -85,7 +99,19 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	if h.broadcaster != nil {
 		h.broadcaster.BroadcastRunResultAnalysisCreated(row, result.TestRunID)
 	}
+	if attemptErr != nil {
+		return row, attemptErr
+	}
 	return row, nil
+}
+
+// aiEnabled reports the global AI master switch; failure analysis enforces it server-side.
+func (h *Handler) aiEnabled() (bool, error) {
+	fs, err := h.store.GetOrCreateAIFeatureSettings()
+	if err != nil {
+		return false, err
+	}
+	return fs.Enabled, nil
 }
 
 func ptrOrNil(s string) *string {

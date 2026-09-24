@@ -99,3 +99,40 @@ func TestTypeSafeMigration_BackfillsLegacyRows(t *testing.T) {
 		FROM run_result_analyses ORDER BY id`).Scan(&again).Error)
 	require.Equal(t, rows, again)
 }
+
+// TestTypeSafeMigration_NewSwitchesDefaultOnExistingRow: a database whose TypeSafe settings
+// row predates the explanation switch and the takeover threshold gets both columns with the
+// behaviour-preserving defaults (explanations on, never hand a verdict to the LLM), and keeps
+// the values an admin had already saved.
+func TestTypeSafeMigration_NewSwitchesDefaultOnExistingRow(t *testing.T) {
+	dir := t.TempDir()
+	dsn := filepath.Join(dir, "ttgo.db")
+	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.Exec("CREATE TABLE `type_safe_settings` (`id` text,`enabled` numeric NOT NULL DEFAULT false,`api_key` text,"+
+		"`model` text NOT NULL DEFAULT \"jev-1.13.0\",`timeout_seconds` integer NOT NULL DEFAULT 30,"+
+		"`verdict_engine_enabled` numeric NOT NULL DEFAULT true,`semantic_dedup_enabled` numeric NOT NULL DEFAULT true,"+
+		"`allow_auto_failure_analysis` numeric NOT NULL DEFAULT false,`created_at` datetime,`updated_at` datetime,PRIMARY KEY (`id`))").Error)
+	require.NoError(t, db.Exec(`INSERT INTO type_safe_settings
+		(id, enabled, api_key, model, timeout_seconds, verdict_engine_enabled, semantic_dedup_enabled, allow_auto_failure_analysis)
+		VALUES ('singleton', true, '', 'jev-latest', 45, true, false, true)`).Error)
+	sqlDB, _ := db.DB()
+	require.NoError(t, sqlDB.Close())
+
+	wd, _ := os.Getwd()
+	require.NoError(t, os.Chdir(dir))
+	defer os.Chdir(wd)
+	s, err := New(dsn)
+	require.NoError(t, err)
+	defer s.Close()
+
+	got, err := s.GetTypeSafeSettings()
+	require.NoError(t, err)
+	require.True(t, got.NarrativeEnabled, "existing installs keep their explanations")
+	require.Equal(t, 0, got.EscalateBelowPct, "existing installs never hand verdicts to the LLM until an admin opts in")
+	require.True(t, got.Enabled)
+	require.Equal(t, "jev-latest", got.Model)
+	require.Equal(t, 45, got.TimeoutSeconds)
+	require.False(t, got.SemanticDedupEnabled)
+	require.True(t, got.AllowAutoFailureAnalysis)
+}

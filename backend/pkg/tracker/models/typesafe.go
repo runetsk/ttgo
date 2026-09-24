@@ -27,6 +27,22 @@ type TypeSafeSettings struct {
 	TimeoutSeconds int    `json:"timeout_seconds" gorm:"not null;default:30"`
 	// VerdictEngineEnabled: TypeSafe decides verdict + defect-type suggestion.
 	VerdictEngineEnabled bool `json:"verdict_engine_enabled" gorm:"not null;default:true"`
+	// NarrativeEnabled: after TypeSafe decides, the default LLM provider writes the summary,
+	// next action and rationale. Off = the classification is stored without an explanation.
+	// It does not by itself stop LLM calls: the takeover threshold and the fallback below
+	// still use the LLM when they are on. Ignored while VerdictEngineEnabled is off (the LLM
+	// then decides and explains in one call).
+	NarrativeEnabled bool `json:"narrative_enabled" gorm:"not null;default:true"`
+	// LLMFallbackEnabled: when TypeSafe cannot answer (network, rate limit, oversized state),
+	// the default LLM decides instead. Off = the attempt is recorded as failed, so failure
+	// data never reaches the LLM on that path. With NarrativeEnabled off and
+	// EscalateBelowPct 0 as well, analysis is TypeSafe-only and needs no LLM provider.
+	LLMFallbackEnabled bool `json:"llm_fallback_enabled" gorm:"not null;default:true"`
+	// EscalateBelowPct: when TypeSafe's verdict confidence is below this percentage, the
+	// default LLM provider decides instead, exactly as the generative pipeline would, and the
+	// analysis notes TypeSafe's answer. 0 (the default) never escalates. Ignored while
+	// VerdictEngineEnabled is off or no LLM provider is configured.
+	EscalateBelowPct int `json:"escalate_below_pct" gorm:"not null;default:0"`
 	// SemanticDedupEnabled: TypeSafe merges failure groups sharing a cause (also needs
 	// AIFailureAnalysisSettings.DedupEnabled).
 	SemanticDedupEnabled bool `json:"semantic_dedup_enabled" gorm:"not null;default:true"`
@@ -46,6 +62,9 @@ type TypeSafeSettingsResponse struct {
 	Model                    string    `json:"model"`
 	TimeoutSeconds           int       `json:"timeout_seconds"`
 	VerdictEngineEnabled     bool      `json:"verdict_engine_enabled"`
+	NarrativeEnabled         bool      `json:"narrative_enabled"`
+	LLMFallbackEnabled       bool      `json:"llm_fallback_enabled"`
+	EscalateBelowPct         int       `json:"escalate_below_pct"`
 	SemanticDedupEnabled     bool      `json:"semantic_dedup_enabled"`
 	AllowAutoFailureAnalysis bool      `json:"allow_auto_failure_analysis"`
 	CreatedAt                time.Time `json:"created_at"`
@@ -61,6 +80,9 @@ type TypeSafeSettingsPatch struct {
 	Model                    *string `json:"model"`
 	TimeoutSeconds           *int    `json:"timeout_seconds"`
 	VerdictEngineEnabled     *bool   `json:"verdict_engine_enabled"`
+	NarrativeEnabled         *bool   `json:"narrative_enabled"`
+	LLMFallbackEnabled       *bool   `json:"llm_fallback_enabled"`
+	EscalateBelowPct         *int    `json:"escalate_below_pct"`
 	SemanticDedupEnabled     *bool   `json:"semantic_dedup_enabled"`
 	AllowAutoFailureAnalysis *bool   `json:"allow_auto_failure_analysis"`
 }

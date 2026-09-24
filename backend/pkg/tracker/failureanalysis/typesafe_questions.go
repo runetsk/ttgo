@@ -10,7 +10,7 @@ import (
 // Bump the matching policy version whenever any of them changes: stored analyses
 // record it, so calibration can be read per policy.
 const (
-	PolicyVersion         = "fa-verdict-v4"  // verdict + defect_type questions, thresholds and the derived-suggestion rule
+	PolicyVersion         = "fa-verdict-v5"  // verdict + defect_type questions, thresholds and the suggestion rule (v5: a confident verdict decides the suggestion)
 	SemanticPolicyVersion = "fa-semantic-v1" // same-cause question and grouping thresholds
 )
 
@@ -19,7 +19,12 @@ const (
 	VerdictHighMin       = 0.90 // confidence >= → bucket "high"
 	VerdictMediumMin     = 0.50 // confidence >= → bucket "medium"; below → "low"
 	DefectTypeSuggestMin = 0.50 // defect_type confidence below this → abstain (no suggestion)
-	RunnerUpMargin       = 0.15 // narrative mentions the runner-up verdict only when top-two gap < this
+	// VerdictDecidesSuggestionMin: a verdict at or above this (and not unknown) decides the
+	// suggestion through the verdict-to-defect mapping, whatever the defect_type question said.
+	// Set below VerdictHighMin in v5: on the benchmark the question withheld a runner
+	// out-of-memory suggestion under an infrastructure verdict at 0.88.
+	VerdictDecidesSuggestionMin = 0.85
+	RunnerUpMargin              = 0.15 // narrative mentions the runner-up verdict only when top-two gap < this
 )
 
 // DefectTypeInsufficient is the explicit "none of the three" option of the defect_type question.
@@ -39,8 +44,10 @@ const (
 )
 
 // HistoryNote is a constant sent inside the state so the model reads history correctly.
-// It says "other", not "earlier": the query window ends at analysis time and excludes only
-// the current run, so a re-analysis of an old result can include later failures.
+// It says "other" rather than "earlier" for historical reasons: until 2026-09-23 the query
+// window ended at analysis time, so a re-analysis of an old result could include later
+// failures. The window now ends at the analyzed result (BuildContext), so every entry is
+// earlier; the wording is kept because it is part of the state the policy was tuned on.
 const HistoryNote = "Other FAILED or ERRORED runs of this same test from the last 30 days, excluding this run. Passing runs are not listed. Labels are what a person assigned to those other failures; an entry with the same error condition as this failure, and its label, bear on this one."
 
 // verdictOptions returns the six verdicts in a stable order.

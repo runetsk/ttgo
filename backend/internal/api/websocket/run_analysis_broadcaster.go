@@ -56,6 +56,11 @@ func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisCreated(a *models.Run
 		"dedup_group_key":                  a.DedupGroupKey,
 		"dedup_method":                     a.DedupMethod,
 		"dedup_p_same":                     a.DedupPSame,
+		"decision_status":                  a.DecisionStatus,
+		"error_category":                   a.ErrorCategory,
+		"takeover_from_verdict":            a.TakeoverFromVerdict,
+		"takeover_from_confidence":         a.TakeoverFromConfidence,
+		"job_id":                           a.JobID,
 	}
 	b.Hub.Broadcast(NewEvent(EventRunResultAnalysisCreated, runResultTopic(a.RunResultID), payload))
 	if testRunID != "" {

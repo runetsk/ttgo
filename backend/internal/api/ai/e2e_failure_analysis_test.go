@@ -3,6 +3,7 @@ package ai_test
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -32,10 +33,15 @@ func (p *verdictProvider) Chat(_ context.Context, _ llm.ChatRequest) (*llm.ChatR
 }
 
 func TestFailureAnalysisEndToEnd(t *testing.T) {
-	s, err := store.New(":memory:")
+	// A temp-file database: the job analyzes its groups concurrently, and with :memory: every
+	// pooled connection would get its own empty database.
+	dir := t.TempDir()
+	t.Chdir(dir)
+	s, err := store.New(filepath.Join(dir, "e2e.db"))
 	if err != nil {
 		t.Fatalf("store.New: %v", err)
 	}
+	t.Cleanup(func() { _ = s.Close() })
 
 	run := &models.TestRun{Name: "e2e"}
 	if err := s.CreateTestRun(run); err != nil {

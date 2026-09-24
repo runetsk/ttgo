@@ -4788,6 +4788,61 @@ const docTemplate = `{
                 }
             }
         },
+        "/run-results/{id}/analyses/{analysisId}/explain": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, AI is switched off, or no LLM provider is available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "Explain a stored TypeSafe decision",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run result ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Analysis ID",
+                        "name": "analysisId",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.RunResultAnalysis"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/runs": {
             "get": {
                 "description": "Returns test runs with optional filtering by category list, status, date ranges, and folder.",
@@ -5216,6 +5271,99 @@ const docTemplate = `{
                                     "type": "string"
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/runs/{id}/analysis-job/retry-failed": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Queues a failure-analysis job limited to the groups whose current analysis is a failed attempt (provider error, reply cut off or unreadable twice, TypeSafe unavailable with the fallback off). 409 when nothing failed or a job is already active.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "Retry failed analyses",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.RunAnalysisJob"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/runs/{id}/analysis-jobs": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "List a run's analysis jobs",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "additionalProperties": true
+                            }
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -7430,7 +7578,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300.",
+                "description": "Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300. escalate_below_pct must be 0..100 (0 = never ask the LLM to decide).",
                 "consumes": [
                     "application/json"
                 ],
@@ -9840,6 +9988,71 @@ const docTemplate = `{
                 }
             }
         },
+        "ttgo_pkg_tracker_models.RunAnalysisJob": {
+            "type": "object",
+            "properties": {
+                "analyzed_count": {
+                    "type": "integer"
+                },
+                "capped_at": {
+                    "type": "integer"
+                },
+                "completed_at": {
+                    "type": "string"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "model_name": {
+                    "type": "string"
+                },
+                "pipeline": {
+                    "description": "Pipeline is a JSON snapshot of the route the job ran with (decider, narrator,\nexplanations, takeover threshold, fallback, reply cap), PipelineLabel its short name.",
+                    "type": "string"
+                },
+                "pipeline_label": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "retry_failed_only": {
+                    "description": "RetryFailedOnly: re-analyze only the groups whose current analysis failed.",
+                    "type": "boolean"
+                },
+                "semantic_input_tokens": {
+                    "description": "TypeSafe tokens used by semantic grouping",
+                    "type": "integer"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "test_run_id": {
+                    "type": "string"
+                },
+                "total_failures": {
+                    "type": "integer"
+                },
+                "trigger": {
+                    "type": "string"
+                },
+                "unique_groups": {
+                    "type": "integer"
+                }
+            }
+        },
         "ttgo_pkg_tracker_models.RunDefectRow": {
             "type": "object",
             "properties": {
@@ -10066,6 +10279,144 @@ const docTemplate = `{
                 }
             }
         },
+        "ttgo_pkg_tracker_models.RunResultAnalysis": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "string"
+                },
+                "confidence_score": {
+                    "description": "TypeSafe verdict confidence 0..1; NULL for generative rows (never invented).",
+                    "type": "number"
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "created_by": {
+                    "type": "string"
+                },
+                "decision_ms": {
+                    "description": "Stage timing and call accounting for this attempt (representatives only; clones are 0).",
+                    "type": "integer"
+                },
+                "decision_status": {
+                    "description": "DecisionStatus separates a decision (\"ok\") from an attempt that produced none\n(\"failed\"). A failed row keeps Verdict \"unknown\" only for compatibility: readers must\ncheck this field, never the verdict, an empty model name or the summary text.",
+                    "type": "string"
+                },
+                "dedup_group_key": {
+                    "type": "string"
+                },
+                "dedup_method": {
+                    "description": "Grouping provenance. \"\" on representatives; on clones: how they were grouped and,\nfor semantic clones, the probability/model/policy that justified the merge.",
+                    "type": "string"
+                },
+                "dedup_model": {
+                    "type": "string"
+                },
+                "dedup_p_same": {
+                    "type": "number"
+                },
+                "dedup_policy_version": {
+                    "type": "string"
+                },
+                "defect_type_probabilities": {
+                    "type": "string"
+                },
+                "engine": {
+                    "description": "Engine that produced Verdict. Legacy rows read as generative (column default).",
+                    "type": "string"
+                },
+                "error_category": {
+                    "description": "ErrorCategory names why a failed attempt failed (timeout, rate_limit, truncated,\nunparseable, ...), or why a kept TypeSafe decision has no LLM takeover.",
+                    "type": "string"
+                },
+                "finish_reason": {
+                    "type": "string"
+                },
+                "id": {
+                    "type": "string"
+                },
+                "job_id": {
+                    "description": "JobID is the analysis job that produced the row; nil for single-result analyses.",
+                    "type": "string"
+                },
+                "llm_calls": {
+                    "type": "integer"
+                },
+                "llm_ms": {
+                    "type": "integer"
+                },
+                "model_name": {
+                    "type": "string"
+                },
+                "narrative_status": {
+                    "type": "string"
+                },
+                "next_action": {
+                    "type": "string"
+                },
+                "policy_version": {
+                    "type": "string"
+                },
+                "provider_id": {
+                    "type": "string"
+                },
+                "rationale": {
+                    "type": "string"
+                },
+                "raw_response": {
+                    "type": "string"
+                },
+                "run_result_id": {
+                    "type": "string"
+                },
+                "source_analysis_id": {
+                    "type": "string"
+                },
+                "suggested_defect_type": {
+                    "description": "SuggestedDefectType is PERSISTED and is the single source of truth for the suggestion.\ntypesafe rows: the decided option, or \"\" when TypeSafe abstained.\ngenerative rows: SuggestedDefectType(Verdict), written at analysis time (and backfilled).\nNo read path may derive it from Verdict any more.",
+                    "type": "string"
+                },
+                "suggested_defect_type_confidence": {
+                    "type": "number"
+                },
+                "suggestion_source": {
+                    "description": "SuggestionSource is \"\" when the suggestion came from the defect-type question (or the\ngenerative mapping) and SuggestionSourceVerdict when it was derived from a confident\nTypeSafe verdict because the question abstained (policy v4, verdict \u003e= 0.90) or abstained\nor disagreed (v5, verdict \u003e= failureanalysis.VerdictDecidesSuggestionMin).",
+                    "type": "string"
+                },
+                "summary": {
+                    "type": "string"
+                },
+                "takeover_from_confidence": {
+                    "type": "number"
+                },
+                "takeover_from_defect_type": {
+                    "type": "string"
+                },
+                "takeover_from_verdict": {
+                    "description": "Takeover provenance: TypeSafe's own decision when its confidence was below the\ntakeover threshold and the LLM decided instead. Empty on every other row.",
+                    "type": "string"
+                },
+                "token_usage_completion": {
+                    "type": "integer"
+                },
+                "token_usage_prompt": {
+                    "type": "integer"
+                },
+                "typesafe_input_tokens": {
+                    "type": "integer"
+                },
+                "verdict": {
+                    "type": "string"
+                },
+                "verdict_probabilities": {
+                    "type": "string"
+                },
+                "version": {
+                    "type": "integer"
+                }
+            }
+        },
         "ttgo_pkg_tracker_models.TestCase": {
             "type": "object",
             "properties": {
@@ -10260,8 +10611,17 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "escalate_below_pct": {
+                    "type": "integer"
+                },
+                "llm_fallback_enabled": {
+                    "type": "boolean"
+                },
                 "model": {
                     "type": "string"
+                },
+                "narrative_enabled": {
+                    "type": "boolean"
                 },
                 "semantic_dedup_enabled": {
                     "type": "boolean"
@@ -10293,11 +10653,20 @@ const docTemplate = `{
                 "enabled": {
                     "type": "boolean"
                 },
+                "escalate_below_pct": {
+                    "type": "integer"
+                },
                 "id": {
                     "type": "string"
                 },
+                "llm_fallback_enabled": {
+                    "type": "boolean"
+                },
                 "model": {
                     "type": "string"
+                },
+                "narrative_enabled": {
+                    "type": "boolean"
                 },
                 "semantic_dedup_enabled": {
                     "type": "boolean"

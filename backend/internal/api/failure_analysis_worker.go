@@ -27,46 +27,110 @@ func (s *Server) StartFailureAnalysisWorker(ctx context.Context) {
 	go w.Run(ctx)
 }
 
-// newAnalyzeDepsResolver builds JobDeps from live settings on every call (spec §4 "Resolver").
-// A generative-provider error is fatal for the job; any TypeSafe setup problem (missing or
-// undecryptable key included) is logged and leaves Decider/Semantic nil so the job runs
-// generatively — the promised fallback.
+// newAnalyzeDepsResolver builds JobDeps from live settings on every call (spec §4 "Resolver"),
+// enforcing consent at execution time rather than only when a job is queued:
+//   - the AI master switch stops everything (ErrAIDisabled);
+//   - TypeSafe is resolved first; any TypeSafe setup problem (missing or undecryptable key)
+//     is logged and leaves Decider/Semantic nil, so the LLM decides as before;
+//   - the LLM is attached only when a route needs it: no TypeSafe decider, explanations on,
+//     a takeover threshold, or the fallback. With none of them, analysis is TypeSafe-only and
+//     never touches the LLM provider, so a broken or missing LLM configuration cannot block it;
+//   - an automatic job uses the LLM only when that provider is itself approved for automatic
+//     analysis, checked now, since the default provider may have changed since the job was queued;
+//   - a broken LLM configuration fails the job only when the LLM would have to decide.
 func newAnalyzeDepsResolver(st *store.Store) failureanalysis.DepsResolver {
 	return func(trigger string) (failureanalysis.JobDeps, error) {
 		var deps failureanalysis.JobDeps
-		cfg, err := st.GetDefaultProviderConfig()
-		if err != nil {
+		if fs, err := st.GetOrCreateAIFeatureSettings(); err != nil {
 			return deps, err
-		}
-		if cfg != nil {
-			p, perr := llm.NewProvider(cfg)
-			if perr != nil {
-				return deps, perr
-			}
-			deps.Narrative, deps.NarrativeModel = p, cfg.ModelName
+		} else if !fs.Enabled {
+			return deps, failureanalysis.ErrAIDisabled
 		}
 
-		ts, err := st.GetTypeSafeSettings()
-		if err != nil {
-			slog.Warn("typesafe: settings unavailable, running without TypeSafe", "err", err)
-			return deps, nil
+		// An explicit Explain is a manual action that exists to call the LLM.
+		explain := trigger == failureanalysis.TriggerExplain
+		if explain {
+			trigger = models.RunAnalysisJobTriggerManual
 		}
-		permitted := ts.Enabled && (trigger == models.RunAnalysisJobTriggerManual || ts.AllowAutoFailureAnalysis)
-		if !permitted || (!ts.VerdictEngineEnabled && !ts.SemanticDedupEnabled) {
-			return deps, nil
+		ts := resolveTypeSafe(st, trigger, &deps)
+
+		needLLM := explain || deps.Decider == nil ||
+			(ts != nil && (ts.NarrativeEnabled || ts.EscalateBelowPct > 0 || ts.LLMFallbackEnabled))
+		if needLLM {
+			cfg, err := st.GetDefaultProviderConfig()
+			switch {
+			case err != nil:
+				if deps.Decider == nil {
+					return deps, err
+				}
+				slog.Warn("failure-analysis: default LLM provider could not be loaded; TypeSafe decides alone", "err", err)
+				deps.LLMUnavailableReason = "the default LLM provider could not be loaded"
+			case cfg == nil:
+				deps.LLMUnavailableReason = "no default LLM provider is configured"
+			case trigger != models.RunAnalysisJobTriggerManual && !cfg.AllowAutoFailureAnalysis:
+				deps.LLMUnavailableReason = "the default LLM provider is not approved for automatic analysis"
+			default:
+				p, perr := llm.NewProvider(cfg)
+				if perr != nil {
+					if deps.Decider == nil {
+						return deps, perr
+					}
+					slog.Warn("failure-analysis: default LLM provider is misconfigured; TypeSafe decides alone", "err", perr)
+					deps.LLMUnavailableReason = "the default LLM provider is misconfigured"
+				} else {
+					deps.Narrative, deps.NarrativeModel = p, cfg.ModelName
+				}
+			}
 		}
-		key, err := st.TypeSafeAPIKey()
-		if err != nil || key == "" {
-			slog.Warn("typesafe: API key missing or undecryptable; re-enter it in Settings, running without TypeSafe", "err", err)
-			return deps, nil
-		}
-		client := typesafe.NewHTTPClient(key, typesafe.Options{Timeout: time.Duration(ts.TimeoutSeconds) * time.Second})
-		if ts.VerdictEngineEnabled {
-			deps.Decider = failureanalysis.NewTypeSafeDecider(client, ts.Model)
-		}
-		if ts.SemanticDedupEnabled {
-			deps.Semantic = &failureanalysis.SemanticDeps{Client: client, Model: ts.Model}
+
+		if deps.Decider != nil && ts != nil {
+			deps.NarrativeSkipped = !ts.NarrativeEnabled
+			deps.NoLLMFallback = !ts.LLMFallbackEnabled
+			// Below this verdict confidence the LLM decides instead (needs both engines).
+			if deps.Narrative != nil && ts.EscalateBelowPct > 0 {
+				deps.EscalateBelow = float64(ts.EscalateBelowPct) / 100
+			}
 		}
 		return deps, nil
 	}
+}
+
+// resolveTypeSafe attaches the TypeSafe decider and semantic grouping when they are enabled,
+// consented for this trigger and keyed. It returns the settings when TypeSafe can decide.
+func resolveTypeSafe(st *store.Store, trigger string, deps *failureanalysis.JobDeps) *models.TypeSafeSettings {
+	ts, err := st.GetTypeSafeSettings()
+	if err != nil {
+		slog.Warn("typesafe: settings unavailable, running without TypeSafe", "err", err)
+		return nil
+	}
+	permitted := ts.Enabled && (trigger == models.RunAnalysisJobTriggerManual || ts.AllowAutoFailureAnalysis)
+	if !permitted || (!ts.VerdictEngineEnabled && !ts.SemanticDedupEnabled) {
+		return nil
+	}
+	key, err := st.TypeSafeAPIKey()
+	if err != nil || key == "" {
+		slog.Warn("typesafe: API key missing or undecryptable; re-enter it in Settings", "err", err)
+		if !ts.VerdictEngineEnabled {
+			return nil // semantic grouping only: skip it, the LLM decides as configured
+		}
+		// TypeSafe is the configured decider but cannot run. Treat it as unavailable rather
+		// than as not configured, so the LLM-fallback switch decides whether the LLM may see
+		// the failure (off: every attempt is recorded as failed with category configuration).
+		deps.Decider = failureanalysis.NewUnavailableDecider(&typesafe.Error{
+			Category: typesafe.CategoryConfiguration,
+			Message:  "TypeSafe.ai API key missing or undecryptable; re-enter it in Settings",
+		})
+		deps.DeciderModel = ts.Model
+		return ts
+	}
+	client := typesafe.NewHTTPClient(key, typesafe.Options{Timeout: time.Duration(ts.TimeoutSeconds) * time.Second})
+	if ts.SemanticDedupEnabled {
+		deps.Semantic = &failureanalysis.SemanticDeps{Client: client, Model: ts.Model}
+	}
+	if !ts.VerdictEngineEnabled {
+		return nil
+	}
+	deps.Decider = failureanalysis.NewTypeSafeDecider(client, ts.Model)
+	deps.DeciderModel = ts.Model
+	return ts
 }

@@ -117,13 +117,15 @@ func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 		return s
 	}
 	ev := Evidence{
-		TestName:              headRunes(r.TestNameSnapshot, TestNameCap),
-		Categories:            headRunes(in.Categories, CategoriesCap),
-		Env:                   headRunes(in.Env, EnvFieldCap),
-		Browser:               headRunes(in.Browser, EnvFieldCap),
-		OS:                    headRunes(in.OS, EnvFieldCap),
-		AppVersion:            headRunes(in.AppVersion, EnvFieldCap),
-		FailureType:           headRunes(r.FailureType, EnvFieldCap),
+		// Every field that leaves the server is redacted, not only the failure text: test
+		// names, environment fields, steps and linked records can carry secrets and emails too.
+		TestName:              headRunes(red(r.TestNameSnapshot), TestNameCap),
+		Categories:            headRunes(red(in.Categories), CategoriesCap),
+		Env:                   headRunes(red(in.Env), EnvFieldCap),
+		Browser:               headRunes(red(in.Browser), EnvFieldCap),
+		OS:                    headRunes(red(in.OS), EnvFieldCap),
+		AppVersion:            headRunes(red(in.AppVersion), EnvFieldCap),
+		FailureType:           headRunes(red(r.FailureType), EnvFieldCap),
 		ErrorMessage:          headRunes(red(r.ErrorMessage), b.ErrorHead),
 		StackTrace:            headRunes(red(r.StackTrace), b.StackHead),
 		LogText:               tailRunes(red(r.LogText), b.LogTail),
@@ -136,7 +138,7 @@ func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 	}
 	ev.Steps = make([]PromptStep, len(steps))
 	for i, s := range steps {
-		ev.Steps[i] = PromptStep{Order: s.Order, Action: headRunes(s.Action, StepTextCap), Expected: headRunes(s.Expected, StepTextCap)}
+		ev.Steps[i] = PromptStep{Order: s.Order, Action: headRunes(red(s.Action), StepTextCap), Expected: headRunes(red(s.Expected), StepTextCap)}
 	}
 	sims := in.SimilarFailures
 	if len(sims) > SimilarFailuresMax {
@@ -146,7 +148,7 @@ func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 	for i, s := range sims {
 		ev.SimilarFailures[i] = SimilarFailure{RunStartedAt: s.RunStartedAt,
 			Status: headRunes(s.Status, SimilarLabelCap), ErrorMessage: oneline(headRunes(red(s.ErrorMessage), SimilarMsgCap)),
-			DefectType: headRunes(s.DefectType, SimilarLabelCap), DefectKey: headRunes(s.DefectKey, DefectKeyCap)}
+			DefectType: headRunes(s.DefectType, SimilarLabelCap), DefectKey: headRunes(red(s.DefectKey), DefectKeyCap)}
 	}
 	defs := in.LinkedDefects
 	if len(defs) > MaxLinkedDefects {
@@ -154,9 +156,12 @@ func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 	}
 	ev.LinkedDefects = make([]LinkedDefect, len(defs))
 	for i, d := range defs {
-		ev.LinkedDefects[i] = LinkedDefect{Key: headRunes(d.Key, DefectKeyCap), Status: headRunes(d.Status, DefectStatusCap), Summary: headRunes(d.Summary, DefectSummaryCap)}
+		ev.LinkedDefects[i] = LinkedDefect{Key: headRunes(red(d.Key), DefectKeyCap), Status: headRunes(d.Status, DefectStatusCap), Summary: headRunes(red(d.Summary), DefectSummaryCap)}
 	}
-	ev.LinkedRequirements = append([]LinkedRequirement(nil), in.LinkedRequirements...)
+	ev.LinkedRequirements = make([]LinkedRequirement, len(in.LinkedRequirements))
+	for i, lr := range in.LinkedRequirements {
+		ev.LinkedRequirements[i] = LinkedRequirement{Key: red(lr.Key), Title: red(lr.Title)}
+	}
 	return ev
 }
 

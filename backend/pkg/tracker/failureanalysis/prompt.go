@@ -203,3 +203,24 @@ func makePrefix(dropped []string) string {
 	}
 	return "[context: " + strings.Join(dropped, "; ") + "] "
 }
+
+// SplitSystemPrompt separates a rendered template's "SYSTEM:" block from the rest. The block
+// becomes a real system message, so instructions and the untrusted evidence below them travel
+// in different roles. A prompt without both markers returns ("", prompt) unchanged.
+func SplitSystemPrompt(prompt string) (system, user string) {
+	trimmed := strings.TrimLeft(prompt, " \t\r\n")
+	if !strings.HasPrefix(trimmed, "SYSTEM:") {
+		return "", prompt
+	}
+	body := strings.TrimPrefix(trimmed, "SYSTEM:")
+	idx := strings.Index(body, "\nUSER:")
+	if idx < 0 {
+		return "", prompt
+	}
+	system = strings.TrimSpace(body[:idx])
+	user = strings.TrimLeft(body[idx+len("\nUSER:"):], "\r\n")
+	if system == "" || strings.TrimSpace(user) == "" {
+		return "", prompt
+	}
+	return system, user
+}

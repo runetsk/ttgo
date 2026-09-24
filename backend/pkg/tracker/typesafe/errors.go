@@ -17,6 +17,9 @@ const (
 	CategoryNetwork    Category = "network"    // dial/TLS/reset
 	CategoryParse      Category = "parse"      // body not decodable or answers invalid
 	CategoryInternal   Category = "internal"   // any other status (incl. 5xx)
+	// CategoryConfiguration: TypeSafe is selected but not usable as configured (no API key,
+	// or a stored key that cannot be decrypted). Raised by TTGO itself, never by the API.
+	CategoryConfiguration Category = "configuration"
 )
 
 // Error is a classified TypeSafe failure. Message never contains the request body or key.

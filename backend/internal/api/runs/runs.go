@@ -1045,7 +1045,9 @@ func (h *Handler) CompleteRun(w http.ResponseWriter, r *http.Request) {
 
 		// ai-failure-analysis: auto-on-completion enqueue.
 		// Non-fatal — run finalization succeeds regardless.
-		if settings, err := h.store.GetFailureAnalysisSettings(); err == nil && settings.EnabledOnCompletion {
+		if fs, ferr := h.store.GetOrCreateAIFeatureSettings(); ferr == nil && !fs.Enabled {
+			// The AI master switch is enforced server-side: nothing is queued while it is off.
+		} else if settings, err := h.store.GetFailureAnalysisSettings(); err == nil && settings.EnabledOnCompletion {
 			provider, _ := h.store.GetDefaultProviderConfig()
 			if provider != nil && provider.AllowAutoFailureAnalysis {
 				failures, err := h.store.ListLatestFailingResults(run.ID)

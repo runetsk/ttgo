@@ -81,6 +81,13 @@ func (c *Client) ListRunResultAnalyses(resultID string) (json.RawMessage, error)
 	return raw, err
 }
 
+// ListAnalysisJobs returns every failure-analysis job of a run, newest first,
+// each with its pipeline and outcome counts.
+func (c *Client) ListAnalysisJobs(runID string) (json.RawMessage, error) {
+	raw, _, err := c.GetRaw("/api/runs/"+runID+"/analysis-jobs", nil)
+	return raw, err
+}
+
 // GetAISeedStatus returns the AI demo dataset's status and its answer key
 // (admin only).
 func (c *Client) GetAISeedStatus() (json.RawMessage, error) {
