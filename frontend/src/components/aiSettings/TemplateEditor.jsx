@@ -1,307 +1,169 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { aiGeneration } from '../../api';
 import { toast } from '../../toast';
 import { TEMPLATE_VARS, REQUIRED_TEMPLATE_VARS, PARENT_REQUIRED_VARS } from './constants';
-import { s } from './styles';
+import { placeholderStatus, insertText } from '../../utils/aiSettingsTabs';
+import { ts } from './templateEditorStyles';
 
-/* ── Standard + Parent Prompt Template Sections ── */
-export default function TemplateEditor({ isAdmin }) {
-    const [template, setTemplate]           = useState(null);
-    const [templateContent, setTemplateContent] = useState('');
-    const [savingTemplate, setSavingTemplate]   = useState(false);
-    const [resettingTemplate, setResettingTemplate] = useState(false);
+// The two prompt templates generation uses. Both drafts live here, so switching between them (or
+// to another tab of Settings → AI) keeps unsaved edits; each saves and resets on its own.
+const KINDS = {
+    standard: {
+        label: 'Standard',
+        desc: 'Used when generating tests for a single requirement (no child issues).',
+        required: REQUIRED_TEMPLATE_VARS,
+        missingWhat: 'Requirement details',
+        contentKey: 'content',
+        save: aiGeneration.updateTemplate, reset: aiGeneration.resetTemplate,
+        name: 'Template',
+    },
+    parent: {
+        label: 'Parent (with child issues)',
+        desc: 'Used for a parent requirement that has child issues. Lighter, and focused on coverage across the children rather than deep single-requirement rules.',
+        required: PARENT_REQUIRED_VARS,
+        missingWhat: 'Child issue context',
+        contentKey: 'parent_content',
+        save: aiGeneration.updateParentTemplate, reset: aiGeneration.resetParentTemplate,
+        name: 'Parent template',
+    },
+};
+const KIND_IDS = ['standard', 'parent'];
 
-    const [parentContent, setParentContent]         = useState('');
-    const [savingParent, setSavingParent]           = useState(false);
-    const [resettingParent, setResettingParent]     = useState(false);
+export default function TemplateEditor({ isAdmin, onStatusChange }) {
+    const [template, setTemplate] = useState(null);
+    const [drafts, setDrafts] = useState({ standard: '', parent: '' });
+    const [kind, setKind] = useState('standard');
+    const [busy, setBusy] = useState(null); // 'save' | 'reset' | null
+    const editorRef = useRef(null);
 
-    const loadTemplate = useCallback(() => {
+    const load = useCallback(() => {
         aiGeneration.getTemplate()
-            .then(t => { setTemplate(t); setTemplateContent(t.content || ''); setParentContent(t.parent_content || ''); })
+            .then((t) => { setTemplate(t); setDrafts({ standard: t.content || '', parent: t.parent_content || '' }); })
             .catch(() => {});
     }, []);
+    useEffect(() => { load(); }, [load]);
 
+    const saved = (k) => (template ? template[KINDS[k].contentKey] || '' : '');
+    const modified = {
+        standard: !!template && drafts.standard !== saved('standard'),
+        parent: !!template && drafts.parent !== saved('parent'),
+    };
+    const standardCustom = !!template && saved('standard') !== (template.default_content || '');
+    const parentCustom = !!template && saved('parent') !== (template.default_parent_content || '');
+    const dirty = modified.standard || modified.parent;
     useEffect(() => {
-        loadTemplate();
-    }, [loadTemplate]);
+        if (template) onStatusChange?.({ standardCustom, parentCustom, dirty });
+    }, [template, standardCustom, parentCustom, dirty, onStatusChange]);
 
-    const handleSaveTemplate = async () => {
-        setSavingTemplate(true);
+    const cfg = KINDS[kind];
+    const content = drafts[kind];
+    const rows = placeholderStatus(content, TEMPLATE_VARS, cfg.required);
+    const missing = rows.filter((r) => r.required && !r.present).map((r) => r.name);
+    const setContent = (value) => setDrafts((d) => ({ ...d, [kind]: value }));
+
+    const handleSave = async () => {
+        setBusy('save');
         try {
-            const t = await aiGeneration.updateTemplate(templateContent);
+            const t = await cfg.save(content);
             setTemplate(t);
-            if (t.warnings?.length) {
-                t.warnings.forEach(w => toast.error(w));
-            } else {
-                toast.success('Template saved');
-            }
+            if (t.warnings?.length) t.warnings.forEach((w) => toast.error(w));
+            else toast.success(`${cfg.name} saved`);
         } catch (err) {
-            toast.error(err?.response?.data?.error || 'Failed to save template');
+            toast.error(err?.response?.data?.error || `Failed to save ${cfg.name.toLowerCase()}`);
         } finally {
-            setSavingTemplate(false);
+            setBusy(null);
         }
     };
 
-    const missingRequiredVars = REQUIRED_TEMPLATE_VARS.filter(v => !templateContent.includes(v));
-
-    const handleResetTemplate = async () => {
-        if (!window.confirm('Reset template to the built-in default?')) return;
-        setResettingTemplate(true);
+    const handleReset = async () => {
+        if (!window.confirm(`Reset the ${cfg.name.toLowerCase()} to the built-in default?`)) return;
+        setBusy('reset');
         try {
-            const t = await aiGeneration.resetTemplate();
+            const t = await cfg.reset();
             setTemplate(t);
-            setTemplateContent(t.content || '');
-            toast.success('Template reset to default');
+            setDrafts((d) => ({ ...d, [kind]: t[cfg.contentKey] || '' }));
+            toast.success(`${cfg.name} reset to default`);
         } catch (err) {
-            toast.error(err?.response?.data?.error || 'Failed to reset template');
+            toast.error(err?.response?.data?.error || `Failed to reset ${cfg.name.toLowerCase()}`);
         } finally {
-            setResettingTemplate(false);
+            setBusy(null);
         }
     };
 
-    const templateModified = template && templateContent !== template.content;
-    const parentModified = template && parentContent !== (template.parent_content || '');
-    const missingParentVars = PARENT_REQUIRED_VARS.filter(v => !parentContent.includes(v));
-
-    const handleSaveParentTemplate = async () => {
-        setSavingParent(true);
-        try {
-            const t = await aiGeneration.updateParentTemplate(parentContent);
-            setTemplate(t);
-            if (t.warnings?.length) {
-                t.warnings.forEach(w => toast.error(w));
-            } else {
-                toast.success('Parent template saved');
-            }
-        } catch (err) {
-            toast.error(err?.response?.data?.error || 'Failed to save parent template');
-        } finally {
-            setSavingParent(false);
-        }
-    };
-
-    const handleResetParentTemplate = async () => {
-        if (!window.confirm('Reset parent template to the built-in default?')) return;
-        setResettingParent(true);
-        try {
-            const t = await aiGeneration.resetParentTemplate();
-            setTemplate(t);
-            setParentContent(t.parent_content || '');
-            toast.success('Parent template reset to default');
-        } catch (err) {
-            toast.error(err?.response?.data?.error || 'Failed to reset parent template');
-        } finally {
-            setResettingParent(false);
-        }
+    const insert = (name) => {
+        const el = editorRef.current;
+        if (!el || !isAdmin) return;
+        const next = insertText(el.value, el.selectionStart, el.selectionEnd, name);
+        setContent(next.value);
+        requestAnimationFrame(() => { el.focus(); el.setSelectionRange(next.caret, next.caret); });
     };
 
     return (
-        <>
-            {/* ── Standard Prompt Template Section ── */}
-            <section style={s.section}>
-                <div style={s.sectionHead}>
-                    <div style={s.sectionHeadLeft}>
-                        <span style={s.sectionDot} />
-                        <h4 style={s.sectionTitle}>Standard Prompt Template</h4>
-                        {templateModified && <span style={s.modifiedBadge}>Unsaved changes</span>}
-                    </div>
-                    {isAdmin && (
-                        <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                className="action-btn"
-                                onClick={handleResetTemplate}
-                                disabled={resettingTemplate}
-                                style={{ fontSize: '0.82rem' }}
-                            >
-                                {resettingTemplate ? 'Resetting…' : 'Reset to Default'}
-                            </button>
-                            <button
-                                className="primary-btn"
-                                onClick={handleSaveTemplate}
-                                disabled={savingTemplate || !templateModified}
-                                style={{ fontSize: '0.82rem' }}
-                            >
-                                {savingTemplate ? 'Saving…' : 'Save Template'}
-                            </button>
-                        </div>
-                    )}
-                </div>
-
-                <p style={s.templateDesc}>
-                    Used when generating tests for a single requirement (no child issues). Use these placeholders:
-                </p>
-
-                {/* Variable chips */}
-                <div style={s.varChips}>
-                    {TEMPLATE_VARS.map(v => (
-                        <code key={v} style={{
-                            ...s.varChip,
-                            ...(REQUIRED_TEMPLATE_VARS.includes(v) && missingRequiredVars.includes(v)
-                                ? { borderColor: 'rgba(239,68,68,0.5)', color: '#f87171', background: 'rgba(239,68,68,0.1)' }
-                                : {}),
-                        }}>{v}</code>
+        <section style={ts.section}>
+            <div style={ts.head}>
+                <div style={ts.segmented} role="group" aria-label="Prompt template">
+                    {KIND_IDS.map((k) => (
+                        <button key={k} type="button" aria-pressed={kind === k} data-testid={`template-kind-${k}`}
+                            onClick={() => setKind(k)} style={{ ...ts.segment, ...(kind === k ? ts.segmentOn : null) }}>
+                            {KINDS[k].label}
+                            {modified[k] && <span style={ts.dirtyDot} aria-label="unsaved changes" />}
+                        </button>
                     ))}
                 </div>
-
-                {/* Missing placeholder warning */}
-                {missingRequiredVars.length > 0 && (
-                    <div style={{
-                        display: 'flex', alignItems: 'flex-start', gap: 10,
-                        padding: '10px 14px',
-                        borderRadius: 8,
-                        background: 'rgba(239,68,68,0.08)',
-                        border: '1px solid rgba(239,68,68,0.25)',
-                        marginBottom: 8,
-                    }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                        <div>
-                            <span style={{ fontSize: '0.82rem', color: '#f87171', fontWeight: 600 }}>
-                                Missing required placeholders:{' '}
-                            </span>
-                            <span style={{ fontSize: '0.82rem', color: '#fca5a5', fontFamily: 'monospace' }}>
-                                {missingRequiredVars.join(', ')}
-                            </span>
-                            <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: 'rgba(252,165,165,0.8)', lineHeight: 1.4 }}>
-                                Requirement details will <strong>not</strong> be sent to the LLM without these placeholders.
-                            </p>
-                        </div>
-                    </div>
-                )}
-
-                {/* Editor */}
-                <div style={s.editorWrap}>
-                    {!isAdmin && (
-                        <div style={s.readOnlyBanner}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
-                            View only — admin required to edit
-                        </div>
-                    )}
-                    <textarea
-                        className="modern-input"
-                        style={{
-                            ...s.editor,
-                            opacity: isAdmin ? 1 : 0.7,
-                        }}
-                        value={templateContent}
-                        onChange={e => setTemplateContent(e.target.value)}
-                        disabled={!isAdmin}
-                        placeholder="Loading template…"
-                        spellCheck={false}
-                    />
-                    <div style={s.editorFooter}>
-                        <span style={s.charCount}>{templateContent.length} chars</span>
-                    </div>
-                </div>
-            </section>
-
-            {/* ── Parent Prompt Template Section ── */}
-            <section style={s.section}>
-                <div style={s.sectionHead}>
-                    <div style={s.sectionHeadLeft}>
-                        <span style={s.sectionDot} />
-                        <h4 style={s.sectionTitle}>Parent Prompt Template</h4>
-                        <span style={s.templateTypeBadge}>Children</span>
-                        {parentModified && <span style={s.modifiedBadge}>Unsaved changes</span>}
-                    </div>
+                <div style={ts.actions}>
+                    {modified[kind] && <span style={ts.unsaved} data-testid="template-unsaved">Unsaved changes</span>}
                     {isAdmin && (
-                        <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                                className="action-btn"
-                                onClick={handleResetParentTemplate}
-                                disabled={resettingParent}
-                                style={{ fontSize: '0.82rem' }}
-                            >
-                                {resettingParent ? 'Resetting…' : 'Reset to Default'}
+                        <>
+                            <button type="button" className="action-btn" data-testid="template-reset" onClick={handleReset}
+                                disabled={busy !== null} style={{ fontSize: '0.82rem' }}>
+                                {busy === 'reset' ? 'Resetting…' : 'Reset to default'}
                             </button>
-                            <button
-                                className="primary-btn"
-                                onClick={handleSaveParentTemplate}
-                                disabled={savingParent || !parentModified}
-                                style={{ fontSize: '0.82rem' }}
-                            >
-                                {savingParent ? 'Saving…' : 'Save Template'}
+                            <button type="button" className="primary-btn" data-testid="template-save" onClick={handleSave}
+                                disabled={busy !== null || !modified[kind]} style={{ fontSize: '0.82rem' }}>
+                                {busy === 'save' ? 'Saving…' : 'Save template'}
                             </button>
-                        </div>
+                        </>
                     )}
                 </div>
+            </div>
 
-                <p style={s.templateDesc}>
-                    Used when generating tests for a parent requirement that has child issues.
-                    Lighter and focused on coverage across children rather than deep single-requirement rules.
-                </p>
+            <p style={ts.desc}>{cfg.desc}</p>
 
-                {/* Variable chips */}
-                <div style={s.varChips}>
-                    {TEMPLATE_VARS.map(v => (
-                        <code key={v} style={{
-                            ...s.varChip,
-                            ...(PARENT_REQUIRED_VARS.includes(v) && missingParentVars.includes(v)
-                                ? { borderColor: 'rgba(239,68,68,0.5)', color: '#f87171', background: 'rgba(239,68,68,0.1)' }
-                                : {}),
-                        }}>{v}</code>
-                    ))}
+            {missing.length > 0 && (
+                <div role="alert" style={ts.missing}>
+                    <strong>Missing required placeholders: </strong>
+                    <span style={{ fontFamily: 'monospace' }}>{missing.join(', ')}</span>. {cfg.missingWhat} will <strong>not</strong> be sent to the LLM without them.
                 </div>
+            )}
 
-                {/* Missing placeholder warning */}
-                {missingParentVars.length > 0 && (
-                    <div style={{
-                        display: 'flex', alignItems: 'flex-start', gap: 10,
-                        padding: '10px 14px',
-                        borderRadius: 8,
-                        background: 'rgba(239,68,68,0.08)',
-                        border: '1px solid rgba(239,68,68,0.25)',
-                        marginBottom: 8,
-                    }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}>
-                            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                            <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
-                        </svg>
-                        <div>
-                            <span style={{ fontSize: '0.82rem', color: '#f87171', fontWeight: 600 }}>
-                                Missing required placeholders:{' '}
-                            </span>
-                            <span style={{ fontSize: '0.82rem', color: '#fca5a5', fontFamily: 'monospace' }}>
-                                {missingParentVars.join(', ')}
-                            </span>
-                            <p style={{ margin: '3px 0 0', fontSize: '0.78rem', color: 'rgba(252,165,165,0.8)', lineHeight: 1.4 }}>
-                                Child issue context will <strong>not</strong> be sent to the LLM without these placeholders.
-                            </p>
-                        </div>
-                    </div>
-                )}
-
-                {/* Editor */}
-                <div style={s.editorWrap}>
-                    {!isAdmin && (
-                        <div style={s.readOnlyBanner}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
-                            View only — admin required to edit
-                        </div>
-                    )}
-                    <textarea
-                        className="modern-input"
-                        style={{
-                            ...s.editor,
-                            opacity: isAdmin ? 1 : 0.7,
-                        }}
-                        value={parentContent}
-                        onChange={e => setParentContent(e.target.value)}
-                        disabled={!isAdmin}
-                        placeholder="Loading parent template…"
-                        spellCheck={false}
-                    />
-                    <div style={s.editorFooter}>
-                        <span style={s.charCount}>{parentContent.length} chars</span>
+            <div style={ts.grid}>
+                <div style={ts.editorWrap}>
+                    {!isAdmin && <div style={ts.readOnly}>View only: an admin can edit templates</div>}
+                    <textarea ref={editorRef} className="modern-input" data-testid="template-editor" aria-label={`${cfg.label} prompt template`}
+                        style={{ ...ts.editor, opacity: isAdmin ? 1 : 0.7 }} value={content} onChange={(e) => setContent(e.target.value)}
+                        disabled={!isAdmin} placeholder="Loading template…" spellCheck={false} />
+                    <div style={ts.footer}>
+                        <span>{content.length} chars</span>
+                        <span>{rows.filter((r) => r.present).length} of {rows.length} placeholders</span>
                     </div>
                 </div>
-            </section>
-        </>
+                <div style={ts.side}>
+                    <div style={ts.sideTitle}>Placeholders</div>
+                    {rows.map((r) => {
+                        const bad = r.required && !r.present;
+                        return (
+                            <button key={r.name} type="button" style={ts.ph} onClick={() => insert(r.name)} disabled={!isAdmin}
+                                data-testid={`template-placeholder-${r.name.replace(/[{}]/g, '')}`}
+                                aria-label={`Insert ${r.name}${r.required ? ', required' : ''}${r.present ? ', used' : ', not used'}`}>
+                                <span aria-hidden="true" style={{ width: 14, textAlign: 'center', ...(bad ? ts.phMissing : null) }}>{r.present ? '✓' : bad ? '!' : '○'}</span>
+                                <span style={{ ...ts.phName, ...(bad ? ts.phMissing : null) }}>{r.name}</span>
+                                {r.required && <span style={ts.phReq}>required</span>}
+                            </button>
+                        );
+                    })}
+                    <p style={ts.sideNote}>Click a placeholder to insert it at the cursor.</p>
+                </div>
+            </div>
+        </section>
     );
 }
