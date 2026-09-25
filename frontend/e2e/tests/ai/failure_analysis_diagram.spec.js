@@ -42,6 +42,7 @@ test.describe('Settings — failure-analysis process diagram', () => {
         const writes = await mockSettings(page);
         await settingsPage.open();
         await settingsPage.openFailureAnalysis();
+        await settingsPage.selectFlowStep('explain');
 
         const explained = settingsPage.flowPart('explain', 'answers');
         await expect(explained).toContainText('Fake LLM (fake-1) writes the explanation.');
@@ -63,14 +64,15 @@ test.describe('Settings — failure-analysis process diagram', () => {
         await expect(settingsPage.flowTrigger('auto')).toHaveAttribute('aria-pressed', 'true');
         const start = settingsPage.flowStep('start');
         await expect(start).toHaveAttribute('data-status', 'blocked');
-        await expect(start).toContainText('"Auto-analyze on run completion" is off');
+        await expect(settingsPage.flowDetail).toContainText('"Auto-analyze on run completion" is off');
         await expect(settingsPage.flowChip('ts.allow_auto_failure_analysis')).toContainText('Not allowed');
 
         await page.getByTestId('fa-enabled_on_completion').check();
-        await expect(start).toContainText('Nothing can analyze: the default LLM provider is not approved for automatic analysis, and TypeSafe.ai is not allowed on automatic analysis.');
+        await expect(settingsPage.flowDetail).toContainText('Nothing can analyze: the default LLM provider is not approved for automatic analysis, and TypeSafe.ai is not allowed on automatic analysis.');
 
         await page.getByTestId('typesafe-allow_auto_failure_analysis').check();
         await expect(start).toHaveAttribute('data-status', 'run');
+        await settingsPage.selectFlowStep('group');
         await expect(settingsPage.flowPart('group', 'semantic')).toHaveAttribute('data-status', 'run');
         expect(writes).toEqual([]);
     });
@@ -92,6 +94,7 @@ test.describe('Settings — failure-analysis process diagram', () => {
         const writes = await mockSettings(page);
         await settingsPage.open();
         await settingsPage.openFailureAnalysis();
+        await settingsPage.selectFlowStep('group');
 
         await page.getByTestId('fa-max-analyses').fill('0');
         await expect(settingsPage.flowChip('fa.max_analyses_per_run')).toContainText('invalid');
@@ -113,6 +116,7 @@ test.describe('Settings — failure-analysis process diagram', () => {
         await mockSettings(page);
         await settingsPage.open();
         await settingsPage.openFailureAnalysis();
+        await settingsPage.selectFlowStep('group');
 
         await settingsPage.flowChip('fa.dedup_enabled').click();
         const toggle = page.getByTestId('fa-dedup_enabled');
@@ -147,6 +151,7 @@ test.describe('Settings — failure-analysis process diagram', () => {
 
         await expect(page.getByTestId('typesafe-save')).toHaveCount(0);
         await expect(settingsPage.flowStep('decide')).toHaveAttribute('data-status', 'run');
+        await settingsPage.selectFlowStep('group');
         await settingsPage.flowChip('fa.dedup_enabled').click();
         await expect(page.locator('[data-setting="fa.dedup_enabled"]')).toBeFocused();
     });

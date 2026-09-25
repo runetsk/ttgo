@@ -88,4 +88,11 @@ export class SettingsPage extends BasePage {
     flowPart(stepId, id) { return this.page.getByTestId(`analysis-flow-part-${stepId}-${id}`); }
     flowChip(key) { return this.page.getByTestId(`analysis-flow-chip-${key}`); }
     flowTrigger(mode) { return this.page.getByTestId(`analysis-flow-trigger-${mode}`); }
+
+    // The diagram shows one step's detail at a time; click a step to show its parts and chips.
+    async selectFlowStep(id) {
+        await this.flowStep(id).getByRole('button').click();
+        await this.page.getByTestId('analysis-flow-detail').and(this.page.locator(`[data-step="${id}"]`)).waitFor();
+    }
+    get flowDetail() { return this.page.getByTestId('analysis-flow-detail'); }
 }

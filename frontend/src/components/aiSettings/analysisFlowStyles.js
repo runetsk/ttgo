@@ -28,17 +28,11 @@ export const fs = {
     },
     segmentOn: { background: 'rgba(99,102,241,0.15)', color: 'var(--aig-tone-indigo-fg)' },
     legend: { display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px 12px', fontSize: '0.72rem', color: 'var(--text-secondary)' },
-    steps: { listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' },
-    step: { display: 'flex', gap: 12, minWidth: 0 },
-    stepIdle: { opacity: 0.45 },
-    rail: { display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, width: 26 },
     dot: {
-        width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        width: 22, height: 22, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
         fontSize: '0.75rem', fontWeight: 700, borderWidth: 1.5, flexShrink: 0,
     },
     dotTone: byStatus((t, k) => ({ borderColor: t.border, color: t.fg, background: t.bg, borderStyle: dashedIfSkip(k) })),
-    line: { flex: 1, width: 2, background: 'var(--border-color)', margin: '4px 0' },
-    body: { flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 6, padding: '2px 0 18px' },
     stepHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
     stepTitle: { margin: 0, fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-primary)' },
     status: {
@@ -52,7 +46,6 @@ export const fs = {
     },
     tagUnredacted: { color: 'var(--aig-tone-amber-fg)', borderColor: 'rgba(234,179,8,0.45)', background: 'rgba(234,179,8,0.1)' },
     reason: { margin: 0, fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.5 },
-    detail: { margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.55 },
     note: { margin: 0, fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.5, fontStyle: 'italic' },
     partsLabel: {
         fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase',
@@ -89,5 +82,33 @@ export const fs = {
         color: 'var(--aig-tone-red-fg)', fontSize: '0.82rem', fontWeight: 600,
     },
     stale: { fontSize: '0.76rem', fontWeight: 600, color: 'var(--aig-tone-amber-fg)' },
-    skeleton: { height: 44, borderRadius: 8, background: 'var(--bg-tertiary)', opacity: 0.7 },
+    // Horizontal row: one grid column per step; arrows sit in the gap between columns.
+    scroller: { overflowX: 'auto', paddingBottom: 2 },
+    row: { listStyle: 'none', margin: 0, padding: 0, display: 'grid', columnGap: 22, minWidth: 700 },
+    nodeItem: { position: 'relative', display: 'flex', minWidth: 0 },
+    node: {
+        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6,
+        padding: '10px 10px 12px', borderRadius: 10, borderWidth: 1, background: 'var(--bg-tertiary)',
+        color: 'var(--text-primary)', cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+    },
+    nodeTone: byStatus((t, k) => ({ borderColor: t.border, borderStyle: dashedIfSkip(k) })),
+    nodeSelected: { borderColor: 'var(--accent-indigo)', boxShadow: '0 0 0 3px rgba(99,102,241,0.18)' },
+    nodeIdle: { opacity: 0.45, cursor: 'default' },
+    nodeHead: { display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 },
+    nodeTitle: { fontSize: '0.8rem', fontWeight: 700, lineHeight: 1.3 },
+    nodeTags: { display: 'flex', flexWrap: 'wrap', gap: 4 },
+    arrow: { position: 'absolute', right: -19, top: '50%', marginTop: -8, color: 'var(--text-secondary)' },
+    // The selected step's detail, pointing up at its box.
+    detail: {
+        position: 'relative', marginTop: 12, minWidth: 700, boxSizing: 'border-box',
+        display: 'flex', flexDirection: 'column', gap: 8, padding: '14px 16px', borderRadius: 10,
+        border: '1px solid var(--accent-indigo)', background: 'var(--bg-secondary)',
+    },
+    caret: {
+        position: 'absolute', top: -7, width: 12, height: 12, transform: 'rotate(45deg)',
+        background: 'var(--bg-secondary)', borderTop: '1px solid var(--accent-indigo)', borderLeft: '1px solid var(--accent-indigo)',
+    },
+    detailText: { margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.55 },
+    skeletonRow: { display: 'grid', gridTemplateColumns: 'repeat(6, minmax(0, 1fr))', gap: 22 },
+    skeleton: { height: 92, borderRadius: 10, background: 'var(--bg-tertiary)', opacity: 0.7 },
 };
