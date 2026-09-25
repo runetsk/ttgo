@@ -2,10 +2,10 @@ import { test, expect } from '../../fixtures/test.js';
 import { TIMEOUTS } from '../../config.js';
 
 // The failure-analysis states a real engine cannot be made to produce on demand: a failed
-// attempt, a TypeSafe decision stored without an explanation, a finished job with failures,
-// and the TypeSafe card's route summary. The analysis endpoints are mocked with page.route,
-// so no LLM or TypeSafe call is made and no AI setting is written. Only the run and its two
-// failing results are real.
+// attempt, a TypeSafe decision stored without an explanation, and a finished job with failures.
+// The analysis endpoints are mocked with page.route, so no LLM or TypeSafe call is made and no
+// AI setting is written. Only the run and its two failing results are real. The settings-page
+// process diagram has its own spec, failure_analysis_diagram.spec.js.
 
 const FAILED = {
     id: 'an-failed', version: 1, engine: 'typesafe', model_name: 'jev-1.13.0', verdict: 'unknown',
@@ -108,41 +108,5 @@ test.describe('AI failure analysis — failed attempts, explanations and job out
         await expect(page.getByText('AI retrying failed groups — 0 of 1 groups')).toBeVisible();
         await expect(summary).toHaveCount(0);
         expect(retried).toBe(1);
-    });
-});
-
-test.describe('Settings — TypeSafe.ai route summary', () => {
-    test('says what an analysis will do, from the unsaved form', async ({ page, settingsPage }) => {
-        let writes = 0;
-        await page.route(/\/api\/settings\/typesafe$/, (route) => {
-            if (route.request().method() !== 'GET') {
-                writes++;
-                return route.fulfill(json({ error: 'the e2e route summary spec never saves' }, 500));
-            }
-            return route.fulfill(json({
-                id: 'singleton', enabled: true, api_key_masked: '…1234', api_key_status: 'ok', model: 'jev-1.13.0',
-                timeout_seconds: 30, verdict_engine_enabled: true, narrative_enabled: true, llm_fallback_enabled: true,
-                escalate_below_pct: 0, semantic_dedup_enabled: true, allow_auto_failure_analysis: false,
-            }));
-        });
-        await page.route(/\/api\/settings\/llm-providers$/, (route) => route.fulfill(json([
-            { id: 'p1', label: 'Fake LLM', provider_type: 'openai', model_name: 'fake-1', is_default: true, enabled: true, allow_auto_failure_analysis: false },
-        ])));
-
-        await settingsPage.open();
-        await settingsPage.openTypeSafeCard();
-        const manual = page.getByTestId('typesafe-route-manual');
-        await expect(manual.getByRole('listitem')).toHaveText([
-            'TypeSafe (jev-1.13.0) decides.',
-            'Fake LLM (fake-1) writes the explanation.',
-            'If TypeSafe is unavailable, Fake LLM (fake-1) decides.',
-        ]);
-        await expect(page.getByTestId('typesafe-route-auto')).toContainText('Nothing can analyze: the default LLM provider is not approved for automatic analysis');
-
-        await page.getByTestId('typesafe-narrative_enabled').uncheck();
-        await page.getByTestId('typesafe-llm_fallback_enabled').uncheck();
-        await expect(manual).toContainText('No failure data is sent to the LLM.');
-        await expect(page.getByTestId('typesafe-route')).toContainText('with the unsaved changes above');
-        expect(writes).toBe(0);
     });
 });

@@ -77,4 +77,15 @@ export class SettingsPage extends BasePage {
     get typesafeSaveButton() { return this.page.getByTestId('typesafe-save'); }
     get typesafeClearKeyCheckbox() { return this.page.getByTestId('typesafe-clear-key'); }
     get typesafeModelInput() { return this.page.getByTestId('typesafe-model'); }
+
+    // ── AI Failure Analysis section (AI Generation tab) ─────────────────────
+    async openFailureAnalysis() {
+        await this.openTab('AI Generation');
+        await this.page.getByTestId('analysis-flow').scrollIntoViewIfNeeded();
+    }
+
+    flowStep(id) { return this.page.getByTestId(`analysis-flow-step-${id}`); }
+    flowPart(stepId, id) { return this.page.getByTestId(`analysis-flow-part-${stepId}-${id}`); }
+    flowChip(key) { return this.page.getByTestId(`analysis-flow-chip-${key}`); }
+    flowTrigger(mode) { return this.page.getByTestId(`analysis-flow-trigger-${mode}`); }
 }

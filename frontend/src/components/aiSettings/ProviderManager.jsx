@@ -5,6 +5,7 @@ import { s } from './styles';
 import ProviderModal from './ProviderModal';
 import DeleteModal from './DeleteModal';
 import ProviderCard from './ProviderCard';
+import { useAIGeneration } from '../../contexts/AIGenerationContext';
 
 /* ── LLM Providers Section (list, add/edit/delete/test, modals) ── */
 export default function ProviderManager({ isAdmin }) {
@@ -27,6 +28,14 @@ export default function ProviderManager({ isAdmin }) {
         loadProviders();
     }, [loadProviders]);
 
+    const { refreshProviders } = useAIGeneration();
+    // After a change, reload this list and the app-wide one that the failure-analysis diagram and
+    // the generation provider picker read.
+    const reloadAll = useCallback(() => {
+        loadProviders();
+        refreshProviders();
+    }, [loadProviders, refreshProviders]);
+
     const handleTestConnection = async (provider) => {
         setTestingId(provider.id);
         setTestResults(prev => ({ ...prev, [provider.id]: null }));
@@ -44,7 +53,7 @@ export default function ProviderManager({ isAdmin }) {
         try {
             await aiGeneration.setDefault(provider.id);
             toast.success(`${provider.label} set as default`);
-            loadProviders();
+            reloadAll();
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to set default');
         }
@@ -56,7 +65,7 @@ export default function ProviderManager({ isAdmin }) {
         try {
             await aiGeneration.deleteProvider(confirmDelete.id);
             toast.success('Provider deleted');
-            loadProviders();
+            reloadAll();
         } catch (err) {
             toast.error(err?.response?.data?.error || 'Failed to delete provider');
         }
@@ -65,7 +74,7 @@ export default function ProviderManager({ isAdmin }) {
     return (
         <>
             {/* ── LLM Providers Section ── */}
-            <section style={s.section}>
+            <section style={s.section} data-setting="provider.default" tabIndex={-1}>
                 <div style={s.sectionHead}>
                     <div style={s.sectionHeadLeft}>
                         <span style={s.sectionDot} />
@@ -132,7 +141,7 @@ export default function ProviderManager({ isAdmin }) {
                 <ProviderModal
                     provider={modal.type === 'edit' ? modal.provider : null}
                     onClose={() => setModal(null)}
-                    onSaved={() => { setModal(null); loadProviders(); }}
+                    onSaved={() => { setModal(null); reloadAll(); }}
                 />
             )}
             {confirmDelete && (

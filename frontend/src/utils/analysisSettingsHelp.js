@@ -1,0 +1,135 @@
+// Plain-language explanations of the failure-analysis settings and steps, written from the server
+// code. One source for the cards' "What this does" toggles and the process diagram (a chip's
+// tooltip is `what`; "How this step works" uses STEP_HELP). Keys are the data-setting anchors:
+// ai.* (master switch), fa.* (AI Failure Analysis card), ts.* (TypeSafe.ai card), provider.default.
+// When server behaviour changes (dedup normalization, redaction patterns, thresholds), update here.
+
+export const SETTING_HELP = {
+    'ai.enabled': {
+        title: 'AI features',
+        what: 'Master switch for every AI feature, including failure analysis.',
+        off: 'AI actions are hidden, new analyses are refused and completed runs are not queued. An analysis already running finishes.',
+    },
+    'fa.enabled_on_completion': {
+        title: 'Auto-analyze on run completion',
+        what: 'When a run is completed with failing results, its failures are queued as if someone clicked Analyze failures.',
+        details: 'It needs something that may analyze automatically: TypeSafe.ai with "Allow on automatic analysis", or a default LLM with "Auto failure analysis" ticked in its provider settings. The LLM needs that tick for any part it plays in an automatic analysis. Runs completed before you switch this on are not queued.',
+        off: 'Failures are analyzed only when someone asks.',
+    },
+    'fa.dedup_enabled': {
+        title: 'Deduplicate similar failures',
+        what: 'Failures with the same failure type and the same error text form one group; one result is analyzed and its answer is copied to the rest.',
+        details: 'Before comparing, standalone numbers of four or more digits (order and request IDs), timestamps and hex addresses (0x7ff…) are replaced, and folder paths written with / are cut to the file name. Numbers joined to letters, such as 30000ms, and Windows \\ paths still count.',
+        example: '"Timeout 30000ms waiting for #checkout (order 55121)" and the same message with order 55904 → one group, because only the order number differs.',
+        off: 'Every failing result is analyzed on its own, which is slower and costs a call each.',
+    },
+    'ts.semantic_dedup_enabled': {
+        title: 'Semantic failure grouping',
+        what: 'After identical grouping, TypeSafe.ai merges groups of the same failure type that it is at least 80% sure describe the same failure.',
+        details: 'Only groups whose wording overlaps are compared. TypeSafe.ai receives short excerpts: the test name, failure type, error and the start of the stack. These calls happen before the cap, so Max analyses per run does not limit them. Needs Deduplicate similar failures and a usable TypeSafe.ai key.',
+        example: '"POST /api/orders failed: upstream payment service returned 503" and "POST /api/orders failed: payment gateway unavailable (503)" → one group.',
+        off: 'Only identical failures are grouped.',
+    },
+    'fa.redaction_enabled': {
+        title: 'Redact secrets',
+        what: 'Before failure text leaves the server, recognized secrets are replaced in every field sent to TypeSafe.ai and the LLM.',
+        details: 'Bearer tokens; OpenAI, AWS, GitHub, Stripe, Slack and Google keys; credentials in URLs; private key blocks; JWTs; password=, token= and api_key= style values; email addresses. It is best effort: values in other shapes, or too short to look like a secret (password=abc), are sent as recorded, and the prompt template is sent as written.',
+        example: 'password=hunter2 → password=<REDACTED>; Authorization: Bearer eyJ… → Authorization: Bearer <REDACTED_TOKEN>; qa@example.com → <REDACTED_EMAIL>.',
+        off: 'Failure text is sent as recorded.',
+    },
+    'fa.max_analyses_per_run': {
+        title: 'Max analyses per run',
+        what: 'The most failure groups one analysis covers, largest groups first (1 to 500).',
+        example: '300 failing results in 40 groups with a cap of 20 → the 20 largest groups are analyzed; the other 20 stay without an analysis. Analyze them one result at a time, or raise the cap.',
+    },
+    'fa.parallel_groups': {
+        title: 'Groups analyzed at once',
+        what: 'How many groups are analyzed side by side (1 to 8). Nearly all the time is spent waiting on TypeSafe.ai and the LLM.',
+        details: 'Lower it if the LLM provider answers with rate-limit errors.',
+        example: '24 groups that wait about 6 s each on the LLM take about 2½ minutes one at a time and roughly half that four at a time; the slowest calls set the pace.',
+    },
+    'fa.prompt_template': {
+        title: 'Prompt template',
+        what: 'The instructions and layout sent to the LLM with the failure evidence.',
+        details: 'It is sent as written, without redaction, and must ask for JSON with verdict, confidence, summary, next_action and rationale.',
+    },
+    'ts.enabled': {
+        title: 'Enable TypeSafe.ai',
+        what: 'Turns TypeSafe.ai on for the features switched on in its card.',
+        off: 'Nothing is sent to TypeSafe.ai; its settings are kept.',
+    },
+    'ts.api_key': {
+        title: 'API key',
+        what: 'Stored encrypted and shown masked. Test connection checks the stored key, so save a new key first.',
+        details: 'A key that can no longer be decrypted must be entered again. A new key is checked when it is first used.',
+    },
+    'ts.model': {
+        title: 'Model',
+        what: 'The TypeSafe.ai model that answers. Pinned to jev-1.13.0 by default because confidence thresholds are tuned per version.',
+    },
+    'ts.timeout_seconds': {
+        title: 'Timeout',
+        what: 'How long one request to TypeSafe.ai may take (5 to 300 s). A request that times out is not repeated and the decision counts as unavailable.',
+        details: 'Rate limits, overload, network and server errors are retried up to three times with a pause, so one decision can take longer than this.',
+    },
+    'ts.verdict_engine_enabled': {
+        title: 'Use for failure verdicts',
+        what: 'TypeSafe.ai answers two multiple-choice questions, the verdict and the defect type, with a probability for every option and a confidence.',
+        off: 'The default LLM decides.',
+    },
+    'ts.allow_auto_failure_analysis': {
+        title: 'Allow on automatic analysis',
+        what: "TypeSafe.ai's own consent for runs analyzed on completion.",
+        details: 'Analyses started by hand, including Retry failed groups, use TypeSafe.ai whenever it is enabled.',
+        off: 'Automatic analyses do not contact TypeSafe.ai; the LLM decides for them.',
+    },
+    'ts.narrative_enabled': {
+        title: 'Write an explanation with the default LLM',
+        what: 'After TypeSafe.ai decides, the default LLM writes a summary, a next action and the reasoning.',
+        details: 'When TypeSafe is unsure or unavailable and the LLM decides instead, its answer includes an explanation either way.',
+        off: "TypeSafe's decisions are stored without that extra call, so a group takes about as long as TypeSafe's answer. Explain on a result writes one on demand.",
+    },
+    'ts.llm_fallback_enabled': {
+        title: 'Use the default LLM when TypeSafe is unavailable',
+        what: 'What happens when TypeSafe.ai cannot answer: an error, a timeout or no usable key.',
+        example: 'TypeSafe times out after 30 s. On: the LLM decides and explains, and the analysis says TypeSafe was unavailable.',
+        off: 'The attempt is recorded as failed and can be retried; failure data never goes to the LLM in its place.',
+    },
+    'ts.escalate_below_pct': {
+        title: "Ask the LLM when TypeSafe's confidence is below",
+        what: 'Below this confidence the default LLM decides instead of TypeSafe.ai, and the analysis notes what TypeSafe said. 0 never hands over.',
+        example: 'At 90%: "flaky test, 72% sure" goes to the LLM, which decides and explains; "product bug, 96% sure" stays with TypeSafe. If the LLM cannot answer, TypeSafe\'s decision is kept.',
+    },
+    'provider.default': {
+        title: 'Default LLM',
+        what: 'The enabled default provider in LLM Providers; failure analysis always uses this one.',
+        details: 'Automatic analyses use it only when "Auto failure analysis" is ticked in its provider settings.',
+    },
+};
+
+export const STEP_HELP = {
+    start: {
+        what: 'An analysis covers every failing result of a run. It starts when you click Analyze failures, when a run is completed (with Auto-analyze on), or from Retry failed groups.',
+        example: 'Retry failed groups is a manual action, so it follows the "Started by hand" route even for a run first analyzed automatically.',
+    },
+    group: {
+        what: 'Failing results that look alike are grouped so each group is analyzed once and the answer is copied to the rest.',
+        example: '120 failing results that come from 9 distinct errors need 9 analyses, not 120.',
+    },
+    evidence: {
+        what: 'For each group, one result is sent with its context: the error, stack, log and steps, the environment, linked defects and requirements, and how this test failed in the 30 days before.',
+        example: 'A test that failed with the same timeout three times last week points the model toward a flaky test.',
+    },
+    decide: {
+        what: 'Someone chooses the verdict (product bug, flaky test, environment issue…) and suggests a defect type: TypeSafe.ai when it is set up to decide, otherwise the default LLM.',
+        example: 'TypeSafe answers "flaky test, 93% sure"; with "Ask the LLM below" at 90% that answer is kept.',
+    },
+    explain: {
+        what: 'An explanation is a summary, a suggested next action and the reasoning, written by the default LLM.',
+        example: 'With explanations off, a TypeSafe decision shows "No explanation was written" and an Explain button.',
+    },
+    store: {
+        what: 'Every analysis is kept as a version on its result and shown on the run page and in the run grid.',
+        example: 'Re-analyze adds a new version; a failed attempt shows as "Analysis failed" and can be retried.',
+    },
+};

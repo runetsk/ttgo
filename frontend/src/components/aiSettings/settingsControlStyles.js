@@ -16,10 +16,12 @@ export const cs = {
     },
     togglesGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 },
     toggleCard: {
-        position: 'relative', display: 'flex', alignItems: 'flex-start', gap: 10, padding: '12px 14px', borderRadius: 10,
+        display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 14px', borderRadius: 10,
         borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--border-color)', background: 'var(--bg-tertiary)',
         transition: 'background 0.15s, border-color 0.15s, box-shadow 0.15s',
     },
+    // The label area of a ToggleCard: the overlay checkbox covers exactly this, not the help below.
+    toggleMain: { position: 'relative', display: 'flex', alignItems: 'flex-start', gap: 10 },
     toggleIcon: {
         width: 30, height: 30, borderRadius: 8, borderWidth: 1, borderStyle: 'solid', borderColor: 'transparent',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
@@ -27,6 +29,22 @@ export const cs = {
     toggleLabel: { fontSize: '0.86rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 2 },
     toggleDesc: { fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.5 },
     toggleNote: { fontSize: '0.72rem', color: 'var(--aig-tone-amber-fg)', marginTop: 4, fontWeight: 600 },
+    fieldError: { color: 'var(--aig-tone-red-fg)', fontWeight: 600 },
+    help: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 },
+    helpBtn: {
+        alignSelf: 'flex-start', display: 'inline-flex', alignItems: 'center', gap: 6, padding: 0, border: 'none',
+        background: 'transparent', color: 'var(--aig-tone-indigo-fg)', fontSize: '0.74rem', fontWeight: 600,
+        cursor: 'pointer', fontFamily: 'inherit',
+    },
+    helpIcon: {
+        width: 14, height: 14, borderRadius: '50%', border: '1.5px solid currentColor', display: 'inline-flex',
+        alignItems: 'center', justifyContent: 'center', fontSize: '0.6rem', fontWeight: 700, fontStyle: 'italic', lineHeight: 1,
+    },
+    helpText: {
+        flexDirection: 'column', gap: 6, padding: '8px 10px', borderRadius: 8,
+        border: '1px solid var(--border-color)', background: 'var(--bg-secondary)',
+    },
+    helpPara: { margin: 0, fontSize: '0.76rem', color: 'var(--text-secondary)', lineHeight: 1.55 },
     switch: { position: 'relative', borderRadius: 10, transition: 'background 0.15s', flexShrink: 0 },
     switchKnob: {
         position: 'absolute', top: 2, left: 2, borderRadius: '50%', background: '#fff',

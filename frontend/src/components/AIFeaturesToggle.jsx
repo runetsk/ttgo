@@ -28,7 +28,7 @@ export default function AIFeaturesToggle({ isAdmin }) {
     };
 
     return (
-        <div style={s.card}>
+        <div style={s.card} data-setting="ai.enabled" tabIndex={-1}>
             <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={s.titleRow}>
                     <span style={s.title}>AI Features</span>
@@ -45,8 +45,8 @@ export default function AIFeaturesToggle({ isAdmin }) {
                 )}
                 {!aiFeaturesEnabled && (
                     <p style={s.caveat}>
-                        Note: this hides AI in the UI only. Automated failure analysis on run
-                        completion (if enabled below) keeps running server-side.
+                        Off: AI actions are hidden, new failure analyses are refused and completed runs
+                        are not queued. An analysis already running finishes.
                     </p>
                 )}
             </div>

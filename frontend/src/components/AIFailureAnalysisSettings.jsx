@@ -6,16 +6,28 @@ import {
     getFailureAnalysisAccuracy,
 } from '../api';
 import { summarizeAccuracy, confidenceRows, verdictRows, engineRows } from './aiSettings/accuracyFormat';
-import { ToggleCard } from './aiSettings/SettingsControls';
+import { ToggleCard, FieldRow, HelpToggle } from './aiSettings/SettingsControls';
+import { cs } from './aiSettings/settingsControlStyles';
+import { SETTING_HELP } from '../utils/analysisSettingsHelp';
+import {
+    validateFailureAnalysisDraft, isFailureAnalysisDirty, parseWholeNumber,
+    MAX_ANALYSES_MIN, MAX_ANALYSES_MAX, PARALLEL_MIN, PARALLEL_MAX,
+} from '../utils/failureAnalysisSettings';
 import { toast } from '../toast';
 
 // Rolling window for the accuracy panel. Matches the backend default so the
 // panel and the endpoint never describe different periods.
 const ACCURACY_WINDOW_DAYS = 30;
 
-export default function AIFailureAnalysisSettings({ isAdmin }) {
+const numberValue = (n) => (Number.isFinite(n) ? n : '');
+const svgIcon = (paths) => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{paths}</svg>
+);
+
+export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
     const [settings, setSettings] = useState(null);
     const [original, setOriginal] = useState(null);
+    const [loadError, setLoadError] = useState(false);
     const [saving, setSaving] = useState(false);
     const [resetting, setResetting] = useState(false);
 
@@ -25,22 +37,29 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
             setOriginal(s);
         }).catch((e) => {
             console.error('Load settings failed', e);
+            setLoadError(true);
             toast.error('Failed to load AI failure analysis settings');
         });
     }, []);
 
-    const modified = useMemo(() => {
-        if (!settings || !original) return false;
-        return (
-            settings.enabled_on_completion !== original.enabled_on_completion ||
-            settings.max_analyses_per_run !== original.max_analyses_per_run ||
-            settings.parallel_groups !== original.parallel_groups ||
-            settings.dedup_enabled !== original.dedup_enabled ||
-            settings.redaction_enabled !== original.redaction_enabled ||
-            settings.prompt_template !== original.prompt_template
-        );
-    }, [settings, original]);
+    const modified = useMemo(() => !!settings && !!original && isFailureAnalysisDirty(settings, original), [settings, original]);
+    const errors = useMemo(() => (settings ? validateFailureAnalysisDraft(settings) : {}), [settings]);
 
+    // Report to the section that draws the process diagram (same contract as TypeSafeSettingsCard).
+    useEffect(() => {
+        if (!onStateChange) return;
+        if (loadError) onStateChange({ status: 'error' });
+        else if (!settings || !original) onStateChange({ status: 'loading' });
+        else onStateChange({ status: 'ready', saved: original, draft: settings, dirty: modified, errors });
+    }, [onStateChange, loadError, settings, original, modified, errors]);
+
+    if (loadError) {
+        return (
+            <section style={s.section} data-testid="fa-settings">
+                <div style={s.loadingState} data-testid="fa-load-error">Couldn&apos;t load the AI failure analysis settings. Reload the page to try again.</div>
+            </section>
+        );
+    }
     if (!settings) {
         return (
             <section style={s.section}>
@@ -53,6 +72,7 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
     }
 
     const update = (patch) => setSettings((prev) => ({ ...prev, ...patch }));
+    const hasErrors = Object.keys(errors).length > 0;
 
     const save = async () => {
         setSaving(true);
@@ -90,7 +110,7 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
     };
 
     return (
-        <section style={s.section}>
+        <section style={s.section} data-testid="fa-settings">
             <div style={s.sectionHead}>
                 <div style={s.sectionHeadLeft}>
                     <span style={s.sectionDot} />
@@ -99,12 +119,8 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
                 </div>
                 {isAdmin && (
                     <div style={{ display: 'flex', gap: 8 }}>
-                        <button
-                            className="primary-btn"
-                            onClick={save}
-                            disabled={saving || !modified}
-                            style={{ fontSize: '0.82rem' }}
-                        >
+                        <button className="primary-btn" onClick={save} disabled={saving || !modified || hasErrors}
+                            data-testid="fa-save" style={{ fontSize: '0.82rem' }}>
                             {saving ? 'Saving…' : 'Save'}
                         </button>
                     </div>
@@ -117,111 +133,78 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
 
             <AccuracyPanel />
 
-            {/* Toggles */}
             <div style={s.togglesGrid}>
                 <ToggleCard
-                    icon={
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
-                        </svg>
-                    }
+                    icon={svgIcon(<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />)}
                     iconColor="#14b8a6"
                     label="Auto-analyze on run completion"
-                    desc="Automatically classify failures whenever a run finishes."
+                    desc="Queue a run's failures for analysis when the run is completed."
                     checked={settings.enabled_on_completion}
                     disabled={!isAdmin}
                     onChange={(v) => update({ enabled_on_completion: v })}
                     testId="fa-enabled_on_completion"
+                    setting="fa.enabled_on_completion" help={SETTING_HELP['fa.enabled_on_completion']}
                 />
                 <ToggleCard
-                    icon={
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                        </svg>
-                    }
+                    icon={svgIcon(<><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>)}
                     iconColor="#818cf8"
                     label="Deduplicate similar failures"
-                    desc="Group near-identical failures and analyze one representative."
+                    desc="Group failures with the same type and error text and analyze one representative."
                     checked={settings.dedup_enabled}
                     disabled={!isAdmin}
                     onChange={(v) => update({ dedup_enabled: v })}
                     testId="fa-dedup_enabled"
+                    setting="fa.dedup_enabled" help={SETTING_HELP['fa.dedup_enabled']}
                 />
                 <ToggleCard
-                    icon={
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-                        </svg>
-                    }
+                    icon={svgIcon(<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />)}
                     iconColor="#fbbf24"
                     label="Redact secrets"
-                    desc="Strip tokens, keys, and credentials before sending to the LLM. Recommended."
+                    desc="Replace recognized secrets before failure text is sent. Recommended."
                     checked={settings.redaction_enabled}
                     disabled={!isAdmin}
                     onChange={(v) => update({ redaction_enabled: v })}
                     testId="fa-redaction_enabled"
+                    setting="fa.redaction_enabled" help={SETTING_HELP['fa.redaction_enabled']}
                 />
             </div>
 
-            {/* Max analyses per run */}
-            <div style={s.fieldRow}>
-                <div style={s.fieldLabelCol}>
-                    <label style={s.fieldLabel}>Max analyses per run</label>
-                    <p style={s.fieldHint}>
-                        Cap on unique failure groups analyzed per run. Keeps cost bounded.
-                    </p>
-                </div>
-                <input
-                    className="modern-input"
-                    type="number"
-                    min={1}
-                    max={500}
-                    disabled={!isAdmin}
-                    value={settings.max_analyses_per_run}
-                    onChange={(e) => update({ max_analyses_per_run: parseInt(e.target.value, 10) || 0 })}
-                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }}
-                />
-            </div>
+            <FieldRow label="Max analyses per run" htmlFor="fa-max-analyses"
+                setting="fa.max_analyses_per_run" help={SETTING_HELP['fa.max_analyses_per_run']}
+                hint={errors.max_analyses_per_run
+                    ? <span style={cs.fieldError}>{errors.max_analyses_per_run}</span>
+                    : 'Cap on failure groups analyzed per run, largest first. Keeps cost bounded.'}>
+                <input id="fa-max-analyses" data-testid="fa-max-analyses" className="modern-input" type="number"
+                    min={MAX_ANALYSES_MIN} max={MAX_ANALYSES_MAX} disabled={!isAdmin}
+                    value={numberValue(settings.max_analyses_per_run)}
+                    onChange={(e) => update({ max_analyses_per_run: parseWholeNumber(e.target.value) })}
+                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
+            </FieldRow>
 
-            {/* Groups analyzed at once */}
-            <div style={s.fieldRow}>
-                <div style={s.fieldLabelCol}>
-                    <label style={s.fieldLabel} htmlFor="fa-parallel-groups">Groups analyzed at once</label>
-                    <p style={s.fieldHint}>
-                        How many failure groups a run&apos;s analysis works on at the same time. Nearly all of the time is waiting for TypeSafe.ai and the LLM, so more at once finishes a run sooner. Lower it if your LLM provider answers with rate-limit errors. 1 to 8.
-                    </p>
-                </div>
-                <input
-                    id="fa-parallel-groups"
-                    data-testid="fa-parallel-groups"
-                    className="modern-input"
-                    type="number"
-                    min={1}
-                    max={8}
-                    disabled={!isAdmin}
-                    value={settings.parallel_groups ?? 4}
-                    onChange={(e) => update({ parallel_groups: parseInt(e.target.value, 10) || 0 })}
-                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }}
-                />
-            </div>
+            <FieldRow label="Groups analyzed at once" htmlFor="fa-parallel-groups"
+                setting="fa.parallel_groups" help={SETTING_HELP['fa.parallel_groups']}
+                hint={errors.parallel_groups
+                    ? <span style={cs.fieldError}>{errors.parallel_groups}</span>
+                    : 'How many failure groups are analyzed side by side. Lower it if your LLM provider answers with rate-limit errors.'}>
+                <input id="fa-parallel-groups" data-testid="fa-parallel-groups" className="modern-input" type="number"
+                    min={PARALLEL_MIN} max={PARALLEL_MAX} disabled={!isAdmin}
+                    value={numberValue(settings.parallel_groups)}
+                    onChange={(e) => update({ parallel_groups: parseWholeNumber(e.target.value) })}
+                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
+            </FieldRow>
 
             {/* Prompt template */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div data-setting="fa.prompt_template" tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
                     <div>
                         <div style={s.subTitle}>Prompt template</div>
                         <p style={s.fieldHint}>
                             Sent to the LLM for each failure. Must return JSON with verdict, confidence, summary, next_action, rationale.
                         </p>
+                        <HelpToggle help={SETTING_HELP['fa.prompt_template']} setting="fa.prompt_template" />
                     </div>
                     {isAdmin && (
-                        <button
-                            onClick={reset}
-                            disabled={resetting}
-                            style={s.resetBtn}
-                            title="Reset to default prompt"
-                        >
+                        <button onClick={reset} disabled={resetting} style={s.resetBtn} title="Reset to default prompt">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                                 <polyline points="1 4 1 10 7 10"/>
                                 <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
@@ -254,6 +237,7 @@ export default function AIFailureAnalysisSettings({ isAdmin }) {
                         <span style={s.charCount}>{(settings.prompt_template || '').length} chars</span>
                     </div>
                 </div>
+                {errors.prompt_template && <div style={cs.fieldError} data-testid="fa-prompt-error">{errors.prompt_template}</div>}
             </div>
         </section>
     );
@@ -414,27 +398,6 @@ const s = {
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
         gap: 10,
-    },
-    fieldRow: {
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 16,
-        padding: '12px 14px',
-        borderRadius: 10,
-        border: '1px solid var(--border-color)',
-        background: 'var(--bg-tertiary)',
-    },
-    fieldLabelCol: {
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 2,
-        minWidth: 0,
-    },
-    fieldLabel: {
-        fontSize: '0.86rem',
-        fontWeight: 600,
-        color: 'var(--text-primary)',
     },
     fieldHint: {
         margin: 0,

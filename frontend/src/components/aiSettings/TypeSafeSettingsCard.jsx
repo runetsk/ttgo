@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { getTypeSafeSettings, updateTypeSafeSettings, testTypeSafeConnection, aiGeneration } from '../../api';
+import { getTypeSafeSettings, updateTypeSafeSettings, testTypeSafeConnection } from '../../api';
 import { toast } from '../../toast';
 import { s } from './styles';
 import { ToggleCard, InlineSwitch, FieldRow, SuffixInput, UnsavedBadge } from './SettingsControls';
 import { cs } from './settingsControlStyles';
+import { SETTING_HELP } from '../../utils/analysisSettingsHelp';
 import {
-    formFromSettings, buildTypeSafePatch, keyStatusLabel, canTestConnection, escalationValid, escalationNote,
-    defaultProvider, describeRoute, typesafeStatus, verdictDependencyNote, TIMEOUT_MIN, TIMEOUT_MAX,
+    formFromSettings, buildTypeSafePatch, keyStatusLabel, canTestConnection, escalationNote,
+    typesafeStatus, verdictDependencyNote, validateTypeSafeDraft, TIMEOUT_MIN, TIMEOUT_MAX,
 } from '../../utils/typesafeSettings';
 
 const icon = (paths) => (
@@ -39,27 +40,44 @@ function StatusPill({ status }) {
 }
 
 /* ── TypeSafe.ai Section: one hosted decision API used by failure analysis ── */
-export default function TypeSafeSettingsCard({ isAdmin }) {
+export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
     const [settings, setSettings] = useState(null);
     const [form, setForm] = useState(null);
+    const [loadError, setLoadError] = useState(false);
     const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState(false);
     const [testResult, setTestResult] = useState(null);
-    const [providers, setProviders] = useState(null); // null: not loaded (or not visible to this user)
 
     useEffect(() => {
         let alive = true;
         getTypeSafeSettings()
             .then((data) => { if (alive) { setSettings(data); setForm(formFromSettings(data)); } })
-            .catch(() => toast.error('Failed to load TypeSafe settings'));
-        aiGeneration.listProviders()
-            .then((list) => { if (alive) setProviders(Array.isArray(list) ? list : []); })
-            .catch(() => {});
+            .catch(() => {
+                if (alive) setLoadError(true);
+                toast.error('Failed to load TypeSafe settings');
+            });
         return () => { alive = false; };
     }, []);
 
     const patch = useMemo(() => (form && settings ? buildTypeSafePatch(form, settings) : null), [form, settings]);
+    const errors = useMemo(() => (form ? validateTypeSafeDraft(form) : {}), [form]);
 
+    // Report to the section that draws the process diagram: the saved settings, the draft on
+    // screen and which fields are invalid, after load, every edit and every save.
+    useEffect(() => {
+        if (!onStateChange) return;
+        if (loadError) onStateChange({ status: 'error' });
+        else if (!settings || !form) onStateChange({ status: 'loading' });
+        else onStateChange({ status: 'ready', saved: settings, draft: form, dirty: !!patch, errors });
+    }, [onStateChange, loadError, settings, form, patch, errors]);
+
+    if (loadError) {
+        return (
+            <section style={s.section} data-testid="typesafe-settings">
+                <div style={s.loadingState} data-testid="typesafe-load-error">Couldn&apos;t load the TypeSafe.ai settings. Reload the page to try again.</div>
+            </section>
+        );
+    }
     if (!settings || !form) {
         return (
             <section style={s.section}>
@@ -98,15 +116,12 @@ export default function TypeSafeSettingsCard({ isAdmin }) {
         }
     };
 
-    const timeoutValid = Number.isInteger(form.timeout_seconds) && form.timeout_seconds >= TIMEOUT_MIN && form.timeout_seconds <= TIMEOUT_MAX;
-    const modelValid = typeof form.model === 'string' && form.model.trim() !== '';
-    const escalationOk = escalationValid(form.escalate_below_pct ?? 0);
-    const canSave = !!patch && timeoutValid && modelValid && escalationOk;
+    const canSave = !!patch && Object.keys(errors).length === 0;
     const testAllowed = canTestConnection(form, settings);
-    const route = providers ? describeRoute(form, settings.api_key_status === 'ok', defaultProvider(providers)) : null;
     const unsavedKeyChange = !!form.clear_api_key || (typeof form.api_key === 'string' && form.api_key.trim() !== '');
     const verdictNote = verdictDependencyNote(form);
     const locked = !isAdmin;
+    const errorHint = (text) => <span style={cs.fieldError}>{text}</span>;
 
     return (
         <section style={cs.section} data-testid="typesafe-settings">
@@ -136,12 +151,14 @@ export default function TypeSafeSettingsCard({ isAdmin }) {
                     ? 'TypeSafe is used for the features switched on below.'
                     : 'Off: nothing is sent to TypeSafe. The settings below are kept for when you switch it on.'}
                 checked={form.enabled} disabled={locked} testId="typesafe-enabled"
+                setting="ts.enabled" help={SETTING_HELP['ts.enabled']}
                 onChange={(v) => update({ enabled: v })}
             />
 
             <div style={cs.groupTitle}>Connection</div>
             <FieldRow
                 label="API key" htmlFor="typesafe-api-key" testId="typesafe-key-row"
+                setting="ts.api_key" help={SETTING_HELP['ts.api_key']}
                 hint={(
                     <>
                         <span data-testid="typesafe-key-status">{keyStatusLabel(settings)}</span>
@@ -179,13 +196,13 @@ export default function TypeSafeSettingsCard({ isAdmin }) {
                     </button>
                 )}
             </FieldRow>
-            <FieldRow label="Model" htmlFor="typesafe-model"
-                hint="Pinned by default (jev-1.13.0). Confidence thresholds are tuned per version, so change it deliberately.">
+            <FieldRow label="Model" htmlFor="typesafe-model" setting="ts.model" help={SETTING_HELP['ts.model']}
+                hint={errors.model ? errorHint(errors.model) : 'Pinned by default (jev-1.13.0). Confidence thresholds are tuned per version, so change it deliberately.'}>
                 <input id="typesafe-model" className="modern-input" type="text" value={form.model} disabled={locked} data-testid="typesafe-model"
                     onChange={(e) => update({ model: e.target.value })} style={{ width: 200, padding: '8px 12px', fontSize: '0.85rem' }} />
             </FieldRow>
-            <FieldRow label="Timeout" htmlFor="typesafe-timeout"
-                hint={timeoutValid ? 'How long to wait for one TypeSafe answer before counting it as unavailable.' : `Enter a whole number of seconds from ${TIMEOUT_MIN} to ${TIMEOUT_MAX}.`}>
+            <FieldRow label="Timeout" htmlFor="typesafe-timeout" setting="ts.timeout_seconds" help={SETTING_HELP['ts.timeout_seconds']}
+                hint={errors.timeout_seconds ? errorHint(errors.timeout_seconds) : 'How long one request to TypeSafe may take before the decision counts as unavailable.'}>
                 <SuffixInput id="typesafe-timeout" suffix="s" min={TIMEOUT_MIN} max={TIMEOUT_MAX} value={form.timeout_seconds} disabled={locked}
                     data-testid="typesafe-timeout" onChange={(e) => update({ timeout_seconds: Number(e.target.value) })} />
             </FieldRow>
@@ -196,16 +213,19 @@ export default function TypeSafeSettingsCard({ isAdmin }) {
                     label="Use for failure verdicts"
                     desc="TypeSafe decides the verdict and the suggested defect type, with a real confidence score."
                     checked={form.verdict_engine_enabled} disabled={locked} testId="typesafe-verdict_engine_enabled"
+                    setting="ts.verdict_engine_enabled" help={SETTING_HELP['ts.verdict_engine_enabled']}
                     onChange={(v) => update({ verdict_engine_enabled: v })} />
                 <ToggleCard icon={ICONS.layers} iconColor="#60a5fa"
                     label="Semantic failure grouping"
                     desc="Merge failure groups that share a cause even when the error text differs."
                     checked={form.semantic_dedup_enabled} disabled={locked} testId="typesafe-semantic_dedup_enabled"
+                    setting="ts.semantic_dedup_enabled" help={SETTING_HELP['ts.semantic_dedup_enabled']}
                     onChange={(v) => update({ semantic_dedup_enabled: v })} />
                 <ToggleCard icon={ICONS.activity} iconColor="#14b8a6"
                     label="Allow on automatic analysis"
                     desc="Off by default: analyses started by run completion do not contact TypeSafe unless this is on."
                     checked={form.allow_auto_failure_analysis} disabled={locked} testId="typesafe-allow_auto_failure_analysis"
+                    setting="ts.allow_auto_failure_analysis" help={SETTING_HELP['ts.allow_auto_failure_analysis']}
                     onChange={(v) => update({ allow_auto_failure_analysis: v })} />
             </div>
 
@@ -213,48 +233,26 @@ export default function TypeSafeSettingsCard({ isAdmin }) {
             <div style={cs.togglesGrid}>
                 <ToggleCard icon={ICONS.message} iconColor="#f472b6"
                     label="Write an explanation with the default LLM"
-                    desc="After TypeSafe decides, your LLM writes the summary, next action and rationale. Off: decisions only, in well under a second per group; each analysis has an Explain button."
+                    desc="After TypeSafe decides, your LLM writes the summary, next action and rationale. Off: decisions only; each analysis has an Explain button."
                     checked={form.narrative_enabled} disabled={locked || !form.verdict_engine_enabled} note={verdictNote}
+                    setting="ts.narrative_enabled" help={SETTING_HELP['ts.narrative_enabled']}
                     testId="typesafe-narrative_enabled" onChange={(v) => update({ narrative_enabled: v })} />
                 <ToggleCard icon={ICONS.fallback} iconColor="#fbbf24"
                     label="Use the default LLM when TypeSafe is unavailable"
                     desc="On: if TypeSafe cannot be reached, the LLM decides and the analysis says so. Off: the attempt is recorded as failed and can be retried; failure data never goes to the LLM in its place."
                     checked={form.llm_fallback_enabled} disabled={locked || !form.verdict_engine_enabled} note={verdictNote}
+                    setting="ts.llm_fallback_enabled" help={SETTING_HELP['ts.llm_fallback_enabled']}
                     testId="typesafe-llm_fallback_enabled" onChange={(v) => update({ llm_fallback_enabled: v })} />
             </div>
             <FieldRow label="Ask the LLM when TypeSafe's confidence is below" htmlFor="typesafe-escalate" disabled={!form.verdict_engine_enabled}
-                hint={<span data-testid="typesafe-escalate-note">{form.verdict_engine_enabled ? escalationNote(form.escalate_below_pct ?? 0) : verdictNote}</span>}>
+                setting="ts.escalate_below_pct" help={SETTING_HELP['ts.escalate_below_pct']}
+                hint={<span data-testid="typesafe-escalate-note" style={form.verdict_engine_enabled && errors.escalate_below_pct ? cs.fieldError : undefined}>
+                    {form.verdict_engine_enabled ? escalationNote(form.escalate_below_pct ?? 0) : verdictNote}
+                </span>}>
                 <SuffixInput id="typesafe-escalate" suffix="%" min={0} max={100} step={1} value={form.escalate_below_pct ?? 0}
                     disabled={locked || !form.verdict_engine_enabled} data-testid="typesafe-escalate_below_pct"
                     onChange={(e) => update({ escalate_below_pct: e.target.value === '' ? NaN : Number(e.target.value) })} />
             </FieldRow>
-
-            {route && (
-                <div style={routePanel} data-testid="typesafe-route">
-                    <div style={cs.groupTitle}>
-                        What an analysis will do{patch ? ' (with the unsaved changes above)' : ''}
-                    </div>
-                    <div style={routeColumns}>
-                        {[['Started by hand', route.manual, 'manual'], ['Started by run completion', route.auto, 'auto']].map(([title, lines, key]) => (
-                            <div key={key} data-testid={`typesafe-route-${key}`} style={{ minWidth: 0 }}>
-                                <div style={routeTitle}>{title}</div>
-                                <ul style={routeList}>
-                                    {lines.map((line) => <li key={line} style={routeItem}>{line}</li>)}
-                                </ul>
-                            </div>
-                        ))}
-                    </div>
-                </div>
-            )}
         </section>
     );
 }
-
-const routePanel = {
-    display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 14px', borderRadius: 10,
-    border: '1px solid rgba(99,102,241,0.25)', background: 'rgba(99,102,241,0.04)',
-};
-const routeColumns = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 };
-const routeTitle = { fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 };
-const routeList = { margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 3 };
-const routeItem = { fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.5 };

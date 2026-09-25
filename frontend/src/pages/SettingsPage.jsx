@@ -7,7 +7,7 @@ import TokenSettings from '../components/TokenSettings';
 import WebhookSettings from '../components/WebhookSettings';
 import IntegrationSettings from '../components/IntegrationSettings';
 import AIGenSettings from '../components/AIGenSettings';
-import AIFailureAnalysisSettings from '../components/AIFailureAnalysisSettings';
+import FailureAnalysisSection from '../components/aiSettings/FailureAnalysisSection';
 import AIFeaturesToggle from '../components/AIFeaturesToggle';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../hooks/useSubscription';
@@ -271,7 +271,7 @@ export default function SettingsPage() {
                 <>
                     <AIFeaturesToggle isAdmin={isAdmin} />
                     <AIGenSettings />
-                    <AIFailureAnalysisSettings isAdmin={isAdmin} />
+                    <FailureAnalysisSection isAdmin={isAdmin} />
                 </>
             )}
             {activeTab === 'backups' && isAdmin && <BackupsSettings />}

@@ -48,6 +48,10 @@ export function AIGenerationProvider({ children }) {
 
     // Global AI master switch (DB-backed). Default true → optimistic & fail-open.
     const [aiFeaturesEnabled, setAiFeaturesEnabled] = useState(true);
+    // Load status of the two app-wide AI settings, for views that must not mistake a failed load
+    // for a real value (the failure-analysis diagram). Everything else keeps failing open.
+    const [providersStatus, setProvidersStatus] = useState('loading'); // loading | ready | error | stale
+    const [aiFeaturesStatus, setAiFeaturesStatus] = useState('loading'); // loading | ready | error
 
     // Generation params
     const [coverageLevel, setCoverageLevel] = useState('thorough');
@@ -206,6 +210,23 @@ export function AIGenerationProvider({ children }) {
         try { sessionStorage.setItem('ttgo_aigen_run_id', runId); } catch { /* sessionStorage quota exceeded — non-critical, skip persistence */ }
     }, [runId]);
 
+    // refreshProviders reloads the enabled providers (LLM Providers calls it after every change) and
+    // keeps the generation picker on a provider that still exists. A failed first load is an error;
+    // a failed refresh keeps the list and marks it stale.
+    const refreshProviders = useCallback(() => aiGeneration.listProviders()
+        .then((data) => {
+            const enabled = (data || []).filter((p) => p.enabled);
+            setProviders(enabled);
+            setProvidersStatus('ready');
+            setSelectedProviderId((prev) => (enabled.some((p) => p.id === prev) ? prev
+                : ((enabled.find((p) => p.is_default) || enabled[0])?.id || '')));
+            return enabled;
+        })
+        .catch(() => {
+            setProvidersStatus((prev) => (prev === 'loading' ? 'error' : 'stale'));
+            return null;
+        }), []);
+
     // ── Eager-load folders & providers once authenticated ────────────
     const foldersLoadedRef = useRef(false);
     useEffect(() => {
@@ -227,22 +248,14 @@ export function AIGenerationProvider({ children }) {
             })
             .catch(() => {});
 
-        aiGeneration.listProviders()
-            .then(data => {
-                const enabled = (data || []).filter(p => p.enabled);
-                setProviders(enabled);
-                if (!selectedProviderId) {
-                    const def = enabled.find(p => p.is_default) || enabled[0];
-                    if (def) setSelectedProviderId(def.id);
-                }
-            })
-            .catch(() => {});
+        refreshProviders();
 
         aiGeneration.getFeatureSettings()
             .then(cfg => {
                 if (cfg && typeof cfg.enabled === 'boolean') setAiFeaturesEnabled(cfg.enabled);
+                setAiFeaturesStatus('ready');
             })
-            .catch(() => { /* fail-open: leave AI visible on error */ });
+            .catch(() => { setAiFeaturesStatus('error'); /* fail-open: leave AI visible on error */ });
     }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
     // ── Derived values ──────────────────────────────────────────────
@@ -729,6 +742,9 @@ export function AIGenerationProvider({ children }) {
         // Global AI master switch
         aiFeaturesEnabled,
         setAiFeaturesEnabled,
+        aiFeaturesStatus,
+        providersStatus,
+        refreshProviders,
         // Generation params
         coverageLevel,
         setCoverageLevel,
