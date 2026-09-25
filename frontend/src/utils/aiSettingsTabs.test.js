@@ -60,6 +60,8 @@ test('summaryTiles: model tile covers loading, error, none and a default', () =>
     assert.equal(none.tone, 'warn');
     const ok = tile({ provider: PROVIDER, providersStatus: 'ready' });
     assert.deepEqual([ok.id, ok.tab, ok.value, ok.sub, ok.tone], ['model', 'providers', 'Anthropic Claude', 'claude-sonnet-4-5', 'ok']);
+    const sameName = tile({ provider: { ...PROVIDER, label: 'claude-sonnet-4-5' }, providersStatus: 'ready' });
+    assert.equal(sameName.sub, '', 'the model is not named twice');
 });
 
 test('summaryTiles: prompts tile names what is customized and flags unsaved edits', () => {

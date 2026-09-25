@@ -54,7 +54,9 @@ function modelTile(provider, providersStatus) {
     if (providersStatus === 'loading') return { ...base, ...LOADING };
     if (providersStatus === 'error') return { ...base, value: "Couldn't load providers", sub: 'Reload the page to try again', tone: 'bad', meter: null };
     if (!provider) return { ...base, value: 'No default model', sub: 'Add a provider and make it the default', tone: 'warn', meter: null };
-    return { ...base, value: provider.label, sub: provider.model_name || '', tone: 'ok', meter: null };
+    // A provider whose label is its model would name it twice.
+    const sub = provider.model_name && provider.model_name !== provider.label ? provider.model_name : '';
+    return { ...base, value: provider.label, sub, tone: 'ok', meter: null };
 }
 
 function promptsTile(templates) {

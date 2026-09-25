@@ -27,7 +27,8 @@ export const ps = {
         border: 'none', borderBottom: '2px solid transparent', background: 'none', color: 'var(--text-secondary)',
         fontFamily: 'inherit', fontSize: '0.88rem', fontWeight: 500, cursor: 'pointer', whiteSpace: 'nowrap',
     },
-    tabOn: { color: 'var(--text-primary)', borderBottomColor: 'var(--accent-indigo)', fontWeight: 600 },
+    // Same shorthand as `tab`: React drops a removed longhand without restoring the shorthand's color.
+    tabOn: { color: 'var(--text-primary)', borderBottom: '2px solid var(--accent-indigo)', fontWeight: 600 },
     dirtyDot: { width: 7, height: 7, borderRadius: '50%', background: 'var(--aig-tone-amber-fg)' },
     panel: { display: 'flex', flexDirection: 'column', gap: 32 },
 };
