@@ -29,7 +29,9 @@ export default function SaveBar({ model, result, saving, onSave, onDiscard, onRe
             <button type="button" className="action-btn" data-testid="ai-savebar-discard" disabled={saving} onClick={onDiscard} style={{ fontSize: '0.82rem' }}>
                 Discard
             </button>
-            <button type="button" className="primary-btn" data-testid="ai-savebar-save" disabled={saving || !model.canSave} onClick={onSave} style={{ fontSize: '0.82rem' }}>
+            {/* .primary-btn has no disabled look of its own, so a blocked Save is dimmed here. */}
+            <button type="button" className="primary-btn" data-testid="ai-savebar-save" disabled={saving || !model.canSave} onClick={onSave}
+                style={{ fontSize: '0.82rem', ...(saving || !model.canSave ? bs.disabled : null) }}>
                 {saving ? 'Saving…' : 'Save changes'}
             </button>
         </div>
@@ -42,6 +44,7 @@ const bs = {
         padding: '10px 14px', marginTop: 8, borderRadius: 10, border: '1px solid var(--border-color)',
         background: 'var(--bg-secondary)', boxShadow: '0 -6px 20px rgba(0,0,0,0.18)',
     },
+    disabled: { opacity: 0.5, cursor: 'not-allowed' },
     dot: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
     message: { flex: 1, minWidth: 0, fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.45 },
     messageBad: { color: 'var(--aig-tone-red-fg)', fontWeight: 600 },
