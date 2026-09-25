@@ -11,12 +11,33 @@ import (
 	"ttgo/pkg/tracker/models"
 )
 
+// aiBudgetResponse is the budget settings plus the estimated spend of generation attempts since
+// the start of the month, so Settings → AI can show spend against the monthly budget.
+type aiBudgetResponse struct {
+	*models.AIBudgetSettings
+	MonthSpentUSD float64 `json:"month_spent_usd"`
+}
+
+// monthStartUTC is the start of the calendar month (UTC) that the monthly budget counts from.
+func monthStartUTC(now time.Time) time.Time {
+	now = now.UTC()
+	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+}
+
+func (h *Handler) budgetResponse(cfg *models.AIBudgetSettings) (aiBudgetResponse, error) {
+	spent, err := h.store.SumEstimatedCostSince(monthStartUTC(time.Now()))
+	if err != nil {
+		return aiBudgetResponse{}, err
+	}
+	return aiBudgetResponse{AIBudgetSettings: cfg, MonthSpentUSD: spent}, nil
+}
+
 // GetAIBudgetSettings returns the soft budget configuration.
 //
 // @Summary  Get AI budget settings
 // @Tags     ai-settings
 // @Produce  json
-// @Success  200 {object} models.AIBudgetSettings
+// @Success  200 {object} models.AIBudgetSettings "settings plus month_spent_usd: estimated spend since the 1st (UTC)"
 // @Router   /settings/ai-budgets [get]
 // @Security BearerAuth
 func (h *Handler) GetAIBudgetSettings(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +46,12 @@ func (h *Handler) GetAIBudgetSettings(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, cfg)
+	resp, err := h.budgetResponse(cfg)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resp)
 }
 
 // UpdateAIBudgetSettings updates the soft budgets (admin).
@@ -35,7 +61,7 @@ func (h *Handler) GetAIBudgetSettings(w http.ResponseWriter, r *http.Request) {
 // @Accept   json
 // @Produce  json
 // @Param    body body object true "per_request_usd, monthly_usd (0 = off)"
-// @Success  200 {object} models.AIBudgetSettings
+// @Success  200 {object} models.AIBudgetSettings "settings plus month_spent_usd: estimated spend since the 1st (UTC)"
 // @Router   /settings/ai-budgets [put]
 // @Security BearerAuth
 func (h *Handler) UpdateAIBudgetSettings(w http.ResponseWriter, r *http.Request) {
@@ -67,7 +93,12 @@ func (h *Handler) UpdateAIBudgetSettings(w http.ResponseWriter, r *http.Request)
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	httpx.JSON(w, http.StatusOK, cfg)
+	resp, err := h.budgetResponse(cfg)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, resp)
 }
 
 // checkBudget estimates the upcoming call's worst-case cost and returns a
@@ -95,9 +126,7 @@ func (h *Handler) checkBudget(cfg *models.LLMProviderConfig, promptChars, maxCom
 		}
 	}
 	if budgets.MonthlyUSD > 0 {
-		now := time.Now().UTC()
-		monthStart := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
-		spent, err := h.store.SumEstimatedCostSince(monthStart)
+		spent, err := h.store.SumEstimatedCostSince(monthStartUTC(time.Now()))
 		if err == nil && spent+*estimate > budgets.MonthlyUSD {
 			return map[string]interface{}{
 				"error":    fmt.Sprintf("this call (~$%.4f) would exceed the monthly budget $%.2f (spent $%.4f); resend with acknowledge_budget=true to proceed", *estimate, budgets.MonthlyUSD, spent),

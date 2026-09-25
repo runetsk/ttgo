@@ -7319,7 +7319,7 @@ const docTemplate = `{
                 "summary": "Get AI budget settings",
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "settings plus month_spent_usd: estimated spend since the 1st (UTC)",
                         "schema": {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings"
                         }
@@ -7355,7 +7355,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "OK",
+                        "description": "settings plus month_spent_usd: estimated spend since the 1st (UTC)",
                         "schema": {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings"
                         }
