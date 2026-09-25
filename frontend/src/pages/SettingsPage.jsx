@@ -6,9 +6,7 @@ import Modal from '../components/Modal';
 import TokenSettings from '../components/TokenSettings';
 import WebhookSettings from '../components/WebhookSettings';
 import IntegrationSettings from '../components/IntegrationSettings';
-import AIGenSettings from '../components/AIGenSettings';
-import FailureAnalysisSection from '../components/aiSettings/FailureAnalysisSection';
-import AIFeaturesToggle from '../components/AIFeaturesToggle';
+import AISettingsPage from '../components/aiSettings/AISettingsPage';
 import { useAuth } from '../contexts/AuthContext';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
@@ -96,7 +94,7 @@ export default function SettingsPage() {
             tabs: [
                 { id: 'jira', label: 'Jira', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg> },
                 { id: 'confluence', label: 'Confluence', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg> },
-                { id: 'ai-test-generation', label: 'AI Generation', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> },
+                { id: 'ai-test-generation', label: 'AI', icon: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg> },
             ],
         },
         ...(isAdmin ? [{
@@ -267,13 +265,7 @@ export default function SettingsPage() {
                     renderTestConnection={() => <ConfluenceTestConnection />}
                 />
             )}
-            {activeTab === 'ai-test-generation' && (
-                <>
-                    <AIFeaturesToggle isAdmin={isAdmin} />
-                    <AIGenSettings />
-                    <FailureAnalysisSection isAdmin={isAdmin} />
-                </>
-            )}
+            {activeTab === 'ai-test-generation' && <AISettingsPage isAdmin={isAdmin} />}
             {activeTab === 'backups' && isAdmin && <BackupsSettings />}
             {activeTab === 'users' && isAdmin && <UserSettings />}
             {activeTab === 'demo-data' && isAdmin && <DemoDataSettings />}

@@ -1,16 +1,17 @@
-import React, { useState } from 'react';
+import React, { useId, useState } from 'react';
 import { aiGeneration } from '../api';
 import { toast } from '../toast';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
 
 /**
- * Global master switch for all AI features (generation, import, failure
- * analysis). Reads/writes the DB-backed flag exposed via AIGenerationContext.
- * Admin-only control; read-only for everyone else.
+ * Global master switch for all AI features (generation, import, failure analysis), shown in the
+ * Settings → AI header. Reads/writes the DB-backed flag exposed via AIGenerationContext.
+ * Admin-only control; read-only for everyone else. AISettingsPage shows what "off" means.
  */
 export default function AIFeaturesToggle({ isAdmin }) {
     const { aiFeaturesEnabled, setAiFeaturesEnabled } = useAIGeneration();
     const [saving, setSaving] = useState(false);
+    const id = useId();
 
     const handleToggle = async () => {
         if (!isAdmin || saving) return;
@@ -28,72 +29,40 @@ export default function AIFeaturesToggle({ isAdmin }) {
     };
 
     return (
-        <div style={s.card} data-setting="ai.enabled" tabIndex={-1}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={s.titleRow}>
-                    <span style={s.title}>AI Features</span>
-                    <span style={{ ...s.badge, ...(aiFeaturesEnabled ? s.badgeOn : s.badgeOff) }}>
-                        {aiFeaturesEnabled ? 'On' : 'Off'}
-                    </span>
-                </div>
-                <p style={s.desc}>
-                    Enable AI test generation, import, and failure analysis across the app.
-                    When off, all AI actions are hidden from the interface.
-                </p>
-                {!isAdmin && (
-                    <p style={s.lockNote}>🔒 Only an admin can change this setting.</p>
-                )}
-                {!aiFeaturesEnabled && (
-                    <p style={s.caveat}>
-                        Off: AI actions are hidden, new failure analyses are refused and completed runs
-                        are not queued. An analysis already running finishes.
-                    </p>
-                )}
-            </div>
+        <div style={s.wrap} data-setting="ai.enabled" tabIndex={-1}>
+            <label htmlFor={id} style={s.label}>AI features</label>
+            <span style={{ ...s.badge, ...(aiFeaturesEnabled ? s.badgeOn : s.badgeOff) }}>{aiFeaturesEnabled ? 'On' : 'Off'}</span>
             <button
+                id={id}
                 type="button"
                 role="switch"
+                data-testid="ai-features-switch"
                 aria-checked={aiFeaturesEnabled ? 'true' : 'false'}
-                aria-disabled={!isAdmin || saving}
                 disabled={!isAdmin || saving}
                 onClick={handleToggle}
-                title={isAdmin ? 'Toggle AI features' : 'Admin only'}
-                style={{
-                    ...s.switch,
-                    background: aiFeaturesEnabled ? '#6366f1' : 'var(--border-color)',
-                    cursor: isAdmin ? 'pointer' : 'not-allowed',
-                    opacity: isAdmin ? 1 : 0.6,
-                }}
+                title={isAdmin ? 'Turn every AI feature on or off' : 'Only an admin can change this setting'}
+                style={{ ...s.switch, background: aiFeaturesEnabled ? 'var(--accent-indigo)' : 'var(--border-color)', cursor: isAdmin ? 'pointer' : 'not-allowed', opacity: isAdmin ? 1 : 0.6 }}
             >
                 <span style={{ ...s.knob, transform: aiFeaturesEnabled ? 'translateX(20px)' : 'translateX(2px)' }} />
             </button>
+            {!isAdmin && <span style={s.lock}>Admin only</span>}
         </div>
     );
 }
 
 const s = {
-    card: {
-        display: 'flex', alignItems: 'flex-start', gap: 16,
-        padding: '16px 18px', borderRadius: 12,
-        border: '1px solid var(--border-color)', background: 'var(--bg-tertiary)',
-        marginBottom: 24,
+    wrap: {
+        display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0, padding: '8px 12px', borderRadius: 10,
+        border: '1px solid var(--border-color)', background: 'var(--bg-secondary)',
     },
-    titleRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 },
-    title: { fontSize: '0.95rem', fontWeight: 700, color: 'var(--text-primary)' },
+    label: { fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', cursor: 'pointer' },
     badge: { fontSize: '0.68rem', fontWeight: 700, padding: '1px 8px', borderRadius: 20, letterSpacing: '0.02em' },
-    badgeOn: { color: '#4ade80', background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)' },
-    badgeOff: { color: '#f87171', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' },
-    desc: { margin: 0, fontSize: '0.845rem', color: 'var(--text-secondary)', lineHeight: 1.6, maxWidth: 560 },
-    lockNote: { margin: '8px 0 0', fontSize: '0.78rem', color: 'var(--text-secondary)', opacity: 0.85 },
-    caveat: { margin: '8px 0 0', fontSize: '0.78rem', color: '#fbbf24', lineHeight: 1.5 },
-    switch: {
-        position: 'relative', flexShrink: 0,
-        width: 42, height: 24, borderRadius: 999, border: 'none', padding: 0,
-        transition: 'background 0.18s', marginTop: 2,
-    },
+    badgeOn: { color: 'var(--aig-tone-green-fg)', background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.25)' },
+    badgeOff: { color: 'var(--aig-tone-red-fg)', background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.2)' },
+    lock: { fontSize: '0.72rem', color: 'var(--text-secondary)' },
+    switch: { position: 'relative', flexShrink: 0, width: 42, height: 24, borderRadius: 999, border: 'none', padding: 0, transition: 'background 0.18s' },
     knob: {
-        position: 'absolute', top: 2, left: 0,
-        width: 20, height: 20, borderRadius: '50%', background: '#fff',
+        position: 'absolute', top: 2, left: 0, width: 20, height: 20, borderRadius: '50%', background: '#fff',
         transition: 'transform 0.18s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
     },
 };

@@ -22,7 +22,7 @@ export default function AIDisabledNotice() {
             </h2>
             <p style={{ margin: 0, maxWidth: 400, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
                 AI test generation, import, and failure analysis have been disabled by an
-                administrator. They can be re-enabled in Settings → AI Generation.
+                administrator. They can be re-enabled in Settings → AI.
             </p>
         </div>
     );

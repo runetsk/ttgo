@@ -66,9 +66,15 @@ export class SettingsPage extends BasePage {
         await this.page.getByRole('button', { name: 'Save Configuration' }).click();
     }
 
-    // ── TypeSafe.ai card (AI Generation tab) ────────────────────────────────
+    // ── Settings → AI (header + tabs Providers / Prompts / Limits & budget / Failure analysis) ──
+    async openAISettings(tabLabel) {
+        await this.page.getByRole('button', { name: 'AI', exact: true }).click();
+        if (tabLabel) await this.page.getByRole('tab', { name: tabLabel }).click();
+    }
+
+    // ── TypeSafe.ai card (AI → Failure analysis) ────────────────────────────
     async openTypeSafeCard() {
-        await this.openTab('AI Generation');
+        await this.openAISettings('Failure analysis');
         await this.page.getByTestId('typesafe-settings').scrollIntoViewIfNeeded();
     }
 
@@ -78,9 +84,9 @@ export class SettingsPage extends BasePage {
     get typesafeClearKeyCheckbox() { return this.page.getByTestId('typesafe-clear-key'); }
     get typesafeModelInput() { return this.page.getByTestId('typesafe-model'); }
 
-    // ── AI Failure Analysis section (AI Generation tab) ─────────────────────
+    // ── AI Failure Analysis section (AI → Failure analysis) ─────────────────
     async openFailureAnalysis() {
-        await this.openTab('AI Generation');
+        await this.openAISettings('Failure analysis');
         await this.page.getByTestId('analysis-flow').scrollIntoViewIfNeeded();
     }
 
