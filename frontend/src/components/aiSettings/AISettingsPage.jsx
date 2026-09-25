@@ -51,9 +51,10 @@ export default function AISettingsPage({ isAdmin, onDirtyChange }) {
     const list = useMemo(() => Object.values(sections), [sections]);
     const model = useMemo(() => saveBarModel(list, AI_TABS), [list]);
     const dirtyAny = model.dirtyCount > 0;
+    useUnsavedGuard(dirtyAny, 'Discard unsaved AI settings?');
+    // SettingsPage asks about the one navigation the router blocker cannot stop (a typed #hash).
     useEffect(() => { onDirtyChange?.(dirtyAny); }, [dirtyAny, onDirtyChange]);
     useEffect(() => () => onDirtyChange?.(false), [onDirtyChange]);
-    useUnsavedGuard(dirtyAny, 'Discard unsaved AI settings?');
 
     const save = useCallback(async () => {
         if (saving || !model.canSave) return;

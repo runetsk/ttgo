@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    saveBarModel, runSaves, saveResultMessage, errorDescriptors, saveError, sameSummary, shouldGuardLink,
+    saveBarModel, runSaves, saveResultMessage, errorDescriptors, saveError, sameSummary, shouldBlockNavigation,
 } from './saveBar.js';
 
 const TABS = [
@@ -89,17 +89,14 @@ test('sameSummary compares the registered fields', () => {
     assert.equal(sameSummary(undefined, a), false);
 });
 
-test('shouldGuardLink', () => {
-    const loc = { href: 'http://x/settings#ai-test-generation', origin: 'http://x', pathname: '/settings' };
-    const click = { button: 0, defaultPrevented: false, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false };
-    const link = (href, extra = {}) => ({ href, target: null, download: false, ...extra });
-    assert.equal(shouldGuardLink(link('http://x/runs'), click, loc), true);
-    assert.equal(shouldGuardLink(link('/runs'), click, loc), true, 'relative hrefs resolve against the page');
-    assert.equal(shouldGuardLink(link('http://x/settings#custom-fields'), click, loc), false, 'SettingsPage owns hash changes');
-    assert.equal(shouldGuardLink(link('http://other/runs'), click, loc), false);
-    assert.equal(shouldGuardLink(link('http://x/runs', { target: '_blank' }), click, loc), false);
-    assert.equal(shouldGuardLink(link('http://x/runs', { download: true }), click, loc), false);
-    assert.equal(shouldGuardLink(link('http://x/runs'), { ...click, ctrlKey: true }, loc), false);
-    assert.equal(shouldGuardLink(link('http://x/runs'), { ...click, button: 1 }, loc), false);
-    assert.equal(shouldGuardLink(link('http://x/runs'), { ...click, defaultPrevented: true }, loc), false);
+test('shouldBlockNavigation', () => {
+    const at = (pathname, hash = '') => ({ pathname, hash });
+    const from = at('/settings', '#ai-test-generation');
+    const block = (to, dirty = true) => shouldBlockNavigation({ dirty, from, to });
+    assert.equal(block(at('/runs'), false), false, 'nothing to lose');
+    assert.equal(block(at('/runs')), true);
+    assert.equal(block(at('/login')), false, 'log out ends the session before it navigates');
+    assert.equal(block(at('/settings', '#custom-fields')), true);
+    assert.equal(block(at('/settings', '#ai-test-generation')), false);
+    assert.equal(block(at('/settings')), false);
 });

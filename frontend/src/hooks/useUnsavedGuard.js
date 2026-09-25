@@ -1,29 +1,26 @@
-import { useEffect } from 'react';
-import { shouldGuardLink } from '../utils/saveBar';
+import { useCallback, useEffect } from 'react';
+import { useBlocker } from 'react-router-dom';
+import { shouldBlockNavigation } from '../utils/saveBar';
 
 // useUnsavedGuard warns before unsaved changes are lost: the browser's own prompt on close or
-// reload, and a confirm on in-app links. The link listener runs in the capture phase, before
-// React Router's Link sees the click. navigate() calls from code are not caught (the app uses
-// <BrowserRouter>, which has no navigation blocker).
+// reload, and a confirm on every router navigation (links, navigate(), Back/Forward, #hash
+// links). A #hash typed into the address bar is outside the router; SettingsPage asks for that.
 export function useUnsavedGuard(dirty, message) {
     useEffect(() => {
         if (!dirty) return undefined;
         const onBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; };
-        const onClick = (e) => {
-            const a = e.target instanceof Element ? e.target.closest('a[href]') : null;
-            if (!a) return;
-            const link = { href: a.href, target: a.getAttribute('target'), download: a.hasAttribute('download') };
-            if (!shouldGuardLink(link, e, window.location)) return;
-            if (!window.confirm(message)) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-        };
         window.addEventListener('beforeunload', onBeforeUnload);
-        document.addEventListener('click', onClick, true);
-        return () => {
-            window.removeEventListener('beforeunload', onBeforeUnload);
-            document.removeEventListener('click', onClick, true);
-        };
-    }, [dirty, message]);
+        return () => window.removeEventListener('beforeunload', onBeforeUnload);
+    }, [dirty]);
+
+    const shouldBlock = useCallback(
+        ({ currentLocation, nextLocation }) => shouldBlockNavigation({ dirty, from: currentLocation, to: nextLocation }),
+        [dirty],
+    );
+    const blocker = useBlocker(shouldBlock);
+    useEffect(() => {
+        if (blocker.state !== 'blocked') return;
+        if (window.confirm(message)) blocker.proceed();
+        else blocker.reset();
+    }, [blocker, message]);
 }

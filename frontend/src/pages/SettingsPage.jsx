@@ -26,21 +26,24 @@ export default function SettingsPage() {
     const hashTab = (location.hash || '').replace(/^#/, '');
     const [activeTab, setActiveTab] = useState(hashTab || 'custom-fields');
     const navigate = useNavigate();
-
-    // Settings → AI saves through one bar; leaving it with unsaved changes asks first.
     const aiDirty = useRef(false);
     const onAiDirty = useCallback((v) => { aiDirty.current = v; }, []);
-    const confirmLeaveAI = () => !aiDirty.current || window.confirm('Discard unsaved AI settings?');
 
     useEffect(() => {
+        // The URL hash is the one source of the section: sidebar clicks, links and typed URLs all
+        // change it through the router, so Settings → AI's blocker (hooks/useUnsavedGuard.js)
+        // can stop a switch that would lose unsaved changes before it happens.
         if (!hashTab || hashTab === activeTab) return;
-        if (activeTab === 'ai-test-generation' && !confirmLeaveAI()) {
-            // Keep the AI section; put the router's hash back so the same link works next time.
+        // A #hash typed into the address bar is a history entry the router did not create (no idx),
+        // which its blocker cannot stop; ask here and put the AI section back on cancel.
+        const untracked = window.history.state?.idx == null;
+        if (activeTab === 'ai-test-generation' && untracked && aiDirty.current
+            && !window.confirm('Discard unsaved AI settings?')) {
             navigate({ hash: '#ai-test-generation' }, { replace: true });
             return;
         }
         setActiveTab(hashTab);
-        // eslint-disable-next-line react-hooks/exhaustive-deps -- must run only when the URL hash changes; activeTab is read solely to skip a redundant set. Tab clicks update activeTab via a raw history.replaceState (not React Router navigation), so location.hash/hashTab doesn't change — adding activeTab here would re-run on every manual tab click and, since hashTab is now stale, immediately revert the click back to the old hash tab
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- must run only when the URL hash changes; activeTab is read solely to skip a redundant set
     }, [hashTab]);
 
     const loadFields = () => {
@@ -143,13 +146,7 @@ export default function SettingsPage() {
                             return (
                                 <button
                                     key={tab.id}
-                                    onClick={() => {
-                                        if (activeTab === 'ai-test-generation' && tab.id !== activeTab && !confirmLeaveAI()) return;
-                                        setActiveTab(tab.id);
-                                        if (typeof window !== 'undefined') {
-                                            window.history.replaceState(null, '', `#${tab.id}`);
-                                        }
-                                    }}
+                                    onClick={() => navigate({ hash: `#${tab.id}` }, { replace: true })}
                                     className={active ? 'settings-tab-active' : 'settings-tab'}
                                     style={{
                                         display: 'flex', alignItems: 'center', gap: 8,

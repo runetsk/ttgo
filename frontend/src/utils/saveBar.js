@@ -66,14 +66,12 @@ export function sameSummary(a, b) {
         && JSON.stringify(a.errors) === JSON.stringify(b.errors);
 }
 
-// shouldGuardLink says whether a click on a link would leave the page with unsaved changes.
-// Same-page links only change the hash; SettingsPage's hash effect asks before switching away.
-export function shouldGuardLink(link, event, location) {
-    if (event.defaultPrevented || event.button !== 0) return false;
-    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return false;
-    if ((link.target && link.target !== '_self') || link.download) return false;
-    let url;
-    try { url = new URL(link.href, location.href); } catch { return false; }
-    if (url.origin !== location.origin) return false;
-    return url.pathname !== location.pathname;
+const AI_HASH = '#ai-test-generation';
+
+// shouldBlockNavigation says whether a router navigation would leave Settings → AI with unsaved
+// changes. Log out is never blocked: the session is already gone when it navigates to /login.
+export function shouldBlockNavigation({ dirty, from, to }) {
+    if (!dirty || to.pathname === '/login') return false;
+    if (to.pathname !== from.pathname) return true;
+    return to.pathname === '/settings' && !!to.hash && to.hash !== AI_HASH;
 }
