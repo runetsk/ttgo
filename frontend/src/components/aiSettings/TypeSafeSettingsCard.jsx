@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { getTypeSafeSettings, updateTypeSafeSettings, testTypeSafeConnection } from '../../api';
 import { toast } from '../../toast';
+import { errorDescriptors, saveError } from '../../utils/saveBar';
+import { useSaveSection } from './saveBarContext';
 import { s } from './styles';
 import { ToggleCard, InlineSwitch, FieldRow, SuffixInput, UnsavedBadge } from './SettingsControls';
 import { cs } from './settingsControlStyles';
@@ -44,7 +46,6 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
     const [settings, setSettings] = useState(null);
     const [form, setForm] = useState(null);
     const [loadError, setLoadError] = useState(false);
-    const [saving, setSaving] = useState(false);
     const [testing, setTesting] = useState(false);
     const [testResult, setTestResult] = useState(null);
 
@@ -71,6 +72,25 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
         else onStateChange({ status: 'ready', saved: settings, draft: form, dirty: !!patch, errors });
     }, [onStateChange, loadError, settings, form, patch, errors]);
 
+    // Registered with the page save bar before the early returns below (hook order).
+    const errorList = useMemo(() => errorDescriptors(errors, 'ts'), [errors]);
+    const saveSettings = async () => {
+        if (!patch) return;
+        let next;
+        try {
+            next = await updateTypeSafeSettings(patch);
+        } catch (err) {
+            throw saveError(err, 'Failed to save TypeSafe settings');
+        }
+        setSettings(next);
+        setForm(formFromSettings(next));
+        setTestResult(null);
+    };
+    const discardDraft = () => { if (settings) setForm(formFromSettings(settings)); };
+    const saving = useSaveSection('typesafe', {
+        label: 'TypeSafe.ai', tab: 'analysis', dirty: !!patch, errors: errorList, save: saveSettings, discard: discardDraft,
+    });
+
     if (loadError) {
         return (
             <section style={s.section} data-testid="typesafe-settings">
@@ -88,22 +108,6 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
 
     const update = (p) => setForm((prev) => ({ ...prev, ...p }));
 
-    const save = async () => {
-        if (!patch) return;
-        setSaving(true);
-        try {
-            const next = await updateTypeSafeSettings(patch);
-            setSettings(next);
-            setForm(formFromSettings(next));
-            setTestResult(null);
-            toast.success('TypeSafe settings saved');
-        } catch (err) {
-            toast.error(err?.response?.data?.error || 'Failed to save TypeSafe settings');
-        } finally {
-            setSaving(false);
-        }
-    };
-
     const runTest = async () => {
         setTesting(true);
         setTestResult(null);
@@ -116,11 +120,10 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
         }
     };
 
-    const canSave = !!patch && Object.keys(errors).length === 0;
     const testAllowed = canTestConnection(form, settings);
     const unsavedKeyChange = !!form.clear_api_key || (typeof form.api_key === 'string' && form.api_key.trim() !== '');
     const verdictNote = verdictDependencyNote(form);
-    const locked = !isAdmin;
+    const locked = !isAdmin || saving;
     const errorHint = (text) => <span style={cs.fieldError}>{text}</span>;
 
     return (
@@ -132,11 +135,6 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
                     <StatusPill status={typesafeStatus(settings)} />
                     {patch && <UnsavedBadge />}
                 </div>
-                {isAdmin && (
-                    <button className="primary-btn" onClick={save} disabled={saving || !canSave} data-testid="typesafe-save" style={{ fontSize: '0.82rem' }}>
-                        {saving ? 'Saving…' : 'Save'}
-                    </button>
-                )}
             </div>
 
             <p style={cs.desc}>
@@ -176,7 +174,7 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
                         )}
                         {isAdmin && settings.api_key_status !== 'missing' && (
                             <span style={{ display: 'block', marginTop: 6 }}>
-                                <InlineSwitch label="Remove the stored key" checked={form.clear_api_key} testId="typesafe-clear-key"
+                                <InlineSwitch label="Remove the stored key" checked={form.clear_api_key} testId="typesafe-clear-key" disabled={saving}
                                     onChange={(v) => update({ clear_api_key: v, api_key: '' })} />
                             </span>
                         )}
@@ -189,7 +187,7 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
                     onChange={(e) => update({ api_key: e.target.value })}
                     style={{ width: 280, padding: '8px 12px', fontSize: '0.85rem' }} />
                 {isAdmin && (
-                    <button onClick={runTest} disabled={testing || !testAllowed} data-testid="typesafe-test"
+                    <button onClick={runTest} disabled={testing || !testAllowed || saving} data-testid="typesafe-test"
                         title={testAllowed ? 'Check the stored key with one small request' : 'Save a key first'}
                         style={{ ...cs.secondaryBtn, opacity: testing || !testAllowed ? 0.55 : 1, cursor: testing || !testAllowed ? 'not-allowed' : 'pointer' }}>
                         {testing ? 'Testing…' : 'Test connection'}

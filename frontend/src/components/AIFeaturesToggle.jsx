@@ -2,6 +2,7 @@ import React, { useId, useState } from 'react';
 import { aiGeneration } from '../api';
 import { toast } from '../toast';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
+import { useSaveBarSaving } from './aiSettings/saveBarContext';
 
 /**
  * Global master switch for all AI features (generation, import, failure analysis), shown in the
@@ -11,6 +12,7 @@ import { useAIGeneration } from '../contexts/AIGenerationContext';
 export default function AIFeaturesToggle({ isAdmin }) {
     const { aiFeaturesEnabled, setAiFeaturesEnabled } = useAIGeneration();
     const [saving, setSaving] = useState(false);
+    const busy = useSaveBarSaving();
     const id = useId();
 
     const handleToggle = async () => {
@@ -38,7 +40,7 @@ export default function AIFeaturesToggle({ isAdmin }) {
                 role="switch"
                 data-testid="ai-features-switch"
                 aria-checked={aiFeaturesEnabled ? 'true' : 'false'}
-                disabled={!isAdmin || saving}
+                disabled={!isAdmin || saving || busy}
                 onClick={handleToggle}
                 title={isAdmin ? 'Turn every AI feature on or off' : 'Only an admin can change this setting'}
                 style={{ ...s.switch, background: aiFeaturesEnabled ? 'var(--accent-indigo)' : 'var(--border-color)', cursor: isAdmin ? 'pointer' : 'not-allowed', opacity: isAdmin ? 1 : 0.6 }}

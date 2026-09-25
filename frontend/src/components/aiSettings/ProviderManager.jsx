@@ -6,6 +6,7 @@ import ProviderModal from './ProviderModal';
 import DeleteModal from './DeleteModal';
 import ProviderCard from './ProviderCard';
 import { useAIGeneration } from '../../contexts/AIGenerationContext';
+import { useSaveBarSaving } from './saveBarContext';
 
 /* ── LLM Providers Section (list, add/edit/delete/test, modals) ── */
 export default function ProviderManager({ isAdmin }) {
@@ -15,6 +16,8 @@ export default function ProviderManager({ isAdmin }) {
     const [testingId, setTestingId]         = useState(null);
     const [testResults, setTestResults]     = useState({});
     const [confirmDelete, setConfirmDelete] = useState(null);
+    // Provider changes apply at once; hold them while the page save bar is saving.
+    const busy = useSaveBarSaving();
 
     const loadProviders = useCallback(() => {
         setLoading(true);
@@ -37,6 +40,7 @@ export default function ProviderManager({ isAdmin }) {
     }, [loadProviders, refreshProviders]);
 
     const handleTestConnection = async (provider) => {
+        if (busy) return;
         setTestingId(provider.id);
         setTestResults(prev => ({ ...prev, [provider.id]: null }));
         try {
@@ -50,6 +54,7 @@ export default function ProviderManager({ isAdmin }) {
     };
 
     const handleSetDefault = async (provider) => {
+        if (busy) return;
         try {
             await aiGeneration.setDefault(provider.id);
             toast.success(`${provider.label} set as default`);
@@ -84,7 +89,7 @@ export default function ProviderManager({ isAdmin }) {
                         )}
                     </div>
                     {isAdmin && (
-                        <button className="primary-btn" style={s.addBtn} onClick={() => setModal({ type: 'add' })}>
+                        <button className="primary-btn" style={s.addBtn} disabled={busy} onClick={() => setModal({ type: 'add' })}>
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
@@ -112,7 +117,7 @@ export default function ProviderManager({ isAdmin }) {
                                 : 'An admin needs to configure an LLM provider before you can generate test cases.'}
                         </p>
                         {isAdmin && (
-                            <button className="primary-btn" style={{ marginTop: 4 }} onClick={() => setModal({ type: 'add' })}>
+                            <button className="primary-btn" style={{ marginTop: 4 }} disabled={busy} onClick={() => setModal({ type: 'add' })}>
                                 Add Your First Provider
                             </button>
                         )}
@@ -128,8 +133,8 @@ export default function ProviderManager({ isAdmin }) {
                                 testResult={testResults[p.id]}
                                 onTest={handleTestConnection}
                                 onSetDefault={handleSetDefault}
-                                onEdit={(prov) => setModal({ type: 'edit', provider: prov })}
-                                onDelete={(prov) => setConfirmDelete(prov)}
+                                onEdit={(prov) => { if (!busy) setModal({ type: 'edit', provider: prov }); }}
+                                onDelete={(prov) => { if (!busy) setConfirmDelete(prov); }}
                             />
                         ))}
                     </div>

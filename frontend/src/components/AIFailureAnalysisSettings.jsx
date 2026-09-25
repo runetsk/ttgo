@@ -14,6 +14,8 @@ import {
     MAX_ANALYSES_MIN, MAX_ANALYSES_MAX, PARALLEL_MIN, PARALLEL_MAX,
 } from '../utils/failureAnalysisSettings';
 import { toast } from '../toast';
+import { errorDescriptors, saveError } from '../utils/saveBar';
+import { useSaveSection } from './aiSettings/saveBarContext';
 
 // Rolling window for the accuracy panel. Matches the backend default so the
 // panel and the endpoint never describe different periods.
@@ -28,7 +30,6 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
     const [settings, setSettings] = useState(null);
     const [original, setOriginal] = useState(null);
     const [loadError, setLoadError] = useState(false);
-    const [saving, setSaving] = useState(false);
     const [resetting, setResetting] = useState(false);
 
     useEffect(() => {
@@ -53,6 +54,32 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
         else onStateChange({ status: 'ready', saved: original, draft: settings, dirty: modified, errors });
     }, [onStateChange, loadError, settings, original, modified, errors]);
 
+    // Registered with the page save bar before the early returns below (hook order).
+    const errorList = useMemo(() => errorDescriptors(errors, 'fa'), [errors]);
+    const saveSettings = async () => {
+        if (!settings) return;
+        let next;
+        try {
+            next = await updateFailureAnalysisSettings({
+                enabled_on_completion: settings.enabled_on_completion,
+                max_analyses_per_run:  settings.max_analyses_per_run,
+                parallel_groups:       settings.parallel_groups,
+                dedup_enabled:         settings.dedup_enabled,
+                redaction_enabled:     settings.redaction_enabled,
+                prompt_template:       settings.prompt_template,
+            });
+        } catch (err) {
+            throw saveError(err, 'Failed to save the failure-analysis settings');
+        }
+        setSettings(next);
+        setOriginal(next);
+    };
+    const discardDraft = () => { if (original) setSettings(original); };
+    const saving = useSaveSection('failureAnalysis', {
+        label: 'AI Failure Analysis', tab: 'analysis', dirty: modified, errors: errorList, save: saveSettings, discard: discardDraft,
+    });
+    const locked = !isAdmin || saving;
+
     if (loadError) {
         return (
             <section style={s.section} data-testid="fa-settings">
@@ -72,28 +99,6 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
     }
 
     const update = (patch) => setSettings((prev) => ({ ...prev, ...patch }));
-    const hasErrors = Object.keys(errors).length > 0;
-
-    const save = async () => {
-        setSaving(true);
-        try {
-            const next = await updateFailureAnalysisSettings({
-                enabled_on_completion: settings.enabled_on_completion,
-                max_analyses_per_run:  settings.max_analyses_per_run,
-                parallel_groups:       settings.parallel_groups,
-                dedup_enabled:         settings.dedup_enabled,
-                redaction_enabled:     settings.redaction_enabled,
-                prompt_template:       settings.prompt_template,
-            });
-            setSettings(next);
-            setOriginal(next);
-            toast.success('Saved');
-        } catch (e) {
-            toast.error('Save failed: ' + (e.response?.data?.error || e.message));
-        } finally {
-            setSaving(false);
-        }
-    };
 
     const reset = async () => {
         setResetting(true);
@@ -117,14 +122,6 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     <h4 style={s.sectionTitle}>AI Failure Analysis</h4>
                     {modified && <span style={s.modifiedBadge}>Unsaved changes</span>}
                 </div>
-                {isAdmin && (
-                    <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="primary-btn" onClick={save} disabled={saving || !modified || hasErrors}
-                            data-testid="fa-save" style={{ fontSize: '0.82rem' }}>
-                            {saving ? 'Saving…' : 'Save'}
-                        </button>
-                    </div>
-                )}
             </div>
 
             <p style={s.desc}>
@@ -140,7 +137,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     label="Auto-analyze on run completion"
                     desc="Queue a run's failures for analysis when the run is completed."
                     checked={settings.enabled_on_completion}
-                    disabled={!isAdmin}
+                    disabled={locked}
                     onChange={(v) => update({ enabled_on_completion: v })}
                     testId="fa-enabled_on_completion"
                     setting="fa.enabled_on_completion" help={SETTING_HELP['fa.enabled_on_completion']}
@@ -151,7 +148,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     label="Deduplicate similar failures"
                     desc="Group failures with the same type and error text and analyze one representative."
                     checked={settings.dedup_enabled}
-                    disabled={!isAdmin}
+                    disabled={locked}
                     onChange={(v) => update({ dedup_enabled: v })}
                     testId="fa-dedup_enabled"
                     setting="fa.dedup_enabled" help={SETTING_HELP['fa.dedup_enabled']}
@@ -162,7 +159,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     label="Redact secrets"
                     desc="Replace recognized secrets before failure text is sent. Recommended."
                     checked={settings.redaction_enabled}
-                    disabled={!isAdmin}
+                    disabled={locked}
                     onChange={(v) => update({ redaction_enabled: v })}
                     testId="fa-redaction_enabled"
                     setting="fa.redaction_enabled" help={SETTING_HELP['fa.redaction_enabled']}
@@ -175,7 +172,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     ? <span style={cs.fieldError}>{errors.max_analyses_per_run}</span>
                     : 'Cap on failure groups analyzed per run, largest first. Keeps cost bounded.'}>
                 <input id="fa-max-analyses" data-testid="fa-max-analyses" className="modern-input" type="number"
-                    min={MAX_ANALYSES_MIN} max={MAX_ANALYSES_MAX} disabled={!isAdmin}
+                    min={MAX_ANALYSES_MIN} max={MAX_ANALYSES_MAX} disabled={locked}
                     value={numberValue(settings.max_analyses_per_run)}
                     onChange={(e) => update({ max_analyses_per_run: parseWholeNumber(e.target.value) })}
                     style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
@@ -187,7 +184,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     ? <span style={cs.fieldError}>{errors.parallel_groups}</span>
                     : 'How many failure groups are analyzed side by side. Lower it if your LLM provider answers with rate-limit errors.'}>
                 <input id="fa-parallel-groups" data-testid="fa-parallel-groups" className="modern-input" type="number"
-                    min={PARALLEL_MIN} max={PARALLEL_MAX} disabled={!isAdmin}
+                    min={PARALLEL_MIN} max={PARALLEL_MAX} disabled={locked}
                     value={numberValue(settings.parallel_groups)}
                     onChange={(e) => update({ parallel_groups: parseWholeNumber(e.target.value) })}
                     style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
@@ -204,7 +201,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                         <HelpToggle help={SETTING_HELP['fa.prompt_template']} setting="fa.prompt_template" />
                     </div>
                     {isAdmin && (
-                        <button onClick={reset} disabled={resetting} style={s.resetBtn} title="Reset to default prompt">
+                        <button onClick={reset} disabled={resetting || saving} style={s.resetBtn} title="Reset to default prompt">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
                                 <polyline points="1 4 1 10 7 10"/>
                                 <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
@@ -229,7 +226,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                         style={{ ...s.editor, opacity: isAdmin ? 1 : 0.7 }}
                         value={settings.prompt_template}
                         onChange={(e) => update({ prompt_template: e.target.value })}
-                        disabled={!isAdmin}
+                        disabled={locked}
                         spellCheck={false}
                         placeholder="Loading template…"
                     />
