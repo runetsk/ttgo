@@ -99,7 +99,7 @@ test.describe('Settings — failure-analysis process diagram', () => {
         await page.getByTestId('fa-max-analyses').fill('0');
         await expect(settingsPage.flowChip('fa.max_analyses_per_run')).toContainText('invalid');
         await expect(settingsPage.flowPart('group', 'cap')).toContainText('Up to 20 groups, largest first');
-        await expect(page.getByTestId('fa-save')).toBeDisabled();
+        await expect(page.getByTestId('ai-savebar-save')).toBeDisabled();
         expect(writes).toEqual([]);
     });
 
@@ -149,7 +149,7 @@ test.describe('Settings — failure-analysis process diagram', () => {
         await settingsPage.open();
         await settingsPage.openFailureAnalysis();
 
-        await expect(page.getByTestId('typesafe-save')).toHaveCount(0);
+        await expect(page.getByTestId('ai-savebar')).toHaveCount(0);
         await expect(settingsPage.flowStep('decide')).toHaveAttribute('data-status', 'run');
         await settingsPage.selectFlowStep('group');
         await settingsPage.flowChip('fa.dedup_enabled').click();

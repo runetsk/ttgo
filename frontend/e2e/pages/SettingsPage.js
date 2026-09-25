@@ -80,7 +80,8 @@ export class SettingsPage extends BasePage {
 
     get typesafeKeyInput() { return this.page.getByTestId('typesafe-api-key'); }
     get typesafeKeyStatus() { return this.page.getByTestId('typesafe-key-status'); }
-    get typesafeSaveButton() { return this.page.getByTestId('typesafe-save'); }
+    // TypeSafe.ai saves through the page save bar.
+    get typesafeSaveButton() { return this.page.getByTestId('ai-savebar-save'); }
     get typesafeClearKeyCheckbox() { return this.page.getByTestId('typesafe-clear-key'); }
     get typesafeModelInput() { return this.page.getByTestId('typesafe-model'); }
 
@@ -101,4 +102,10 @@ export class SettingsPage extends BasePage {
         await this.page.getByTestId('analysis-flow-detail').and(this.page.locator(`[data-step="${id}"]`)).waitFor();
     }
     get flowDetail() { return this.page.getByTestId('analysis-flow-detail'); }
+
+    // ── Settings → AI save bar ──────────────────────────────────────────────
+    get saveBar() { return this.page.getByTestId('ai-savebar'); }
+    get saveBarSave() { return this.page.getByTestId('ai-savebar-save'); }
+    get saveBarDiscard() { return this.page.getByTestId('ai-savebar-discard'); }
+    get saveBarMessage() { return this.page.getByTestId('ai-savebar-message'); }
 }
