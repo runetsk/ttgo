@@ -1,19 +1,20 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { aiGeneration } from '../../api';
-import { toast } from '../../toast';
 import { monthMeter } from '../../utils/aiSettingsTabs';
+import { saveError } from '../../utils/saveBar';
+import { useSaveSection } from './saveBarContext';
 import { s } from './styles';
 
 const METER_FILL = { neutral: 'var(--accent-indigo)', warn: 'var(--aig-tone-amber-fg)', bad: 'var(--aig-tone-red-fg)' };
 const FIELD_LABEL = { display: 'flex', flexDirection: 'column', gap: 4, fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 500 };
 const asField = (usd) => (usd > 0 ? String(usd) : '');
+const NO_ERRORS = [];
 
-/* ── Soft Cost Budgets Section ── */
+/* ── Soft Cost Budgets Section (saves through the Settings → AI save bar) ── */
 export default function BudgetSettings({ isAdmin, onStatusChange }) {
     const [saved, setSaved] = useState(null); // { perRequest, monthly, monthlyUsd, spentUsd }
     const [perRequest, setPerRequest] = useState('');
     const [monthly, setMonthly] = useState('');
-    const [saving, setSaving] = useState(false);
 
     const apply = useCallback((cfg) => {
         const next = {
@@ -33,23 +34,25 @@ export default function BudgetSettings({ isAdmin, onStatusChange }) {
 
     const dirty = !!saved && (perRequest !== saved.perRequest || monthly !== saved.monthly);
     useEffect(() => {
-        if (saved) onStatusChange?.({ monthlyUsd: saved.monthlyUsd, spentUsd: saved.spentUsd, dirty });
-    }, [saved, dirty, onStatusChange]);
+        if (saved) onStatusChange?.({ monthlyUsd: saved.monthlyUsd, spentUsd: saved.spentUsd });
+    }, [saved, onStatusChange]);
 
-    const save = async () => {
-        setSaving(true);
+    const saveBudgets = async () => {
+        let cfg;
         try {
-            apply(await aiGeneration.updateBudgetSettings({
+            cfg = await aiGeneration.updateBudgetSettings({
                 per_request_usd: perRequest === '' ? 0 : parseFloat(perRequest),
                 monthly_usd: monthly === '' ? 0 : parseFloat(monthly),
-            }));
-            toast.success('Budgets saved');
+            });
         } catch (err) {
-            toast.error(err?.response?.data?.error || 'Failed to save budgets');
-        } finally {
-            setSaving(false);
+            throw saveError(err, 'Failed to save the budgets');
         }
+        apply(cfg);
     };
+    const saving = useSaveSection('budgets', {
+        label: 'Soft cost budgets', tab: 'limits', dirty, errors: NO_ERRORS, save: saveBudgets,
+        discard: () => { if (saved) { setPerRequest(saved.perRequest); setMonthly(saved.monthly); } },
+    });
 
     const meter = saved ? monthMeter(saved.spentUsd, saved.monthlyUsd) : null;
 
@@ -61,11 +64,6 @@ export default function BudgetSettings({ isAdmin, onStatusChange }) {
                     <h4 style={s.sectionTitle}>Soft cost budgets</h4>
                     {dirty && <span style={s.modifiedBadge}>Unsaved changes</span>}
                 </div>
-                {isAdmin && (
-                    <button className="primary-btn" data-testid="budget-save" onClick={save} disabled={saving || !dirty} style={{ fontSize: '0.82rem' }}>
-                        {saving ? 'Saving…' : 'Save'}
-                    </button>
-                )}
             </div>
             <p style={s.templateDesc}>
                 Warnings only: over a budget, generation asks for confirmation instead of cutting the request down.
@@ -75,12 +73,12 @@ export default function BudgetSettings({ isAdmin, onStatusChange }) {
                 <label style={FIELD_LABEL}>
                     Per request (USD)
                     <input className="modern-input" data-testid="budget-per-request" type="number" min="0" step="0.01" value={perRequest}
-                        onChange={(e) => setPerRequest(e.target.value)} disabled={!isAdmin} style={{ padding: '8px 10px', fontSize: '0.85rem' }} />
+                        onChange={(e) => setPerRequest(e.target.value)} disabled={!isAdmin || saving} style={{ padding: '8px 10px', fontSize: '0.85rem' }} />
                 </label>
                 <label style={FIELD_LABEL}>
                     Per month (USD)
                     <input className="modern-input" data-testid="budget-monthly" type="number" min="0" step="0.5" value={monthly}
-                        onChange={(e) => setMonthly(e.target.value)} disabled={!isAdmin} style={{ padding: '8px 10px', fontSize: '0.85rem' }} />
+                        onChange={(e) => setMonthly(e.target.value)} disabled={!isAdmin || saving} style={{ padding: '8px 10px', fontSize: '0.85rem' }} />
                 </label>
             </div>
             {saved && (
