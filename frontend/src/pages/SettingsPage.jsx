@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getCustomFields, createCustomField, deleteCustomField, auth as authApi, users as usersApi, seed as seedApi, jira as jiraApi, confluence as confApi } from '../api';
 import { toast } from '../toast';
@@ -25,9 +25,21 @@ export default function SettingsPage() {
     const location = useLocation();
     const hashTab = (location.hash || '').replace(/^#/, '');
     const [activeTab, setActiveTab] = useState(hashTab || 'custom-fields');
+    const navigate = useNavigate();
+
+    // Settings → AI saves through one bar; leaving it with unsaved changes asks first.
+    const aiDirty = useRef(false);
+    const onAiDirty = useCallback((v) => { aiDirty.current = v; }, []);
+    const confirmLeaveAI = () => !aiDirty.current || window.confirm('Discard unsaved AI settings?');
 
     useEffect(() => {
-        if (hashTab && hashTab !== activeTab) setActiveTab(hashTab);
+        if (!hashTab || hashTab === activeTab) return;
+        if (activeTab === 'ai-test-generation' && !confirmLeaveAI()) {
+            // Keep the AI section; put the router's hash back so the same link works next time.
+            navigate({ hash: '#ai-test-generation' }, { replace: true });
+            return;
+        }
+        setActiveTab(hashTab);
         // eslint-disable-next-line react-hooks/exhaustive-deps -- must run only when the URL hash changes; activeTab is read solely to skip a redundant set. Tab clicks update activeTab via a raw history.replaceState (not React Router navigation), so location.hash/hashTab doesn't change — adding activeTab here would re-run on every manual tab click and, since hashTab is now stale, immediately revert the click back to the old hash tab
     }, [hashTab]);
 
@@ -132,6 +144,7 @@ export default function SettingsPage() {
                                 <button
                                     key={tab.id}
                                     onClick={() => {
+                                        if (activeTab === 'ai-test-generation' && tab.id !== activeTab && !confirmLeaveAI()) return;
                                         setActiveTab(tab.id);
                                         if (typeof window !== 'undefined') {
                                             window.history.replaceState(null, '', `#${tab.id}`);
@@ -265,7 +278,7 @@ export default function SettingsPage() {
                     renderTestConnection={() => <ConfluenceTestConnection />}
                 />
             )}
-            {activeTab === 'ai-test-generation' && <AISettingsPage isAdmin={isAdmin} />}
+            {activeTab === 'ai-test-generation' && <AISettingsPage isAdmin={isAdmin} onDirtyChange={onAiDirty} />}
             {activeTab === 'backups' && isAdmin && <BackupsSettings />}
             {activeTab === 'users' && isAdmin && <UserSettings />}
             {activeTab === 'demo-data' && isAdmin && <DemoDataSettings />}
