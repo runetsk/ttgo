@@ -240,6 +240,60 @@ test.describe('Settings — AI save bar', () => {
     });
 });
 
+const topNav = (page, label) => page.locator('.tt-nav-btn, .tt-nav-active').filter({ hasText: label });
+
+test.describe('Settings — AI save bar, leaving the page', () => {
+    test('the top navigation asks before leaving with unsaved changes', async ({ page, settingsPage }) => {
+        await mockSettings(page);
+        await settingsPage.open();
+        await settingsPage.openAISettings('Prompts');
+        await page.getByTestId('template-editor').fill(EDITED);
+
+        // One recording handler answers the dialogs in order, so an extra dialog would show up.
+        const answers = ['dismiss', 'accept'];
+        const dialogs = [];
+        page.on('dialog', (d) => { dialogs.push(d.message()); return answers.shift() === 'accept' ? d.accept() : d.dismiss(); });
+        await topNav(page, 'Runs').click();
+        await expect(page).toHaveURL(/\/settings#ai-test-generation$/);
+        await expect(page.getByTestId('template-editor')).toHaveValue(EDITED);
+
+        await topNav(page, 'Runs').click();
+        await expect(page).toHaveURL(/\/runs$/);
+        expect(dialogs).toEqual(['Discard unsaved AI settings?', 'Discard unsaved AI settings?']);
+    });
+
+    test('the browser Back button asks before leaving with unsaved changes', async ({ page, settingsPage }) => {
+        await mockSettings(page);
+        await page.goto('/library');
+        await topNav(page, 'Settings').click();
+        await settingsPage.openAISettings('Prompts');
+        await page.getByTestId('template-editor').fill(EDITED);
+
+        page.once('dialog', (d) => d.dismiss());
+        await page.goBack({ waitUntil: 'commit' });
+        await expect(page).toHaveURL(/\/settings#ai-test-generation$/);
+        await expect(page.getByTestId('ai-settings')).toBeVisible();
+        await expect(page.getByTestId('template-editor')).toHaveValue(EDITED);
+    });
+
+    test('signing out is never blocked', async ({ page, settingsPage }) => {
+        await mockSettings(page);
+        // Keep the real session: the logout call and the user lookup after it are mocked.
+        let signedOut = false;
+        await page.route(/\/api\/auth\/logout$/, (route) => { signedOut = true; return route.fulfill(json({ ok: true })); });
+        await page.route(/\/api\/auth\/me$/, (route) => (signedOut ? route.fulfill(json({ error: 'unauthorized' }, 401)) : route.fallback()));
+        const dialogs = [];
+        page.on('dialog', (d) => { dialogs.push(d.message()); return d.dismiss(); });
+
+        await settingsPage.open();
+        await settingsPage.openAISettings('Prompts');
+        await page.getByTestId('template-editor').fill(EDITED);
+        await page.getByTitle('Sign out').click();
+        await expect(page).toHaveURL(/\/login$/);
+        expect(dialogs).toEqual([]);
+    });
+});
+
 const FAILURES = [
     { name: 'template', tab: 'Prompts', tabId: 'prompts', label: 'Standard prompt template', edit: (page) => page.getByTestId('template-editor').fill(EDITED) },
     { name: 'coverage', tab: 'Limits & budget', tabId: 'limits', label: 'Output tokens per coverage level', edit: (page) => page.getByTestId('coverage-essential_max_tokens').fill('2048') },
