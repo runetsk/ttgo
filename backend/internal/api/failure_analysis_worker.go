@@ -6,6 +6,7 @@ import (
 	"time"
 
 	apiai "ttgo/internal/api/ai"
+	apiruns "ttgo/internal/api/runs"
 	apiws "ttgo/internal/api/websocket"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/failureanalysis/worker"
@@ -37,7 +38,8 @@ func (s *Server) StartFailureAnalysisWorker(ctx context.Context) {
 //     never touches the LLM provider, so a broken or missing LLM configuration cannot block it;
 //   - an automatic job uses the LLM only when that provider is itself approved for automatic
 //     analysis, checked now, since the default provider may have changed since the job was queued;
-//   - a broken LLM configuration fails the job only when the LLM would have to decide.
+//   - a broken LLM configuration fails the job only when the LLM would have to decide;
+//   - the settings page draws these rules (frontend/src/utils/analysisFlow.js); change both together.
 func newAnalyzeDepsResolver(st *store.Store) failureanalysis.DepsResolver {
 	return func(trigger string) (failureanalysis.JobDeps, error) {
 		var deps failureanalysis.JobDeps
@@ -92,6 +94,25 @@ func newAnalyzeDepsResolver(st *store.Store) failureanalysis.DepsResolver {
 			}
 		}
 		return deps, nil
+	}
+}
+
+// newAutoAnalyzeGate answers, at run completion, whether an automatic analysis could run now:
+// the resolver the worker uses, asked for the completion trigger. It builds clients but makes no
+// network call. The worker resolves again when the job runs, so later setting changes still apply.
+func newAutoAnalyzeGate(resolve failureanalysis.DepsResolver) apiruns.AutoAnalyzeGate {
+	return func() (bool, string) {
+		deps, err := resolve(models.RunAnalysisJobTriggerAutoOnDone)
+		if err != nil {
+			return false, err.Error()
+		}
+		if !deps.CanAnalyze() {
+			if deps.LLMUnavailableReason != "" {
+				return false, deps.LLMUnavailableReason
+			}
+			return false, "nothing is configured to analyze"
+		}
+		return true, ""
 	}
 }
 

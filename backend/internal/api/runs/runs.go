@@ -1048,16 +1048,15 @@ func (h *Handler) CompleteRun(w http.ResponseWriter, r *http.Request) {
 		if fs, ferr := h.store.GetOrCreateAIFeatureSettings(); ferr == nil && !fs.Enabled {
 			// The AI master switch is enforced server-side: nothing is queued while it is off.
 		} else if settings, err := h.store.GetFailureAnalysisSettings(); err == nil && settings.EnabledOnCompletion {
-			provider, _ := h.store.GetDefaultProviderConfig()
-			if provider != nil && provider.AllowAutoFailureAnalysis {
-				failures, err := h.store.ListLatestFailingResults(run.ID)
-				if err == nil && len(failures) > 0 {
-					if _, _, err := h.store.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerAutoOnDone, ""); err != nil {
-						slog.WarnContext(r.Context(), "ai-failure-analysis: auto enqueue failed", "run_id", run.ID, "err", err)
-					}
+			failures, err := h.store.ListLatestFailingResults(run.ID)
+			if err == nil && len(failures) > 0 {
+				// Queue only when something may analyze automatically right now: TypeSafe with its
+				// automatic consent, or a default LLM approved for automatic analysis.
+				if ok, reason := h.canAutoAnalyze(); !ok {
+					slog.WarnContext(r.Context(), "ai-failure-analysis: auto skipped — nothing may analyze automatically", "run_id", run.ID, "reason", reason)
+				} else if _, _, err := h.store.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerAutoOnDone, ""); err != nil {
+					slog.WarnContext(r.Context(), "ai-failure-analysis: auto enqueue failed", "run_id", run.ID, "err", err)
 				}
-			} else {
-				slog.WarnContext(r.Context(), "ai-failure-analysis: auto skipped — no approved default provider", "run_id", run.ID)
 			}
 		}
 	}

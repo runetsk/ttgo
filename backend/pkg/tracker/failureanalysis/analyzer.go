@@ -173,6 +173,7 @@ func FailedResult(err error, deps AnalyzeDeps) *AnalyzeResult {
 // Analyze runs the cascade (spec §6): TypeSafe decides when a Decider is present, the generative
 // provider narrates; without a decider (or when it fails and the fallback is on) the generative
 // provider decides as today.
+// The settings page draws these branches (frontend/src/utils/analysisFlow.js); change both together.
 func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeResult, error) {
 	ev := BuildEvidence(in)
 
