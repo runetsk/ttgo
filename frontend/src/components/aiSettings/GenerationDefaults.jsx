@@ -4,7 +4,7 @@ import { toast } from '../../toast';
 import { s } from './styles';
 
 /* ── Coverage Token Limits Section ── */
-export default function GenerationDefaults({ isAdmin }) {
+export default function GenerationDefaults({ isAdmin, onDirtyChange }) {
     const [coverageCfg, setCoverageCfg] = useState(null);
     const [coverageForm, setCoverageForm] = useState({ essential_max_tokens: 4096, thorough_max_tokens: 8192, comprehensive_max_tokens: 16384 });
     const [savingCoverage, setSavingCoverage] = useState(false);
@@ -24,6 +24,8 @@ export default function GenerationDefaults({ isAdmin }) {
         coverageForm.thorough_max_tokens !== coverageCfg.thorough_max_tokens ||
         coverageForm.comprehensive_max_tokens !== coverageCfg.comprehensive_max_tokens
     );
+    const coverageDirty = !!coverageModified;
+    useEffect(() => { onDirtyChange?.(coverageDirty); }, [coverageDirty, onDirtyChange]);
 
     const handleSaveCoverage = async () => {
         setSavingCoverage(true);
@@ -44,7 +46,7 @@ export default function GenerationDefaults({ isAdmin }) {
             <div style={s.sectionHead}>
                 <div style={s.sectionHeadLeft}>
                     <span style={s.sectionDot} />
-                    <h4 style={s.sectionTitle}>Coverage Token Limits</h4>
+                    <h4 style={s.sectionTitle}>Output tokens per coverage level</h4>
                     {coverageModified && <span style={s.modifiedBadge}>Unsaved changes</span>}
                 </div>
                 {isAdmin && (
@@ -59,7 +61,7 @@ export default function GenerationDefaults({ isAdmin }) {
                 )}
             </div>
             <p style={s.templateDesc}>
-                Maximum tokens the LLM can use per coverage level. Higher values allow more test cases but cost more.
+                The most the model may write for one generation. Higher limits allow more test cases and cost more.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 8 }}>
                 {[
