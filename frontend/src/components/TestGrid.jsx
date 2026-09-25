@@ -510,7 +510,6 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                         className="primary-btn"
                         onClick={handleCreate}
                         disabled={isMultiRoot}
-                        style={{ opacity: isMultiRoot ? 0.5 : 1, cursor: isMultiRoot ? 'not-allowed' : 'pointer' }}
                         data-testid="create-test-button"
                         title={isMultiRoot ? "Creation disabled for multiple selection" : "New Test"}
                     >

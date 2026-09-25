@@ -156,7 +156,7 @@ export default function DefectModal({ mode = 'create', defect = null, isSnapshot
 
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 22, paddingTop: 16, borderTop: '1px solid var(--border-color)' }}>
                         <button type="button" className="action-btn" onClick={onClose} disabled={submitting}>Cancel</button>
-                        <button type="submit" className="primary-btn" disabled={submitting || !title.trim()} style={{ opacity: submitting ? 0.6 : 1 }} data-testid="defect-save">
+                        <button type="submit" className="primary-btn" disabled={submitting || !title.trim()} data-testid="defect-save">
                             {submitting ? 'Saving…' : (mode === 'edit' ? 'Save' : 'Create')}
                         </button>
                     </div>

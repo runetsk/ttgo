@@ -49,7 +49,7 @@ export default function CreateDefectModal({ runId, resultId, testName, errorMess
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
                         <button type="button" className="action-btn" onClick={onClose} disabled={submitting}>Cancel</button>
-                        <button type="submit" className="primary-btn" disabled={submitting || !title.trim()} style={{ opacity: submitting ? 0.6 : 1 }}>
+                        <button type="submit" className="primary-btn" disabled={submitting || !title.trim()}>
                             {submitting ? 'Creating…' : 'Create Defect'}
                         </button>
                     </div>

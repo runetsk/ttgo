@@ -92,7 +92,7 @@ export default function CreateRunModal({ onClose, onSuccess, defaultFolderId = n
                 {/* Footer */}
                 <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                     <button type="button" className="action-btn" onClick={onClose} disabled={loading} style={{ padding: '8px 18px', fontSize: '0.85rem', marginRight: 'auto' }} data-testid="create-run-cancel">Cancel</button>
-                    <button type="button" className="primary-btn" onClick={create} disabled={loading} style={{ padding: '8px 20px', fontSize: '0.85rem', opacity: loading ? 0.5 : 1 }} data-testid="create-run-submit">
+                    <button type="button" className="primary-btn" onClick={create} disabled={loading} style={{ padding: '8px 20px', fontSize: '0.85rem' }} data-testid="create-run-submit">
                         {loading ? 'Creating…' : 'Create Run'}
                     </button>
                 </div>

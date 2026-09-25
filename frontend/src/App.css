@@ -323,6 +323,16 @@
     box-shadow: 0 6px 16px rgba(99, 102, 241, 0.35);
 }
 
+/* A disabled button looks disabled, and hovering it neither lifts nor brightens it. */
+.primary-btn:disabled,
+.primary-btn:disabled:hover {
+    opacity: 0.5;
+    cursor: not-allowed;
+    filter: none;
+    transform: none;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25);
+}
+
 .category-manager {
     display: flex;
     flex-direction: column;
@@ -499,6 +509,14 @@
 .action-btn:hover {
     background: var(--bg-secondary);
     border-color: var(--text-secondary);
+}
+
+.action-btn:disabled,
+.action-btn:disabled:hover {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
 }
 
 .modern-select {

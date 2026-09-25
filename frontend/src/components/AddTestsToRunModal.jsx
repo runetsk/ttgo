@@ -52,7 +52,7 @@ export default function AddTestsToRunModal({ runId, existingTestCaseIds, onClose
                 {/* Footer */}
                 <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border-color)', background: 'var(--bg-secondary)', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                     <button type="button" className="action-btn" onClick={onClose} disabled={loading} style={{ padding: '8px 18px', fontSize: '0.85rem', marginRight: 'auto' }} data-testid="add-tests-cancel">Cancel</button>
-                    <button type="button" className="primary-btn" onClick={add} disabled={loading || count === 0} style={{ padding: '8px 20px', fontSize: '0.85rem', opacity: (loading || count === 0) ? 0.5 : 1 }} data-testid="add-tests-submit">
+                    <button type="button" className="primary-btn" onClick={add} disabled={loading || count === 0} style={{ padding: '8px 20px', fontSize: '0.85rem' }} data-testid="add-tests-submit">
                         {loading ? 'Adding…' : `Add ${count} test${count === 1 ? '' : 's'}`}
                     </button>
                 </div>
