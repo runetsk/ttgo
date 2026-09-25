@@ -18,6 +18,9 @@ export function useUnsavedGuard(dirty, message) {
         [dirty],
     );
     const blocker = useBlocker(shouldBlock);
+    // Known limitation: with the browser's own confirm, pressing Back/Forward again while the
+    // dialog is open behaves differently across browsers (React Router warns about this pattern).
+    // Chrome's dialog is tab-modal, so it holds there; an in-app dialog would close it everywhere.
     useEffect(() => {
         if (blocker.state !== 'blocked') return;
         if (window.confirm(message)) blocker.proceed();

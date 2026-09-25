@@ -35,11 +35,13 @@ export default function SettingsPage() {
         // can stop a switch that would lose unsaved changes before it happens.
         if (!hashTab || hashTab === activeTab) return;
         // A #hash typed into the address bar is a history entry the router did not create (no idx),
-        // which its blocker cannot stop; ask here and put the AI section back on cancel.
+        // which its blocker cannot stop; ask here. On cancel, step back to the AI entry the router
+        // still tracks: replacing the untracked entry would keep it untracked, and a later Back
+        // from it could not be blocked.
         const untracked = window.history.state?.idx == null;
         if (activeTab === 'ai-test-generation' && untracked && aiDirty.current
             && !window.confirm('Discard unsaved AI settings?')) {
-            navigate({ hash: '#ai-test-generation' }, { replace: true });
+            navigate(-1);
             return;
         }
         setActiveTab(hashTab);

@@ -276,6 +276,23 @@ test.describe('Settings — AI save bar, leaving the page', () => {
         await expect(page.getByTestId('template-editor')).toHaveValue(EDITED);
     });
 
+    test('after cancelling a typed hash, Back is still guarded', async ({ page, settingsPage }) => {
+        await mockSettings(page);
+        await page.goto('/library');
+        await topNav(page, 'Settings').click();
+        await settingsPage.openAISettings('Prompts');
+        await page.getByTestId('template-editor').fill(EDITED);
+        const dialogs = [];
+        page.on('dialog', (d) => { dialogs.push(d.message()); return d.dismiss(); });
+
+        await page.evaluate(() => { window.location.hash = '#custom-fields'; });
+        await expect(page).toHaveURL(/\/settings#ai-test-generation$/);
+        await page.goBack({ waitUntil: 'commit' });
+        await expect(page).toHaveURL(/\/settings#ai-test-generation$/);
+        await expect(page.getByTestId('template-editor')).toHaveValue(EDITED);
+        expect(dialogs).toEqual(['Discard unsaved AI settings?', 'Discard unsaved AI settings?']);
+    });
+
     test('signing out is never blocked', async ({ page, settingsPage }) => {
         await mockSettings(page);
         // Keep the real session: the logout call and the user lookup after it are mocked.
