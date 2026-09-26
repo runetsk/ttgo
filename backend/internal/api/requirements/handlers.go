@@ -293,6 +293,7 @@ func (h *Handler) ListChildren(w http.ResponseWriter, r *http.Request) {
 // @Success      201  {object}  models.Requirement
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
 // @Failure      502  {object}  map[string]string
 // @Router       /requirements/import [post]
 func (h *Handler) ImportRequirement(w http.ResponseWriter, r *http.Request) {
@@ -337,6 +338,9 @@ func (h *Handler) ImportRequirement(w http.ResponseWriter, r *http.Request) {
 			httpx.Error(w, http.StatusInternalServerError, err)
 			return
 		}
+		if httpx.WriteSecretError(w, cfg.TokenError()) {
+			return
+		}
 		if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
 			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "Jira integration is not configured"})
 			return
@@ -351,6 +355,9 @@ func (h *Handler) ImportRequirement(w http.ResponseWriter, r *http.Request) {
 		cfg, err := h.store.GetConfluenceConfig()
 		if err != nil {
 			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		if httpx.WriteSecretError(w, cfg.TokenError()) {
 			return
 		}
 		if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
@@ -450,6 +457,7 @@ func (h *Handler) ImportRequirement(w http.ResponseWriter, r *http.Request) {
 // @Success      200  {object}  object{action=string}
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
 // @Failure      502  {object}  map[string]string
 // @Router       /requirements/{id}/resync [post]
 // @Security     BearerAuth
@@ -470,6 +478,9 @@ func (h *Handler) Resync(w http.ResponseWriter, r *http.Request) {
 	switch req.SourceType {
 	case "jira":
 		cfg, err := h.store.GetJiraConfig()
+		if err == nil && httpx.WriteSecretError(w, cfg.TokenError()) {
+			return
+		}
 		if err != nil || cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
 			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "Jira integration is not configured"})
 			return
@@ -481,6 +492,9 @@ func (h *Handler) Resync(w http.ResponseWriter, r *http.Request) {
 		}
 	case "confluence":
 		cfg, err := h.store.GetConfluenceConfig()
+		if err == nil && httpx.WriteSecretError(w, cfg.TokenError()) {
+			return
+		}
 		if err != nil || cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
 			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "Confluence integration is not configured"})
 			return
@@ -688,6 +702,10 @@ func (h *Handler) BulkImport(w http.ResponseWriter, r *http.Request) {
 		switch req.SourceType {
 		case "jira":
 			cfg, err := h.store.GetJiraConfig()
+			if tokErr := cfg.TokenError(); err == nil && tokErr != nil {
+				failed = append(failed, failedItem{SourceKey: key, Reason: tokErr.Error()})
+				continue
+			}
 			if err != nil || cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
 				failed = append(failed, failedItem{SourceKey: key, Reason: "Jira integration is not configured"})
 				continue
@@ -699,6 +717,10 @@ func (h *Handler) BulkImport(w http.ResponseWriter, r *http.Request) {
 			}
 		case "confluence":
 			cfg, err := h.store.GetConfluenceConfig()
+			if tokErr := cfg.TokenError(); err == nil && tokErr != nil {
+				failed = append(failed, failedItem{SourceKey: key, Reason: tokErr.Error()})
+				continue
+			}
 			if err != nil || cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
 				failed = append(failed, failedItem{SourceKey: key, Reason: "Confluence integration is not configured"})
 				continue
@@ -922,6 +944,9 @@ func (h *Handler) PostToJira(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.store.GetJiraConfig()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if httpx.WriteSecretError(w, cfg.TokenError()) {
 		return
 	}
 	if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {

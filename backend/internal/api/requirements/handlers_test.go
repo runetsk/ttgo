@@ -11,6 +11,7 @@ import (
 	api "ttgo/internal/api"
 	"ttgo/internal/api/requirements"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/secretbox"
 	"ttgo/pkg/tracker/store"
 
 	"github.com/microcosm-cc/bluemonday"
@@ -580,4 +581,43 @@ func TestPostToJira_JiraNotConfigured(t *testing.T) {
 	require.NoError(t, st.CreateImportedRequirement(r))
 	w := do(t, st, "POST", "/api/requirements/"+r.ID+"/post-to-jira", nil)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+func plantUndecryptableToken(t *testing.T, st *store.Store, table string) {
+	t.Helper()
+	box, err := secretbox.New([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	foreign, err := box.Encrypt("token-1234")
+	require.NoError(t, err)
+	require.NoError(t, st.DB().Exec("UPDATE "+table+" SET api_token = ? WHERE id = ?", foreign, "singleton").Error)
+}
+
+func TestImport_UndecryptableTokenSays422(t *testing.T) {
+	st := newStore(t)
+	_, err := st.UpsertJiraConfig("https://example.atlassian.net", "u@e.com", "token-1234", true, "PROJ", "Bug")
+	require.NoError(t, err)
+	_, err = st.UpsertConfluenceConfig("https://example.atlassian.net", "u@e.com", "token-1234", true)
+	require.NoError(t, err)
+	plantUndecryptableToken(t, st, "jira_configs")
+	plantUndecryptableToken(t, st, "confluence_configs")
+
+	for _, src := range []struct{ typ, key, subject string }{
+		{"jira", "PROJ-1", "Jira API token"},
+		{"confluence", "123", "Confluence API token"},
+	} {
+		w := do(t, st, "POST", "/api/requirements/import", map[string]string{"source_type": src.typ, "source_key": src.key})
+		require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), src.subject+": the stored key can't be decrypted — re-enter it")
+
+		// Bulk import reports it per key, like its other failures.
+		w = do(t, st, "POST", "/api/requirements/bulk-import", map[string]interface{}{"source_type": src.typ, "source_keys": []string{src.key}})
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		assert.Contains(t, w.Body.String(), src.subject+": the stored key can't be decrypted — re-enter it")
+	}
+
+	imported := &models.Requirement{Identifier: "PROJ-7", Title: "t", SourceType: "jira", SourceKey: "PROJ-7"}
+	require.NoError(t, st.CreateImportedRequirement(imported))
+	w := do(t, st, "POST", "/api/requirements/"+imported.ID+"/resync", nil)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	w = do(t, st, "POST", "/api/requirements/"+imported.ID+"/post-to-jira", nil)
+	require.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
 }
