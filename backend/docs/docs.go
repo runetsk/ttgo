@@ -7632,7 +7632,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Vendor master switch, pinned model, per-feature switches and the API key's status (missing | ok | undecryptable). The key itself is never returned.",
+                "description": "Vendor master switch, pinned model, per-feature switches and the API key's status (missing | ok | undecryptable). The key itself is never returned. price_per_mtok is the USD price per million input tokens.",
                 "produces": [
                     "application/json"
                 ],
@@ -7662,7 +7662,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300. escalate_below_pct must be 0..100 (0 = never ask the LLM to decide).",
+                "description": "Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300. escalate_below_pct must be 0..100 (0 = never ask the LLM to decide). price_per_mtok (USD per million TypeSafe input tokens, used for failure-analysis cost and budgets) must be \u003e= 0.",
                 "consumes": [
                     "application/json"
                 ],
@@ -10711,6 +10711,9 @@ const docTemplate = `{
                 "narrative_enabled": {
                     "type": "boolean"
                 },
+                "price_per_mtok": {
+                    "type": "number"
+                },
                 "semantic_dedup_enabled": {
                     "type": "boolean"
                 },
@@ -10755,6 +10758,9 @@ const docTemplate = `{
                 },
                 "narrative_enabled": {
                     "type": "boolean"
+                },
+                "price_per_mtok": {
+                    "type": "number"
                 },
                 "semantic_dedup_enabled": {
                     "type": "boolean"

@@ -14,7 +14,7 @@ import (
 // GetTypeSafeSettings returns the TypeSafe.ai configuration with the key masked.
 //
 // @Summary      TypeSafe settings
-// @Description  Vendor master switch, pinned model, per-feature switches and the API key's status (missing | ok | undecryptable). The key itself is never returned.
+// @Description  Vendor master switch, pinned model, per-feature switches and the API key's status (missing | ok | undecryptable). The key itself is never returned. price_per_mtok is the USD price per million input tokens.
 // @Tags         ai-settings
 // @Produce      json
 // @Success      200  {object}  models.TypeSafeSettingsResponse
@@ -33,7 +33,7 @@ func (h *Handler) GetTypeSafeSettings(w http.ResponseWriter, r *http.Request) {
 // UpdateTypeSafeSettings applies a partial update (admin).
 //
 // @Summary      Update TypeSafe settings
-// @Description  Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300. escalate_below_pct must be 0..100 (0 = never ask the LLM to decide).
+// @Description  Partial update. An omitted or blank api_key preserves the stored key; clear_api_key removes it; both together is rejected. timeout_seconds must be 5..300. escalate_below_pct must be 0..100 (0 = never ask the LLM to decide). price_per_mtok (USD per million TypeSafe input tokens, used for failure-analysis cost and budgets) must be >= 0.
 // @Tags         ai-settings
 // @Accept       json
 // @Produce      json
@@ -59,6 +59,10 @@ func (h *Handler) UpdateTypeSafeSettings(w http.ResponseWriter, r *http.Request)
 	}
 	if p.TimeoutSeconds != nil && (*p.TimeoutSeconds < 5 || *p.TimeoutSeconds > 300) {
 		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "timeout_seconds must be between 5 and 300"})
+		return
+	}
+	if p.PricePerMTok != nil && *p.PricePerMTok < 0 {
+		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": "price_per_mtok must be >= 0"})
 		return
 	}
 	if p.EscalateBelowPct != nil && (*p.EscalateBelowPct < 0 || *p.EscalateBelowPct > 100) {

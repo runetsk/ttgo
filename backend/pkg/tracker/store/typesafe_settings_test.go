@@ -145,3 +145,29 @@ func TestTypeSafeSettings_PlaintextKeyIsRejectedUntilBackfilled(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "plain-text-key-1234", key)
 }
+func TestTypeSafeSettings_PricePerMTok(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetTypeSafeSettings()
+	require.NoError(t, err)
+	require.InDelta(t, models.TypeSafeDefaultPricePerMTok, got.PricePerMTok, 1e-12, "seeded at the default price")
+
+	zero := 0.0
+	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{PricePerMTok: &zero})
+	require.NoError(t, err)
+	resp, err := s.TypeSafeSettingsResponse()
+	require.NoError(t, err)
+	require.Zero(t, resp.PricePerMTok, "an explicit 0 (free) persists")
+
+	half := 0.5
+	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{PricePerMTok: &half})
+	require.NoError(t, err)
+	resp, err = s.TypeSafeSettingsResponse()
+	require.NoError(t, err)
+	require.InDelta(t, 0.5, resp.PricePerMTok, 1e-12)
+
+	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{Model: tsStr("jev-1.14.0")})
+	require.NoError(t, err)
+	resp, err = s.TypeSafeSettingsResponse()
+	require.NoError(t, err)
+	require.InDelta(t, 0.5, resp.PricePerMTok, 1e-12, "a patch without the price leaves it alone")
+}

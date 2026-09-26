@@ -17,7 +17,7 @@ func (s *Store) seedTypeSafeSettings() error {
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		now := time.Now()
 		row = models.TypeSafeSettings{
-			ID: models.TypeSafeSettingsID, Enabled: false, Model: models.TypeSafeDefaultModel,
+			ID: models.TypeSafeSettingsID, Enabled: false, Model: models.TypeSafeDefaultModel, PricePerMTok: models.TypeSafeDefaultPricePerMTok,
 			TimeoutSeconds: 30, VerdictEngineEnabled: true, NarrativeEnabled: true, LLMFallbackEnabled: true, SemanticDedupEnabled: true,
 			AllowAutoFailureAnalysis: false, CreatedAt: now, UpdatedAt: now,
 		}
@@ -53,7 +53,7 @@ func (s *Store) TypeSafeSettingsResponse() (models.TypeSafeSettingsResponse, err
 		return models.TypeSafeSettingsResponse{}, err
 	}
 	resp := models.TypeSafeSettingsResponse{
-		ID: row.ID, Enabled: row.Enabled, Model: row.Model, TimeoutSeconds: row.TimeoutSeconds,
+		ID: row.ID, Enabled: row.Enabled, Model: row.Model, TimeoutSeconds: row.TimeoutSeconds, PricePerMTok: row.PricePerMTok,
 		VerdictEngineEnabled: row.VerdictEngineEnabled, NarrativeEnabled: row.NarrativeEnabled, LLMFallbackEnabled: row.LLMFallbackEnabled,
 		EscalateBelowPct: row.EscalateBelowPct, SemanticDedupEnabled: row.SemanticDedupEnabled,
 		AllowAutoFailureAnalysis: row.AllowAutoFailureAnalysis, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
@@ -91,6 +91,9 @@ func (s *Store) UpdateTypeSafeSettings(p models.TypeSafeSettingsPatch) (*models.
 	}
 	if p.TimeoutSeconds != nil {
 		updates["timeout_seconds"] = *p.TimeoutSeconds
+	}
+	if p.PricePerMTok != nil {
+		updates["price_per_mtok"] = *p.PricePerMTok
 	}
 	if p.VerdictEngineEnabled != nil {
 		updates["verdict_engine_enabled"] = *p.VerdictEngineEnabled

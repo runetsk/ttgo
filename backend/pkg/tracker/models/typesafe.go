@@ -9,6 +9,9 @@ const TypeSafeSettingsID = "singleton"
 // thresholds are tuned per model version.
 const TypeSafeDefaultModel = "jev-1.13.0"
 
+// TypeSafeDefaultPricePerMTok is the seeded USD price per million TypeSafe input tokens.
+const TypeSafeDefaultPricePerMTok = 0.042
+
 // API key status values reported by TypeSafeSettingsResponse.
 const (
 	TypeSafeKeyStatusMissing       = "missing"
@@ -25,6 +28,10 @@ type TypeSafeSettings struct {
 	APIKey         string `json:"-" gorm:"column:api_key"` // encrypted at rest (strict), never serialised
 	Model          string `json:"model" gorm:"not null;default:'jev-1.13.0'"`
 	TimeoutSeconds int    `json:"timeout_seconds" gorm:"not null;default:30"`
+	// PricePerMTok is the USD price per million TypeSafe input tokens. Failure analysis uses it
+	// to price each TypeSafe call in the cost ledger and to estimate a start against the AI
+	// budgets. 0 = free.
+	PricePerMTok float64 `json:"price_per_mtok" gorm:"column:price_per_mtok;not null;default:0.042"`
 	// VerdictEngineEnabled: TypeSafe decides verdict + defect-type suggestion.
 	VerdictEngineEnabled bool `json:"verdict_engine_enabled" gorm:"not null;default:true"`
 	// NarrativeEnabled: after TypeSafe decides, the default LLM provider writes the summary,
@@ -61,6 +68,7 @@ type TypeSafeSettingsResponse struct {
 	APIKeyStatus             string    `json:"api_key_status"` // missing | ok | undecryptable
 	Model                    string    `json:"model"`
 	TimeoutSeconds           int       `json:"timeout_seconds"`
+	PricePerMTok             float64   `json:"price_per_mtok"`
 	VerdictEngineEnabled     bool      `json:"verdict_engine_enabled"`
 	NarrativeEnabled         bool      `json:"narrative_enabled"`
 	LLMFallbackEnabled       bool      `json:"llm_fallback_enabled"`
@@ -74,15 +82,16 @@ type TypeSafeSettingsResponse struct {
 // TypeSafeSettingsPatch is a partial update; nil fields are left alone. A nil or empty
 // APIKey preserves the stored key; ClearAPIKey blanks it. Both together is an error.
 type TypeSafeSettingsPatch struct {
-	Enabled                  *bool   `json:"enabled"`
-	APIKey                   *string `json:"api_key"`
-	ClearAPIKey              bool    `json:"clear_api_key"`
-	Model                    *string `json:"model"`
-	TimeoutSeconds           *int    `json:"timeout_seconds"`
-	VerdictEngineEnabled     *bool   `json:"verdict_engine_enabled"`
-	NarrativeEnabled         *bool   `json:"narrative_enabled"`
-	LLMFallbackEnabled       *bool   `json:"llm_fallback_enabled"`
-	EscalateBelowPct         *int    `json:"escalate_below_pct"`
-	SemanticDedupEnabled     *bool   `json:"semantic_dedup_enabled"`
-	AllowAutoFailureAnalysis *bool   `json:"allow_auto_failure_analysis"`
+	Enabled                  *bool    `json:"enabled"`
+	APIKey                   *string  `json:"api_key"`
+	ClearAPIKey              bool     `json:"clear_api_key"`
+	Model                    *string  `json:"model"`
+	TimeoutSeconds           *int     `json:"timeout_seconds"`
+	PricePerMTok             *float64 `json:"price_per_mtok"`
+	VerdictEngineEnabled     *bool    `json:"verdict_engine_enabled"`
+	NarrativeEnabled         *bool    `json:"narrative_enabled"`
+	LLMFallbackEnabled       *bool    `json:"llm_fallback_enabled"`
+	EscalateBelowPct         *int     `json:"escalate_below_pct"`
+	SemanticDedupEnabled     *bool    `json:"semantic_dedup_enabled"`
+	AllowAutoFailureAnalysis *bool    `json:"allow_auto_failure_analysis"`
 }
