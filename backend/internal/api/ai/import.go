@@ -65,9 +65,13 @@ func (h *Handler) ParseImport(w http.ResponseWriter, r *http.Request) {
 		llmCases, debug, llmErr := h.llmParseImportFallback(r.Context(), req.Content)
 		if llmErr != nil {
 			slog.WarnContext(r.Context(), "ai_import: LLM fallback also failed", "error", llmErr)
-			httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{
+			body := map[string]string{
 				"error": "Unable to parse any test cases from the provided content. Supported formats: JSON array, markdown table, numbered/bulleted list, CSV. AI-powered parsing also failed: " + llmErr.Error(),
-			})
+			}
+			if llm.Classify(llmErr) == llm.ErrCatConfiguration {
+				body["category"] = string(llm.ErrCatConfiguration)
+			}
+			httpx.JSON(w, http.StatusUnprocessableEntity, body)
 			return
 		}
 		if len(llmCases) == 0 {
@@ -297,6 +301,9 @@ func (h *Handler) llmParseImportFallback(ctx context.Context, rawContent string)
 	}
 
 	provider, err := llm.NewProvider(providerCfg)
+	if llm.Classify(err) == llm.ErrCatConfiguration {
+		return nil, nil, err // already says which key and what to do
+	}
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to initialize LLM provider: %w", err)
 	}

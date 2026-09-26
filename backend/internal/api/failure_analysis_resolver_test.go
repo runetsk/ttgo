@@ -4,7 +4,9 @@ import (
 	"context"
 	"testing"
 	"ttgo/pkg/tracker/failureanalysis"
+	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/secretbox"
 	"ttgo/pkg/tracker/store"
 	"ttgo/pkg/tracker/typesafe"
 
@@ -241,4 +243,43 @@ func TestResolver_MissingKeyIsTypeSafeUnavailableNotAnLLMRoute(t *testing.T) {
 		failureanalysis.AnalyzeContext{Result: &models.RunResult{ID: "r", ErrorMessage: "boom"}})
 	require.ErrorIs(t, aerr, failureanalysis.ErrTypeSafeUnavailable)
 	require.Equal(t, "configuration", failureanalysis.FailedResult(aerr, d.Analyze()).ErrorCategory)
+}
+func TestResolver_UndecryptableLLMKey(t *testing.T) {
+	s := resolverStore(t)
+	cfg, err := s.GetDefaultProviderConfig()
+	require.NoError(t, err)
+	box, err := secretbox.New([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	foreign, err := box.Encrypt("k")
+	require.NoError(t, err)
+	require.NoError(t, s.DB().Exec("UPDATE llm_provider_configs SET api_key = ? WHERE id = ?", foreign, cfg.ID).Error)
+	resolve := newAnalyzeDepsResolver(s, typesafe.NewClientFactory(nil))
+
+	// The LLM has to decide (TypeSafe off): the job runs and every attempt is recorded as failed
+	// with category configuration, so the card says what to fix.
+	d, err := resolve(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.NotNil(t, d.Narrative)
+	_, cerr := d.Narrative.Chat(context.Background(), llm.ChatRequest{})
+	require.ErrorIs(t, cerr, models.ErrSecretUndecryptable)
+	require.Equal(t, "configuration", failureanalysis.FailedResult(cerr, d.Analyze()).ErrorCategory)
+
+	// Explain never gets a provider that can only fail: it says why instead.
+	e, err := resolve(failureanalysis.TriggerExplain)
+	require.NoError(t, err)
+	require.Nil(t, e.Narrative)
+	require.Equal(t, "the default LLM provider's stored key can't be decrypted — re-enter it", e.LLMUnavailableReason)
+
+	// An automatic run with nothing else to decide cannot run at all; non-secret edits still work.
+	approveProviderForAuto(t, s)
+	_, err = resolve(models.RunAnalysisJobTriggerAutoOnDone)
+	require.ErrorIs(t, err, models.ErrSecretUndecryptable)
+
+	// With TypeSafe deciding, the LLM is simply left out.
+	enableTypeSafe(t, s, false)
+	d, err = resolve(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.NotNil(t, d.Decider)
+	require.Nil(t, d.Narrative)
+	require.Equal(t, "the default LLM provider's stored key can't be decrypted — re-enter it", d.LLMUnavailableReason)
 }

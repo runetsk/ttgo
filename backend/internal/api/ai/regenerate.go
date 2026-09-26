@@ -159,6 +159,10 @@ func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	provider, err := llm.NewProvider(providerCfg)
+	if llm.Classify(err) == llm.ErrCatConfiguration {
+		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]string{"error": err.Error(), "category": string(llm.ErrCatConfiguration)})
+		return
+	}
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return

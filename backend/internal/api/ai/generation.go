@@ -94,6 +94,9 @@ func (h *Handler) CreateProvider(w http.ResponseWriter, r *http.Request) {
 		CompletionPricePerMTok:   req.CompletionPricePerMTok,
 	}
 	if err := h.store.CreateProviderConfig(cfg); err != nil {
+		if httpx.WriteSecretError(w, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "already exists") {
 			httpx.JSON(w, http.StatusConflict, map[string]string{"error": err.Error()})
 			return
@@ -117,6 +120,7 @@ func (h *Handler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
 		ProviderType             string   `json:"provider_type"`
 		EndpointURL              string   `json:"endpoint_url"`
 		APIKey                   string   `json:"api_key"`
+		ClearAPIKey              bool     `json:"clear_api_key"`
 		ModelName                string   `json:"model_name"`
 		TimeoutSeconds           int      `json:"timeout_seconds"`
 		IsDefault                bool     `json:"is_default"`
@@ -137,6 +141,10 @@ func (h *Handler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	if req.ClearAPIKey && req.APIKey != "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "api_key and clear_api_key are mutually exclusive"})
+		return
+	}
 	updates := map[string]interface{}{
 		"label":                     req.Label,
 		"provider_type":             req.ProviderType,
@@ -155,8 +163,14 @@ func (h *Handler) UpdateProvider(w http.ResponseWriter, r *http.Request) {
 	if req.AllowAutoFailureAnalysis != nil {
 		updates["allow_auto_failure_analysis"] = *req.AllowAutoFailureAnalysis
 	}
+	if req.ClearAPIKey {
+		updates["api_key"] = "" // the way out for a key that can't be decrypted
+	}
 	cfg, err := h.store.UpdateProviderConfig(id, updates, req.APIKey)
 	if err != nil {
+		if httpx.WriteSecretError(w, err) {
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			httpx.Error(w, http.StatusNotFound, err)
 			return
@@ -200,6 +214,13 @@ func (h *Handler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	provider, err := llm.NewProvider(cfg)
+	if llm.Classify(err) == llm.ErrCatConfiguration {
+		// The stored key can't be decrypted: nothing is sent; the admin must re-enter it.
+		httpx.JSON(w, http.StatusUnprocessableEntity, map[string]interface{}{
+			"success": false, "error": err.Error(), "category": string(llm.ErrCatConfiguration),
+		})
+		return
+	}
 	if err != nil {
 		httpx.JSON(w, http.StatusOK, map[string]interface{}{"success": false, "error": err.Error()})
 		return

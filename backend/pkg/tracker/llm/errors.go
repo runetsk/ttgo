@@ -23,6 +23,9 @@ const (
 	ErrCatValidation     ErrorCategory = "validation"
 	ErrCatCancelled      ErrorCategory = "cancellation"
 	ErrCatInternal       ErrorCategory = "internal"
+	// ErrCatConfiguration: a stored setting the call needs is unusable (an API key that can't
+	// be decrypted). Fixed in Settings, never by retrying.
+	ErrCatConfiguration ErrorCategory = "configuration"
 )
 
 // ProviderError is a classified failure from a provider HTTP call.
@@ -33,9 +36,13 @@ type ProviderError struct {
 	Category   ErrorCategory
 	RetryAfter time.Duration
 	Message    string
+	Err        error // the underlying cause, when there is one (errors.Is/As see it)
 }
 
 func (e *ProviderError) Error() string { return e.Message }
+
+// Unwrap exposes the underlying cause (e.g. a *models.SecretError).
+func (e *ProviderError) Unwrap() error { return e.Err }
 
 // Retryable reports whether the failure is transient: rate limits and
 // 5xx/network-level provider failures. Timeouts are NOT retryable — the

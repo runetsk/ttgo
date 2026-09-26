@@ -42,6 +42,10 @@ func (s *Server) ensureAIHandler() *apiai.Handler {
 	return s.aiHandler
 }
 
+// llmKeyUnreadableReason is why the LLM is left out when the default provider's stored key can't
+// be decrypted (frontend/src/utils/analysisFlow.js shows the same words).
+const llmKeyUnreadableReason = "the default LLM provider's stored key can't be decrypted — re-enter it"
+
 // newAnalyzeDepsResolver builds JobDeps from live settings on every call (spec §4 "Resolver"),
 // enforcing consent at execution time rather than only when a job is queued:
 //   - the AI master switch stops everything (ErrAIDisabled);
@@ -53,6 +57,10 @@ func (s *Server) ensureAIHandler() *apiai.Handler {
 //   - an automatic job uses the LLM only when that provider is itself approved for automatic
 //     analysis, checked now, since the default provider may have changed since the job was queued;
 //   - a broken LLM configuration fails the job only when the LLM would have to decide;
+//   - a default LLM key that can't be decrypted: a manual run the LLM must decide still runs and
+//     records each attempt as failed with category configuration; Explain, and runs TypeSafe
+//     decides, leave the LLM out with llmKeyUnreadableReason; an automatic run with nothing else
+//     to decide fails resolution with the key error;
 //   - every TypeSafe client is built through tsf, the process-wide factory with the shared
 //     rate limiter (nil = unlimited, for tests);
 //   - the settings page draws these rules (frontend/src/utils/analysisFlow.js); change both together.
@@ -89,14 +97,23 @@ func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failur
 				deps.LLMUnavailableReason = "the default LLM provider is not approved for automatic analysis"
 			default:
 				p, perr := llm.NewProvider(cfg)
-				if perr != nil {
-					if deps.Decider == nil {
-						return deps, perr
-					}
+				keyUnreadable := llm.Classify(perr) == llm.ErrCatConfiguration
+				switch {
+				case perr == nil:
+					deps.Narrative, deps.NarrativeModel = p, cfg.ModelName
+				case keyUnreadable && deps.Decider == nil && !explain && trigger == models.RunAnalysisJobTriggerManual:
+					// The LLM must decide but its stored key can't be decrypted. Attach a provider that
+					// fails every call, so each attempt is recorded as failed with category configuration
+					// and the card says what to fix, instead of the job failing as a whole.
+					deps.Narrative, deps.NarrativeModel = llm.NewUnavailableProvider(perr), cfg.ModelName
+				case keyUnreadable && (deps.Decider != nil || explain):
+					slog.Warn("failure-analysis: default LLM provider key can't be decrypted; re-enter it in Settings", "err", perr)
+					deps.LLMUnavailableReason = llmKeyUnreadableReason
+				case deps.Decider == nil:
+					return deps, perr
+				default:
 					slog.Warn("failure-analysis: default LLM provider is misconfigured; TypeSafe decides alone", "err", perr)
 					deps.LLMUnavailableReason = "the default LLM provider is misconfigured"
-				} else {
-					deps.Narrative, deps.NarrativeModel = p, cfg.ModelName
 				}
 			}
 		}

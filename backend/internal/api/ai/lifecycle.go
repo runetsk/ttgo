@@ -154,7 +154,7 @@ func httpStatusForCategory(category llm.ErrorCategory) int {
 		return http.StatusGatewayTimeout
 	case llm.ErrCatRateLimit:
 		return http.StatusTooManyRequests
-	case llm.ErrCatParse, llm.ErrCatValidation:
+	case llm.ErrCatParse, llm.ErrCatValidation, llm.ErrCatConfiguration:
 		return http.StatusUnprocessableEntity
 	case llm.ErrCatInternal:
 		return http.StatusInternalServerError
@@ -435,6 +435,14 @@ func (h *Handler) executeGeneration(r *http.Request, req createGenerationRequest
 
 	// ── Execute the run synchronously ──
 	provider, err := llm.NewProvider(providerCfg)
+	if llm.Classify(err) == llm.ErrCatConfiguration {
+		// The provider's stored key can't be decrypted: fail the run with a category the UI and
+		// a replay understand, without calling the provider.
+		h.failRun(run, models.AIGenerationRunStatusFailed, llm.ErrCatConfiguration, err.Error(), time.Now(), 0)
+		return &generationOutcome{status: http.StatusUnprocessableEntity, run: run, payload: map[string]interface{}{
+			"error": err.Error(), "category": string(llm.ErrCatConfiguration), "run_id": run.ID,
+		}}
+	}
 	if err != nil {
 		h.failRun(run, models.AIGenerationRunStatusFailed, llm.ErrCatInternal, err.Error(), time.Now(), 0)
 		return &generationOutcome{status: http.StatusInternalServerError, payload: errorPayload(http.StatusInternalServerError, fmt.Errorf("failed to initialize provider: %w", err))}

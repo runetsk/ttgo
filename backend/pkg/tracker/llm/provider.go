@@ -53,8 +53,13 @@ type Provider interface {
 	Chat(ctx context.Context, req ChatRequest) (*ChatResponse, error)
 }
 
-// NewProvider returns the appropriate Provider implementation for the given config.
+// NewProvider returns the appropriate Provider implementation for the given config. A config
+// whose stored key can't be decrypted is refused with a configuration ProviderError, so no
+// request ever goes out without its key.
 func NewProvider(cfg *models.LLMProviderConfig) (Provider, error) {
+	if err := cfg.KeyError(); err != nil {
+		return nil, &ProviderError{Category: ErrCatConfiguration, Message: err.Error(), Err: err}
+	}
 	switch cfg.ProviderType {
 	case "openai", "gemini", "local":
 		return newOpenAICompatClient(cfg), nil
@@ -63,4 +68,16 @@ func NewProvider(cfg *models.LLMProviderConfig) (Provider, error) {
 	default:
 		return nil, fmt.Errorf("unknown provider type: %s", cfg.ProviderType)
 	}
+}
+
+// unavailableProvider fails every call with the same error.
+type unavailableProvider struct{ err error }
+
+// NewUnavailableProvider returns a Provider whose every Chat call fails with err: a configured
+// provider that cannot be used, so each attempt is recorded as failed with err's category
+// instead of the whole job failing.
+func NewUnavailableProvider(err error) Provider { return unavailableProvider{err: err} }
+
+func (p unavailableProvider) Chat(context.Context, ChatRequest) (*ChatResponse, error) {
+	return nil, p.err
 }
