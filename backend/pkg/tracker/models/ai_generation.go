@@ -342,6 +342,10 @@ type RunAnalysisJobOutcomes struct {
 	ExplanationSkipped int `json:"explanation_skipped"` // decided, explanations switched off
 	TakenOver          int `json:"taken_over"`          // decided by the LLM below the TypeSafe threshold
 	FailedRows         int `json:"failed_rows"`         // failing results left without a decision
+
+	// FailedConfiguration counts representatives that failed on a settings problem (missing
+	// or undecryptable key, unknown model id): retrying cannot help until the settings change.
+	FailedConfiguration int `json:"failed_configuration"`
 }
 
 // GeneratedStep is a single step in a generated test case draft.

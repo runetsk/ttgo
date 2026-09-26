@@ -146,3 +146,25 @@ func TestBackfillFailedAnalyses(t *testing.T) {
 	check(unparseable, models.DecisionStatusFailed, "unparseable")
 	check(realUnknown, models.DecisionStatusOK, "")
 }
+func TestAnalysisJobOutcomes_CountsConfigurationFailures(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	job, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	mk := func(category string, source *string) *models.RunResultAnalysis {
+		out, err := s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: addFailingResult(t, s, runID).ID, JobID: &job.ID,
+			Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow, DecisionStatus: models.DecisionStatusFailed,
+			ErrorCategory: category, SourceAnalysisID: source})
+		require.NoError(t, err)
+		return out
+	}
+	rep := mk("configuration", nil)
+	mk("configuration", &rep.ID) // a clone follows its representative and is not counted again
+	mk("timeout", nil)
+
+	o, err := s.AnalysisJobOutcomes(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, o.Failed)
+	require.Equal(t, 1, o.FailedConfiguration)
+	require.Equal(t, 3, o.FailedRows)
+}

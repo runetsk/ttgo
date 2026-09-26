@@ -261,6 +261,10 @@ func classifyStatus(status int, retryAfter string, body []byte) *Error {
 	msg := truncateBody(body)
 	e := &Error{Status: status, Message: msg}
 	switch {
+	case status == 400 || status == 404:
+		// TypeSafe rejected the request itself or the model/path does not exist: the settings
+		// (model id, base URL) are wrong, and repeating the call cannot help.
+		e.Category = CategoryConfiguration
 	case status == 401:
 		e.Category = CategoryAuth
 	case status == 422:

@@ -265,3 +265,20 @@ func TestEvaluate_CancelledLimiterWaitSendsNothing(t *testing.T) {
 	require.ErrorAs(t, err, &te)
 	require.Equal(t, CategoryNetwork, te.Category)
 }
+func TestEvaluate_400And404AreConfigurationAndNotRetried(t *testing.T) {
+	for _, status := range []int{http.StatusBadRequest, http.StatusNotFound} {
+		var calls int32
+		c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&calls, 1)
+			w.WriteHeader(status)
+			_, _ = w.Write([]byte(`{"detail":"model 'jev-9' not found"}`))
+		})
+		_, err := c.Evaluate(context.Background(), Request{State: "s", Model: "jev-9", Questions: choiceQ()})
+		var te *Error
+		require.ErrorAs(t, err, &te, status)
+		require.Equal(t, CategoryConfiguration, te.Category, status)
+		require.Equal(t, status, te.Status, status)
+		require.False(t, te.Retryable(), status)
+		require.Equal(t, int32(1), atomic.LoadInt32(&calls), status)
+	}
+}

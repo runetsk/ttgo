@@ -17,8 +17,9 @@ const (
 	CategoryNetwork    Category = "network"    // dial/TLS/reset
 	CategoryParse      Category = "parse"      // body not decodable or answers invalid
 	CategoryInternal   Category = "internal"   // any other status (incl. 5xx)
-	// CategoryConfiguration: TypeSafe is selected but not usable as configured (no API key,
-	// or a stored key that cannot be decrypted). Raised by TTGO itself, never by the API.
+	// CategoryConfiguration: TypeSafe is selected but not usable as configured. TTGO raises it
+	// for a missing or undecryptable key; HTTP 400 and 404 (unknown model id, wrong base URL)
+	// map to it too. Never retried: only a settings change helps.
 	CategoryConfiguration Category = "configuration"
 )
 
@@ -40,7 +41,7 @@ func (e *Error) Error() string {
 }
 
 // Retryable: rate limit, overloaded, 5xx and network failures. Never auth, validation,
-// parse, timeout (the timeout is respected, not doubled) or other 4xx.
+// configuration, parse, timeout (the timeout is respected, not doubled) or other 4xx.
 func (e *Error) Retryable() bool {
 	switch e.Category {
 	case CategoryRateLimit, CategoryOverloaded, CategoryNetwork:

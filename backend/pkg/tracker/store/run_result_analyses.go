@@ -188,6 +188,11 @@ func (s *Store) AnalysisJobOutcomes(jobID string) (models.RunAnalysisJobOutcomes
 	if err != nil {
 		return o, err
 	}
+	err = s.db.Raw(`SELECT COUNT(*) FROM run_result_analyses WHERE job_id = ? AND source_analysis_id IS NULL
+		AND decision_status = 'failed' AND error_category = 'configuration'`, jobID).Scan(&o.FailedConfiguration).Error
+	if err != nil {
+		return o, err
+	}
 	err = s.db.Raw(`SELECT COUNT(*) FROM run_result_analyses WHERE job_id = ? AND decision_status = 'failed'`, jobID).
 		Scan(&o.FailedRows).Error
 	return o, err
