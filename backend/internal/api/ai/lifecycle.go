@@ -293,7 +293,7 @@ func (h *Handler) failRun(run *models.AIGenerationRun, status string, category l
 // executes it synchronously.
 //
 // @Summary      Create an AI generation run
-// @Description  Creates an idempotent generation run for a requirement, calls the configured LLM provider with structured output, validates and persists the drafts, and returns the completed run. Replaying a finished idempotency key returns the stored result without calling the provider.
+// @Description  Creates an idempotent generation run for a requirement, calls the configured LLM provider with structured output, validates and persists the drafts, and returns the completed run. Replaying a finished idempotency key returns the stored result without calling the provider. 409 when AI features are switched off.
 // @Tags         ai-generations
 // @Accept       json
 // @Produce      json
@@ -307,6 +307,9 @@ func (h *Handler) failRun(run *models.AIGenerationRun, status string, category l
 // @Router       /ai-generations [post]
 // @Security     BearerAuth
 func (h *Handler) CreateGeneration(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAI(w) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxLifecycleBodyBytes)
 	var req createGenerationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {

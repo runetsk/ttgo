@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
+	"ttgo/internal/api/httpx"
 	"ttgo/internal/api/websocket"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/models"
@@ -105,13 +107,34 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	return row, nil
 }
 
-// aiEnabled reports the global AI master switch; failure analysis enforces it server-side.
+// aiOffMessage is the one wording every AI endpoint answers with while the master switch is off
+// (failureanalysis.ErrAIDisabled carries the same text for the analysis paths).
+const aiOffMessage = "AI features are switched off"
+
+// aiEnabled reports the global AI master switch.
 func (h *Handler) aiEnabled() (bool, error) {
 	fs, err := h.store.GetOrCreateAIFeatureSettings()
 	if err != nil {
 		return false, err
 	}
 	return fs.Enabled, nil
+}
+
+// requireAI enforces the AI master switch for a handler that calls an AI vendor. It writes
+// 409 {"error":"AI features are switched off"} (500 when the setting cannot be read) and
+// returns false when the request must stop. Connection tests and the prompt preview are not
+// gated: admins configure providers before switching AI on, and the preview calls nothing.
+func (h *Handler) requireAI(w http.ResponseWriter) bool {
+	on, err := h.aiEnabled()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return false
+	}
+	if !on {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": aiOffMessage})
+		return false
+	}
+	return true
 }
 
 func ptrOrNil(s string) *string {

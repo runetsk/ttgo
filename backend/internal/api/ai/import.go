@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html"
 	"net/http"
@@ -30,7 +31,7 @@ const maxImportTestCases = 50
 // handleParseImport parses raw AI-generated content into structured test cases.
 //
 // @Summary      Parse import content
-// @Description  Parse raw AI-generated or pasted content into structured test cases. Supports JSON, markdown table, numbered list, CSV formats with LLM fallback.
+// @Description  Parse raw AI-generated or pasted content into structured test cases. Supports JSON, markdown table, numbered list, CSV formats with LLM fallback. While AI features are switched off the LLM fallback is skipped (same 422 as when no provider is configured); the deterministic parsers always run.
 // @Tags         ai-import
 // @Accept       json
 // @Produce      json
@@ -262,6 +263,13 @@ func (h *Handler) AcceptImport(w http.ResponseWriter, r *http.Request) {
 // test cases from unstructured content when deterministic parsers fail.
 // Returns drafts and debug info (duration, model, usage, etc.).
 func (h *Handler) llmParseImportFallback(ctx context.Context, rawContent string) ([]models.GeneratedTestCase, map[string]interface{}, error) {
+	// Only this step is an AI feature; the deterministic parsers always run. With AI off the
+	// fallback reports itself unavailable, like the "no provider configured" case.
+	if on, err := h.aiEnabled(); err != nil {
+		return nil, nil, fmt.Errorf("AI settings unavailable: %w", err)
+	} else if !on {
+		return nil, nil, errors.New(aiOffMessage)
+	}
 	start := time.Now()
 
 	// Find an enabled provider (prefer default).

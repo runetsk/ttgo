@@ -177,11 +177,7 @@ func (h *Handler) EnqueueRunAnalysis(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "no failing results in this run"})
 		return
 	}
-	if on, err := h.aiEnabled(); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
-	} else if !on {
-		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "AI features are switched off"})
+	if !h.requireAI(w) {
 		return
 	}
 	userID := authctx.ActorID(r.Context())
@@ -309,11 +305,7 @@ func (h *Handler) RetryFailedRunAnalysis(w http.ResponseWriter, r *http.Request)
 		httpx.Error(w, http.StatusNotFound, fmt.Errorf("test run not found"))
 		return
 	}
-	if on, err := h.aiEnabled(); err != nil {
-		httpx.Error(w, http.StatusInternalServerError, err)
-		return
-	} else if !on {
-		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "AI features are switched off"})
+	if !h.requireAI(w) {
 		return
 	}
 	failed, err := h.store.FailedResultIDsForRun(runID)

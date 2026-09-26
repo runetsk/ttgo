@@ -479,7 +479,7 @@ func (h *Handler) ResetParentTemplate(w http.ResponseWriter, r *http.Request) {
 // ttgo CLI, internal/cli/client/ai.go, depends on this contract).
 //
 // @Summary      Generate test cases from a requirement (deprecated)
-// @Description  Deprecated: use POST /ai-generations. Delegates to the durable generation lifecycle so runs are persisted; the legacy request/response shape is unchanged.
+// @Description  Deprecated: use POST /ai-generations. Delegates to the durable generation lifecycle so runs are persisted; the legacy request/response shape is unchanged. 409 when AI features are switched off.
 // @Tags         ai-generations
 // @Deprecated
 // @Accept       json
@@ -494,6 +494,9 @@ func (h *Handler) ResetParentTemplate(w http.ResponseWriter, r *http.Request) {
 // @Router       /requirements/{id}/generate-tests [post]
 // @Security     BearerAuth
 func (h *Handler) GenerateTests(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAI(w) {
+		return
+	}
 	requirementID := r.PathValue("id")
 
 	var req struct {

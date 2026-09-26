@@ -72,7 +72,7 @@ func buildRegenerationPrompt(req *models.Requirement, original models.DraftConte
 // RegenerateDraft creates an alternative version of one pending draft.
 //
 // @Summary      Regenerate one AI draft
-// @Description  Calls the provider with a focused revision prompt and persists the result as a NEW pending alternative (original untouched, versions retained). Choose between them via the choose endpoint.
+// @Description  Calls the provider with a focused revision prompt and persists the result as a NEW pending alternative (original untouched, versions retained). Choose between them via the choose endpoint. 409 when AI features are switched off.
 // @Tags         ai-generations
 // @Accept       json
 // @Produce      json
@@ -87,6 +87,9 @@ func buildRegenerationPrompt(req *models.Requirement, original models.DraftConte
 // @Router       /ai-generations/{id}/drafts/{draft_id}/regenerate [post]
 // @Security     BearerAuth
 func (h *Handler) RegenerateDraft(w http.ResponseWriter, r *http.Request) {
+	if !h.requireAI(w) {
+		return
+	}
 	runID := r.PathValue("id")
 	draft, err := h.getRunDraft(runID, r.PathValue("draft_id"))
 	if err != nil {

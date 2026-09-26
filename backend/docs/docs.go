@@ -140,7 +140,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Creates an idempotent generation run for a requirement, calls the configured LLM provider with structured output, validates and persists the drafts, and returns the completed run. Replaying a finished idempotency key returns the stored result without calling the provider.",
+                "description": "Creates an idempotent generation run for a requirement, calls the configured LLM provider with structured output, validates and persists the drafts, and returns the completed run. Replaying a finished idempotency key returns the stored result without calling the provider. 409 when AI features are switched off.",
                 "consumes": [
                     "application/json"
                 ],
@@ -579,7 +579,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Calls the provider with a focused revision prompt and persists the result as a NEW pending alternative (original untouched, versions retained). Choose between them via the choose endpoint.",
+                "description": "Calls the provider with a focused revision prompt and persists the result as a NEW pending alternative (original untouched, versions retained). Choose between them via the choose endpoint. 409 when AI features are switched off.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3365,7 +3365,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Parse raw AI-generated or pasted content into structured test cases. Supports JSON, markdown table, numbered list, CSV formats with LLM fallback.",
+                "description": "Parse raw AI-generated or pasted content into structured test cases. Supports JSON, markdown table, numbered list, CSV formats with LLM fallback. While AI features are switched off the LLM fallback is skipped (same 422 as when no provider is configured); the deterministic parsers always run.",
                 "consumes": [
                     "application/json"
                 ],
@@ -3952,7 +3952,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Deprecated: use POST /ai-generations. Delegates to the durable generation lifecycle so runs are persisted; the legacy request/response shape is unchanged.",
+                "description": "Deprecated: use POST /ai-generations. Delegates to the durable generation lifecycle so runs are persisted; the legacy request/response shape is unchanged. 409 when AI features are switched off.",
                 "consumes": [
                     "application/json"
                 ],
