@@ -10,7 +10,7 @@ import (
 // AIGenerationReportEndpoint serves the generation outcome/cost report.
 //
 // @Summary      AI generation summary report
-// @Description  Aggregated run outcomes, draft feedback (accepted unchanged/edited, rejected with reasons, superseded), token/cost totals, and provider comparisons for a date window (default last 30 days).
+// @Description  Aggregated run outcomes, draft feedback (accepted unchanged/edited, rejected with reasons, superseded), token/cost totals, and provider comparisons for a date window (default last 30 days). Includes an analysis block: failure-analysis cost in the same window (cost_usd, typesafe_cost_usd, llm_cost_usd, explain_cost_usd, events).
 // @Tags         ai-generations
 // @Produce      json
 // @Param        start_date  query  string  false  "YYYY-MM-DD"

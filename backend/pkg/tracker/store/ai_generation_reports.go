@@ -47,6 +47,9 @@ type AIGenerationReport struct {
 	} `json:"drafts"`
 	RejectionReasons map[string]int       `json:"rejection_reasons"`
 	Providers        []AIGenProviderStats `json:"providers"`
+
+	// Analysis is failure-analysis spend in the same window, from the cost ledger.
+	Analysis AnalysisCostSummary `json:"analysis"`
 }
 
 // GetAIGenerationReport aggregates runs, draft outcomes, rejection reasons,
@@ -220,5 +223,10 @@ func (s *Store) GetAIGenerationReport(start, end time.Time) (*AIGenerationReport
 			TotalTokens: row.TotalTokens, CostUSD: row.Cost, AvgDurationMs: int64(row.AvgDur),
 		})
 	}
+	analysis, err := s.AnalysisCostReport(start, end)
+	if err != nil {
+		return nil, err
+	}
+	rep.Analysis = analysis
 	return rep, nil
 }

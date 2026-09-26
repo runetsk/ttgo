@@ -9,27 +9,31 @@ import (
 	"ttgo/internal/api/httpx"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/store"
 )
 
-// aiBudgetResponse is the budget settings plus the estimated spend of generation attempts since
-// the start of the month, so Settings → AI can show spend against the monthly budget.
+// aiBudgetResponse is the budget settings plus the estimated spend since the start of the
+// month, in total and split between test generation and failure analysis, so Settings → AI can
+// show spend against the monthly budget.
 type aiBudgetResponse struct {
 	*models.AIBudgetSettings
-	MonthSpentUSD float64 `json:"month_spent_usd"`
-}
-
-// monthStartUTC is the start of the calendar month (UTC) that the monthly budget counts from.
-func monthStartUTC(now time.Time) time.Time {
-	now = now.UTC()
-	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	MonthSpentUSD           float64 `json:"month_spent_usd"`
+	MonthSpentGenerationUSD float64 `json:"month_spent_generation_usd"`
+	MonthSpentAnalysisUSD   float64 `json:"month_spent_analysis_usd"`
 }
 
 func (h *Handler) budgetResponse(cfg *models.AIBudgetSettings) (aiBudgetResponse, error) {
-	spent, err := h.store.SumEstimatedCostSince(monthStartUTC(time.Now()))
+	since := store.MonthStartUTC(time.Now())
+	gen, err := h.store.SumGenerationCostSince(since)
 	if err != nil {
 		return aiBudgetResponse{}, err
 	}
-	return aiBudgetResponse{AIBudgetSettings: cfg, MonthSpentUSD: spent}, nil
+	analysis, err := h.store.SumAnalysisCostSince(since)
+	if err != nil {
+		return aiBudgetResponse{}, err
+	}
+	return aiBudgetResponse{AIBudgetSettings: cfg, MonthSpentUSD: gen + analysis,
+		MonthSpentGenerationUSD: gen, MonthSpentAnalysisUSD: analysis}, nil
 }
 
 // GetAIBudgetSettings returns the soft budget configuration.
@@ -37,7 +41,7 @@ func (h *Handler) budgetResponse(cfg *models.AIBudgetSettings) (aiBudgetResponse
 // @Summary  Get AI budget settings
 // @Tags     ai-settings
 // @Produce  json
-// @Success  200 {object} models.AIBudgetSettings "settings plus month_spent_usd: estimated spend since the 1st (UTC)"
+// @Success  200 {object} models.AIBudgetSettings "settings plus month_spent_usd (estimated spend since the 1st, UTC) split into month_spent_generation_usd and month_spent_analysis_usd"
 // @Router   /settings/ai-budgets [get]
 // @Security BearerAuth
 func (h *Handler) GetAIBudgetSettings(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +65,7 @@ func (h *Handler) GetAIBudgetSettings(w http.ResponseWriter, r *http.Request) {
 // @Accept   json
 // @Produce  json
 // @Param    body body object true "per_request_usd, monthly_usd (0 = off)"
-// @Success  200 {object} models.AIBudgetSettings "settings plus month_spent_usd: estimated spend since the 1st (UTC)"
+// @Success  200 {object} models.AIBudgetSettings "settings plus month_spent_usd (estimated spend since the 1st, UTC) split into month_spent_generation_usd and month_spent_analysis_usd"
 // @Router   /settings/ai-budgets [put]
 // @Security BearerAuth
 func (h *Handler) UpdateAIBudgetSettings(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +130,7 @@ func (h *Handler) checkBudget(cfg *models.LLMProviderConfig, promptChars, maxCom
 		}
 	}
 	if budgets.MonthlyUSD > 0 {
-		spent, err := h.store.SumEstimatedCostSince(monthStartUTC(time.Now()))
+		spent, err := h.store.SumEstimatedCostSince(store.MonthStartUTC(time.Now()))
 		if err == nil && spent+*estimate > budgets.MonthlyUSD {
 			return map[string]interface{}{
 				"error":    fmt.Sprintf("this call (~$%.4f) would exceed the monthly budget $%.2f (spent $%.4f); resend with acknowledge_budget=true to proceed", *estimate, budgets.MonthlyUSD, spent),

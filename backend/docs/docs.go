@@ -223,7 +223,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Aggregated run outcomes, draft feedback (accepted unchanged/edited, rejected with reasons, superseded), token/cost totals, and provider comparisons for a date window (default last 30 days).",
+                "description": "Aggregated run outcomes, draft feedback (accepted unchanged/edited, rejected with reasons, superseded), token/cost totals, and provider comparisons for a date window (default last 30 days). Includes an analysis block: failure-analysis cost in the same window (cost_usd, typesafe_cost_usd, llm_cost_usd, explain_cost_usd, events).",
                 "produces": [
                     "application/json"
                 ],
@@ -7382,7 +7382,7 @@ const docTemplate = `{
                 "summary": "Get AI budget settings",
                 "responses": {
                     "200": {
-                        "description": "settings plus month_spent_usd: estimated spend since the 1st (UTC)",
+                        "description": "settings plus month_spent_usd (estimated spend since the 1st, UTC) split into month_spent_generation_usd and month_spent_analysis_usd",
                         "schema": {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings"
                         }
@@ -7418,7 +7418,7 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "settings plus month_spent_usd: estimated spend since the 1st (UTC)",
+                        "description": "settings plus month_spent_usd (estimated spend since the 1st, UTC) split into month_spent_generation_usd and month_spent_analysis_usd",
                         "schema": {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.AIBudgetSettings"
                         }

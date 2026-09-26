@@ -203,6 +203,7 @@ func (s *Store) bootstrapDB() error {
 		&models.AIGenerationAttempt{},       // ai-generation stage 6: per-attempt usage
 		&models.AIBudgetSettings{},          // ai-generation stage 6: soft cost budgets
 		&models.TypeSafeSettings{},          // typesafe: vendor settings singleton
+		&models.AIAnalysisCostEvent{},       // failure-analysis cost ledger (one row per billable call)
 	); err != nil {
 		return fmt.Errorf("failed to migrate schema: %w", err)
 	}
