@@ -42,3 +42,12 @@ test('showEndedJob: clean finishes only when watched, problems until dismissed',
     assert.equal(showEndedJob(warn, false, true), false);
     assert.equal(showEndedJob(null, true, false), false);
 });
+
+test('jobSummary: settings failures say retrying will not help yet', () => {
+    const s = jobSummary({ status: 'completed', outcomes: { decided: 1, failed: 2, failed_rows: 3, failed_configuration: 2 } });
+    assert.equal(s.retryable, true, 'Retry failed groups stays available');
+    assert.equal(s.retryHint, "2 groups failed on a settings problem (model id, key). Retrying won't help until the settings are fixed.");
+    assert.equal(jobSummary({ status: 'completed', outcomes: { decided: 1, failed: 1, failed_rows: 1 } }).retryHint, null);
+    assert.match(jobSummary({ status: 'failed', error_message: 'x', outcomes: { failed_rows: 1, failed_configuration: 1 } }).retryHint,
+        /^1 group failed on a settings problem/);
+});

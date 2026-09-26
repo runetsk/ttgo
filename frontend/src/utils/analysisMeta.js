@@ -48,7 +48,7 @@ const ERROR_LABELS = {
     network: 'network error',
     authentication: 'authentication failed',
     authorization: 'not authorized',
-    configuration: 'TypeSafe.ai key missing',
+    configuration: 'settings problem',
 };
 
 export function failureHeading(analysis) {
@@ -58,6 +58,17 @@ export function failureHeading(analysis) {
 
 export function failureMessage(analysis) {
     return (analysis?.summary || '').replace(/^analysis failed\s*:\s*/i, '');
+}
+
+// failureAdvice is the closing line of a failed-attempt card. A settings problem (missing or
+// undecryptable key, unknown model id: error_category "configuration") fails again on every
+// retry, so it points at the settings of the engine that failed instead of at Re-analyze.
+export function failureAdvice(analysis) {
+    if (analysis?.error_category !== 'configuration') return 'No decision was made. Re-analyze to try again.';
+    const where = analysis.engine === 'generative'
+        ? 'the LLM provider settings (model, key)'
+        : 'the TypeSafe.ai settings (model id, key)';
+    return `No decision was made. Check ${where}, then Re-analyze.`;
 }
 
 // explainAction names the button that asks for the missing explanation of a stored TypeSafe

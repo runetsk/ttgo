@@ -89,9 +89,14 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
                             {job.pipeline_label}
                         </span>
                     )}
+                    {summary.retryHint && (
+                        <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 12 }} data-testid="run-analysis-retry-hint">
+                            {summary.retryHint}
+                        </span>
+                    )}
                 </span>
                 {summary.retryable && (
-                    <button onClick={retry} disabled={retrying} className="action-btn" style={{ padding: '4px 12px', fontSize: '0.78rem' }} data-testid="run-analysis-retry-failed">
+                    <button onClick={retry} disabled={retrying} title={summary.retryHint || undefined} className="action-btn" style={{ padding: '4px 12px', fontSize: '0.78rem' }} data-testid="run-analysis-retry-failed">
                         {retrying ? 'Queuing…' : 'Retry failed groups'}
                     </button>
                 )}

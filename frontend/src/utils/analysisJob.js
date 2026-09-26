@@ -9,14 +9,19 @@ export function isTerminalJob(job) {
 
 // jobSummary describes an ended job from its outcome counts (GET /runs/{id}/analysis-job).
 // tone: 'ok' when every group got a decision, 'warn' when some did not, 'error' when the job
-// itself failed. retryable: some failed results still have no decision.
+// itself failed. retryable: some failed results still have no decision. retryHint: some of
+// those failed on a settings problem, which a retry cannot fix (the button stays).
 export function jobSummary(job) {
     if (!isTerminalJob(job)) return null;
     const o = job.outcomes || {};
     const failedRows = o.failed_rows || 0;
     const retryable = failedRows > 0;
+    const configFailed = o.failed_configuration || 0;
+    const retryHint = retryable && configFailed > 0
+        ? `${plural(configFailed, 'group', 'groups')} failed on a settings problem (model id, key). Retrying won't help until the settings are fixed.`
+        : null;
     if (job.status === 'failed') {
-        return { tone: 'error', retryable, text: `AI analysis failed: ${job.error_message || 'unknown error'}.` };
+        return { tone: 'error', retryable, retryHint, text: `AI analysis failed: ${job.error_message || 'unknown error'}.` };
     }
     const parts = [];
     const decided = o.decided || 0;
@@ -32,7 +37,7 @@ export function jobSummary(job) {
     let text = `${head}: ${parts.join(', ')}.`;
     if (retryable) text += ` ${plural(failedRows, 'failed result has', 'failed results have')} no decision yet.`;
     const tone = job.status === 'cancelled' || o.failed ? 'warn' : 'ok';
-    return { tone, retryable, text };
+    return { tone, retryable, retryHint, text };
 }
 
 // showEndedJob: a clean finish is shown only when this page watched the job run; anything that

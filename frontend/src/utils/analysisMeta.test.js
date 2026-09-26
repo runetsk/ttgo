@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { badgeTitle, analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, explainAction, takeoverNote, shouldReplaceAnalysis } from './analysisMeta.js';
+import { badgeTitle, analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, failureAdvice, explainAction, takeoverNote, shouldReplaceAnalysis } from './analysisMeta.js';
 
 const ts = {
     engine: 'typesafe', model_name: 'jev-1.13.0', confidence_score: 0.87, confidence: 'medium',
@@ -89,6 +89,15 @@ test('shouldReplaceAnalysis keeps the newest version on screen', () => {
     assert.equal(shouldReplaceAnalysis({ version: 2 }, { version: 1 }), false, 'explaining an older version does not roll the grid back');
 });
 
-test('failureHeading names a missing TypeSafe key', () => {
-    assert.equal(failureHeading({ error_category: 'configuration' }), 'Analysis failed · TypeSafe.ai key missing');
+test('failureHeading names a settings problem', () => {
+    assert.equal(failureHeading({ error_category: 'configuration' }), 'Analysis failed · settings problem');
+});
+
+test('failureAdvice points a settings failure at the settings instead of Re-analyze', () => {
+    assert.equal(failureAdvice({ error_category: 'timeout' }), 'No decision was made. Re-analyze to try again.');
+    assert.equal(failureAdvice({ engine: 'typesafe', error_category: 'configuration' }),
+        'No decision was made. Check the TypeSafe.ai settings (model id, key), then Re-analyze.');
+    assert.equal(failureAdvice({ engine: 'generative', error_category: 'configuration' }),
+        'No decision was made. Check the LLM provider settings (model, key), then Re-analyze.');
+    assert.equal(failureAdvice(null), 'No decision was made. Re-analyze to try again.');
 });

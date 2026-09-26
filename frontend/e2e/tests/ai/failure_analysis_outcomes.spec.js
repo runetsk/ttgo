@@ -109,4 +109,28 @@ test.describe('AI failure analysis — failed attempts, explanations and job out
         await expect(summary).toHaveCount(0);
         expect(retried).toBe(1);
     });
+
+    test('a settings failure points at the settings, and Retry failed groups says it will not help yet', async ({ page, runDetailPage }) => {
+        const configFailed = {
+            ...FAILED, error_category: 'configuration', run_result_id: failedRow.result.id,
+            summary: 'analysis failed: TypeSafe.ai unavailable and the LLM fallback is off: typesafe: configuration (HTTP 404): model not found',
+        };
+        await page.route(/\/api\/run-results\/[^/]+\/analyses$/, (route) => route.fulfill(json([configFailed])));
+        await page.route(/\/api\/runs\/[^/]+\/analyses\/current$/, (route) => route.fulfill(json({ [failedRow.result.id]: configFailed })));
+        await page.route(/\/api\/runs\/[^/]+\/analysis-job$/, (route) => route.fulfill(json({
+            ...ENDED_JOB, test_run_id: seed.run.id, outcomes: { ...ENDED_JOB.outcomes, failed_configuration: 1 },
+        })));
+        await runDetailPage.open(seed.run.id);
+
+        await expect(page.getByTestId('run-analysis-retry-hint')).toHaveText(
+            "1 group failed on a settings problem (model id, key). Retrying won't help until the settings are fixed.",
+            { timeout: TIMEOUTS.HEAVY_GRID });
+        await expect(page.getByTestId('run-analysis-retry-failed')).toBeEnabled();
+
+        await runDetailPage.expandResultRow(failedRow.tc.name);
+        await page.getByTestId('result-tab-ai').click();
+        await expect(page.getByTestId('analysis-failed-heading')).toContainText('Analysis failed · settings problem');
+        await expect(page.getByTestId('analysis-failed-advice')).toHaveText(
+            'No decision was made. Check the TypeSafe.ai settings (model id, key), then Re-analyze.');
+    });
 });

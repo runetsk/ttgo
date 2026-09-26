@@ -8,7 +8,7 @@ import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
 import { isManualStepResults } from '../utils/stepResults';
 import { isFailureStatus } from '../utils/resultStatus';
-import { analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, explainAction, takeoverNote } from '../utils/analysisMeta.js';
+import { analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, failureAdvice, explainAction, takeoverNote } from '../utils/analysisMeta.js';
 import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
@@ -615,8 +615,8 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
                     <div style={{ fontSize: '0.82rem', fontFamily: 'monospace', color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                         {failureMessage(analysis)}
                     </div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 6 }}>
-                        No decision was made. Re-analyze to try again.
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: 6 }} data-testid="analysis-failed-advice">
+                        {failureAdvice(analysis)}
                     </div>
                 </div>
             ) : compact ? null : (
