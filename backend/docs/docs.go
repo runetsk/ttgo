@@ -2165,6 +2165,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -2233,6 +2242,15 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -2316,6 +2334,15 @@ const docTemplate = `{
                             }
                         }
                     },
+                    "422": {
+                        "description": "Unprocessable Entity",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
                     "502": {
                         "description": "Bad Gateway",
                         "schema": {
@@ -2378,6 +2405,15 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -3443,6 +3479,15 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "422": {
+                        "description": "Unprocessable Entity",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -7370,7 +7415,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Return the current Confluence integration configuration. Returns {\"enabled\": false} when not yet configured.",
+                "description": "Return the current Confluence integration configuration with api_token_status (missing | ok | undecryptable); a token that can't be decrypted never fails this call. Returns {\"enabled\": false} when not yet configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -7402,7 +7447,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Create or update the Confluence integration configuration (base URL, email, API token).",
+                "description": "Create or update the Confluence integration configuration (base URL, email, API token). An empty api_token keeps the stored token as-is; clear_api_token removes it. A token that cannot be encrypted is not saved (500 with the reason).",
                 "consumes": [
                     "application/json"
                 ],
@@ -7427,6 +7472,9 @@ const docTemplate = `{
                                 },
                                 "base_url": {
                                     "type": "string"
+                                },
+                                "clear_api_token": {
+                                    "type": "boolean"
                                 },
                                 "email": {
                                     "type": "string"
@@ -7468,7 +7516,7 @@ const docTemplate = `{
         },
         "/settings/jira": {
             "get": {
-                "description": "Returns the masked Jira configuration. Returns {\"enabled\": false} when not yet configured.",
+                "description": "Returns the masked Jira configuration with api_token_status (missing | ok | undecryptable); a token that can't be decrypted never fails this call. Returns {\"enabled\": false} when not yet configured.",
                 "produces": [
                     "application/json"
                 ],
@@ -7486,7 +7534,7 @@ const docTemplate = `{
                 }
             },
             "put": {
-                "description": "Upserts the workspace Jira configuration. If api_token is empty, the existing token is preserved.",
+                "description": "Upserts the workspace Jira configuration. If api_token is empty the stored token is kept as-is (even one that can't be decrypted); clear_api_token removes it. A token that cannot be encrypted is not saved (500 with the reason).",
                 "consumes": [
                     "application/json"
                 ],
@@ -7512,6 +7560,15 @@ const docTemplate = `{
                                 "base_url": {
                                     "type": "string"
                                 },
+                                "clear_api_token": {
+                                    "type": "boolean"
+                                },
+                                "default_issue_type": {
+                                    "type": "string"
+                                },
+                                "default_project_key": {
+                                    "type": "string"
+                                },
                                 "email": {
                                     "type": "string"
                                 },
@@ -7531,6 +7588,15 @@ const docTemplate = `{
                     },
                     "400": {
                         "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
                         "schema": {
                             "type": "object",
                             "additionalProperties": {
@@ -9797,6 +9863,10 @@ const docTemplate = `{
             "type": "object",
             "properties": {
                 "api_token_masked": {
+                    "type": "string"
+                },
+                "api_token_status": {
+                    "description": "missing | ok | undecryptable",
                     "type": "string"
                 },
                 "base_url": {

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	api "ttgo/internal/api"
+	"ttgo/pkg/tracker/secretbox"
 	"ttgo/pkg/tracker/store"
 
 	"github.com/stretchr/testify/assert"
@@ -132,4 +133,47 @@ func TestListChildPages_NotConfigured(t *testing.T) {
 	st := newStore(t)
 	w := do(t, st, "GET", "/api/confluence/pages/abc/children", nil)
 	assert.Equal(t, http.StatusBadRequest, w.Code)
+}
+func plantUndecryptableToken(t *testing.T, st *store.Store) string {
+	t.Helper()
+	_, err := st.UpsertConfluenceConfig("https://example.atlassian.net", "u@e.com", "token-1234", true)
+	require.NoError(t, err)
+	box, err := secretbox.New([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	foreign, err := box.Encrypt("token-1234")
+	require.NoError(t, err)
+	require.NoError(t, st.DB().Exec("UPDATE confluence_configs SET api_token = ? WHERE id = ?", foreign, "singleton").Error)
+	return foreign
+}
+
+func TestUndecryptableToken_SettingsLoadCallsSay422AndClearWorks(t *testing.T) {
+	st := newStore(t)
+	foreign := plantUndecryptableToken(t, st)
+
+	w := do(t, st, "GET", "/api/settings/confluence", nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), foreign)
+	assert.Contains(t, w.Body.String(), `"api_token_status":"undecryptable"`)
+	assert.Contains(t, w.Body.String(), `"has_token":false`)
+
+	for _, path := range []string{
+		"/api/confluence/spaces",
+		"/api/confluence/pages?space_id=1",
+		"/api/confluence/pages/123",
+		"/api/confluence/pages/123/children",
+	} {
+		w = do(t, st, "GET", path, nil)
+		require.Equal(t, http.StatusUnprocessableEntity, w.Code, path+": "+w.Body.String())
+		assert.Contains(t, w.Body.String(), "Confluence API token: the stored key can't be decrypted — re-enter it")
+	}
+
+	w = do(t, st, "PUT", "/api/settings/confluence", map[string]interface{}{"base_url": "https://example.atlassian.net", "email": "u@e.com", "enabled": false})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var stored string
+	require.NoError(t, st.DB().Raw("SELECT api_token FROM confluence_configs WHERE id = ?", "singleton").Scan(&stored).Error)
+	assert.Equal(t, foreign, stored, "saving the other fields keeps the stored token")
+
+	w = do(t, st, "PUT", "/api/settings/confluence", map[string]interface{}{"base_url": "https://example.atlassian.net", "email": "u@e.com", "clear_api_token": true})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), `"api_token_status":"missing"`)
 }

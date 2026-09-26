@@ -32,7 +32,7 @@ func ValidJiraKey(s string) bool { return jiraKeyRe.MatchString(s) }
 
 // handleGetJiraConfig godoc
 // @Summary      Get Jira integration configuration
-// @Description  Returns the masked Jira configuration. Returns {"enabled": false} when not yet configured.
+// @Description  Returns the masked Jira configuration with api_token_status (missing | ok | undecryptable); a token that can't be decrypted never fails this call. Returns {"enabled": false} when not yet configured.
 // @Tags         jira
 // @Produce      json
 // @Success      200  {object}  models.JiraConfigResponse
@@ -52,19 +52,21 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 
 // handleUpsertJiraConfig godoc
 // @Summary      Create or update Jira integration configuration
-// @Description  Upserts the workspace Jira configuration. If api_token is empty, the existing token is preserved.
+// @Description  Upserts the workspace Jira configuration. If api_token is empty the stored token is kept as-is (even one that can't be decrypted); clear_api_token removes it. A token that cannot be encrypted is not saved (500 with the reason).
 // @Tags         jira
 // @Accept       json
 // @Produce      json
-// @Param        body  body      object{base_url=string,email=string,api_token=string,enabled=bool}  true  "Jira config payload"
+// @Param        body  body      object{base_url=string,email=string,api_token=string,clear_api_token=bool,enabled=bool,default_project_key=string,default_issue_type=string}  true  "Jira config payload"
 // @Success      200  {object}  models.JiraConfigResponse
 // @Failure      400  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
 // @Router       /settings/jira [put]
 func (h *Handler) UpsertConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		BaseURL           string `json:"base_url"`
 		Email             string `json:"email"`
 		APIToken          string `json:"api_token"`
+		ClearAPIToken     bool   `json:"clear_api_token"`
 		Enabled           bool   `json:"enabled"`
 		DefaultProjectKey string `json:"default_project_key"`
 		DefaultIssueType  string `json:"default_issue_type"`
@@ -87,11 +89,28 @@ func (h *Handler) UpsertConfig(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "base_url rejected: " + err.Error()})
 		return
 	}
+	if req.ClearAPIToken && req.APIToken != "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "api_token and clear_api_token are mutually exclusive"})
+		return
+	}
 
 	cfg, err := h.store.UpsertJiraConfig(req.BaseURL, req.Email, req.APIToken, req.Enabled, req.DefaultProjectKey, req.DefaultIssueType)
 	if err != nil {
+		if httpx.WriteSecretError(w, err) {
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
+	}
+	if req.ClearAPIToken {
+		if err := h.store.ClearJiraAPIToken(); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		if cfg, err = h.store.GetJiraConfig(); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	if h.hub != nil {
 		h.hub.Broadcast(apiws.NewEvent(apiws.EventSettingsChanged, "settings:*", map[string]string{"integration": "jira"}))
@@ -108,6 +127,7 @@ func (h *Handler) UpsertConfig(w http.ResponseWriter, r *http.Request) {
 // @Param        ticketId  path      string  true  "Jira issue key, e.g. PROJ-123"
 // @Success      200  {object}  models.JiraTicketResult
 // @Failure      400  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
 // @Router       /jira/ticket/{ticketId} [get]
 func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
 	ticketID := r.PathValue("ticketId")
@@ -119,6 +139,9 @@ func (h *Handler) GetTicket(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg == nil || !cfg.Enabled {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "Jira integration is not enabled. Configure it in Settings."})
+		return
+	}
+	if httpx.WriteSecretError(w, cfg.TokenError()) {
 		return
 	}
 	if cfg.APIToken == "" {
@@ -475,6 +498,9 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.store.GetJiraConfig()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if httpx.WriteSecretError(w, cfg.TokenError()) {
 		return
 	}
 	if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {

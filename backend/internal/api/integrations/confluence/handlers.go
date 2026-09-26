@@ -342,7 +342,7 @@ func FetchConfluencePage(cfg *models.ConfluenceConfig, pageID string, sanitizer 
 // handleGetConfluenceConfig returns the current Confluence integration configuration.
 //
 // @Summary      Get Confluence config
-// @Description  Return the current Confluence integration configuration. Returns {"enabled": false} when not yet configured.
+// @Description  Return the current Confluence integration configuration with api_token_status (missing | ok | undecryptable); a token that can't be decrypted never fails this call. Returns {"enabled": false} when not yet configured.
 // @Tags         confluence
 // @Produce      json
 // @Success      200  {object}  object
@@ -369,11 +369,11 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 // handleUpsertConfluenceConfig creates or updates the Confluence integration configuration.
 //
 // @Summary      Upsert Confluence config
-// @Description  Create or update the Confluence integration configuration (base URL, email, API token).
+// @Description  Create or update the Confluence integration configuration (base URL, email, API token). An empty api_token keeps the stored token as-is; clear_api_token removes it. A token that cannot be encrypted is not saved (500 with the reason).
 // @Tags         confluence
 // @Accept       json
 // @Produce      json
-// @Param        body  body  object{base_url=string,email=string,api_token=string,enabled=bool}  true  "Confluence config"
+// @Param        body  body  object{base_url=string,email=string,api_token=string,clear_api_token=bool,enabled=bool}  true  "Confluence config"
 // @Success      200  {object}  object
 // @Failure      400  {object}  map[string]string
 // @Failure      500  {object}  map[string]string
@@ -381,10 +381,11 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 // @Security     BearerAuth
 func (h *Handler) UpsertConfig(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		BaseURL  string `json:"base_url"`
-		Email    string `json:"email"`
-		APIToken string `json:"api_token"`
-		Enabled  bool   `json:"enabled"`
+		BaseURL       string `json:"base_url"`
+		Email         string `json:"email"`
+		APIToken      string `json:"api_token"`
+		ClearAPIToken bool   `json:"clear_api_token"`
+		Enabled       bool   `json:"enabled"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -402,11 +403,28 @@ func (h *Handler) UpsertConfig(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "base_url rejected: " + err.Error()})
 		return
 	}
+	if req.ClearAPIToken && req.APIToken != "" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "api_token and clear_api_token are mutually exclusive"})
+		return
+	}
 
 	cfg, err := h.store.UpsertConfluenceConfig(req.BaseURL, req.Email, req.APIToken, req.Enabled)
 	if err != nil {
+		if httpx.WriteSecretError(w, err) {
+			return
+		}
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
+	}
+	if req.ClearAPIToken {
+		if err := h.store.ClearConfluenceAPIToken(); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		if cfg, err = h.store.GetConfluenceConfig(); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
 	}
 	if h.hub != nil {
 		h.hub.Broadcast(apiws.NewEvent(apiws.EventSettingsChanged, "settings:*", map[string]string{"integration": "confluence"}))
@@ -425,6 +443,7 @@ func (h *Handler) UpsertConfig(w http.ResponseWriter, r *http.Request) {
 // @Param        limit   query  int     false  "Page size (max 250)"  default(50)
 // @Success      200  {object}  object{spaces=[]object,next_cursor=string}
 // @Failure      400  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
 // @Failure      502  {object}  map[string]string
 // @Router       /confluence/spaces [get]
 // @Security     BearerAuth
@@ -432,6 +451,9 @@ func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.store.GetConfluenceConfig()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if httpx.WriteSecretError(w, cfg.TokenError()) {
 		return
 	}
 	if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
@@ -475,6 +497,7 @@ func (h *Handler) ListSpaces(w http.ResponseWriter, r *http.Request) {
 // @Param        limit     query  int     false  "Page size"  default(25)
 // @Success      200  {object}  object{pages=[]object,next_cursor=string}
 // @Failure      400  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
 // @Failure      502  {object}  map[string]string
 // @Router       /confluence/pages [get]
 // @Security     BearerAuth
@@ -482,6 +505,9 @@ func (h *Handler) ListPages(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.store.GetConfluenceConfig()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if httpx.WriteSecretError(w, cfg.TokenError()) {
 		return
 	}
 	if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
@@ -545,6 +571,7 @@ func (h *Handler) ListPages(w http.ResponseWriter, r *http.Request) {
 // @Param        limit   query  int     false  "Page size"  default(50)
 // @Success      200  {object}  object{pages=[]object,next_cursor=string}
 // @Failure      400  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
 // @Failure      502  {object}  map[string]string
 // @Router       /confluence/pages/{pageId}/children [get]
 // @Security     BearerAuth
@@ -552,6 +579,9 @@ func (h *Handler) ListChildPages(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.store.GetConfluenceConfig()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if httpx.WriteSecretError(w, cfg.TokenError()) {
 		return
 	}
 	if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
@@ -612,6 +642,7 @@ func (h *Handler) ListChildPages(w http.ResponseWriter, r *http.Request) {
 // @Success      200  {object}  object{id=string,title=string,body_html=string,already_imported=bool}
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
+// @Failure      422  {object}  map[string]string
 // @Failure      502  {object}  map[string]string
 // @Router       /confluence/pages/{pageId} [get]
 // @Security     BearerAuth
@@ -619,6 +650,9 @@ func (h *Handler) GetPage(w http.ResponseWriter, r *http.Request) {
 	cfg, err := h.store.GetConfluenceConfig()
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if httpx.WriteSecretError(w, cfg.TokenError()) {
 		return
 	}
 	if cfg == nil || !cfg.Enabled || cfg.APIToken == "" {
