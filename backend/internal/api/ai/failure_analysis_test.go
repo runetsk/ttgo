@@ -260,6 +260,43 @@ func TestCancelRunAnalysisJob_FinishedJobIs409(t *testing.T) {
 		"the completion that won the race must not be overwritten by the losing cancel")
 }
 
+// TestCancelRunAnalysisJob_QueuedIs204 is the happy path: a queued job is cancelled with 204,
+// the run then has no active job, and the cancelled job does not block the next one.
+func TestCancelRunAnalysisJob_QueuedIs204(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+
+	run := createTestRun(t, env, "Run")
+	job, created, err := env.store.MaybeEnqueueForRun(run, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	require.True(t, created)
+
+	rr := doRequest(env, "POST", "/api/runs/"+run+"/analysis-job/cancel", nil)
+	require.Equal(t, http.StatusNoContent, rr.Code, rr.Body.String())
+	require.Empty(t, rr.Body.String())
+
+	got, err := env.store.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.RunAnalysisJobStatusCancelled, got.Status)
+
+	rr = doRequest(env, "GET", "/api/runs/"+run+"/analysis-job", nil)
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+	var view struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &view))
+	require.Equal(t, job.ID, view.ID)
+	require.Equal(t, models.RunAnalysisJobStatusCancelled, view.Status, "the latest job is no longer active")
+
+	rr = doRequest(env, "POST", "/api/runs/"+run+"/analysis-job/cancel", nil)
+	require.Equal(t, http.StatusNotFound, rr.Code, "nothing left to cancel: %s", rr.Body.String())
+
+	_, created, err = env.store.MaybeEnqueueForRun(run, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	require.True(t, created, "a cancelled job does not block the next one")
+}
+
 // ── Valid-run happy paths ────────────────────────────────────────────────
 
 func TestListCurrentAnalysesForEmptyRun_ReturnsEmptyMap(t *testing.T) {
