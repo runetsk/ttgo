@@ -43,6 +43,7 @@ type SemanticDeps struct {
 
 // JobDeps is everything one analysis job needs, resolved per job from live settings.
 // Semantic nil = semantic grouping not permitted for this trigger.
+// Pricing carries the prices in force at resolve time for the cost ledger and budget estimates.
 type JobDeps struct {
 	Narrative            llm.Provider
 	NarrativeModel       string
@@ -53,6 +54,8 @@ type JobDeps struct {
 	NoLLMFallback        bool
 	LLMUnavailableReason string
 	Semantic             *SemanticDeps
+	// Pricing is what this job's calls cost, captured when the dependencies were resolved.
+	Pricing Pricing
 }
 
 // Analyze returns the analyzer-facing subset.
