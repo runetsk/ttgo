@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"ttgo/internal/safehttp"
+	"ttgo/pkg/tracker/callstats"
 )
 
 const (
@@ -243,7 +244,11 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, body []byte) (
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return raw, nil
 	}
-	return nil, classifyStatus(resp.StatusCode, resp.Header.Get("Retry-After"), raw)
+	e := classifyStatus(resp.StatusCode, resp.Header.Get("Retry-After"), raw)
+	if resp.StatusCode == http.StatusTooManyRequests {
+		callstats.RecordRateLimit(ctx) // counted even when a retry then succeeds
+	}
+	return nil, e
 }
 
 func classifyTransport(err error) *Error {

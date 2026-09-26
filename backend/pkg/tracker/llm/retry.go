@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math/rand"
 	"time"
+	"ttgo/pkg/tracker/callstats"
 )
 
 // RetryOptions bounds ChatWithRetry. The zero value uses the defaults below.
@@ -51,7 +52,8 @@ func (o *RetryOptions) withDefaults() RetryOptions {
 // 5xx/network) with bounded exponential backoff plus jitter. It honors a
 // provider Retry-After value when larger than the computed backoff and stops
 // immediately on context cancellation. Returns the response, the number of
-// retries performed, and the last error.
+// retries performed, and the last error. Each rate-limit error is reported to
+// the context's callstats counter, if any.
 func ChatWithRetry(ctx context.Context, p Provider, req ChatRequest, opts RetryOptions) (*ChatResponse, int, error) {
 	o := opts.withDefaults()
 	var lastErr error
@@ -61,6 +63,9 @@ func ChatWithRetry(ctx context.Context, p Provider, req ChatRequest, opts RetryO
 			return resp, attempt, nil
 		}
 		lastErr = err
+		if Classify(err) == ErrCatRateLimit {
+			callstats.RecordRateLimit(ctx) // every 429, including ones a retry then gets past
+		}
 		if ctx.Err() != nil {
 			return nil, attempt, err
 		}
