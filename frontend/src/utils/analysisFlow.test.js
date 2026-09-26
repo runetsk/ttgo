@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { keyState, llmName, buildAnalysisFlow, effectiveDraft, diagramModel } from './analysisFlow.js';
+import { keyState, llmName, buildAnalysisFlow, effectiveDraft, diagramModel, resolveRoute } from './analysisFlow.js';
 
 const TS = {
     enabled: true, api_key: '', clear_api_key: false, api_key_status: 'ok', model: 'jev-1.13.0', timeout_seconds: 30,
@@ -215,4 +215,16 @@ test('diagramModel reads the key status from the saved TypeSafe settings', () =>
     delete form.api_key_status;
     const m = diagramModel({ ...BASE, typesafeCard: ready(form, { ...TS, api_key_status: 'undecryptable' }) });
     assert.equal(step(m.flow, 'decide').status, 'warn');
+});
+
+test('an undecryptable default LLM key leaves the LLM out with the server reason', () => {
+    const bad = { ...APPROVED, api_key_status: 'undecryptable' };
+    const withTs = resolveRoute({ aiEnabled: true, typesafe: TS, provider: bad, trigger: 'manual' });
+    assert.equal(withTs.llm, null);
+    assert.equal(withTs.llmReason, "the default LLM provider's stored key can't be decrypted — re-enter it");
+    assert.equal(withTs.canAnalyze, true, 'TypeSafe still decides');
+    const llmOnly = resolveRoute({ aiEnabled: true, typesafe: { ...TS, enabled: false }, provider: bad, trigger: 'manual' });
+    assert.equal(llmOnly.canAnalyze, false);
+    const fine = resolveRoute({ aiEnabled: true, typesafe: TS, provider: { ...APPROVED, api_key_status: 'ok' }, trigger: 'manual' });
+    assert.equal(fine.llm, 'OpenRouter (minimax)');
 });

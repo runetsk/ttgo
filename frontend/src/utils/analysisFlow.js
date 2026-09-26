@@ -54,6 +54,9 @@ export function llmName(provider) {
     return `${provider.label} (${provider.model_name})`;
 }
 
+// Server: llmKeyUnreadableReason (internal/api/failure_analysis_worker.go).
+const LLM_KEY_UNREADABLE = "the default LLM provider's stored key can't be decrypted — re-enter it";
+
 // resolveRoute ports newAnalyzeDepsResolver for one trigger ('manual' | 'auto').
 export function resolveRoute({ aiEnabled, typesafe: ts, provider, trigger }) {
     const byHand = trigger !== 'auto';
@@ -77,6 +80,9 @@ export function resolveRoute({ aiEnabled, typesafe: ts, provider, trigger }) {
     if (needLLM) {
         if (!provider) llmReason = 'no default LLM provider is configured';
         else if (!byHand && !provider.allow_auto_failure_analysis) llmReason = 'the default LLM provider is not approved for automatic analysis';
+        // The worker still records a manual attempt the LLM must decide as failed (category
+        // configuration); either way no analysis comes out of the LLM, so show the reason.
+        else if (provider.api_key_status === 'undecryptable') llmReason = LLM_KEY_UNREADABLE;
         else llm = llmName(provider);
     }
     return {

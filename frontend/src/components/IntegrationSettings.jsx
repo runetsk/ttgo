@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { labelStyle } from './shared/styles';
 import { toast } from '../toast';
+import { secretNote, secretPlaceholder, canClearSecret, secretPayload } from '../utils/secretStatus';
 
 /**
  * IntegrationSettings -- parameterized integration configuration panel.
@@ -13,7 +14,7 @@ import { toast } from '../toast';
  *   apiGetConfig      () => Promise<config>
  *   apiUpsertConfig   (payload) => Promise<config>
  *   extraFields       [{ key, label, placeholder, defaultValue }]
- *   tokenHintField    response field name indicating token presence
+ *   tokenHintField    response field holding the masked token (Jira: api_token_masked)
  *   renderTestConnection  (config, enabled) => ReactNode
  */
 export default function IntegrationSettings({
@@ -33,6 +34,7 @@ export default function IntegrationSettings({
     const [baseUrl, setBaseUrl] = useState('');
     const [email, setEmail] = useState('');
     const [apiToken, setApiToken] = useState('');
+    const [clearToken, setClearToken] = useState(false);
     const [extras, setExtras] = useState({});
     const [saving, setSaving] = useState(false);
 
@@ -70,8 +72,8 @@ export default function IntegrationSettings({
         const payload = {
             base_url: baseUrl.trim(),
             email: email.trim(),
-            api_token: apiToken,
             enabled,
+            ...secretPayload('api_token', 'clear_api_token', apiToken, clearToken),
         };
         for (const f of extraFields) {
             payload[f.key] = (extras[f.key] || '').trim() || f.defaultValue || '';
@@ -81,6 +83,7 @@ export default function IntegrationSettings({
             .then(cfg => {
                 setConfig(cfg);
                 setApiToken('');
+                setClearToken(false);
                 toast.success(`${providerLabel} configuration saved.`);
             })
             .catch(err => toast.error(err.response?.data?.error || err.message))
@@ -93,20 +96,10 @@ export default function IntegrationSettings({
         return <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Loading {providerLabel} configuration...</div>;
     }
 
-    // Token hint display
-    const tokenHintValue = config?.[tokenHintField];
-    let tokenHintNode = null;
-    if (tokenHintValue) {
-        // Jira returns a masked string (api_token_masked), Confluence returns a boolean (has_token)
-        const hintText = typeof tokenHintValue === 'string'
-            ? `current: ${tokenHintValue}`
-            : 'token configured';
-        tokenHintNode = (
-            <span style={{ fontWeight: 400, marginLeft: 8, color: 'var(--text-secondary)' }}>
-                ({hintText} — leave blank to keep)
-            </span>
-        );
-    }
+    // Token status. Jira also returns the masked token (tokenHintField); Confluence only a flag.
+    const tokenStatus = config?.api_token_status;
+    const masked = typeof config?.[tokenHintField] === 'string' ? config[tokenHintField] : '';
+    const tokenNote = secretNote(tokenStatus, masked, 'token');
 
     return (
         <div>
@@ -156,16 +149,34 @@ export default function IntegrationSettings({
                     <div style={{ gridColumn: '1 / -1' }}>
                         <label style={labelStyle}>
                             API Token
-                            {tokenHintNode}
+                            {tokenNote && (
+                                <span data-testid="integration-token-status" style={{ fontWeight: 400, marginLeft: 8, color: tokenNote.tone === 'red' ? 'var(--aig-tone-red-fg)' : 'var(--text-secondary)' }}>
+                                    ({tokenNote.text})
+                                </span>
+                            )}
                         </label>
                         <input
                             className="modern-input"
                             style={{ width: '100%' }}
                             type="password"
-                            placeholder={tokenHintValue ? 'Leave blank to keep existing token' : `Your ${providerLabel} API token`}
+                            data-testid="integration-api-token-input"
+                            placeholder={secretPlaceholder(tokenStatus, `Your ${providerLabel} API token`, 'token')}
                             value={apiToken}
+                            disabled={clearToken}
                             onChange={e => setApiToken(e.target.value)}
                         />
+                        {canClearSecret(tokenStatus) && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer', userSelect: 'none', fontSize: '0.85rem' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={clearToken}
+                                    data-testid="integration-clear-token"
+                                    onChange={e => { setClearToken(e.target.checked); if (e.target.checked) setApiToken(''); }}
+                                    style={{ width: 16, height: 16, cursor: 'pointer' }}
+                                />
+                                Remove the stored token when saving
+                            </label>
+                        )}
                     </div>
                     {extraFields.map(f => (
                         <div key={f.key}>

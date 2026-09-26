@@ -3,6 +3,7 @@ import { aiGeneration } from '../../api';
 import { toast } from '../../toast';
 import { PROVIDER_GROUPS, presetMeta, presetFromConfig } from './constants';
 import { m } from './styles';
+import { secretNote, secretPlaceholder, canClearSecret, secretPayload } from '../../utils/secretStatus';
 
 /* ── Add / Edit Provider Modal ─────────────────────── */
 export default function ProviderModal({ provider, onClose, onSaved }) {
@@ -14,6 +15,7 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
     const [label, setLabel]                 = useState(provider?.label || '');
     const [endpointURL, setEndpointURL]     = useState(provider?.endpoint_url || presetMeta(initialPresetKey).endpoint);
     const [apiKey, setApiKey]               = useState('');
+    const [clearKey, setClearKey]           = useState(false);
     const [modelName, setModelName]         = useState(provider?.model_name || '');
     const defaultTimeout = provider?.timeout_seconds || (provider?.provider_type === 'local' ? 600 : 90);
     const [timeoutSeconds, setTimeoutSeconds] = useState(defaultTimeout);
@@ -27,6 +29,9 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
     const preset = presetMeta(presetKey);
     const isLocal = preset.providerType === 'local';
     const endpointRequired = isLocal || presetKey === 'custom';
+    const keyStatus = isEdit ? provider.api_key_status : undefined;
+    const keyNote = isEdit ? secretNote(keyStatus, provider.api_key_masked) : null;
+    const keyFallback = isLocal ? 'Not required for local providers' : 'sk-…';
 
     // When adding, selecting a preset prefills its default endpoint. Never
     // clobber a saved endpoint while editing.
@@ -46,7 +51,8 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
         try {
             const data = {
                 label, provider_type: preset.providerType, endpoint_url: endpointURL,
-                api_key: apiKey, model_name: modelName,
+                ...secretPayload('api_key', 'clear_api_key', apiKey, clearKey),
+                model_name: modelName,
                 timeout_seconds: parseInt(timeoutSeconds, 10) || 90,
                 is_default: isDefault, enabled,
                 allow_auto_failure_analysis: allowAutoFA,
@@ -194,19 +200,28 @@ export default function ProviderModal({ provider, onClose, onSaved }) {
                             API Key
                             {isLocal && <span style={{ ...m.chip, marginLeft: 6 }}>Not required</span>}
                         </label>
-                        {isEdit && provider.api_key_masked && (
-                            <div style={m.currentKeyNote}>
-                                Current: <code style={{ fontFamily: 'monospace' }}>{provider.api_key_masked}</code> — leave blank to keep
+                        {keyNote && (
+                            <div data-testid="provider-key-note"
+                                style={{ ...m.currentKeyNote, ...(keyNote.tone === 'red' ? { color: 'var(--aig-tone-red-fg)' } : {}) }}>
+                                {keyNote.text}
                             </div>
                         )}
                         <input
                             className="modern-input"
                             style={{ width: '100%' }}
                             type="password"
-                            placeholder={isEdit ? 'Leave blank to keep existing key' : (isLocal ? 'Not required for local providers' : 'sk-…')}
+                            placeholder={isEdit ? secretPlaceholder(keyStatus, keyFallback) : keyFallback}
                             value={apiKey}
+                            disabled={clearKey}
                             onChange={e => setApiKey(e.target.value)}
                         />
+                        {isEdit && canClearSecret(keyStatus) && (
+                            <label style={m.toggle}>
+                                <input type="checkbox" checked={clearKey} data-testid="provider-clear-key" style={m.checkbox}
+                                    onChange={e => { setClearKey(e.target.checked); if (e.target.checked) setApiKey(''); }} />
+                                <span style={m.toggleLabel}>Remove the stored key</span>
+                            </label>
+                        )}
                     </div>
 
                     {/* Pricing (optional, for cost analytics) */}

@@ -23,6 +23,12 @@ export default function ProviderCard({ provider, isAdmin, testingId, testResult,
                             <span style={s.providerName}>{provider.label}</span>
                             {provider.is_default && <span style={s.defaultBadge}>★ Default</span>}
                             {!provider.enabled && <span style={s.disabledBadge}>Disabled</span>}
+                            {provider.api_key_status === 'undecryptable' && (
+                                <span style={s.disabledBadge} data-testid="provider-key-unreadable"
+                                    title="The stored API key cannot be decrypted. Edit the provider and enter it again.">
+                                    Key unreadable
+                                </span>
+                            )}
                         </div>
                         <div style={s.providerMeta}>
                             <span style={s.metaChip}>{meta.label}</span>
