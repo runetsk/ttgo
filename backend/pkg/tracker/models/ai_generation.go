@@ -1,6 +1,9 @@
 package models
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 // LLMProviderConfig stores an LLM provider configuration.
 // Multiple rows allowed, including multiple per provider type.
@@ -25,6 +28,10 @@ type LLMProviderConfig struct {
 	CompletionPricePerMTok *float64  `json:"completion_price_per_mtok" gorm:"column:completion_price_per_mtok;default:null"`
 	CreatedAt              time.Time `json:"created_at"`
 	UpdatedAt              time.Time `json:"updated_at"`
+
+	// APIKeyStatus is set by the store when it reads the row: missing | ok | undecryptable.
+	// A key that can't be decrypted is read back as "", never as its ciphertext.
+	APIKeyStatus string `json:"-" gorm:"-"`
 }
 
 // LLMProviderConfigResponse is the safe, serialisable view of LLMProviderConfig.
@@ -35,6 +42,7 @@ type LLMProviderConfigResponse struct {
 	ProviderType             string    `json:"provider_type"`
 	EndpointURL              string    `json:"endpoint_url"`
 	APIKeyMasked             string    `json:"api_key_masked"`
+	APIKeyStatus             string    `json:"api_key_status"` // missing | ok | undecryptable
 	ModelName                string    `json:"model_name"`
 	TimeoutSeconds           int       `json:"timeout_seconds"`
 	IsDefault                bool      `json:"is_default"`
@@ -60,6 +68,7 @@ func (c *LLMProviderConfig) MaskedConfig() LLMProviderConfigResponse {
 		ProviderType:             c.ProviderType,
 		EndpointURL:              c.EndpointURL,
 		APIKeyMasked:             masked,
+		APIKeyStatus:             secretStatus(c.APIKeyStatus, c.APIKey),
 		ModelName:                c.ModelName,
 		TimeoutSeconds:           c.TimeoutSeconds,
 		IsDefault:                c.IsDefault,
@@ -70,6 +79,15 @@ func (c *LLMProviderConfig) MaskedConfig() LLMProviderConfigResponse {
 		CreatedAt:                c.CreatedAt,
 		UpdatedAt:                c.UpdatedAt,
 	}
+}
+
+// KeyError is what a call that sends the key to the provider must return instead of calling:
+// non-nil only when the stored key can't be decrypted. Safe on a nil config.
+func (c *LLMProviderConfig) KeyError() error {
+	if c == nil {
+		return nil
+	}
+	return secretError(fmt.Sprintf("LLM provider %q API key", c.Label), c.APIKeyStatus)
 }
 
 // AIGenTemplate stores the TestCaseGenerator prompt templates.

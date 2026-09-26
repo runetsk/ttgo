@@ -55,6 +55,10 @@ type JiraConfig struct {
 	DefaultIssueType  string    `json:"default_issue_type"  gorm:"default:'Bug'"` // 008-jira-integration
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
+
+	// APITokenStatus is set by the store when it reads the row: missing | ok | undecryptable.
+	// A token that can't be decrypted is read back as "", never as its ciphertext.
+	APITokenStatus string `json:"-" gorm:"-"`
 }
 
 // JiraConfigResponse is the safe, serialisable view of JiraConfig returned by the API.
@@ -64,6 +68,7 @@ type JiraConfigResponse struct {
 	BaseURL           string    `json:"base_url"`
 	Email             string    `json:"email"`
 	APITokenMasked    string    `json:"api_token_masked"`
+	APITokenStatus    string    `json:"api_token_status"` // missing | ok | undecryptable
 	Enabled           bool      `json:"enabled"`
 	DefaultProjectKey string    `json:"default_project_key"`
 	DefaultIssueType  string    `json:"default_issue_type"`
@@ -85,12 +90,22 @@ func (c *JiraConfig) MaskedConfig() JiraConfigResponse {
 		BaseURL:           c.BaseURL,
 		Email:             c.Email,
 		APITokenMasked:    masked,
+		APITokenStatus:    secretStatus(c.APITokenStatus, c.APIToken),
 		Enabled:           c.Enabled,
 		DefaultProjectKey: c.DefaultProjectKey,
 		DefaultIssueType:  c.DefaultIssueType,
 		CreatedAt:         c.CreatedAt,
 		UpdatedAt:         c.UpdatedAt,
 	}
+}
+
+// TokenError is what a call that sends the token to Jira must return instead of calling: non-nil
+// only when the stored token can't be decrypted. Safe on a nil config.
+func (c *JiraConfig) TokenError() error {
+	if c == nil {
+		return nil
+	}
+	return secretError("Jira API token", c.APITokenStatus)
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -107,6 +122,9 @@ type ConfluenceConfig struct {
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	// APITokenStatus is set by the store when it reads the row: missing | ok | undecryptable.
+	APITokenStatus string `json:"-" gorm:"-"`
 }
 
 // ConfluenceConfigResponse is the safe, serialisable view of ConfluenceConfig.
@@ -118,6 +136,8 @@ type ConfluenceConfigResponse struct {
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+
+	APITokenStatus string `json:"api_token_status"` // missing | ok | undecryptable
 }
 
 // ToResponse converts a ConfluenceConfig to its safe response form.
@@ -130,7 +150,18 @@ func (c *ConfluenceConfig) ToResponse() ConfluenceConfigResponse {
 		Enabled:   c.Enabled,
 		CreatedAt: c.CreatedAt,
 		UpdatedAt: c.UpdatedAt,
+
+		APITokenStatus: secretStatus(c.APITokenStatus, c.APIToken),
 	}
+}
+
+// TokenError is what a call that sends the token to Confluence must return instead of calling:
+// non-nil only when the stored token can't be decrypted. Safe on a nil config.
+func (c *ConfluenceConfig) TokenError() error {
+	if c == nil {
+		return nil
+	}
+	return secretError("Confluence API token", c.APITokenStatus)
 }
 
 // ErrSourceAlreadyImported is returned when a requirement with the same

@@ -30,33 +30,34 @@ type Store struct {
 	box        *secretbox.Box // at-rest encryption for integration/LLM secrets (F-016)
 }
 
-// encryptSecret returns the value encrypted for storage. Idempotent and
-// best-effort: empty strings and already-encrypted values pass through, and a
-// crypto error never blocks the write (the value is stored as-is).
-func (s *Store) encryptSecret(v string) string {
-	if s.box == nil || v == "" {
-		return v
+// openSecret decrypts a stored secret and reports its status. It never fails: a value that
+// can't be decrypted (foreign ciphertext, or plaintext a failed backfill left behind) comes back
+// as "" with status undecryptable — never as the stored value — so one bad secret cannot break a
+// settings page. Only the call paths that send the secret to a vendor turn that status into an
+// error (TokenError / KeyError).
+func (s *Store) openSecret(stored string) (plain, status string) {
+	if stored == "" {
+		return "", models.SecretStatusMissing
 	}
-	if enc, err := s.box.Encrypt(v); err == nil {
-		return enc
+	plain, err := s.decryptSecretStrict(stored)
+	if err != nil {
+		return "", models.SecretStatusUndecryptable
 	}
-	return v
+	return plain, models.SecretStatusOK
 }
 
-// decryptSecret reverses encryptSecret; plaintext (pre-encryption) values pass
-// through unchanged.
-func (s *Store) decryptSecret(v string) string {
-	if s.box == nil {
-		return v
+// sealSecret encrypts a new secret for storage, fail-closed: an error means nothing may be
+// written (models.ErrSecretNotSaved), never that the plaintext is stored instead.
+func (s *Store) sealSecret(plain string) (string, error) {
+	enc, err := s.encryptSecretStrict(plain)
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", models.ErrSecretNotSaved, err)
 	}
-	if dec, err := s.box.Decrypt(v); err == nil {
-		return dec
-	}
-	return v
+	return enc, nil
 }
 
 // ErrEncryptionUnavailable is returned by the strict helpers when no encryption box is
-// loaded. The TypeSafe key must never be stored or read as plaintext.
+// loaded. No secret may be stored or read as plaintext.
 var ErrEncryptionUnavailable = errors.New("secret encryption is unavailable")
 
 // ErrSecretNotEncrypted: a strict-read secret was found stored as plaintext.
@@ -344,7 +345,13 @@ func (s *Store) backfillEncryptSecrets() error {
 		if value == "" || secretbox.IsEncrypted(value) {
 			return nil
 		}
-		return s.db.Model(model).Where("id = ?", id).Update(column, s.encryptSecret(value)).Error
+		enc, err := s.encryptSecretStrict(value)
+		if err != nil {
+			// Leave the row as it is: strict reads report it as undecryptable until it is re-entered.
+			log.Printf("secrets: could not encrypt %s for %s: %v", column, id, err)
+			return nil
+		}
+		return s.db.Model(model).Where("id = ?", id).Update(column, enc).Error
 	}
 
 	var jira models.JiraConfig

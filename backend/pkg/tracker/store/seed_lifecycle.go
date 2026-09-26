@@ -21,11 +21,30 @@ func (s *Store) SeedDemoTx(removeFirst bool) (SeedResult, error) {
 		if err != nil {
 			return err
 		}
+		if err := s.sealSeededProviderKeys(tx); err != nil {
+			return err
+		}
 		result = r
 		result.ReplacedExisting = removeFirst
 		return nil
 	})
 	return result, err
+}
+
+// sealSeededProviderKeys stores the demo providers' keys the way a saved key is stored
+// (encrypted, fail-closed). SeedDemo inserts rows verbatim, and strict reads would otherwise
+// report its plaintext key as undecryptable until the next boot's backfill.
+func (s *Store) sealSeededProviderKeys(tx *gorm.DB) error {
+	for _, p := range demoDataset("").LLMProviders {
+		enc, err := s.sealSecret(p.APIKey)
+		if err != nil {
+			return err
+		}
+		if err := tx.Model(&models.LLMProviderConfig{}).Where("id = ?", p.ID).Update("api_key", enc).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // purgeKnownDemoEntities hard-deletes every record that demoDataset() would create,

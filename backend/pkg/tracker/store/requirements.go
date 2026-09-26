@@ -378,9 +378,9 @@ func (s *Store) GetTraceabilityMatrix() (*models.MatrixResponse, error) {
 
 const jiraConfigSingletonID = "singleton"
 
-// GetJiraConfig returns the workspace Jira configuration.
-// Returns nil (no error) if no configuration has been saved yet.
-func (s *Store) GetJiraConfig() (*models.JiraConfig, error) {
+// getJiraConfigRaw returns the saved row with the token exactly as stored (ciphertext), for
+// saves that keep it. Returns nil (no error) if nothing has been saved yet.
+func (s *Store) getJiraConfigRaw() (*models.JiraConfig, error) {
 	var cfg models.JiraConfig
 	if err := s.db.First(&cfg, "id = ?", jiraConfigSingletonID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -388,26 +388,45 @@ func (s *Store) GetJiraConfig() (*models.JiraConfig, error) {
 		}
 		return nil, err
 	}
-	cfg.APIToken = s.decryptSecret(cfg.APIToken) // at-rest decryption (F-016)
 	return &cfg, nil
 }
 
+// GetJiraConfig returns the workspace Jira configuration with the token decrypted for the calls
+// that send it to Jira (and for masking). It never fails because of the token: one that can't be
+// decrypted comes back as "" with APITokenStatus "undecryptable", and the call paths turn that
+// into an error with cfg.TokenError(). Returns nil (no error) if nothing has been saved yet.
+func (s *Store) GetJiraConfig() (*models.JiraConfig, error) {
+	cfg, err := s.getJiraConfigRaw()
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	cfg.APIToken, cfg.APITokenStatus = s.openSecret(cfg.APIToken)
+	return cfg, nil
+}
+
 // UpsertJiraConfig creates or updates the singleton Jira configuration.
-// If newToken is empty, the existing stored token is preserved.
+// If newToken is empty, the stored token is kept byte-for-byte (its ciphertext is copied, never
+// decrypted and re-encrypted), so a token that can't be decrypted survives edits to the other
+// fields until it is replaced or cleared. A new token that cannot be encrypted refuses the whole
+// save (models.ErrSecretNotSaved).
 // defaultProjectKey and defaultIssueType configure defect-creation defaults (008-jira-integration).
 func (s *Store) UpsertJiraConfig(baseURL, email, newToken string, enabled bool, defaultProjectKey, defaultIssueType string) (*models.JiraConfig, error) {
 	now := time.Now()
 
-	existing, err := s.GetJiraConfig()
+	existing, err := s.getJiraConfigRaw()
 	if err != nil {
 		return nil, err
 	}
 
-	token := newToken
-	if token == "" && existing != nil {
-		token = existing.APIToken // preserve existing token when not rotating
+	var token string
+	switch {
+	case newToken != "":
+		if token, err = s.sealSecret(newToken); err != nil {
+			return nil, err
+		}
+	case existing != nil:
+		token = existing.APIToken // keep the stored ciphertext as-is
 	}
-	token = s.encryptSecret(token) // encrypt at rest before storage (F-016)
 
 	cfg := models.JiraConfig{
 		ID:                jiraConfigSingletonID,
@@ -439,6 +458,12 @@ func (s *Store) UpsertJiraConfig(baseURL, email, newToken string, enabled bool, 
 		cfg.CreatedAt = existing.CreatedAt
 	}
 	return s.GetJiraConfig() // re-read so the returned token is decrypted for masking
+}
+
+// ClearJiraAPIToken removes the stored token — the way out for one that can't be decrypted.
+func (s *Store) ClearJiraAPIToken() error {
+	return s.db.Model(&models.JiraConfig{}).Where("id = ?", jiraConfigSingletonID).
+		Updates(map[string]interface{}{"api_token": "", "updated_at": time.Now()}).Error
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -541,9 +566,9 @@ func (s *Store) UnlinkRequirement(id string) (*models.Requirement, error) {
 
 const confluenceConfigSingletonID = "singleton"
 
-// GetConfluenceConfig returns the workspace Confluence configuration.
-// Returns nil (no error) if no configuration has been saved yet.
-func (s *Store) GetConfluenceConfig() (*models.ConfluenceConfig, error) {
+// getConfluenceConfigRaw returns the saved row with the token exactly as stored (ciphertext).
+// Returns nil (no error) if nothing has been saved yet.
+func (s *Store) getConfluenceConfigRaw() (*models.ConfluenceConfig, error) {
 	var cfg models.ConfluenceConfig
 	if err := s.db.First(&cfg, "id = ?", confluenceConfigSingletonID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -551,25 +576,40 @@ func (s *Store) GetConfluenceConfig() (*models.ConfluenceConfig, error) {
 		}
 		return nil, err
 	}
-	cfg.APIToken = s.decryptSecret(cfg.APIToken) // at-rest decryption (F-016)
 	return &cfg, nil
 }
 
+// GetConfluenceConfig returns the workspace Confluence configuration with the token decrypted for
+// the calls that send it to Confluence. Like GetJiraConfig it never fails because of the token
+// (APITokenStatus / TokenError report it). Returns nil (no error) if nothing has been saved yet.
+func (s *Store) GetConfluenceConfig() (*models.ConfluenceConfig, error) {
+	cfg, err := s.getConfluenceConfigRaw()
+	if err != nil || cfg == nil {
+		return cfg, err
+	}
+	cfg.APIToken, cfg.APITokenStatus = s.openSecret(cfg.APIToken)
+	return cfg, nil
+}
+
 // UpsertConfluenceConfig creates or updates the singleton Confluence configuration.
-// If newToken is empty, the existing stored token is preserved.
+// If newToken is empty, the stored token's ciphertext is kept as-is (see UpsertJiraConfig).
 func (s *Store) UpsertConfluenceConfig(baseURL, email, newToken string, enabled bool) (*models.ConfluenceConfig, error) {
 	now := time.Now()
 
-	existing, err := s.GetConfluenceConfig()
+	existing, err := s.getConfluenceConfigRaw()
 	if err != nil {
 		return nil, err
 	}
 
-	token := newToken
-	if token == "" && existing != nil {
-		token = existing.APIToken
+	var token string
+	switch {
+	case newToken != "":
+		if token, err = s.sealSecret(newToken); err != nil {
+			return nil, err
+		}
+	case existing != nil:
+		token = existing.APIToken // keep the stored ciphertext as-is
 	}
-	token = s.encryptSecret(token) // encrypt at rest before storage (F-016)
 
 	cfg := models.ConfluenceConfig{
 		ID:        confluenceConfigSingletonID,
@@ -597,6 +637,12 @@ func (s *Store) UpsertConfluenceConfig(baseURL, email, newToken string, enabled 
 		cfg.CreatedAt = existing.CreatedAt
 	}
 	return s.GetConfluenceConfig() // re-read so the returned token is decrypted for masking
+}
+
+// ClearConfluenceAPIToken removes the stored token — the way out for one that can't be decrypted.
+func (s *Store) ClearConfluenceAPIToken() error {
+	return s.db.Model(&models.ConfluenceConfig{}).Where("id = ?", confluenceConfigSingletonID).
+		Updates(map[string]interface{}{"api_token": "", "updated_at": time.Now()}).Error
 }
 
 // ────────────────────────────────────────────────────────────────────────────

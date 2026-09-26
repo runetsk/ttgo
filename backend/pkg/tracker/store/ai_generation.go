@@ -14,7 +14,8 @@ import (
 // LLM Provider Config CRUD
 // ────────────────────────────────────────────────────────────────────────────
 
-// CreateProviderConfig persists a new LLM provider configuration.
+// CreateProviderConfig persists a new LLM provider configuration. The key is encrypted
+// fail-closed: if it cannot be encrypted nothing is saved (models.ErrSecretNotSaved).
 func (s *Store) CreateProviderConfig(cfg *models.LLMProviderConfig) error {
 	if cfg.ID == "" {
 		cfg.ID = uuid.New().String()
@@ -23,9 +24,17 @@ func (s *Store) CreateProviderConfig(cfg *models.LLMProviderConfig) error {
 	cfg.CreatedAt = now
 	cfg.UpdatedAt = now
 	plain := cfg.APIKey
-	cfg.APIKey = s.encryptSecret(cfg.APIKey) // encrypt at rest (F-016)
-	err := s.db.Create(cfg).Error
+	enc, err := s.sealSecret(plain)
+	if err != nil {
+		return err
+	}
+	cfg.APIKey = enc
+	err = s.db.Create(cfg).Error
 	cfg.APIKey = plain // restore plaintext for the caller's masked response
+	cfg.APIKeyStatus = models.SecretStatusMissing
+	if plain != "" {
+		cfg.APIKeyStatus = models.SecretStatusOK
+	}
 	if err != nil {
 		if isUniqueConstraintError(err) {
 			return fmt.Errorf("a provider with this label already exists")
@@ -35,20 +44,22 @@ func (s *Store) CreateProviderConfig(cfg *models.LLMProviderConfig) error {
 	return nil
 }
 
-// GetAllProviderConfigs returns all LLM provider configurations ordered by label.
+// GetAllProviderConfigs returns all LLM provider configurations ordered by label, keys decrypted.
+// A key that can't be decrypted never fails the list: it reads back as "" with APIKeyStatus
+// "undecryptable".
 func (s *Store) GetAllProviderConfigs() ([]*models.LLMProviderConfig, error) {
 	var cfgs []*models.LLMProviderConfig
 	if err := s.db.Order("label").Find(&cfgs).Error; err != nil {
 		return nil, err
 	}
 	for _, c := range cfgs {
-		c.APIKey = s.decryptSecret(c.APIKey) // at-rest decryption (F-016)
+		c.APIKey, c.APIKeyStatus = s.openSecret(c.APIKey)
 	}
 	return cfgs, nil
 }
 
-// GetProviderConfigByID returns a single LLM provider configuration by ID.
-func (s *Store) GetProviderConfigByID(id string) (*models.LLMProviderConfig, error) {
+// getProviderConfigRaw returns the row with the key exactly as stored (ciphertext).
+func (s *Store) getProviderConfigRaw(id string) (*models.LLMProviderConfig, error) {
 	var cfg models.LLMProviderConfig
 	if err := s.db.First(&cfg, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -56,20 +67,36 @@ func (s *Store) GetProviderConfigByID(id string) (*models.LLMProviderConfig, err
 		}
 		return nil, err
 	}
-	cfg.APIKey = s.decryptSecret(cfg.APIKey) // at-rest decryption (F-016)
 	return &cfg, nil
 }
 
-// UpdateProviderConfig updates an existing LLM provider configuration.
-// If newAPIKey is empty, the existing key is preserved.
+// GetProviderConfigByID returns a single LLM provider configuration with its key decrypted (or
+// "" with APIKeyStatus "undecryptable"; callers that send the key use cfg.KeyError()).
+func (s *Store) GetProviderConfigByID(id string) (*models.LLMProviderConfig, error) {
+	cfg, err := s.getProviderConfigRaw(id)
+	if err != nil {
+		return nil, err
+	}
+	cfg.APIKey, cfg.APIKeyStatus = s.openSecret(cfg.APIKey)
+	return cfg, nil
+}
+
+// UpdateProviderConfig updates an existing LLM provider configuration. An empty newAPIKey leaves
+// the api_key column unwritten, so the stored ciphertext is kept as-is even when it can't be
+// decrypted; updates["api_key"] = "" clears it. A new key that cannot be encrypted refuses the
+// whole update (models.ErrSecretNotSaved).
 func (s *Store) UpdateProviderConfig(id string, updates map[string]interface{}, newAPIKey string) (*models.LLMProviderConfig, error) {
-	existing, err := s.GetProviderConfigByID(id)
+	existing, err := s.getProviderConfigRaw(id)
 	if err != nil {
 		return nil, err
 	}
 
 	if newAPIKey != "" {
-		updates["api_key"] = s.encryptSecret(newAPIKey) // encrypt at rest (F-016)
+		enc, err := s.sealSecret(newAPIKey)
+		if err != nil {
+			return nil, err
+		}
+		updates["api_key"] = enc
 	}
 	updates["updated_at"] = time.Now()
 
@@ -105,7 +132,7 @@ func (s *Store) GetDefaultProviderConfig() (*models.LLMProviderConfig, error) {
 		}
 		return nil, err
 	}
-	cfg.APIKey = s.decryptSecret(cfg.APIKey) // at-rest decryption (F-016)
+	cfg.APIKey, cfg.APIKeyStatus = s.openSecret(cfg.APIKey)
 	return &cfg, nil
 }
 
