@@ -405,6 +405,9 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadGateway, err)
 		return
 	}
+	// Dated now, not on the analysis: explaining an old decision is this month's spend.
+	h.recordCosts(failureanalysis.CostEvents(models.AnalysisCostKindExplain, res, deps,
+		failureanalysis.RefsFor(result.TestRunID, a.JobID, a)))
 	updated, err := h.store.UpdateAnalysisNarrative(a.ID, store.NarrativeUpdate{
 		Summary: res.Summary, NextAction: res.NextAction, Rationale: res.Rationale, NarrativeStatus: res.NarrativeStatus,
 		AddPrompt: res.TokenUsagePrompt, AddCompletion: res.TokenUsageCompletion,

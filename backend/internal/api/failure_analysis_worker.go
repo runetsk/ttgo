@@ -101,6 +101,9 @@ func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failur
 				switch {
 				case perr == nil:
 					deps.Narrative, deps.NarrativeModel = p, cfg.ModelName
+					// The prices in force now price every call this job makes (cost ledger).
+					deps.Pricing.LLMProviderID = cfg.ID
+					deps.Pricing.LLMPromptPerMTok, deps.Pricing.LLMCompletionPerMTok = cfg.PromptPricePerMTok, cfg.CompletionPricePerMTok
 				case keyUnreadable && deps.Decider == nil && !explain && trigger == models.RunAnalysisJobTriggerManual:
 					// The LLM must decide but its stored key can't be decrypted. Attach a provider that
 					// fails every call, so each attempt is recorded as failed with category configuration
@@ -178,6 +181,7 @@ func resolveTypeSafe(st *store.Store, tsf *typesafe.ClientFactory, trigger strin
 		return ts
 	}
 	client := tsf.New(key, typesafe.Options{Timeout: time.Duration(ts.TimeoutSeconds) * time.Second})
+	deps.Pricing.TypeSafePerMTok = ts.PricePerMTok
 	if ts.SemanticDedupEnabled {
 		deps.Semantic = &failureanalysis.SemanticDeps{Client: client, Model: ts.Model}
 	}

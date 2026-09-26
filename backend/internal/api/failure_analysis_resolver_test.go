@@ -283,3 +283,25 @@ func TestResolver_UndecryptableLLMKey(t *testing.T) {
 	require.Nil(t, d.Narrative)
 	require.Equal(t, "the default LLM provider's stored key can't be decrypted — re-enter it", d.LLMUnavailableReason)
 }
+func TestResolver_CapturesThePricesInForce(t *testing.T) {
+	t.Chdir(t.TempDir())
+	s, err := store.New(":memory:")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = s.Close() })
+	in, out := 1.5, 6.0
+	cfg := &models.LLMProviderConfig{Label: "priced", ProviderType: "openai", APIKey: "k", ModelName: "gpt-x", Enabled: true,
+		PromptPricePerMTok: &in, CompletionPricePerMTok: &out}
+	require.NoError(t, s.CreateProviderConfig(cfg))
+	require.NoError(t, s.SetDefaultProviderConfig(cfg.ID))
+	enableTypeSafe(t, s, false)
+	price := 0.2
+	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{PricePerMTok: &price})
+	require.NoError(t, err)
+
+	d, err := newAnalyzeDepsResolver(s, typesafe.NewClientFactory(nil))(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Equal(t, cfg.ID, d.Pricing.LLMProviderID)
+	require.InDelta(t, 1.5, *d.Pricing.LLMPromptPerMTok, 1e-12)
+	require.InDelta(t, 6.0, *d.Pricing.LLMCompletionPerMTok, 1e-12)
+	require.InDelta(t, 0.2, d.Pricing.TypeSafePerMTok, 1e-12)
+}

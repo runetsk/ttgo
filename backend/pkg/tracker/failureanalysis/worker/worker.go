@@ -72,6 +72,16 @@ func (w *Worker) failJob(id, msg string) {
 	}
 }
 
+// recordCosts appends cost events to the ledger. A failed write is logged, never fatal: the
+// analysis it describes is already stored.
+func (w *Worker) recordCosts(events []*models.AIAnalysisCostEvent) {
+	for _, ev := range events {
+		if err := w.store.RecordAnalysisCostEvent(ev); err != nil {
+			slog.Warn("failure-analysis: cost event not recorded", "kind", ev.Kind, "engine", ev.Engine, "err", err)
+		}
+	}
+}
+
 func (w *Worker) isCancelled(jobID string) bool {
 	cur, err := w.store.GetAnalysisJob(jobID)
 	return err == nil && cur != nil && cur.Status == models.RunAnalysisJobStatusCancelled
@@ -224,6 +234,8 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		sd.Redact = settings.RedactionEnabled
 		merged, rep, serr := failureanalysis.MergeGroupsSemantically(jobCtx, sd, groups, func() bool { return w.isCancelled(job.ID) })
 		semanticReport = rep
+		// The pass was billed whether or not its merges are used.
+		w.recordCosts(failureanalysis.SemanticCostEvents(rep, deps, failureanalysis.CostRefs{RunID: job.TestRunID, JobID: &job.ID}))
 		switch {
 		case errors.Is(serr, failureanalysis.ErrCancelled) || cancelled():
 			slog.Info("failure-analysis: cancelled during semantic grouping", "job_id", job.ID)
@@ -299,6 +311,9 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		repRowIn := failureanalysis.AnalysisRowFrom(res, rep.ID)
 		repRowIn.JobID = &jobID
 		repRow, err := w.store.CreateAnalysis(repRowIn)
+		// Clones below copy this answer and make no call, so only the representative bills.
+		w.recordCosts(failureanalysis.CostEvents(models.AnalysisCostKindAnalysis, res, deps,
+			failureanalysis.RefsFor(job.TestRunID, &jobID, repRow)))
 		if err != nil {
 			slog.Warn("failure-analysis: persist representative failed", "err", err)
 			continue

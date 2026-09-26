@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 	"ttgo/internal/api/httpx"
@@ -105,6 +106,8 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	row := failureanalysis.AnalysisRowFrom(res, result.ID)
 	row.CreatedBy = ptrOrNil(userID)
 	row, err = h.store.CreateAnalysis(row)
+	h.recordCosts(failureanalysis.CostEvents(models.AnalysisCostKindAnalysis, res, deps,
+		failureanalysis.RefsFor(result.TestRunID, nil, row)))
 	if err != nil {
 		return nil, err
 	}
@@ -145,6 +148,16 @@ func (h *Handler) requireAI(w http.ResponseWriter) bool {
 		return false
 	}
 	return true
+}
+
+// recordCosts appends cost events to the ledger. A failed write is logged, never surfaced:
+// the analysis or explanation it describes succeeded.
+func (h *Handler) recordCosts(events []*models.AIAnalysisCostEvent) {
+	for _, ev := range events {
+		if err := h.store.RecordAnalysisCostEvent(ev); err != nil {
+			slog.Warn("failure-analysis: cost event not recorded", "kind", ev.Kind, "engine", ev.Engine, "err", err)
+		}
+	}
 }
 
 func ptrOrNil(s string) *string {
