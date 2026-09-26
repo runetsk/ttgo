@@ -18,14 +18,28 @@ import (
 
 // StartFailureAnalysisWorker constructs and runs the background worker for run_analysis_jobs.
 func (s *Server) StartFailureAnalysisWorker(ctx context.Context) {
-	resolver := newAnalyzeDepsResolver(s.store)
+	resolver := s.analyzeDepsResolver()
 	bc := &apiws.RunAnalysisBroadcaster{Hub: s.Hub}
-	if s.aiHandler == nil {
-		s.aiHandler = apiai.NewHandler(s.store, s.sanitizer)
-	}
-	s.aiHandler.SetFailureAnalysisDeps(resolver, bc)
+	s.ensureAIHandler().SetFailureAnalysisDeps(resolver, bc)
 	w := worker.NewWorker(s.store, resolver, bc, 3*time.Second)
 	go w.Run(ctx)
+}
+
+// analyzeDepsResolver builds the failure-analysis resolver on the Server's shared TypeSafe
+// client factory, so the worker, the run-completion gate, sync analyze and Explain all draw
+// from one rate limiter.
+func (s *Server) analyzeDepsResolver() failureanalysis.DepsResolver {
+	return newAnalyzeDepsResolver(s.store, s.typesafeClients)
+}
+
+// ensureAIHandler creates the shared AI handler once, wired to the same TypeSafe client
+// factory, so the settings connection test shares the limiter too.
+func (s *Server) ensureAIHandler() *apiai.Handler {
+	if s.aiHandler == nil {
+		s.aiHandler = apiai.NewHandler(s.store, s.sanitizer)
+		s.aiHandler.SetTypeSafeClientFactoryShared(s.typesafeClients)
+	}
+	return s.aiHandler
 }
 
 // newAnalyzeDepsResolver builds JobDeps from live settings on every call (spec §4 "Resolver"),
@@ -39,8 +53,10 @@ func (s *Server) StartFailureAnalysisWorker(ctx context.Context) {
 //   - an automatic job uses the LLM only when that provider is itself approved for automatic
 //     analysis, checked now, since the default provider may have changed since the job was queued;
 //   - a broken LLM configuration fails the job only when the LLM would have to decide;
+//   - every TypeSafe client is built through tsf, the process-wide factory with the shared
+//     rate limiter (nil = unlimited, for tests);
 //   - the settings page draws these rules (frontend/src/utils/analysisFlow.js); change both together.
-func newAnalyzeDepsResolver(st *store.Store) failureanalysis.DepsResolver {
+func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failureanalysis.DepsResolver {
 	return func(trigger string) (failureanalysis.JobDeps, error) {
 		var deps failureanalysis.JobDeps
 		if fs, err := st.GetOrCreateAIFeatureSettings(); err != nil {
@@ -54,7 +70,7 @@ func newAnalyzeDepsResolver(st *store.Store) failureanalysis.DepsResolver {
 		if explain {
 			trigger = models.RunAnalysisJobTriggerManual
 		}
-		ts := resolveTypeSafe(st, trigger, &deps)
+		ts := resolveTypeSafe(st, tsf, trigger, &deps)
 
 		needLLM := explain || deps.Decider == nil ||
 			(ts != nil && (ts.NarrativeEnabled || ts.EscalateBelowPct > 0 || ts.LLMFallbackEnabled))
@@ -118,7 +134,7 @@ func newAutoAnalyzeGate(resolve failureanalysis.DepsResolver) apiruns.AutoAnalyz
 
 // resolveTypeSafe attaches the TypeSafe decider and semantic grouping when they are enabled,
 // consented for this trigger and keyed. It returns the settings when TypeSafe can decide.
-func resolveTypeSafe(st *store.Store, trigger string, deps *failureanalysis.JobDeps) *models.TypeSafeSettings {
+func resolveTypeSafe(st *store.Store, tsf *typesafe.ClientFactory, trigger string, deps *failureanalysis.JobDeps) *models.TypeSafeSettings {
 	ts, err := st.GetTypeSafeSettings()
 	if err != nil {
 		slog.Warn("typesafe: settings unavailable, running without TypeSafe", "err", err)
@@ -144,7 +160,7 @@ func resolveTypeSafe(st *store.Store, trigger string, deps *failureanalysis.JobD
 		deps.DeciderModel = ts.Model
 		return ts
 	}
-	client := typesafe.NewHTTPClient(key, typesafe.Options{Timeout: time.Duration(ts.TimeoutSeconds) * time.Second})
+	client := tsf.New(key, typesafe.Options{Timeout: time.Duration(ts.TimeoutSeconds) * time.Second})
 	if ts.SemanticDedupEnabled {
 		deps.Semantic = &failureanalysis.SemanticDeps{Client: client, Model: ts.Model}
 	}

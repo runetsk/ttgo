@@ -33,7 +33,7 @@ func enableTypeSafe(t *testing.T, s *store.Store, auto bool) {
 func TestResolver_ManualUsesTypeSafeAutoNeedsConsent(t *testing.T) {
 	s := resolverStore(t)
 	enableTypeSafe(t, s, false)
-	r := newAnalyzeDepsResolver(s)
+	r := newAnalyzeDepsResolver(s, nil)
 
 	manual, err := r(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
@@ -65,14 +65,14 @@ func TestResolver_FeatureSwitchesAndMissingKey(t *testing.T) {
 	off := false
 	_, err := s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{VerdictEngineEnabled: &off})
 	require.NoError(t, err)
-	d, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.Nil(t, d.Decider)
 	require.NotNil(t, d.Semantic, "semantic-only mode still gets a client")
 
 	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{ClearAPIKey: true})
 	require.NoError(t, err)
-	d2, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d2, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err, "a missing key is a fallback, never a job failure")
 	require.Nil(t, d2.Decider)
 	require.Nil(t, d2.Semantic)
@@ -85,7 +85,7 @@ func TestResolver_ExplanationsOffSkipNarrationButKeepProvider(t *testing.T) {
 	off := false
 	_, err := s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{NarrativeEnabled: &off})
 	require.NoError(t, err)
-	d, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.True(t, d.NarrativeSkipped)
 	require.NotNil(t, d.Narrative, "the provider stays attached for the generative fallback")
@@ -95,7 +95,7 @@ func TestResolver_ExplanationsOffSkipNarrationButKeepProvider(t *testing.T) {
 	// Without a decider the switch is moot: the LLM decides and explains in one call.
 	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{VerdictEngineEnabled: &off})
 	require.NoError(t, err)
-	d2, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d2, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.False(t, d2.NarrativeSkipped)
 	require.Nil(t, d2.Decider)
@@ -104,14 +104,14 @@ func TestResolver_ExplanationsOffSkipNarrationButKeepProvider(t *testing.T) {
 func TestResolver_EscalationThresholdNeedsBothEngines(t *testing.T) {
 	s := resolverStore(t)
 	enableTypeSafe(t, s, false)
-	d, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.Zero(t, d.EscalateBelow, "off by default")
 
 	pct := 90
 	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{EscalateBelowPct: &pct})
 	require.NoError(t, err)
-	d, err = newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err = newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.InDelta(t, 0.90, d.EscalateBelow, 1e-9)
 	require.InDelta(t, 0.90, d.Analyze().EscalateBelow, 1e-9, "reaches the analyzer")
@@ -119,7 +119,7 @@ func TestResolver_EscalationThresholdNeedsBothEngines(t *testing.T) {
 	off := false
 	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{VerdictEngineEnabled: &off})
 	require.NoError(t, err)
-	d, err = newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err = newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.Zero(t, d.EscalateBelow, "no TypeSafe decision, nothing to escalate")
 }
@@ -137,9 +137,9 @@ func TestResolver_AIMasterSwitchStopsEverything(t *testing.T) {
 	enableTypeSafe(t, s, false)
 	_, err := s.UpdateAIFeatureSettings(false)
 	require.NoError(t, err)
-	_, err = newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	_, err = newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.ErrorIs(t, err, failureanalysis.ErrAIDisabled)
-	_, err = newAnalyzeDepsResolver(s)(failureanalysis.TriggerExplain)
+	_, err = newAnalyzeDepsResolver(s, nil)(failureanalysis.TriggerExplain)
 	require.ErrorIs(t, err, failureanalysis.ErrAIDisabled)
 }
 
@@ -155,7 +155,7 @@ func TestResolver_TypeSafeOnlyNeverTouchesTheLLM(t *testing.T) {
 	_, err = s.UpdateProviderConfig(cfg.ID, map[string]interface{}{"provider_type": "bogus"}, "")
 	require.NoError(t, err)
 
-	d, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.NotNil(t, d.Decider)
 	require.Nil(t, d.Narrative, "TypeSafe-only: no LLM is attached at all")
@@ -169,7 +169,7 @@ func TestResolver_TypeSafeOnlyNeverTouchesTheLLM(t *testing.T) {
 	require.Contains(t, p.Label(), "no LLM")
 
 	// An explicit Explain still needs the LLM, and says why it is missing.
-	e, err := newAnalyzeDepsResolver(s)(failureanalysis.TriggerExplain)
+	e, err := newAnalyzeDepsResolver(s, nil)(failureanalysis.TriggerExplain)
 	require.NoError(t, err)
 	require.Nil(t, e.Narrative)
 	require.Contains(t, e.LLMUnavailableReason, "misconfigured")
@@ -183,7 +183,7 @@ func TestResolver_BrokenLLMLeavesTypeSafeDeciding(t *testing.T) {
 	_, err = s.UpdateProviderConfig(cfg.ID, map[string]interface{}{"provider_type": "bogus"}, "")
 	require.NoError(t, err)
 
-	d, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err, "a misconfigured LLM must not fail a job TypeSafe can decide")
 	require.NotNil(t, d.Decider)
 	require.Nil(t, d.Narrative)
@@ -193,20 +193,20 @@ func TestResolver_BrokenLLMLeavesTypeSafeDeciding(t *testing.T) {
 	off := false
 	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{VerdictEngineEnabled: &off})
 	require.NoError(t, err)
-	_, err = newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	_, err = newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.Error(t, err)
 }
 
 func TestResolver_FallbackSwitch(t *testing.T) {
 	s := resolverStore(t)
 	enableTypeSafe(t, s, false)
-	d, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.False(t, d.NoLLMFallback, "the fallback is on by default")
 	off := false
 	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{LLMFallbackEnabled: &off})
 	require.NoError(t, err)
-	d, err = newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err = newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.True(t, d.NoLLMFallback)
 	require.NotNil(t, d.Narrative, "explanations are still on, so the LLM is attached for them")
@@ -219,7 +219,7 @@ func TestResolver_MissingKeyIsTypeSafeUnavailableNotAnLLMRoute(t *testing.T) {
 	require.NoError(t, err)
 
 	// Fallback on (the default): the LLM may decide, and the analysis says TypeSafe was unavailable.
-	d, err := newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.NotNil(t, d.Decider, "TypeSafe stays the configured decider")
 	require.NotNil(t, d.Narrative)
@@ -233,7 +233,7 @@ func TestResolver_MissingKeyIsTypeSafeUnavailableNotAnLLMRoute(t *testing.T) {
 	off, zero := false, 0
 	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{NarrativeEnabled: &off, LLMFallbackEnabled: &off, EscalateBelowPct: &zero})
 	require.NoError(t, err)
-	d, err = newAnalyzeDepsResolver(s)(models.RunAnalysisJobTriggerManual)
+	d, err = newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
 	require.NoError(t, err)
 	require.Nil(t, d.Narrative, "a missing key must not turn a TypeSafe-only route into an LLM route")
 	require.True(t, d.NoLLMFallback)

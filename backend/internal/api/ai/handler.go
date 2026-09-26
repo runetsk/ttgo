@@ -28,20 +28,30 @@ type Handler struct {
 	// from another session (POST /ai-generations/{id}/cancel).
 	inflight *inflightRegistry
 
-	// newTypeSafeClient constructs the TypeSafe.ai client used by TestTypeSafeConnection;
-	// overridable in tests via SetTypeSafeClientFactory.
+	// typesafeClients is the process-wide TypeSafe client factory (one shared rate limiter),
+	// wired by the Server through SetTypeSafeClientFactoryShared. Nil builds unlimited clients.
+	typesafeClients *typesafe.ClientFactory
+	// newTypeSafeClient constructs the TypeSafe.ai client used by TestTypeSafeConnection. It
+	// builds through typesafeClients; tests replace it via SetTypeSafeClientFactory.
 	newTypeSafeClient func(apiKey string, timeout time.Duration) typesafe.Client
 }
 
 func NewHandler(s *store.Store, sanitizer *bluemonday.Policy) *Handler {
-	return &Handler{
+	h := &Handler{
 		store:     s,
 		sanitizer: sanitizer,
 		inflight:  newInflightRegistry(),
-		newTypeSafeClient: func(k string, to time.Duration) typesafe.Client {
-			return typesafe.NewHTTPClient(k, typesafe.Options{Timeout: to})
-		},
 	}
+	h.newTypeSafeClient = func(k string, to time.Duration) typesafe.Client {
+		return h.typesafeClients.New(k, typesafe.Options{Timeout: to})
+	}
+	return h
+}
+
+// SetTypeSafeClientFactoryShared wires the Server's process-wide TypeSafe client factory, so
+// the connection test draws from the same rate limiter as failure analysis.
+func (h *Handler) SetTypeSafeClientFactoryShared(f *typesafe.ClientFactory) {
+	h.typesafeClients = f
 }
 
 // SetTypeSafeClientFactory replaces the client constructor (tests only).

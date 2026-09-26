@@ -40,6 +40,7 @@ import (
 	"ttgo/internal/safehttp"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
+	"ttgo/pkg/tracker/typesafe"
 
 	_ "ttgo/docs" // generated swagger docs
 
@@ -82,6 +83,8 @@ type Server struct {
 	loginLimiter  *ratelimit.Limiter // per-IP login throttle (F-042)
 	llmLimiter    *ratelimit.Limiter // per-token/IP throttle on LLM-calling endpoints (F-007)
 	rateStop      chan struct{}      // stops limiter janitors on shutdown
+
+	typesafeClients *typesafe.ClientFactory // TypeSafe clients sharing one rate limiter (TYPESAFE_RPM)
 }
 
 func NewServer(s *store.Store, opts ...func(*Server)) *Server {
@@ -99,6 +102,8 @@ func NewServer(s *store.Store, opts ...func(*Server)) *Server {
 		loginLimiter:  ratelimit.New(0.5, 10), // ~30/min sustained, burst 10 per IP
 		llmLimiter:    ratelimit.New(0.2, 8),  // ~12/min sustained, burst 8 per token/IP
 		rateStop:      make(chan struct{}),
+
+		typesafeClients: typesafe.NewClientFactory(typesafe.LimiterFromEnv()),
 	}
 	srv.loginLimiter.StartJanitor(5*time.Minute, 15*time.Minute, srv.rateStop)
 	srv.llmLimiter.StartJanitor(5*time.Minute, 15*time.Minute, srv.rateStop)
@@ -468,6 +473,11 @@ func (s *Server) requestIDMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", rid)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// WithTypeSafeClientFactory replaces the process-wide TypeSafe client factory (tests).
+func WithTypeSafeClientFactory(f *typesafe.ClientFactory) func(*Server) {
+	return func(s *Server) { s.typesafeClients = f }
 }
 
 // WithCORSOrigin sets the allowed CORS origin for the server.

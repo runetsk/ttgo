@@ -57,12 +57,9 @@ func mountAPIRoutes(s *Server, api *routegroup.Bundle) {
 	), s.requireAuth)
 	apijira.Mount(api, apijira.NewHandler(s.store, s.Hub, s.sanitizer), s.requireAuth, s.requireAdmin)
 	apiconfluence.Mount(api, apiconfluence.NewHandler(s.store, s.Hub, s.sanitizer), s.requireAuth, s.requireAdmin)
-	if s.aiHandler == nil {
-		s.aiHandler = apiai.NewHandler(s.store, s.sanitizer)
-	}
-	apiai.Mount(api, s.aiHandler, s.requireAuth, s.requireAdmin)
+	apiai.Mount(api, s.ensureAIHandler(), s.requireAuth, s.requireAdmin)
 	apiruns.Mount(api, apiruns.NewHandlerWithNotifier(s.store, s.Hub, s.notifyRunCompleted).
-		WithAutoAnalyzeGate(newAutoAnalyzeGate(newAnalyzeDepsResolver(s.store))), s.requireAuth)
+		WithAutoAnalyzeGate(newAutoAnalyzeGate(s.analyzeDepsResolver())), s.requireAuth)
 	apicustomfields.Mount(api, apicustomfields.NewHandler(s.store), s.requireAuth, s.requireAdmin)
 	apisearch.Mount(api, apisearch.NewHandler(s.store), s.requireAuth)
 	apitokens.Mount(api, apitokens.NewHandler(s.store), s.requireAdmin)
