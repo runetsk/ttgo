@@ -82,11 +82,14 @@ type Client interface {
 }
 
 // Options configure NewHTTPClient. Zero values take the defaults; sleep is a test seam.
+// Limiter paces every HTTP attempt (nil = unlimited); ClientFactory fills it with the
+// process-wide limiter.
 type Options struct {
 	BaseURL     string
 	Timeout     time.Duration
 	MaxAttempts int
 	HTTP        *http.Client
+	Limiter     Limiter
 	sleep       func(ctx context.Context, d time.Duration) error
 }
 
@@ -95,13 +98,14 @@ type HTTPClient struct {
 	baseURL     string
 	maxAttempts int
 	http        *http.Client
+	limiter     Limiter
 	sleep       func(ctx context.Context, d time.Duration) error
 	jitter      func() float64
 }
 
 func NewHTTPClient(apiKey string, opts Options) *HTTPClient {
 	c := &HTTPClient{apiKey: apiKey, baseURL: strings.TrimRight(opts.BaseURL, "/"),
-		maxAttempts: opts.MaxAttempts, http: opts.HTTP, sleep: opts.sleep, jitter: rand.Float64}
+		maxAttempts: opts.MaxAttempts, http: opts.HTTP, limiter: opts.Limiter, sleep: opts.sleep, jitter: rand.Float64}
 	if c.baseURL == "" {
 		c.baseURL = strings.TrimRight(os.Getenv(EnvBaseURL), "/")
 	}
@@ -119,18 +123,21 @@ func NewHTTPClient(apiKey string, opts Options) *HTTPClient {
 		c.http = safehttp.GuardedClient(timeout) // SSRF guard, fixed public host
 	}
 	if c.sleep == nil {
-		c.sleep = func(ctx context.Context, d time.Duration) error {
-			t := time.NewTimer(d)
-			defer t.Stop()
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-t.C:
-				return nil
-			}
-		}
+		c.sleep = sleepCtx
 	}
 	return c
+}
+
+// wait takes a token from the limiter before an HTTP attempt. A wait cut short by the context
+// is reported like a cancelled backoff, and no request is sent.
+func (c *HTTPClient) wait(ctx context.Context) error {
+	if c.limiter == nil {
+		return nil
+	}
+	if err := c.limiter.Wait(ctx); err != nil {
+		return &Error{Category: CategoryNetwork, Message: "cancelled waiting for the rate limiter: " + err.Error()}
+	}
+	return nil
 }
 
 // wire structs use pointers so "missing or null" is distinguishable from zero.
@@ -160,6 +167,9 @@ func (c *HTTPClient) Evaluate(ctx context.Context, req Request) (*Response, erro
 	}
 	var lastErr error
 	for attempt := 0; attempt < c.maxAttempts; attempt++ {
+		if werr := c.wait(ctx); werr != nil {
+			return nil, werr
+		}
 		raw, herr := c.do(ctx, http.MethodPost, "/v1/systemone", body)
 		if herr == nil {
 			return validate(raw, req)
@@ -188,6 +198,9 @@ func (c *HTTPClient) Evaluate(ctx context.Context, req Request) (*Response, erro
 }
 
 func (c *HTTPClient) ListModels(ctx context.Context) ([]Model, error) {
+	if err := c.wait(ctx); err != nil {
+		return nil, err
+	}
 	raw, err := c.do(ctx, http.MethodGet, "/v1/models", nil)
 	if err != nil {
 		return nil, err

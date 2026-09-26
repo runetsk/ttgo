@@ -215,3 +215,53 @@ func TestNewHTTPClient_BaseURLFallsBackToEnv(t *testing.T) {
 		t.Fatalf("empty env must fall back to the default: got %q", got)
 	}
 }
+
+func TestEvaluate_EachAttemptTakesALimiterToken(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&calls, 1) == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(okBody()))
+	}))
+	defer srv.Close()
+	lim := &countingLimiter{}
+	c := NewHTTPClient("k", Options{BaseURL: srv.URL, HTTP: srv.Client(), Limiter: lim,
+		sleep: func(context.Context, time.Duration) error { return nil }})
+	_, err := c.Evaluate(context.Background(), Request{State: "s", Model: "m", Questions: choiceQ()})
+	require.NoError(t, err)
+	require.Equal(t, int32(2), atomic.LoadInt32(&calls))
+	require.Equal(t, int32(2), lim.calls.Load(), "the retry takes its own token")
+}
+
+func TestListModels_TakesALimiterToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"models":[]}`))
+	}))
+	defer srv.Close()
+	lim := &countingLimiter{}
+	_, err := NewHTTPClient("k", Options{BaseURL: srv.URL, HTTP: srv.Client(), Limiter: lim}).ListModels(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, int32(1), lim.calls.Load())
+}
+
+func TestEvaluate_CancelledLimiterWaitSendsNothing(t *testing.T) {
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		_, _ = w.Write([]byte(okBody()))
+	}))
+	defer srv.Close()
+	lim := &countingLimiter{err: context.Canceled}
+	c := NewHTTPClient("k", Options{BaseURL: srv.URL, HTTP: srv.Client(), Limiter: lim})
+	_, err := c.Evaluate(context.Background(), Request{State: "s", Model: "m", Questions: choiceQ()})
+	var te *Error
+	require.ErrorAs(t, err, &te)
+	require.Equal(t, CategoryNetwork, te.Category)
+	require.Contains(t, te.Message, "rate limiter")
+	require.Zero(t, atomic.LoadInt32(&calls), "no request leaves without a token")
+	_, err = c.ListModels(context.Background())
+	require.ErrorAs(t, err, &te)
+	require.Equal(t, CategoryNetwork, te.Category)
+}
