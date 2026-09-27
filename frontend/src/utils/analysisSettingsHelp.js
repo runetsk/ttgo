@@ -67,6 +67,11 @@ export const SETTING_HELP = {
         title: 'Model',
         what: 'The TypeSafe.ai model that answers. Pinned to jev-1.13.0 by default because confidence thresholds are tuned per version.',
     },
+    'ts.price_per_mtok': {
+        title: 'Price',
+        what: 'What TypeSafe.ai charges per million input tokens, in USD. Failure analysis records what each decision and each semantic grouping pass cost at this price, and holds new analyses against the AI budgets with it.',
+        details: 'The default is 0.042. Set it to match your plan; 0 records TypeSafe calls as free. Calls already made keep the price that applied when they ran.',
+    },
     'ts.timeout_seconds': {
         title: 'Timeout',
         what: 'How long one request to TypeSafe.ai may take (5 to 300 s). A request that times out is not repeated and the decision counts as unavailable.',

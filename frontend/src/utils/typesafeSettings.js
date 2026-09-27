@@ -4,7 +4,7 @@
 export const TIMEOUT_MIN = 5;
 export const TIMEOUT_MAX = 300;
 
-const FIELDS = ['enabled', 'model', 'timeout_seconds', 'verdict_engine_enabled', 'narrative_enabled', 'escalate_below_pct', 'llm_fallback_enabled', 'semantic_dedup_enabled', 'allow_auto_failure_analysis'];
+const FIELDS = ['enabled', 'model', 'price_per_mtok', 'timeout_seconds', 'verdict_engine_enabled', 'narrative_enabled', 'escalate_below_pct', 'llm_fallback_enabled', 'semantic_dedup_enabled', 'allow_auto_failure_analysis'];
 
 // escalationValid: the "ask the LLM below N%" threshold is a whole percentage, 0 (never) to 100.
 export function escalationValid(pct) {
@@ -17,6 +17,11 @@ export function escalationNote(pct) {
     if (pct === 0) return 'Off: TypeSafe decides every verdict it can.';
     if (pct === 100) return 'Every verdict below 100% goes to the LLM, which in practice is almost all of them.';
     return `Verdicts TypeSafe gives less than ${pct}% confidence are decided by your default LLM instead; the analysis notes what TypeSafe said.`;
+}
+
+// priceValid: the USD price per million TypeSafe input tokens; 0 means free.
+export function priceValid(v) {
+    return typeof v === 'number' && Number.isFinite(v) && v >= 0;
 }
 
 // validateTypeSafeDraft returns a message per field the server would reject. Shared by the card
@@ -32,6 +37,9 @@ export function validateTypeSafeDraft(form) {
     }
     if (!escalationValid(form?.escalate_below_pct ?? 0)) {
         errors.escalate_below_pct = 'Enter a whole number from 0 to 100.';
+    }
+    if (form?.price_per_mtok !== undefined && !priceValid(form.price_per_mtok)) {
+        errors.price_per_mtok = 'Enter a price of 0 or more (USD per million input tokens).';
     }
     return errors;
 }

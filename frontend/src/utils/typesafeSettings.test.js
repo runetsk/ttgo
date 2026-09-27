@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formFromSettings, buildTypeSafePatch, keyStatusLabel, canTestConnection, escalationValid, escalationNote, defaultProvider, typesafeStatus, verdictDependencyNote, validateTypeSafeDraft } from './typesafeSettings.js';
+import { formFromSettings, buildTypeSafePatch, keyStatusLabel, canTestConnection, escalationValid, escalationNote, defaultProvider, typesafeStatus, verdictDependencyNote, validateTypeSafeDraft, priceValid } from './typesafeSettings.js';
 
 const settings = {
     enabled: false, api_key_masked: '', api_key_status: 'missing', model: 'jev-1.13.0', timeout_seconds: 30,
@@ -109,4 +109,15 @@ test('validateTypeSafeDraft flags what the server rejects', () => {
     assert.match(validateTypeSafeDraft({ ...ok, model: '  ' }).model, /model/);
     assert.match(validateTypeSafeDraft({ ...ok, escalate_below_pct: NaN }).escalate_below_pct, /0 to 100/);
     assert.equal(validateTypeSafeDraft({ ...ok, escalate_below_pct: undefined }).escalate_below_pct, undefined);
+});
+
+test('price per million tokens: 0 or more, travels in the patch', () => {
+    for (const ok of [0, 0.042, 1, 12.5]) assert.equal(priceValid(ok), true, String(ok));
+    for (const bad of [-0.01, NaN, Infinity, '0.042', null, undefined]) assert.equal(priceValid(bad), false, String(bad));
+    const withPrice = { ...settings, price_per_mtok: 0.042 };
+    const form = { ...formFromSettings(withPrice), price_per_mtok: 0.05 };
+    assert.deepEqual(buildTypeSafePatch(form, withPrice), { price_per_mtok: 0.05 });
+    assert.deepEqual(validateTypeSafeDraft(formFromSettings(withPrice)), {});
+    assert.match(validateTypeSafeDraft({ ...form, price_per_mtok: NaN }).price_per_mtok, /0 or more/);
+    assert.equal(validateTypeSafeDraft(formFromSettings(settings)).price_per_mtok, undefined, 'an older server without the field');
 });

@@ -2,6 +2,7 @@ import React from 'react';
 import {
     ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell,
 } from 'recharts';
+import { analysisCostLine } from '../../utils/aiCost';
 
 const OUTCOME_COLORS = {
     'Accepted as-is': '#34d399', 'Accepted edited': '#a7f3d0', Rejected: '#f87171',
@@ -15,6 +16,7 @@ export default function AIGenerationPanel({ report }) {
     const accepted = drafts.accepted_unchanged + drafts.accepted_edited;
     const decided = accepted + drafts.rejected;
     const acceptanceRate = decided ? Math.round((accepted / decided) * 100) : null;
+    const costLine = analysisCostLine(report.analysis);
 
     const outcomeData = [
         { name: 'Accepted as-is', value: drafts.accepted_unchanged },
@@ -44,6 +46,11 @@ export default function AIGenerationPanel({ report }) {
                 {stat('p95 duration', `${(runs.p95_duration_ms / 1000).toFixed(1)}s`, `avg ${(runs.avg_duration_ms / 1000).toFixed(1)}s`)}
                 {stat('Parse failures', runs.parse_failures, `${runs.retried_runs} runs retried`)}
             </div>
+            {costLine && (
+                <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginBottom: 12 }} data-testid="ai-analysis-cost">
+                    {costLine}
+                </div>
+            )}
 
             {outcomeData.length > 0 && (
                 <div style={{ width: '100%', height: 220 }}>

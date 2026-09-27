@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { aiGeneration } from '../../api';
 import { monthMeter } from '../../utils/aiSettingsTabs';
+import { spendSplit } from '../../utils/aiCost';
 import { saveError } from '../../utils/saveBar';
 import { useSaveSection } from './saveBarContext';
 import { s } from './styles';
@@ -12,7 +13,7 @@ const NO_ERRORS = [];
 
 /* ── Soft Cost Budgets Section (saves through the Settings → AI save bar) ── */
 export default function BudgetSettings({ isAdmin, onStatusChange }) {
-    const [saved, setSaved] = useState(null); // { perRequest, monthly, monthlyUsd, spentUsd }
+    const [saved, setSaved] = useState(null); // { perRequest, monthly, monthlyUsd, spentUsd, split }
     const [perRequest, setPerRequest] = useState('');
     const [monthly, setMonthly] = useState('');
 
@@ -22,6 +23,7 @@ export default function BudgetSettings({ isAdmin, onStatusChange }) {
             monthly: asField(cfg.monthly_usd),
             monthlyUsd: cfg.monthly_usd > 0 ? cfg.monthly_usd : 0,
             spentUsd: cfg.month_spent_usd ?? 0,
+            split: spendSplit(cfg),
         };
         setSaved(next);
         setPerRequest(next.perRequest);
@@ -66,8 +68,7 @@ export default function BudgetSettings({ isAdmin, onStatusChange }) {
                 </div>
             </div>
             <p style={s.templateDesc}>
-                Warnings only: over a budget, generation asks for confirmation instead of cutting the request down.
-                Requires provider pricing. Empty or zero means off.
+                Warnings only: over a budget, test generation and failure analysis ask for confirmation instead of cutting the request down, and automatic analysis of a completed run is skipped until someone chooses Run anyway. Requires provider pricing (and the TypeSafe.ai price). Empty or zero means off.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 8, maxWidth: 520 }}>
                 <label style={FIELD_LABEL}>
@@ -92,6 +93,11 @@ export default function BudgetSettings({ isAdmin, onStatusChange }) {
                     <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
                         ${saved.spentUsd.toFixed(2)} estimated spend this month{meter ? ` of $${saved.monthlyUsd.toFixed(2)}` : ''} · resets on the 1st (UTC)
                     </span>
+                    {saved.split && (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }} data-testid="budget-spend-split">
+                            {saved.split}
+                        </span>
+                    )}
                 </div>
             )}
         </section>

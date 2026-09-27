@@ -199,6 +199,12 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
                 <input id="typesafe-model" className="modern-input" type="text" value={form.model} disabled={locked} data-testid="typesafe-model"
                     onChange={(e) => update({ model: e.target.value })} style={{ width: 200, padding: '8px 12px', fontSize: '0.85rem' }} />
             </FieldRow>
+            <FieldRow label="Price" htmlFor="typesafe-price" setting="ts.price_per_mtok" help={SETTING_HELP['ts.price_per_mtok']}
+                hint={errors.price_per_mtok ? errorHint(errors.price_per_mtok) : 'USD per million input tokens. Prices each TypeSafe call for the AI budgets; 0 = free.'}>
+                <SuffixInput id="typesafe-price" suffix="$ / M tokens" width={120} min={0} step="0.001" value={Number.isFinite(form.price_per_mtok) ? form.price_per_mtok : ''}
+                    disabled={locked} data-testid="typesafe-price"
+                    onChange={(e) => update({ price_per_mtok: e.target.value === '' ? NaN : Number(e.target.value) })} />
+            </FieldRow>
             <FieldRow label="Timeout" htmlFor="typesafe-timeout" setting="ts.timeout_seconds" help={SETTING_HELP['ts.timeout_seconds']}
                 hint={errors.timeout_seconds ? errorHint(errors.timeout_seconds) : 'How long one request to TypeSafe may take before the decision counts as unavailable.'}>
                 <SuffixInput id="typesafe-timeout" suffix="s" min={TIMEOUT_MIN} max={TIMEOUT_MAX} value={form.timeout_seconds} disabled={locked}
