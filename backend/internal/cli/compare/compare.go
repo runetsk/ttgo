@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"ttgo/pkg/tracker/models"
 )
 
 // Result is one failing run result.
@@ -43,6 +45,7 @@ type Analysis struct {
 	DecisionStatus                string   `json:"decision_status"`
 	ErrorCategory                 string   `json:"error_category"`
 	JobID                         *string  `json:"job_id"`
+	HistoryAvailable              bool     `json:"history_available"`
 }
 
 // failedAttempt reports whether an analysis is a failed attempt rather than an answer.
@@ -107,6 +110,26 @@ type Options struct {
 	Job   string // keep only the analyses this job stored
 	ByJob bool   // one column per job, labelled by its pipeline, instead of per engine/model
 	Jobs  []Job  // the run's jobs: labels and order for by-job columns
+	// DefectTypeMode is DefectTypeModeNative (or "") to grade the stored suggestions, or
+	// DefectTypeModeMapping to re-grade every engine's defect type as its verdict's mapping.
+	DefectTypeMode string
+}
+
+// Defect-type grading modes of `ttgo ai compare --defect-type-mode` (spec B5 #26).
+const (
+	DefectTypeModeNative  = "native"
+	DefectTypeModeMapping = "mapping"
+)
+
+// ParseDefectTypeMode validates a --defect-type-mode value; "" means native.
+func ParseDefectTypeMode(s string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", DefectTypeModeNative:
+		return DefectTypeModeNative, nil
+	case DefectTypeModeMapping:
+		return DefectTypeModeMapping, nil
+	}
+	return "", fmt.Errorf("--defect-type-mode must be native or mapping, got %q", s)
 }
 
 // GroundTruth is one planted template of the AI demo dataset. An empty
@@ -142,6 +165,7 @@ type Cell struct {
 	Tokens           int      `json:"tokens"`
 	Failed           bool     `json:"failed,omitempty"` // a failed attempt: no decision
 	ErrorCategory    string   `json:"error_category,omitempty"`
+	History          bool     `json:"history_available"` // the analysis had this test's history
 }
 
 // Row is one failing result with its cell per column.
@@ -166,6 +190,8 @@ type Report struct {
 	// Job is the job the report is limited to (--job); JobLabel its pipeline.
 	Job      string `json:"job,omitempty"`
 	JobLabel string `json:"job_label,omitempty"`
+	// DefectTypeMode is "mapping" when defect types were re-graded from the verdicts.
+	DefectTypeMode string `json:"defect_type_mode,omitempty"`
 	// Excluded counts stored analyses left out because they belong to another job or,
 	// grouped by job, to none (a single re-analyze).
 	Excluded int `json:"excluded,omitempty"`
@@ -303,6 +329,9 @@ func Pivot(results []Result, analyses map[string][]Analysis) Report {
 // decided each row (a takeover or a fallback puts an LLM answer in a TypeSafe job).
 func PivotWith(results []Result, analyses map[string][]Analysis, opts Options) Report {
 	rep := Report{Job: opts.Job}
+	if opts.DefectTypeMode == DefectTypeModeMapping {
+		rep.DefectTypeMode = DefectTypeModeMapping
+	}
 	labels := map[string]string{}
 	order := map[string]int{}
 	for i, j := range opts.Jobs {
@@ -336,13 +365,21 @@ func PivotWith(results []Result, analyses map[string][]Analysis, opts Options) R
 			if cur := row.Cells[key]; cur != nil && cur.Version >= a.Version {
 				continue
 			}
-			row.Cells[key] = &Cell{
+			cell := &Cell{
 				Version: a.Version, Verdict: a.Verdict, Confidence: a.Confidence, Score: a.ConfidenceScore,
 				DefectType: a.SuggestedDefectType, DefectScore: a.SuggestedDefectTypeConfidence,
 				SuggestionSource: a.SuggestionSource, NarrativeStatus: a.NarrativeStatus,
 				Tokens: a.TypeSafeInputTokens + a.TokenUsagePrompt + a.TokenUsageCompletion,
-				Failed: failed, ErrorCategory: a.ErrorCategory,
+				Failed: failed, ErrorCategory: a.ErrorCategory, History: a.HistoryAvailable,
 			}
+			if rep.DefectTypeMode == DefectTypeModeMapping && !failed {
+				// Like for like (spec B5 #26): every engine's suggestion becomes its verdict's
+				// mapping, the rule the generative path already follows, so TypeSafe's separate
+				// defect-type question no longer decides the comparison. No new calls.
+				cell.DefectType = models.SuggestedDefectType(a.Verdict)
+				cell.DefectScore, cell.SuggestionSource = nil, ""
+			}
+			row.Cells[key] = cell
 			if _, ok := seen[key]; !ok {
 				seen[key] = col
 			}
@@ -425,6 +462,14 @@ type BucketStats struct {
 	DefectCorrect  int `json:"defect_correct"`
 }
 
+// HistoryStats is grading over the rows whose analysis had (or lacked) the test's history.
+type HistoryStats struct {
+	Graded         int `json:"graded"`
+	VerdictGraded  int `json:"verdict_graded"`
+	VerdictCorrect int `json:"verdict_correct"`
+	DefectCorrect  int `json:"defect_correct"`
+}
+
 // ColumnStats summarizes one column.
 type ColumnStats struct {
 	Key            string                 `json:"key"`
@@ -445,6 +490,8 @@ type ColumnStats struct {
 	VerdictCorrect int                    `json:"verdict_correct"`
 	DefectCorrect  int                    `json:"defect_correct"`
 	ByConfidence   map[string]BucketStats `json:"by_confidence"`
+	WithHistory    HistoryStats           `json:"with_history"`    // graded rows analyzed with the test's history
+	WithoutHistory HistoryStats           `json:"without_history"` // ...and without it (also every row analyzed before history_available existed)
 }
 
 // PairAgreement compares two columns on the rows both analyzed.
@@ -501,12 +548,18 @@ func Summarize(rep Report) Summary {
 			}
 			if row.Expected != nil {
 				cs.Graded++
+				h := &cs.WithoutHistory
+				if c.History {
+					h = &cs.WithHistory
+				}
+				h.Graded++
 				b := cs.ByConfidence[c.Confidence]
 				b.Graded++
 				ok := defectMatch(c.DefectType, row.Expected.ExpectedDefectType)
 				if ok {
 					cs.DefectCorrect++
 					b.DefectCorrect++
+					h.DefectCorrect++
 				}
 				if issued {
 					cs.IssuedGraded++
@@ -517,9 +570,11 @@ func Summarize(rep Report) Summary {
 				if row.Expected.ExpectedVerdict != "" {
 					cs.VerdictGraded++
 					b.VerdictGraded++
+					h.VerdictGraded++
 					if c.Verdict == row.Expected.ExpectedVerdict {
 						cs.VerdictCorrect++
 						b.VerdictCorrect++
+						h.VerdictCorrect++
 					}
 				}
 				cs.ByConfidence[c.Confidence] = b
@@ -606,6 +661,9 @@ func Render(w io.Writer, rep Report, s Summary) {
 		fmt.Fprintf(w, "; %d stored analysis version(s) are failed calls that name no model and are not counted", rep.FailedCalls)
 	}
 	fmt.Fprintln(w)
+	if rep.DefectTypeMode == DefectTypeModeMapping {
+		fmt.Fprintln(w, "Defect types re-graded as each verdict's mapping (--defect-type-mode mapping); stored suggestions are ignored.")
+	}
 	if rep.Job != "" {
 		label := rep.JobLabel
 		if label == "" {
@@ -697,6 +755,13 @@ func Render(w io.Writer, rep Report, s Summary) {
 			parts = append(parts, fmt.Sprintf("%s %d", k, cs.Verdicts[k]))
 		}
 		fmt.Fprintf(w, "  verdicts: %s\n", strings.Join(parts, ", "))
+		if cs.Graded > 0 {
+			fmt.Fprintf(w, "  with history: verdict %s of %d, defect type %s of %d · without: verdict %s of %d, defect type %s of %d\n",
+				pct(cs.WithHistory.VerdictCorrect, cs.WithHistory.VerdictGraded), cs.WithHistory.VerdictGraded,
+				pct(cs.WithHistory.DefectCorrect, cs.WithHistory.Graded), cs.WithHistory.Graded,
+				pct(cs.WithoutHistory.VerdictCorrect, cs.WithoutHistory.VerdictGraded), cs.WithoutHistory.VerdictGraded,
+				pct(cs.WithoutHistory.DefectCorrect, cs.WithoutHistory.Graded), cs.WithoutHistory.Graded)
+		}
 	}
 	for _, p := range s.Pairs {
 		fmt.Fprintf(w, "\n%s vs %s: %d rows compared, verdict agreement %s, defect-type agreement %s\n",
