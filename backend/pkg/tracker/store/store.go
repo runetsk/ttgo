@@ -153,6 +153,11 @@ func New(dsn string) (*Store, error) {
 func (s *Store) bootstrapDB() error {
 	db := s.db
 
+	// Snapshot provenance (spec B1): decide before AutoMigrate adds suggested_is_clone whether
+	// this is the boot that introduces it. Only that boot runs the backfill below, so rows left
+	// unknown by the conservative rules are never revisited.
+	needProvenanceBackfill := db.Migrator().HasTable("run_results") && !hasColumn(db, "run_results", "suggested_is_clone")
+
 	if err := migrateDefects(db); err != nil {
 		return fmt.Errorf("failed to migrate defects: %w", err)
 	}
@@ -294,6 +299,11 @@ func (s *Store) bootstrapDB() error {
 	}
 	if err := s.backfillFailedAnalyses(); err != nil {
 		return fmt.Errorf("failed to backfill failed analyses: %w", err)
+	}
+	if needProvenanceBackfill {
+		if err := s.backfillSnapshotProvenance(); err != nil {
+			return fmt.Errorf("failed to backfill snapshot provenance: %w", err)
+		}
 	}
 
 	// Encrypt any pre-existing plaintext integration/LLM secrets at rest (F-016).

@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/store"
 
 	"github.com/stretchr/testify/require"
 )
@@ -101,4 +102,24 @@ func TestSnapshotValues_DerivedSuggestionIsItsOwnEngine(t *testing.T) {
 	require.Equal(t, "product_bug", v["suggested_defect_type"])
 	require.Equal(t, "high", v["suggested_confidence"])
 	require.InDelta(t, 0.96, *(v["suggested_confidence_score"].(*float64)), 1e-9)
+}
+
+// The backfill's matcher must accept exactly what snapshotValues writes; this pins the two
+// definitions together so a change to one fails here instead of silently leaving rows unknown.
+func TestSnapshotValues_AgreeWithStoreBackfillMatcher(t *testing.T) {
+	src := "rep"
+	for _, a := range []*models.RunResultAnalysis{
+		{Verdict: "unknown", Confidence: "low", Engine: models.AnalysisEngineTypeSafe, ConfidenceScore: f(0.3), SuggestedDefectType: "automation_bug", SuggestedDefectTypeConfidence: f(0.93)},
+		{Verdict: "product_bug", Confidence: "high", Engine: models.AnalysisEngineTypeSafe, SuggestedDefectType: "product_bug", SuggestedDefectTypeConfidence: f(0.96), SuggestionSource: models.SuggestionSourceVerdict},
+		{Verdict: "flaky_test", Confidence: "medium", Engine: models.AnalysisEngineGenerative, SuggestedDefectType: "automation_bug"},
+		{Verdict: "product_bug", Confidence: "high", SuggestedDefectType: "product_bug"},
+		{Verdict: "environment", Confidence: "medium", Engine: models.AnalysisEngineTypeSafe, SuggestedDefectTypeConfidence: f(0.4), SourceAnalysisID: &src},
+	} {
+		v := snapshotValues(a, time.Now())
+		score, _ := v["suggested_confidence_score"].(*float64)
+		require.True(t, store.SnapshotMatchesAnalysis(a, v["suggested_verdict"].(string), v["suggested_defect_type"].(string),
+			v["suggested_confidence"].(string), v["suggested_engine"].(string), score), "%+v", a)
+	}
+	a := &models.RunResultAnalysis{Verdict: "flaky_test", Confidence: "medium", SuggestedDefectType: "automation_bug"}
+	require.False(t, store.SnapshotMatchesAnalysis(a, "flaky_test", "automation_bug", "high", "generative", nil), "confidence differs")
 }
