@@ -239,6 +239,11 @@ const (
 	RunAnalysisJobStatusCompleted = "completed"
 	RunAnalysisJobStatusFailed    = "failed"
 	RunAnalysisJobStatusCancelled = "cancelled"
+	// RunAnalysisJobStatusSkipped: an automatic analysis that was never queued because it would
+	// have taken the month over the AI budget. Terminal from the start; never counts as active.
+	RunAnalysisJobStatusSkipped = "skipped"
+
+	RunAnalysisJobSkipReasonBudget = "budget"
 
 	RunAnalysisJobTriggerManual     = "manual"
 	RunAnalysisJobTriggerAutoOnDone = "auto_on_completion"
@@ -348,6 +353,13 @@ type RunAnalysisJob struct {
 	PipelineLabel string `json:"pipeline_label,omitempty"`
 	// RetryFailedOnly: re-analyze only the groups whose current analysis failed.
 	RetryFailedOnly bool `json:"retry_failed_only" gorm:"not null;default:false"`
+
+	// Skip record (status skipped): why, and the figures the decision used — this run's
+	// estimate, the month's spend so far and the monthly budget then in force.
+	SkipReason      string   `json:"skip_reason" gorm:"not null;default:''"`
+	SkipEstimateUSD *float64 `json:"skip_estimate_usd"`
+	SkipSpentUSD    *float64 `json:"skip_spent_usd"`
+	SkipBudgetUSD   *float64 `json:"skip_budget_usd"`
 }
 
 // RunAnalysisJobOutcomes summarises what a job's representative analyses produced.

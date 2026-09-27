@@ -125,3 +125,36 @@ func TestUpdateAnalysisJobStatus_CompletesRunningJob(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1234, got.SemanticInputTokens)
 }
+func TestCreateSkippedAnalysisJob_IsTerminalAndNeverBlocks(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+
+	skipped, err := s.CreateSkippedAnalysisJob(runID, models.RunAnalysisJobSkipReasonBudget, 0.4, 9.8, 10)
+	require.NoError(t, err)
+	require.Equal(t, models.RunAnalysisJobStatusSkipped, skipped.Status)
+	require.Equal(t, models.RunAnalysisJobTriggerAutoOnDone, skipped.Trigger)
+	require.NotNil(t, skipped.CompletedAt, "terminal from the start")
+	require.Equal(t, "budget", skipped.SkipReason)
+	require.InDelta(t, 0.4, *skipped.SkipEstimateUSD, 1e-12)
+	require.InDelta(t, 9.8, *skipped.SkipSpentUSD, 1e-12)
+	require.InDelta(t, 10, *skipped.SkipBudgetUSD, 1e-12)
+
+	latest, err := s.GetLatestAnalysisJobForRun(runID)
+	require.NoError(t, err)
+	require.Equal(t, skipped.ID, latest.ID, "the run page shows the skip")
+	next, err := s.NextQueuedAnalysisJob()
+	require.NoError(t, err)
+	require.Nil(t, next, "the worker never picks it up")
+	o, err := s.AnalysisJobOutcomes(skipped.ID)
+	require.NoError(t, err)
+	require.Zero(t, o.Groups)
+	require.Zero(t, o.FailedRows)
+	changed, err := s.UpdateAnalysisJobStatus(skipped.ID, models.RunAnalysisJobStatusCancelled, "")
+	require.NoError(t, err)
+	require.False(t, changed, "nothing to cancel")
+
+	job, created, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	require.True(t, created, "a skipped job is not active: Run anyway is not blocked")
+	require.NotEqual(t, skipped.ID, job.ID)
+}

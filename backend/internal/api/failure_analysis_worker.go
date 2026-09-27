@@ -152,6 +152,26 @@ func newAutoAnalyzeGate(resolve failureanalysis.DepsResolver) apiruns.AutoAnalyz
 	}
 }
 
+// newAutoAnalysis is what run completion consults: the gate, and the estimated cost of the
+// automatic job at the route it would run now (planned groups × the per-call estimate).
+func newAutoAnalysis(st *store.Store, resolve failureanalysis.DepsResolver) apiruns.AutoAnalysis {
+	return apiruns.AutoAnalysis{
+		Gate: newAutoAnalyzeGate(resolve),
+		Estimate: func(failures []*models.RunResult) *float64 {
+			deps, err := resolve(models.RunAnalysisJobTriggerAutoOnDone)
+			if err != nil {
+				return nil
+			}
+			settings, err := st.GetFailureAnalysisSettings()
+			if err != nil {
+				return nil
+			}
+			return failureanalysis.EstimateJobUSD(deps,
+				failureanalysis.PlannedGroups(failures, settings.DedupEnabled, settings.MaxAnalysesPerRun))
+		},
+	}
+}
+
 // resolveTypeSafe attaches the TypeSafe decider and semantic grouping when they are enabled,
 // consented for this trigger and keyed. It returns the settings when TypeSafe can decide.
 func resolveTypeSafe(st *store.Store, tsf *typesafe.ClientFactory, trigger string, deps *failureanalysis.JobDeps) *models.TypeSafeSettings {

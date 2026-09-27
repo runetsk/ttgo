@@ -188,3 +188,24 @@ func (s *Store) ListAnalysisJobsForRun(runID string) ([]*models.RunAnalysisJob, 
 	err := s.db.Where("test_run_id = ?", runID).Order("created_at DESC").Find(&out).Error
 	return out, err
 }
+
+// CreateSkippedAnalysisJob records an automatic analysis that was not queued because spent +
+// its estimate would exceed the monthly budget. It is terminal when written, so the
+// one-active-job rule (queued/running only) never counts it and a later start is not blocked.
+func (s *Store) CreateSkippedAnalysisJob(runID, reason string, estimateUSD, spentUSD, budgetUSD float64) (*models.RunAnalysisJob, error) {
+	now := time.Now()
+	job := &models.RunAnalysisJob{
+		ID:          uuid.New().String(),
+		TestRunID:   runID,
+		Trigger:     models.RunAnalysisJobTriggerAutoOnDone,
+		Status:      models.RunAnalysisJobStatusSkipped,
+		CreatedAt:   now,
+		CompletedAt: &now,
+
+		SkipReason: reason, SkipEstimateUSD: &estimateUSD, SkipSpentUSD: &spentUSD, SkipBudgetUSD: &budgetUSD,
+	}
+	if err := s.db.Create(job).Error; err != nil {
+		return nil, err
+	}
+	return job, nil
+}

@@ -1012,7 +1012,7 @@ func (h *Handler) CopyTestRun(w http.ResponseWriter, r *http.Request) {
 // CompleteRun godoc
 //
 // @Summary      Complete a run
-// @Description  Marks a test run as finished, computing its final status from its results, broadcasting the update, and (if configured) enqueuing AI failure analysis for its failures.
+// @Description  Marks a test run as finished, computing its final status from its results, broadcasting the update, and (if configured) enqueuing AI failure analysis for its failures. An automatic analysis that would take the month over the AI budget is recorded as a skipped job instead.
 // @Tags         runs
 // @Produce      json
 // @Param        id  path  string  true  "Test run ID"
@@ -1054,6 +1054,8 @@ func (h *Handler) CompleteRun(w http.ResponseWriter, r *http.Request) {
 				// automatic consent, or a default LLM approved for automatic analysis.
 				if ok, reason := h.canAutoAnalyze(); !ok {
 					slog.WarnContext(r.Context(), "ai-failure-analysis: auto skipped — nothing may analyze automatically", "run_id", run.ID, "reason", reason)
+				} else if over, estimate, spent, budget := h.autoAnalysisOverBudget(failures); over {
+					h.recordSkippedAutoAnalysis(r.Context(), run.ID, estimate, spent, budget)
 				} else if _, _, err := h.store.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerAutoOnDone, ""); err != nil {
 					slog.WarnContext(r.Context(), "ai-failure-analysis: auto enqueue failed", "run_id", run.ID, "err", err)
 				}

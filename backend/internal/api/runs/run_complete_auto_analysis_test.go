@@ -64,3 +64,55 @@ func TestCompleteRunSkipsAutoAnalysisWhenNothingMayAnalyze(t *testing.T) {
 
 	assert.Nil(t, completeRunWithFailure(t, env))
 }
+func setMonthlyBudget(t *testing.T, env *testEnv, usd float64) {
+	t.Helper()
+	rr := doRequest(env, http.MethodPut, "/api/settings/ai-budgets", map[string]any{"monthly_usd": usd})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+}
+
+func enableTypeSafeAuto(t *testing.T, env *testEnv) {
+	t.Helper()
+	rr := doRequest(env, http.MethodPut, "/api/settings/typesafe", map[string]any{
+		"api_key": "ts-key-1234", "enabled": true, "allow_auto_failure_analysis": true,
+	})
+	require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+}
+
+// Spent + this run's estimate over the monthly budget: the automatic analysis is recorded as a
+// skipped job instead of being queued, and "Run anyway" (an acknowledged manual start) works.
+func TestCompleteRunSkipsAutoAnalysisOverMonthlyBudget(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	enableAutoAnalysis(t, env)
+	enableTypeSafeAuto(t, env)
+	setMonthlyBudget(t, env, 0.0001) // one TypeSafe group is estimated at ~$0.00067
+
+	job := completeRunWithFailure(t, env)
+	require.NotNil(t, job)
+	assert.Equal(t, "skipped", job["status"])
+	assert.Equal(t, "auto_on_completion", job["trigger"])
+	assert.Equal(t, "budget", job["skip_reason"])
+	assert.Greater(t, job["skip_estimate_usd"].(float64), 0.0001)
+	assert.Equal(t, 0.0, job["skip_spent_usd"])
+	assert.InDelta(t, 0.0001, job["skip_budget_usd"], 1e-12)
+	assert.NotNil(t, job["completed_at"])
+
+	// "Run anyway": the skipped job is not active, so an acknowledged manual start is queued.
+	// (The manual 409 itself is covered in internal/api/ai/analysis_budget_test.go; this test
+	// server does not wire the failure-analysis resolver into the AI handler.)
+	runID := job["test_run_id"].(string)
+	rr := doRequest(env, http.MethodPost, "/api/runs/"+runID+"/analyze-failures?acknowledge_budget=true", nil)
+	require.Equal(t, http.StatusCreated, rr.Code, rr.Body.String())
+}
+
+func TestCompleteRunQueuesAutoAnalysisWithinBudget(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	enableAutoAnalysis(t, env)
+	enableTypeSafeAuto(t, env)
+	setMonthlyBudget(t, env, 5)
+
+	job := completeRunWithFailure(t, env)
+	require.NotNil(t, job)
+	assert.Equal(t, "queued", job["status"])
+}
