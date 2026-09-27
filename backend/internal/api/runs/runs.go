@@ -416,6 +416,8 @@ func clearAISuggestion(updateMap map[string]interface{}) {
 	updateMap["suggested_confidence"] = ""
 	updateMap["suggested_engine"] = ""
 	updateMap["suggested_confidence_score"] = nil
+	updateMap["suggested_policy_version"] = ""
+	updateMap["suggested_is_clone"] = nil // unknown, not false: false would claim a direct prediction
 	updateMap["decided_at"] = nil
 }
 
@@ -450,7 +452,11 @@ func snapshotValues(a *models.RunResultAnalysis, decidedAt time.Time) map[string
 		"suggested_confidence":       a.Confidence,
 		"suggested_engine":           engine,
 		"suggested_confidence_score": nil,
-		"decided_at":                 decidedAt,
+		// Provenance (spec B1): which question set decided, and whether this result got its own
+		// prediction or a copy of its group representative's (a dedup clone).
+		"suggested_policy_version": a.PolicyVersion,
+		"suggested_is_clone":       a.SourceAnalysisID != nil,
+		"decided_at":               decidedAt,
 	}
 	if a.Engine == models.AnalysisEngineTypeSafe && a.SuggestedDefectTypeConfidence != nil {
 		score := *a.SuggestedDefectTypeConfidence
@@ -461,11 +467,13 @@ func snapshotValues(a *models.RunResultAnalysis, decidedAt time.Time) map[string
 }
 
 type snapshotKey struct {
-	verdict, confidence, suggestedDefectType, engine, confidenceScore string
+	verdict, confidence, suggestedDefectType, engine, confidenceScore, policyVersion string
+	clone                                                                            bool
 }
 
 // snapshotKeyFor buckets analyses whose snapshot columns are identical, so the bulk path can
-// write one grouped UPDATE per distinct snapshot (spec §5: every snapshot dimension is in the key).
+// write one grouped UPDATE per distinct snapshot (spec §5: every snapshot dimension is in the key,
+// including the provenance columns, so a clone never shares a statement with a direct prediction).
 func snapshotKeyFor(a *models.RunResultAnalysis) snapshotKey {
 	v := snapshotValues(a, time.Time{})
 	score := ""
@@ -473,7 +481,8 @@ func snapshotKeyFor(a *models.RunResultAnalysis) snapshotKey {
 		score = strconv.FormatFloat(*p, 'f', -1, 64)
 	}
 	return snapshotKey{verdict: v["suggested_verdict"].(string), confidence: v["suggested_confidence"].(string),
-		suggestedDefectType: v["suggested_defect_type"].(string), engine: v["suggested_engine"].(string), confidenceScore: score}
+		suggestedDefectType: v["suggested_defect_type"].(string), engine: v["suggested_engine"].(string), confidenceScore: score,
+		policyVersion: v["suggested_policy_version"].(string), clone: v["suggested_is_clone"].(bool)}
 }
 
 // snapshotAISuggestion adds the AI failure-analysis suggestion columns to updateMap so the

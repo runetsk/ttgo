@@ -346,6 +346,15 @@ type RunResult struct {
 	// snapshot columns.
 	SuggestedEngine          string   `json:"suggested_engine" gorm:"default:''"`
 	SuggestedConfidenceScore *float64 `json:"suggested_confidence_score,omitempty"`
+	// SuggestedPolicyVersion is the TypeSafe question-set policy of the snapshotted analysis
+	// ("" for generative rows and for decisions whose provenance is unknown). SuggestedIsClone
+	// says whether that analysis was a dedup clone, i.e. the group representative's answer copied
+	// onto this result, rather than a prediction made for it; NULL = unknown (decided before the
+	// column existed and not recovered by the one-time backfill). The accuracy report counts
+	// unknown rows in its totals only. Both are written by the triage snapshot and cleared with
+	// the other snapshot columns.
+	SuggestedPolicyVersion string `json:"suggested_policy_version" gorm:"default:''"`
+	SuggestedIsClone       *bool  `json:"suggested_is_clone"`
 
 	// DecidedAt is the instant the human triage decision above was recorded, written in UTC
 	// alongside the snapshot columns and NULL until a real decision lands.

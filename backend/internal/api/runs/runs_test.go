@@ -1273,3 +1273,39 @@ func TestLinkExistingDefectToResult(t *testing.T) {
 	srv.ServeHTTP(rec2, req2)
 	assert.Equal(t, http.StatusNotFound, rec2.Code)
 }
+
+// The provenance columns ride with the rest of the snapshot. A bulk triage over a group's
+// representative and its clone records one direct and one cloned suggestion under the analysis'
+// policy version, and a later write that leaves nothing to triage clears both: the clone flag back
+// to NULL (unknown), not to false.
+func TestSnapshotProvenance_BulkSplitsDirectFromCloneAndPassClears(t *testing.T) {
+	s, srv := newSnapshotEnv(t)
+	run, results := seedRunWithResults(t, s, models.StatusFail, 2)
+	rep := &models.RunResultAnalysis{RunResultID: results[0].ID, Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceHigh,
+		ModelName: "jev", Engine: models.AnalysisEngineTypeSafe, SuggestedDefectType: "automation_bug", PolicyVersion: "fa-verdict-v5"}
+	repRow, err := s.CreateAnalysis(rep)
+	require.NoError(t, err)
+	clone := *repRow
+	clone.RunResultID, clone.SourceAnalysisID = results[1].ID, &repRow.ID
+	_, err = s.CreateAnalysis(&clone)
+	require.NoError(t, err)
+
+	w := postBulkUpdate(t, s, srv, run.ID, map[string]any{
+		"result_ids": []string{results[0].ID, results[1].ID}, "status": "FAIL", "defect_type": "automation_bug",
+	})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	for i, wantClone := range []bool{false, true} {
+		got, err := s.GetRunResultByID(results[i].ID)
+		require.NoError(t, err)
+		assert.Equal(t, "fa-verdict-v5", got.SuggestedPolicyVersion, "row %d", i)
+		require.NotNil(t, got.SuggestedIsClone, "row %d", i)
+		assert.Equal(t, wantClone, *got.SuggestedIsClone, "row %d", i)
+	}
+
+	w = putRunResult(t, s, srv, results[1], map[string]any{"status": "PASS"})
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	got, err := s.GetRunResultByID(results[1].ID)
+	require.NoError(t, err)
+	assert.Equal(t, "", got.SuggestedPolicyVersion)
+	assert.Nil(t, got.SuggestedIsClone)
+}

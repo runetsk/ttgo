@@ -40,11 +40,47 @@ func TestSnapshotValues_LegacyRowWithEmptyEngineIsGenerative(t *testing.T) {
 func TestClearAISuggestion_ClearsEveryColumn(t *testing.T) {
 	m := map[string]interface{}{}
 	clearAISuggestion(m)
-	for _, k := range []string{"suggested_verdict", "suggested_defect_type", "suggested_confidence", "suggested_engine"} {
+	for _, k := range []string{"suggested_verdict", "suggested_defect_type", "suggested_confidence", "suggested_engine", "suggested_policy_version"} {
 		require.Equal(t, "", m[k], k)
 	}
 	require.Nil(t, m["suggested_confidence_score"])
+	require.Contains(t, m, "suggested_is_clone", "the clone flag must be written, not left over from an earlier decision")
+	require.Nil(t, m["suggested_is_clone"], "cleared to unknown (NULL), never to false, which would read as a direct prediction")
 	require.Nil(t, m["decided_at"])
+}
+
+func TestSnapshotValues_RecordsPolicyAndCloneProvenance(t *testing.T) {
+	src := "rep-1"
+	direct := &models.RunResultAnalysis{Verdict: "flaky_test", Confidence: "high", Engine: models.AnalysisEngineTypeSafe,
+		SuggestedDefectType: "automation_bug", SuggestedDefectTypeConfidence: f(0.91), PolicyVersion: "fa-verdict-v5"}
+	clone := *direct
+	clone.SourceAnalysisID = &src
+
+	v := snapshotValues(direct, time.Now())
+	require.Equal(t, "fa-verdict-v5", v["suggested_policy_version"])
+	require.Equal(t, false, v["suggested_is_clone"])
+
+	v = snapshotValues(&clone, time.Now())
+	require.Equal(t, "fa-verdict-v5", v["suggested_policy_version"])
+	require.Equal(t, true, v["suggested_is_clone"], "a clone carries its representative's answer, not a prediction of its own")
+
+	gen := snapshotValues(&models.RunResultAnalysis{Verdict: "product_bug", Confidence: "high", SuggestedDefectType: "product_bug"}, time.Now())
+	require.Equal(t, "", gen["suggested_policy_version"], "generative rows have no question-set policy")
+	require.Equal(t, false, gen["suggested_is_clone"])
+}
+
+func TestSnapshotKey_SeparatesDirectFromCloneAndPolicies(t *testing.T) {
+	src := "rep-1"
+	base := models.RunResultAnalysis{Verdict: "flaky_test", Confidence: "high", Engine: "typesafe",
+		SuggestedDefectType: "automation_bug", SuggestedDefectTypeConfidence: f(0.9), PolicyVersion: "fa-verdict-v5"}
+	clone := base
+	clone.SourceAnalysisID = &src
+	older := base
+	older.PolicyVersion = "fa-verdict-v4"
+	require.NotEqual(t, snapshotKeyFor(&base), snapshotKeyFor(&clone), "the bulk path must not write a clone and a direct row in one statement")
+	require.NotEqual(t, snapshotKeyFor(&base), snapshotKeyFor(&older))
+	same := base
+	require.Equal(t, snapshotKeyFor(&base), snapshotKeyFor(&same))
 }
 
 func TestSnapshotKey_SeparatesSameVerdictDifferentSuggestion(t *testing.T) {
