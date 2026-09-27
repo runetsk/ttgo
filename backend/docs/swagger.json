@@ -794,7 +794,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. The window is measured on the moment the decision was recorded, not on when the row was last touched. Only explicitly triaged failing results (FAIL or ERROR) that carried a suggestion at the decision moment are counted — results still sitting at the \"to_investigate\" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements.",
+                "description": "Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict, confidence and engine. Each engine and the totals are split into direct predictions and dedup clones (a group representative's answer copied onto a sibling); decisions recorded before that split existed count in the totals only (unknown_provenance). coverage reports, per engine, the representative analyses created in the window and how many decided, abstained, failed or lack an explanation. policy_version narrows everything to suggestions made under one TypeSafe policy version; policy_versions lists every version in the window. The window is measured on the moment the decision was recorded. Only explicitly triaged failing results (FAIL or ERROR) that carried a suggestion at the decision moment are counted; results still at the \"to_investigate\" auto-default and results with no suggestion are excluded rather than counted as disagreements.",
                 "produces": [
                     "application/json"
                 ],
@@ -809,11 +809,23 @@
                         "description": "Rolling window in days, counted from the triage decision (1-365)",
                         "name": "days",
                         "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Only suggestions made under this TypeSafe policy version (empty = all versions)",
+                        "name": "policy_version",
+                        "in": "query"
                     }
                 ],
                 "responses": {
                     "200": {
-                        "description": "{total, agreed, agreement_rate, by_verdict:[{verdict,total,agreed,rate}], by_confidence:[{confidence,total,agreed,rate}]}",
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_store.AIFailureAnalysisAccuracy"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -10478,6 +10490,13 @@
                     "description": "SuggestedEngine records which engine's suggestion was snapshotted; \"\" on rows decided\nbefore engines existed and on rows with no snapshot. SuggestedConfidenceScore is the\nnumeric confidence of the DEFECT-TYPE question for typesafe rows (the quantity the\naccuracy metric grades), NULL for generative rows. Both are cleared with the other\nsnapshot columns.",
                     "type": "string"
                 },
+                "suggested_is_clone": {
+                    "type": "boolean"
+                },
+                "suggested_policy_version": {
+                    "description": "SuggestedPolicyVersion is the TypeSafe question-set policy of the snapshotted analysis\n(\"\" for generative rows and for decisions whose provenance is unknown). SuggestedIsClone\nsays whether that analysis was a dedup clone, i.e. the group representative's answer copied\nonto this result, rather than a prediction made for it; NULL = unknown (decided before the\ncolumn existed and not recovered by the one-time backfill). The accuracy report counts\nunknown rows in its totals only. Both are written by the triage snapshot and cleared with\nthe other snapshot columns.",
+                    "type": "string"
+                },
                 "suggested_verdict": {
                     "description": "Snapshot of what the AI failure analysis suggested at the moment a human explicitly set\nDefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)\nthat has an analysis — never on the AUTO-default path, where a bare status change stamps\n\"to_investigate\" with no human having chosen anything. Agreement is then a pure comparison of\nSuggestedDefectType vs DefectType.\n\nExplicitly PICKING \"to_investigate\" (both endpoints allow it — it is how a reviewer sends a\nrow back to the untriaged pile) does write these columns: it is a real request, and treating\nit differently would make the two endpoints disagree on identical input. Such a row still\ncontributes nothing to the metric, because accuracyCalibrationFilter counts only the three\nconclusive defect types.\n\nSuggestedVerdict is kept alongside SuggestedDefectType because the verdict -\u003e defect_type\nmapping is lossy, so the per-verdict breakdown cannot be reconstructed from the mapped value.\n\nAll three are CLEARED whenever a triage decision is written without a snapshot behind it\n(non-failure result, no analysis, lookup failure) so a new decision can never be scored\nagainst a suggestion left over from an older one.",
                     "type": "string"
@@ -11018,6 +11037,172 @@
                 },
                 "video": {
                     "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_store.AIAccuracyConfidenceBucket": {
+            "type": "object",
+            "properties": {
+                "agreed": {
+                    "type": "integer"
+                },
+                "confidence": {
+                    "type": "string"
+                },
+                "rate": {
+                    "type": "number"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_store.AIAccuracyCoverage": {
+            "type": "object",
+            "properties": {
+                "abstained": {
+                    "description": "a decision of verdict unknown or with the suggestion withheld",
+                    "type": "integer"
+                },
+                "analyses": {
+                    "type": "integer"
+                },
+                "decided": {
+                    "description": "a decision with a suggestion",
+                    "type": "integer"
+                },
+                "engine": {
+                    "type": "string"
+                },
+                "failed": {
+                    "description": "no decision: the attempt failed",
+                    "type": "integer"
+                },
+                "no_explanation": {
+                    "description": "a decision whose explanation is unavailable, unparseable or skipped",
+                    "type": "integer"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_store.AIAccuracyEngineBucket": {
+            "type": "object",
+            "properties": {
+                "agreed": {
+                    "type": "integer"
+                },
+                "by_confidence": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AIAccuracyConfidenceBucket"
+                    }
+                },
+                "clone_agreed": {
+                    "type": "integer"
+                },
+                "clone_total": {
+                    "type": "integer"
+                },
+                "direct_agreed": {
+                    "type": "integer"
+                },
+                "direct_rate": {
+                    "type": "number"
+                },
+                "direct_total": {
+                    "type": "integer"
+                },
+                "engine": {
+                    "type": "string"
+                },
+                "rate": {
+                    "type": "number"
+                },
+                "total": {
+                    "type": "integer"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_store.AIAccuracyVerdictBucket": {
+            "type": "object",
+            "properties": {
+                "agreed": {
+                    "type": "integer"
+                },
+                "rate": {
+                    "type": "number"
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "verdict": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_store.AIFailureAnalysisAccuracy": {
+            "type": "object",
+            "properties": {
+                "agreed": {
+                    "type": "integer"
+                },
+                "agreement_rate": {
+                    "type": "number"
+                },
+                "by_confidence": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AIAccuracyConfidenceBucket"
+                    }
+                },
+                "by_engine": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AIAccuracyEngineBucket"
+                    }
+                },
+                "by_verdict": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AIAccuracyVerdictBucket"
+                    }
+                },
+                "clone_agreed": {
+                    "type": "integer"
+                },
+                "clone_total": {
+                    "type": "integer"
+                },
+                "coverage": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ttgo_pkg_tracker_store.AIAccuracyCoverage"
+                    }
+                },
+                "direct_agreed": {
+                    "type": "integer"
+                },
+                "direct_rate": {
+                    "type": "number"
+                },
+                "direct_total": {
+                    "type": "integer"
+                },
+                "policy_version": {
+                    "description": "PolicyVersion echoes the filter (\"\" = all versions). PolicyVersions lists every version\npresent in the window, ignoring the filter, so the UI's dropdown stays stable.",
+                    "type": "string"
+                },
+                "policy_versions": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "total": {
+                    "type": "integer"
+                },
+                "unknown_provenance": {
+                    "description": "UnknownProvenance counts calibration rows decided before the split was recorded: in Total,\nin neither half of the split, and never in a specific policy version.",
+                    "type": "integer"
                 }
             }
         },

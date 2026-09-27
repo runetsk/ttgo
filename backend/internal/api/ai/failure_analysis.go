@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 	"ttgo/internal/api/authctx"
 	"ttgo/internal/api/httpx"
@@ -515,17 +516,20 @@ func (h *Handler) CancelRunAnalysisJob(w http.ResponseWriter, r *http.Request) {
 const (
 	defaultAccuracyWindowDays = 30
 	maxAccuracyWindowDays     = 365
+	maxPolicyVersionLen       = 64
 )
 
 // GetFailureAnalysisAccuracy reports how often the AI's suggested defect_type matched the
 // human's triage decision.
 //
 // @Summary      AI failure-analysis accuracy
-// @Description  Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict and confidence. The window is measured on the moment the decision was recorded, not on when the row was last touched. Only explicitly triaged failing results (FAIL or ERROR) that carried a suggestion at the decision moment are counted — results still sitting at the "to_investigate" auto-default (i.e. untriaged) and results with no suggestion are excluded rather than counted as disagreements.
+// @Description  Agreement between the AI's suggested defect_type and the human triage decision over a rolling window, overall and broken down by the snapshotted verdict, confidence and engine. Each engine and the totals are split into direct predictions and dedup clones (a group representative's answer copied onto a sibling); decisions recorded before that split existed count in the totals only (unknown_provenance). coverage reports, per engine, the representative analyses created in the window and how many decided, abstained, failed or lack an explanation. policy_version narrows everything to suggestions made under one TypeSafe policy version; policy_versions lists every version in the window. The window is measured on the moment the decision was recorded. Only explicitly triaged failing results (FAIL or ERROR) that carried a suggestion at the decision moment are counted; results still at the "to_investigate" auto-default and results with no suggestion are excluded rather than counted as disagreements.
 // @Tags         ai-failure-analysis
 // @Produce      json
-// @Param        days  query     int  false  "Rolling window in days, counted from the triage decision (1-365)"  default(30)
-// @Success      200   {object}  map[string]interface{}  "{total, agreed, agreement_rate, by_verdict:[{verdict,total,agreed,rate}], by_confidence:[{confidence,total,agreed,rate}]}"
+// @Param        days            query     int     false  "Rolling window in days, counted from the triage decision (1-365)"  default(30)
+// @Param        policy_version  query     string  false  "Only suggestions made under this TypeSafe policy version (empty = all versions)"
+// @Success      200   {object}  store.AIFailureAnalysisAccuracy
+// @Failure      400   {object}  map[string]interface{}
 // @Failure      500   {object}  map[string]interface{}
 // @Router       /ai/failure-analysis/accuracy [get]
 // @Security     BearerAuth
@@ -539,7 +543,15 @@ func (h *Handler) GetFailureAnalysisAccuracy(w http.ResponseWriter, r *http.Requ
 	if days > maxAccuracyWindowDays {
 		days = maxAccuracyWindowDays
 	}
-	rep, err := h.store.GetFailureAnalysisAccuracy(time.Now().UTC().AddDate(0, 0, -days))
+	policy := strings.TrimSpace(r.URL.Query().Get("policy_version"))
+	if len(policy) > maxPolicyVersionLen {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "policy_version is too long"})
+		return
+	}
+	rep, err := h.store.GetFailureAnalysisAccuracyFor(store.AccuracyFilter{
+		Since:         time.Now().UTC().AddDate(0, 0, -days),
+		PolicyVersion: policy,
+	})
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return

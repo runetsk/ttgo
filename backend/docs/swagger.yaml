@@ -725,6 +725,18 @@ definitions:
           accuracy metric grades), NULL for generative rows. Both are cleared with the other
           snapshot columns.
         type: string
+      suggested_is_clone:
+        type: boolean
+      suggested_policy_version:
+        description: |-
+          SuggestedPolicyVersion is the TypeSafe question-set policy of the snapshotted analysis
+          ("" for generative rows and for decisions whose provenance is unknown). SuggestedIsClone
+          says whether that analysis was a dedup clone, i.e. the group representative's answer copied
+          onto this result, rather than a prediction made for it; NULL = unknown (decided before the
+          column existed and not recovered by the one-time backfill). The accuracy report counts
+          unknown rows in its totals only. Both are written by the triage snapshot and cleared with
+          the other snapshot columns.
+        type: string
       suggested_verdict:
         description: |-
           Snapshot of what the AI failure analysis suggested at the moment a human explicitly set
@@ -1142,6 +1154,121 @@ definitions:
         type: string
       video:
         type: string
+    type: object
+  ttgo_pkg_tracker_store.AIAccuracyConfidenceBucket:
+    properties:
+      agreed:
+        type: integer
+      confidence:
+        type: string
+      rate:
+        type: number
+      total:
+        type: integer
+    type: object
+  ttgo_pkg_tracker_store.AIAccuracyCoverage:
+    properties:
+      abstained:
+        description: a decision of verdict unknown or with the suggestion withheld
+        type: integer
+      analyses:
+        type: integer
+      decided:
+        description: a decision with a suggestion
+        type: integer
+      engine:
+        type: string
+      failed:
+        description: 'no decision: the attempt failed'
+        type: integer
+      no_explanation:
+        description: a decision whose explanation is unavailable, unparseable or skipped
+        type: integer
+    type: object
+  ttgo_pkg_tracker_store.AIAccuracyEngineBucket:
+    properties:
+      agreed:
+        type: integer
+      by_confidence:
+        items:
+          $ref: '#/definitions/ttgo_pkg_tracker_store.AIAccuracyConfidenceBucket'
+        type: array
+      clone_agreed:
+        type: integer
+      clone_total:
+        type: integer
+      direct_agreed:
+        type: integer
+      direct_rate:
+        type: number
+      direct_total:
+        type: integer
+      engine:
+        type: string
+      rate:
+        type: number
+      total:
+        type: integer
+    type: object
+  ttgo_pkg_tracker_store.AIAccuracyVerdictBucket:
+    properties:
+      agreed:
+        type: integer
+      rate:
+        type: number
+      total:
+        type: integer
+      verdict:
+        type: string
+    type: object
+  ttgo_pkg_tracker_store.AIFailureAnalysisAccuracy:
+    properties:
+      agreed:
+        type: integer
+      agreement_rate:
+        type: number
+      by_confidence:
+        items:
+          $ref: '#/definitions/ttgo_pkg_tracker_store.AIAccuracyConfidenceBucket'
+        type: array
+      by_engine:
+        items:
+          $ref: '#/definitions/ttgo_pkg_tracker_store.AIAccuracyEngineBucket'
+        type: array
+      by_verdict:
+        items:
+          $ref: '#/definitions/ttgo_pkg_tracker_store.AIAccuracyVerdictBucket'
+        type: array
+      clone_agreed:
+        type: integer
+      clone_total:
+        type: integer
+      coverage:
+        items:
+          $ref: '#/definitions/ttgo_pkg_tracker_store.AIAccuracyCoverage'
+        type: array
+      direct_agreed:
+        type: integer
+      direct_rate:
+        type: number
+      direct_total:
+        type: integer
+      policy_version:
+        description: |-
+          PolicyVersion echoes the filter ("" = all versions). PolicyVersions lists every version
+          present in the window, ignoring the filter, so the UI's dropdown stays stable.
+        type: string
+      policy_versions:
+        items:
+          type: string
+        type: array
+      total:
+        type: integer
+      unknown_provenance:
+        description: |-
+          UnknownProvenance counts calibration rows decided before the split was recorded: in Total,
+          in neither half of the split, and never in a specific policy version.
+        type: integer
     type: object
   ttgo_pkg_tracker_store.AISeedGroundTruth:
     properties:
@@ -1709,11 +1836,17 @@ paths:
     get:
       description: Agreement between the AI's suggested defect_type and the human
         triage decision over a rolling window, overall and broken down by the snapshotted
-        verdict and confidence. The window is measured on the moment the decision
-        was recorded, not on when the row was last touched. Only explicitly triaged
-        failing results (FAIL or ERROR) that carried a suggestion at the decision
-        moment are counted — results still sitting at the "to_investigate" auto-default
-        (i.e. untriaged) and results with no suggestion are excluded rather than counted
+        verdict, confidence and engine. Each engine and the totals are split into
+        direct predictions and dedup clones (a group representative's answer copied
+        onto a sibling); decisions recorded before that split existed count in the
+        totals only (unknown_provenance). coverage reports, per engine, the representative
+        analyses created in the window and how many decided, abstained, failed or
+        lack an explanation. policy_version narrows everything to suggestions made
+        under one TypeSafe policy version; policy_versions lists every version in
+        the window. The window is measured on the moment the decision was recorded.
+        Only explicitly triaged failing results (FAIL or ERROR) that carried a suggestion
+        at the decision moment are counted; results still at the "to_investigate"
+        auto-default and results with no suggestion are excluded rather than counted
         as disagreements.
       parameters:
       - default: 30
@@ -1721,12 +1854,20 @@ paths:
         in: query
         name: days
         type: integer
+      - description: Only suggestions made under this TypeSafe policy version (empty
+          = all versions)
+        in: query
+        name: policy_version
+        type: string
       produces:
       - application/json
       responses:
         "200":
-          description: '{total, agreed, agreement_rate, by_verdict:[{verdict,total,agreed,rate}],
-            by_confidence:[{confidence,total,agreed,rate}]}'
+          description: OK
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_store.AIFailureAnalysisAccuracy'
+        "400":
+          description: Bad Request
           schema:
             additionalProperties: true
             type: object
