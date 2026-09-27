@@ -103,6 +103,18 @@ export class SettingsPage extends BasePage {
     }
     get flowDetail() { return this.page.getByTestId('analysis-flow-detail'); }
 
+    // ── Suggestion accuracy panel (AI → Failure analysis) ───────────────────
+    async openAccuracyPanel() {
+        await this.openAISettings('Failure analysis');
+        await this.accuracyPanel.scrollIntoViewIfNeeded();
+    }
+
+    get accuracyPanel() { return this.page.getByTestId('accuracy-panel'); }
+    get accuracyHeadlineLabel() { return this.page.getByTestId('accuracy-headline-label'); }
+    get accuracyHeadlineRate() { return this.page.getByTestId('accuracy-headline-rate'); }
+    get accuracyPolicyFilter() { return this.page.getByTestId('accuracy-policy-filter'); }
+    accuracyEngine(key) { return this.page.getByTestId(`accuracy-engine-${key}`); }
+
     // ── Settings → AI save bar ──────────────────────────────────────────────
     get saveBar() { return this.page.getByTestId('ai-savebar'); }
     get saveBarSave() { return this.page.getByTestId('ai-savebar-save'); }
