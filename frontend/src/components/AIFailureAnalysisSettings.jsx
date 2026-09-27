@@ -5,7 +5,10 @@ import {
     resetFailureAnalysisPrompt,
     getFailureAnalysisAccuracy,
 } from '../api';
-import { summarizeAccuracy, confidenceRows, verdictRows, engineRows } from './aiSettings/accuracyFormat';
+import {
+    summarizeAccuracy, confidenceRows, verdictRows, engineRows,
+    AGREEMENT_LABEL, AGREEMENT_TOOLTIP, ALL_VERSIONS, splitLabel, unknownNote, coverageRows, policyOptions,
+} from './aiSettings/accuracyFormat';
 import { ToggleCard, FieldRow, HelpToggle } from './aiSettings/SettingsControls';
 import { cs } from './aiSettings/settingsControlStyles';
 import { SETTING_HELP } from '../utils/analysisSettingsHelp';
@@ -247,10 +250,11 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
 function AccuracyPanel() {
     const [report, setReport] = useState(null);
     const [status, setStatus] = useState('loading');
+    const [policy, setPolicy] = useState(ALL_VERSIONS);
 
     useEffect(() => {
         let alive = true;
-        getFailureAnalysisAccuracy(ACCURACY_WINDOW_DAYS)
+        getFailureAnalysisAccuracy(ACCURACY_WINDOW_DAYS, policy)
             .then((r) => {
                 if (!alive) return;
                 setReport(r);
@@ -261,30 +265,56 @@ function AccuracyPanel() {
                 if (alive) setStatus('failed');
             });
         return () => { alive = false; };
-    }, []);
+    }, [policy]);
+
+    // Picking a version refetches. The loading state is set here, in the event, not in the effect.
+    const choosePolicy = (value) => {
+        setStatus('loading');
+        setPolicy(value);
+    };
 
     // All derivations tolerate a null report, so they are safe before the fetch lands.
     const summary = summarizeAccuracy(report);
     const rows = confidenceRows(report);
     const byVerdict = verdictRows(report);
     const byEngine = engineRows(report);
+    const options = policyOptions(report, policy);
+    const split = splitLabel(report);
+    const unknown = policy ? '' : unknownNote(report);
+    const coverageOnly = coverageRows(report).filter((c) => !byEngine.some((e) => e.key === c.key));
 
     return (
-        <div style={s.accuracyPanel}>
+        <div style={s.accuracyPanel} data-testid="accuracy-panel">
             <div style={s.accuracyHead}>
                 <div style={{ minWidth: 0 }}>
                     <div style={s.subTitle}>Suggestion accuracy</div>
                     <p style={s.fieldHint}>
-                        How often the suggested defect type matched the human triage decision, last {ACCURACY_WINDOW_DAYS} days, per engine.
+                        How often people kept the suggested defect type when they triaged, last {ACCURACY_WINDOW_DAYS} days, per engine.
                     </p>
                 </div>
                 {status === 'ready' && summary.hasData && (
                     <div style={s.accuracyHeadline}>
-                        <span style={s.accuracyRate}>{summary.rateLabel}</span>
+                        <span style={s.accuracyHeadlineLabel} title={AGREEMENT_TOOLTIP} data-testid="accuracy-headline-label">{AGREEMENT_LABEL}</span>
+                        <span style={s.accuracyRate} data-testid="accuracy-headline-rate">{summary.rateLabel}</span>
                         <span style={s.accuracySamples}>{summary.samples}</span>
                     </div>
                 )}
             </div>
+
+            {options.length > 1 && (
+                <label style={s.accuracyFilter}>
+                    <span style={s.accuracyFilterLabel}>Policy version</span>
+                    <select
+                        className="modern-input"
+                        style={s.accuracySelect}
+                        value={policy}
+                        onChange={(e) => choosePolicy(e.target.value)}
+                        data-testid="accuracy-policy-filter"
+                    >
+                        {options.map((o) => <option key={o.value || 'all'} value={o.value}>{o.label}</option>)}
+                    </select>
+                </label>
+            )}
 
             {status === 'loading' && <div style={s.accuracyNote}>Loading accuracy…</div>}
             {status === 'failed' && <div style={s.accuracyNote}>Accuracy stats unavailable.</div>}
@@ -293,9 +323,17 @@ function AccuracyPanel() {
                     Not enough triaged results yet — accuracy appears once failing results are triaged with a defect type.
                 </div>
             )}
+            {status === 'ready' && summary.hasData && (split || unknown) && (
+                <div style={s.accuracyNote} data-testid="accuracy-split">
+                    {[split && `All engines: ${split}.`, unknown].filter(Boolean).join(' ')}
+                </div>
+            )}
             {status === 'ready' && summary.hasData && byEngine.map((eng) => (
                 <div key={eng.key} style={s.ladder} data-testid={`accuracy-engine-${eng.key}`}>
                     <div style={s.ladderCaption}>{eng.label} · {eng.rateLabel} · {eng.samples}</div>
+                    {(eng.split || eng.coverage) && (
+                        <div style={s.ladderSub}>{[eng.split, eng.coverage].filter(Boolean).join(' — ')}</div>
+                    )}
                     {eng.rows.map((row) => (
                         <div key={row.key} style={s.ladderRow}>
                             <span style={s.ladderLabel}>{row.label} confidence</span>
@@ -305,6 +343,18 @@ function AccuracyPanel() {
                     ))}
                 </div>
             ))}
+
+            {status === 'ready' && coverageOnly.length > 0 && (
+                <div style={s.ladder} data-testid="accuracy-coverage">
+                    <div style={s.ladderCaption}>Analyses with no triaged results yet</div>
+                    {coverageOnly.map((c) => (
+                        <div key={c.key} style={s.ladderRow}>
+                            <span style={s.ladderLabel}>{c.label}</span>
+                            <span style={s.coverageText}>{c.text}</span>
+                        </div>
+                    ))}
+                </div>
+            )}
 
             {status === 'ready' && summary.hasData && (
                 <div style={s.ladder}>
@@ -439,6 +489,29 @@ const s = {
         fontSize: '0.72rem',
         color: 'var(--text-secondary)',
     },
+    accuracyHeadlineLabel: {
+        fontSize: '0.72rem',
+        fontWeight: 600,
+        color: 'var(--text-secondary)',
+        textDecoration: 'underline dotted',
+        textUnderlineOffset: 2,
+        cursor: 'help',
+    },
+    accuracyFilter: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+    },
+    accuracyFilterLabel: {
+        fontSize: '0.78rem',
+        color: 'var(--text-secondary)',
+    },
+    accuracySelect: {
+        width: 'auto',
+        minWidth: 180,
+        padding: '4px 8px',
+        fontSize: '0.8rem',
+    },
     accuracyNote: {
         fontSize: '0.78rem',
         color: 'var(--text-secondary)',
@@ -458,6 +531,16 @@ const s = {
         letterSpacing: '0.04em',
         color: 'var(--text-secondary)',
         marginBottom: 2,
+    },
+    ladderSub: {
+        fontSize: '0.74rem',
+        color: 'var(--text-secondary)',
+        marginBottom: 4,
+    },
+    coverageText: {
+        fontSize: '0.74rem',
+        color: 'var(--text-secondary)',
+        textAlign: 'right',
     },
     ladderRow: {
         display: 'flex',

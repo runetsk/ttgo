@@ -9,6 +9,13 @@ import {
     confidenceRows,
     verdictRows,
     engineRows,
+    AGREEMENT_LABEL,
+    AGREEMENT_TOOLTIP,
+    splitLabel,
+    unknownNote,
+    coverageLabel,
+    coverageRows,
+    policyOptions,
 } from './accuracyFormat.js';
 
 // ── formatPercent ────────────────────────────────────────────────────────
@@ -243,4 +250,84 @@ test('engineRows labels suggestions derived from a confident verdict as their ow
         ],
     });
     assert.deepEqual(rows.map((r) => [r.key, r.label]), [['typesafe', 'TypeSafe'], ['typesafe-derived', 'TypeSafe (from verdict)']]);
+});
+// ── Wave 1: human agreement, direct vs clone, coverage, policy filter ────
+
+test('summarizeAccuracy headlines direct-prediction agreement when provenance is known', () => {
+    const got = summarizeAccuracy({
+        total: 6, agreed: 4, agreement_rate: 4 / 6,
+        direct_total: 4, direct_agreed: 3, direct_rate: 0.75, clone_total: 2, clone_agreed: 1,
+    });
+    assert.equal(got.basis, 'direct');
+    assert.equal(got.rateLabel, '75%', 'clones copy one answer and must not move the headline');
+    assert.equal(got.samples, '4 triaged results, direct predictions');
+});
+
+test('summarizeAccuracy falls back to every triaged result when no provenance was recorded', () => {
+    const got = summarizeAccuracy({ total: 3, agreed: 2, agreement_rate: 2 / 3, direct_total: 0, clone_total: 0, unknown_provenance: 3 });
+    assert.equal(got.basis, 'all');
+    assert.equal(got.rateLabel, '67%');
+    assert.equal(got.samples, '3 triaged results');
+});
+
+test('the headline is labelled Human agreement with the acceptance caveat', () => {
+    assert.equal(AGREEMENT_LABEL, 'Human agreement');
+    assert.match(AGREEMENT_TOOLTIP, /Accepting a suggestion counts as agreement/);
+    assert.match(AGREEMENT_TOOLTIP, /not whether the call was right/);
+});
+
+test('splitLabel shows direct and clone agreement and hides an unrecorded split', () => {
+    assert.equal(splitLabel({ direct_total: 4, direct_agreed: 3, direct_rate: 0.75, clone_total: 2, clone_agreed: 1 }), 'direct 75% of 4 · clones 50% of 2');
+    assert.equal(splitLabel({ direct_total: 2, direct_agreed: 2 }), 'direct 100% of 2');
+    assert.equal(splitLabel({ clone_total: 3, clone_agreed: 3 }), 'no direct predictions · clones 100% of 3');
+    assert.equal(splitLabel({ total: 5 }), '');
+    assert.equal(splitLabel(null), '');
+});
+
+test('unknownNote counts decisions without a recorded provenance', () => {
+    assert.equal(unknownNote({ unknown_provenance: 0 }), '');
+    assert.equal(unknownNote(null), '');
+    assert.equal(unknownNote({ unknown_provenance: 1 }), '1 decision recorded before direct predictions and clones were told apart is counted in the totals only.');
+    assert.equal(unknownNote({ unknown_provenance: 3 }), '3 decisions recorded before direct predictions and clones were told apart are counted in the totals only.');
+});
+
+test('coverageLabel reads decided of analysed, abstained and unexplained', () => {
+    assert.equal(coverageLabel({ analyses: 5, decided: 4, abstained: 1, no_explanation: 2 }), '4 decided of 5 · 1 abstained · 2 without explanation');
+    assert.equal(coverageLabel({ analyses: 3, decided: 1, abstained: 0, no_explanation: 0, failed: 2 }), '1 decided of 3 · 0 abstained · 0 without explanation · 2 failed');
+    assert.equal(coverageLabel({ analyses: 0 }), '');
+});
+
+test('engineRows carries each rung\'s split and its engine\'s coverage', () => {
+    const rows = engineRows({
+        by_engine: [
+            { engine: 'typesafe', total: 3, agreed: 2, rate: 2 / 3, direct_total: 2, direct_agreed: 2, direct_rate: 1, clone_total: 1, clone_agreed: 0, by_confidence: [] },
+            { engine: 'typesafe-derived', total: 1, agreed: 1, rate: 1, direct_total: 1, direct_agreed: 1, direct_rate: 1, by_confidence: [] },
+        ],
+        coverage: [{ engine: 'typesafe', analyses: 4, decided: 3, abstained: 1, no_explanation: 0 }],
+    });
+    assert.equal(rows[0].split, 'direct 100% of 2 · clones 0% of 1');
+    assert.equal(rows[0].coverage, '3 decided of 4 · 1 abstained · 0 without explanation');
+    assert.equal(rows[1].coverage, '', 'derived suggestions are TypeSafe analyses: coverage shows once, on the TypeSafe rung');
+});
+
+test('coverageRows lists every engine that analysed in the window', () => {
+    const rows = coverageRows({
+        coverage: [
+            { engine: 'generative', analyses: 2, decided: 1, abstained: 0, failed: 1, no_explanation: 0 },
+            { engine: 'typesafe', analyses: 0 },
+            null,
+        ],
+    });
+    assert.deepEqual(rows, [{ key: 'generative', label: 'LLM', text: '1 decided of 2 · 0 abstained · 0 without explanation · 1 failed' }]);
+    assert.deepEqual(coverageRows(undefined), []);
+});
+
+test('policyOptions starts with All versions and keeps the selected version listed', () => {
+    assert.deepEqual(
+        policyOptions({ policy_versions: ['fa-verdict-v5', 'fa-verdict-v4'] }).map((o) => [o.value, o.label]),
+        [['', 'All versions'], ['fa-verdict-v5', 'fa-verdict-v5'], ['fa-verdict-v4', 'fa-verdict-v4']],
+    );
+    assert.deepEqual(policyOptions(null).map((o) => o.label), ['All versions']);
+    assert.deepEqual(policyOptions({ policy_versions: [] }, 'fa-verdict-v3').map((o) => o.value), ['', 'fa-verdict-v3']);
+    assert.deepEqual(policyOptions({ policy_versions: ['', 7, 'fa-verdict-v5'] }).map((o) => o.value), ['', 'fa-verdict-v5']);
 });

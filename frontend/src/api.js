@@ -556,8 +556,10 @@ export const updateFailureAnalysisSettings = (body) =>
 export const resetFailureAnalysisPrompt = () =>
     api.post('/settings/ai-failure-analysis/prompt/reset').then(r => r.data);
 
-export const getFailureAnalysisAccuracy = (days = 30) =>
-    api.get('/ai/failure-analysis/accuracy', { params: { days } }).then(r => r.data);
+export const getFailureAnalysisAccuracy = (days = 30, policyVersion = '') =>
+    api.get('/ai/failure-analysis/accuracy', {
+        params: policyVersion ? { days, policy_version: policyVersion } : { days },
+    }).then(r => r.data);
 
 export const getTypeSafeSettings = () =>
     api.get('/settings/typesafe').then(r => r.data);
