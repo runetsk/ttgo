@@ -286,7 +286,7 @@ func (h *Handler) jobView(job *models.RunAnalysisJob) (*analysisJobView, error) 
 // pipeline and outcomes. Used to grade one job as a whole (`ttgo ai compare --by-job`).
 //
 // @Summary      List a run's analysis jobs
-// @Description  Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses.
+// @Description  Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses. Outcomes include stage timing (decision_ms_avg/p50/max, llm_ms_avg/p50/max over representatives) and rate_limit_hits.
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        id   path      string  true  "Run ID"

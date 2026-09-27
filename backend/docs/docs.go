@@ -5467,7 +5467,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses.",
+                "description": "Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses. Outcomes include stage timing (decision_ms_avg/p50/max, llm_ms_avg/p50/max over representatives) and rate_limit_hits.",
                 "produces": [
                     "application/json"
                 ],
@@ -5844,7 +5844,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Marks a test run as finished, computing its final status from its results, broadcasting the update, and (if configured) enqueuing AI failure analysis for its failures.",
+                "description": "Marks a test run as finished, computing its final status from its results, broadcasting the update, and (if configured) enqueuing AI failure analysis for its failures. An automatic analysis that would take the month over the AI budget is recorded as a skipped job instead.",
                 "produces": [
                     "application/json"
                 ],
@@ -10247,6 +10247,10 @@ const docTemplate = `{
                 "provider_id": {
                     "type": "string"
                 },
+                "rate_limit_hits": {
+                    "description": "RateLimitHits counts every 429 the job saw from TypeSafe (decisions and semantic\ngrouping) and the LLM, including ones a retry then got past.",
+                    "type": "integer"
+                },
                 "retry_failed_only": {
                     "description": "RetryFailedOnly: re-analyze only the groups whose current analysis failed.",
                     "type": "boolean"
@@ -10254,6 +10258,19 @@ const docTemplate = `{
                 "semantic_input_tokens": {
                     "description": "TypeSafe tokens used by semantic grouping",
                     "type": "integer"
+                },
+                "skip_budget_usd": {
+                    "type": "number"
+                },
+                "skip_estimate_usd": {
+                    "type": "number"
+                },
+                "skip_reason": {
+                    "description": "Skip record (status skipped): why, and the figures the decision used — this run's\nestimate, the month's spend so far and the monthly budget then in force.",
+                    "type": "string"
+                },
+                "skip_spent_usd": {
+                    "type": "number"
                 },
                 "started_at": {
                     "type": "string"

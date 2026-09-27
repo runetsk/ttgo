@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+	"ttgo/pkg/tracker/callstats"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
@@ -202,6 +203,14 @@ func (w *Worker) processOnce(ctx context.Context) error {
 
 	jobCtx, cancelJob := context.WithCancel(ctx)
 	defer cancelJob()
+	// Every TypeSafe and LLM call of the job reports its 429s here (semantic pass included).
+	jobCtx, calls := callstats.WithCounter(jobCtx)
+	saveRateLimits := func() {
+		if err := w.store.SetAnalysisJobRateLimitHits(job.ID, calls.RateLimitHits()); err != nil {
+			slog.Warn("failure-analysis: rate-limit count not recorded", "job_id", job.ID, "err", err)
+		}
+	}
+	defer saveRateLimits() // also for cancelled and interrupted jobs
 	go w.watchCancel(jobCtx, cancelJob, job.ID)
 	cancelled := func() bool { return jobCtx.Err() != nil && ctx.Err() == nil }
 
@@ -374,6 +383,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		return nil
 	}
 
+	saveRateLimits() // before completion, so the completed job already carries it
 	changed, err := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, "")
 	if err != nil {
 		return err

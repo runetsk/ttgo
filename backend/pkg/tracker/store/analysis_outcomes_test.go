@@ -168,3 +168,41 @@ func TestAnalysisJobOutcomes_CountsConfigurationFailures(t *testing.T) {
 	require.Equal(t, 1, o.FailedConfiguration)
 	require.Equal(t, 3, o.FailedRows)
 }
+
+// Timing is over representatives with a non-zero value (a stage that did not run is not 0 ms);
+// clones copy an answer and never count.
+func TestAnalysisJobOutcomes_TimingAndRateLimits(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	job, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	jobID := job.ID
+
+	var first *models.RunResultAnalysis
+	for _, ms := range [][2]int{{100, 0}, {300, 2000}, {200, 4000}, {0, 9000}} {
+		a, err := s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: addFailingResult(t, s, runID).ID, JobID: &jobID,
+			Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, DecisionMs: ms[0], LLMMs: ms[1]})
+		require.NoError(t, err)
+		if first == nil {
+			first = a
+		}
+	}
+	_, err = s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: addFailingResult(t, s, runID).ID, JobID: &jobID,
+		Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh, DecisionMs: 99999, LLMMs: 99999, SourceAnalysisID: &first.ID})
+	require.NoError(t, err)
+	require.NoError(t, s.SetAnalysisJobRateLimitHits(job.ID, 3))
+
+	o, err := s.AnalysisJobOutcomes(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 200, o.DecisionMsAvg)
+	require.Equal(t, 200, o.DecisionMsP50)
+	require.Equal(t, 300, o.DecisionMsMax)
+	require.Equal(t, 5000, o.LLMMsAvg)
+	require.Equal(t, 4000, o.LLMMsP50)
+	require.Equal(t, 9000, o.LLMMsMax)
+	require.Equal(t, 3, o.RateLimitHits)
+
+	stored, err := s.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 3, stored.RateLimitHits)
+}

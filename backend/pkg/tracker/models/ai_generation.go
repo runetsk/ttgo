@@ -360,6 +360,10 @@ type RunAnalysisJob struct {
 	SkipEstimateUSD *float64 `json:"skip_estimate_usd"`
 	SkipSpentUSD    *float64 `json:"skip_spent_usd"`
 	SkipBudgetUSD   *float64 `json:"skip_budget_usd"`
+
+	// RateLimitHits counts every 429 the job saw from TypeSafe (decisions and semantic
+	// grouping) and the LLM, including ones a retry then got past.
+	RateLimitHits int `json:"rate_limit_hits" gorm:"not null;default:0"`
 }
 
 // RunAnalysisJobOutcomes summarises what a job's representative analyses produced.
@@ -376,6 +380,16 @@ type RunAnalysisJobOutcomes struct {
 	// FailedConfiguration counts representatives that failed on a settings problem (missing
 	// or undecryptable key, unknown model id): retrying cannot help until the settings change.
 	FailedConfiguration int `json:"failed_configuration"`
+
+	// Stage timing over the job's representatives, counting only analyses where the stage ran
+	// (non-zero): the TypeSafe decision and the LLM calls, in milliseconds; p50 is nearest-rank.
+	DecisionMsAvg int `json:"decision_ms_avg"`
+	DecisionMsP50 int `json:"decision_ms_p50"`
+	DecisionMsMax int `json:"decision_ms_max"`
+	LLMMsAvg      int `json:"llm_ms_avg"`
+	LLMMsP50      int `json:"llm_ms_p50"`
+	LLMMsMax      int `json:"llm_ms_max"`
+	RateLimitHits int `json:"rate_limit_hits"` // copied from the job
 }
 
 // GeneratedStep is a single step in a generated test case draft.

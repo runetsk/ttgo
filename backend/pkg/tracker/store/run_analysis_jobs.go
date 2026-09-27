@@ -209,3 +209,8 @@ func (s *Store) CreateSkippedAnalysisJob(runID, reason string, estimateUSD, spen
 	}
 	return job, nil
 }
+
+// SetAnalysisJobRateLimitHits records how many rate-limit responses the job has seen.
+func (s *Store) SetAnalysisJobRateLimitHits(id string, hits int) error {
+	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).Update("rate_limit_hits", hits).Error
+}

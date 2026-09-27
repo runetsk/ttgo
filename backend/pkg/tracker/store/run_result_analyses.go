@@ -3,6 +3,8 @@ package store
 import (
 	"errors"
 	"fmt"
+	"math"
+	"sort"
 	"time"
 	"ttgo/pkg/tracker/models"
 
@@ -195,5 +197,40 @@ func (s *Store) AnalysisJobOutcomes(jobID string) (models.RunAnalysisJobOutcomes
 	}
 	err = s.db.Raw(`SELECT COUNT(*) FROM run_result_analyses WHERE job_id = ? AND decision_status = 'failed'`, jobID).
 		Scan(&o.FailedRows).Error
+	if err != nil {
+		return o, err
+	}
+	var timings []struct{ D, L int }
+	if err := s.db.Raw(`SELECT decision_ms AS d, llm_ms AS l FROM run_result_analyses
+		WHERE job_id = ? AND source_analysis_id IS NULL`, jobID).Scan(&timings).Error; err != nil {
+		return o, err
+	}
+	var decision, llmMs []int
+	for _, t := range timings {
+		if t.D > 0 {
+			decision = append(decision, t.D)
+		}
+		if t.L > 0 {
+			llmMs = append(llmMs, t.L)
+		}
+	}
+	o.DecisionMsAvg, o.DecisionMsP50, o.DecisionMsMax = msStats(decision)
+	o.LLMMsAvg, o.LLMMsP50, o.LLMMsMax = msStats(llmMs)
+	err = s.db.Raw(`SELECT COALESCE(MAX(rate_limit_hits), 0) FROM run_analysis_jobs WHERE id = ?`, jobID).
+		Scan(&o.RateLimitHits).Error
 	return o, err
+}
+
+// msStats is the rounded mean, nearest-rank median and maximum of millisecond samples.
+func msStats(v []int) (avg, p50, mx int) {
+	if len(v) == 0 {
+		return 0, 0, 0
+	}
+	sorted := append([]int(nil), v...)
+	sort.Ints(sorted)
+	sum := 0
+	for _, x := range sorted {
+		sum += x
+	}
+	return int(math.Round(float64(sum) / float64(len(sorted)))), sorted[(len(sorted)+1)/2-1], sorted[len(sorted)-1]
 }
