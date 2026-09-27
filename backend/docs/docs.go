@@ -4858,7 +4858,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, AI is switched off, or no LLM provider is available.",
+                "description": "Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true.",
                 "produces": [
                     "application/json"
                 ],
@@ -4880,6 +4880,12 @@ const docTemplate = `{
                         "name": "analysisId",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Proceed although a soft AI budget would be exceeded",
+                        "name": "acknowledge_budget",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -4898,6 +4904,67 @@ const docTemplate = `{
                     },
                     "409": {
                         "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/run-results/{id}/analyze": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Runs failure analysis on one result now and stores it as a new version. A failed attempt is stored too and returned with 502. 409 when AI is switched off, or when the estimated cost exceeds a soft AI budget and acknowledge_budget is not true (payload: category \"budget\", scope, estimated_cost_usd, budget_usd, month_spent_usd).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "Analyze one failing result",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run result ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Proceed although a soft AI budget would be exceeded",
+                        "name": "acknowledge_budget",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.RunResultAnalysis"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true
@@ -5346,7 +5413,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Queues a failure-analysis job limited to the groups whose current analysis is a failed attempt (provider error, reply cut off or unreadable twice, TypeSafe unavailable with the fallback off). 409 when nothing failed or a job is already active.",
+                "description": "Queues a failure-analysis job limited to the groups whose current analysis is a failed attempt (provider error, reply cut off or unreadable twice, TypeSafe unavailable with the fallback off). 409 when nothing failed or a job is already active. 409 also when the estimated cost exceeds a soft AI budget and acknowledge_budget is not true.",
                 "produces": [
                     "application/json"
                 ],
@@ -5361,6 +5428,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Proceed although a soft AI budget would be exceeded",
+                        "name": "acknowledge_budget",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -5424,6 +5497,67 @@ const docTemplate = `{
                     },
                     "404": {
                         "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/runs/{id}/analyze-failures": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "Queues a failure-analysis job for the run's failing results. 409 when a job is already active, AI is switched off, or the job's estimated cost (failing groups × the per-call estimate) exceeds a soft AI budget and acknowledge_budget is not true.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "Analyze a run's failures",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Run ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Proceed although a soft AI budget would be exceeded",
+                        "name": "acknowledge_budget",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "201": {
+                        "description": "Created",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.RunAnalysisJob"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
                         "schema": {
                             "type": "object",
                             "additionalProperties": true

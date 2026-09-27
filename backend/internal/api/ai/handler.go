@@ -67,7 +67,7 @@ func (h *Handler) SetFailureAnalysisDeps(resolver failureanalysis.DepsResolver, 
 }
 
 // analyzeSync runs Analyze directly for one result (manual trigger) and persists the row.
-func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, userID string) (*models.RunResultAnalysis, error) {
+func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, userID string, acknowledged bool) (*models.RunResultAnalysis, error) {
 	if h.resolveDeps == nil {
 		return nil, fmt.Errorf("no LLM provider configured")
 	}
@@ -83,6 +83,9 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 			return nil, fmt.Errorf("cannot analyze: %s", deps.LLMUnavailableReason)
 		}
 		return nil, fmt.Errorf("no LLM provider configured")
+	}
+	if warn := h.checkAnalysisBudget(failureanalysis.EstimateCallUSD(deps), 1, acknowledged); warn != nil {
+		return nil, &budgetExceededError{payload: warn}
 	}
 	settings, err := h.store.GetFailureAnalysisSettings()
 	if err != nil {

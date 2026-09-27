@@ -4380,7 +4380,8 @@ paths:
         was skipped, unavailable or unreadable, and stores the explanation on the
         same analysis. The verdict, confidence and suggestion do not change. 409 when
         the analysis is not an unexplained TypeSafe decision, AI is switched off,
-        or no LLM provider is available.
+        or no LLM provider is available. 409 also when the explanation's estimated
+        cost exceeds a soft AI budget and acknowledge_budget is not true.
       parameters:
       - description: Run result ID
         in: path
@@ -4392,6 +4393,10 @@ paths:
         name: analysisId
         required: true
         type: string
+      - description: Proceed although a soft AI budget would be exceeded
+        in: query
+        name: acknowledge_budget
+        type: boolean
       produces:
       - application/json
       responses:
@@ -4412,6 +4417,50 @@ paths:
       security:
       - BearerAuth: []
       summary: Explain a stored TypeSafe decision
+      tags:
+      - ai-failure-analysis
+  /run-results/{id}/analyze:
+    post:
+      description: 'Runs failure analysis on one result now and stores it as a new
+        version. A failed attempt is stored too and returned with 502. 409 when AI
+        is switched off, or when the estimated cost exceeds a soft AI budget and acknowledge_budget
+        is not true (payload: category "budget", scope, estimated_cost_usd, budget_usd,
+        month_spent_usd).'
+      parameters:
+      - description: Run result ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Proceed although a soft AI budget would be exceeded
+        in: query
+        name: acknowledge_budget
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.RunResultAnalysis'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Analyze one failing result
       tags:
       - ai-failure-analysis
   /runs:
@@ -4661,13 +4710,18 @@ paths:
       description: Queues a failure-analysis job limited to the groups whose current
         analysis is a failed attempt (provider error, reply cut off or unreadable
         twice, TypeSafe unavailable with the fallback off). 409 when nothing failed
-        or a job is already active.
+        or a job is already active. 409 also when the estimated cost exceeds a soft
+        AI budget and acknowledge_budget is not true.
       parameters:
       - description: Run ID
         in: path
         name: id
         required: true
         type: string
+      - description: Proceed although a soft AI budget would be exceeded
+        in: query
+        name: acknowledge_budget
+        type: boolean
       produces:
       - application/json
       responses:
@@ -4719,6 +4773,49 @@ paths:
       security:
       - BearerAuth: []
       summary: List a run's analysis jobs
+      tags:
+      - ai-failure-analysis
+  /runs/{id}/analyze-failures:
+    post:
+      description: Queues a failure-analysis job for the run's failing results. 409
+        when a job is already active, AI is switched off, or the job's estimated cost
+        (failing groups × the per-call estimate) exceeds a soft AI budget and acknowledge_budget
+        is not true.
+      parameters:
+      - description: Run ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Proceed although a soft AI budget would be exceeded
+        in: query
+        name: acknowledge_budget
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.RunAnalysisJob'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Analyze a run's failures
       tags:
       - ai-failure-analysis
   /runs/{id}/assignee:

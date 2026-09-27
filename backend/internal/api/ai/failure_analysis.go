@@ -77,6 +77,19 @@ func (h *Handler) ResetFailureAnalysisPrompt(w http.ResponseWriter, r *http.Requ
 }
 
 // AnalyzeRunResult runs synchronous analysis on a single RunResult.
+//
+// @Summary      Analyze one failing result
+// @Description  Runs failure analysis on one result now and stores it as a new version. A failed attempt is stored too and returned with 502. 409 when AI is switched off, or when the estimated cost exceeds a soft AI budget and acknowledge_budget is not true (payload: category "budget", scope, estimated_cost_usd, budget_usd, month_spent_usd).
+// @Tags         ai-failure-analysis
+// @Produce      json
+// @Param        id                  path   string  true   "Run result ID"
+// @Param        acknowledge_budget  query  bool    false  "Proceed although a soft AI budget would be exceeded"
+// @Success      201  {object}  models.RunResultAnalysis
+// @Failure      404  {object}  map[string]interface{}
+// @Failure      409  {object}  map[string]interface{}
+// @Failure      502  {object}  map[string]interface{}
+// @Router       /run-results/{id}/analyze [post]
+// @Security     BearerAuth
 func (h *Handler) AnalyzeRunResult(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	result, err := h.store.GetRunResultByID(id)
@@ -89,9 +102,14 @@ func (h *Handler) AnalyzeRunResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := authctx.ActorID(r.Context())
-	row, err := h.analyzeSync(r.Context(), result, userID)
+	row, err := h.analyzeSync(r.Context(), result, userID, acknowledgedBudget(r))
 	if errors.Is(err, failureanalysis.ErrAIDisabled) {
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "AI features are switched off"})
+		return
+	}
+	var over *budgetExceededError
+	if errors.As(err, &over) {
+		httpx.JSON(w, http.StatusConflict, over.payload)
 		return
 	}
 	if err != nil && row != nil {
@@ -157,6 +175,19 @@ func (h *Handler) ListCurrentAnalysesForRun(w http.ResponseWriter, r *http.Reque
 }
 
 // EnqueueRunAnalysis creates (or returns) a batch job for analyzing a run's failures.
+//
+// @Summary      Analyze a run's failures
+// @Description  Queues a failure-analysis job for the run's failing results. 409 when a job is already active, AI is switched off, or the job's estimated cost (failing groups × the per-call estimate) exceeds a soft AI budget and acknowledge_budget is not true.
+// @Tags         ai-failure-analysis
+// @Produce      json
+// @Param        id                  path   string  true   "Run ID"
+// @Param        acknowledge_budget  query  bool    false  "Proceed although a soft AI budget would be exceeded"
+// @Success      201  {object}  models.RunAnalysisJob
+// @Failure      400  {object}  map[string]interface{}
+// @Failure      404  {object}  map[string]interface{}
+// @Failure      409  {object}  map[string]interface{}
+// @Router       /runs/{id}/analyze-failures [post]
+// @Security     BearerAuth
 func (h *Handler) EnqueueRunAnalysis(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	run, err := h.store.GetTestRun(runID)
@@ -178,6 +209,16 @@ func (h *Handler) EnqueueRunAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.requireAI(w) {
+		return
+	}
+	settings, err := h.store.GetFailureAnalysisSettings()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	groups := failureanalysis.PlannedGroups(failures, settings.DedupEnabled, settings.MaxAnalysesPerRun)
+	if warn := h.jobBudgetWarning(r, groups); warn != nil {
+		httpx.JSON(w, http.StatusConflict, warn)
 		return
 	}
 	userID := authctx.ActorID(r.Context())
@@ -285,10 +326,11 @@ func (h *Handler) ListRunAnalysisJobs(w http.ResponseWriter, r *http.Request) {
 // analysis failed.
 //
 // @Summary      Retry failed analyses
-// @Description  Queues a failure-analysis job limited to the groups whose current analysis is a failed attempt (provider error, reply cut off or unreadable twice, TypeSafe unavailable with the fallback off). 409 when nothing failed or a job is already active.
+// @Description  Queues a failure-analysis job limited to the groups whose current analysis is a failed attempt (provider error, reply cut off or unreadable twice, TypeSafe unavailable with the fallback off). 409 when nothing failed or a job is already active. 409 also when the estimated cost exceeds a soft AI budget and acknowledge_budget is not true.
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        id   path      string  true  "Run ID"
+// @Param        acknowledge_budget  query  bool  false  "Proceed although a soft AI budget would be exceeded"
 // @Success      201  {object}  models.RunAnalysisJob
 // @Failure      404  {object}  map[string]interface{}
 // @Failure      409  {object}  map[string]interface{}
@@ -317,6 +359,19 @@ func (h *Handler) RetryFailedRunAnalysis(w http.ResponseWriter, r *http.Request)
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "no failed analyses to retry"})
 		return
 	}
+	settings, err := h.store.GetFailureAnalysisSettings()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	groups := len(failed) // an upper bound: failed results, before regrouping
+	if settings.MaxAnalysesPerRun > 0 && groups > settings.MaxAnalysesPerRun {
+		groups = settings.MaxAnalysesPerRun
+	}
+	if warn := h.jobBudgetWarning(r, groups); warn != nil {
+		httpx.JSON(w, http.StatusConflict, warn)
+		return
+	}
 	job, created, err := h.store.EnqueueRetryFailedForRun(runID, authctx.ActorID(r.Context()))
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
@@ -333,11 +388,12 @@ func (h *Handler) RetryFailedRunAnalysis(w http.ResponseWriter, r *http.Request)
 // explanations were off or the explanation call failed. The decision is not re-run.
 //
 // @Summary      Explain a stored TypeSafe decision
-// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, AI is switched off, or no LLM provider is available.
+// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true.
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        id          path      string  true  "Run result ID"
 // @Param        analysisId  path      string  true  "Analysis ID"
+// @Param        acknowledge_budget  query  bool  false  "Proceed although a soft AI budget would be exceeded"
 // @Success      200  {object}  models.RunResultAnalysis
 // @Failure      404  {object}  map[string]interface{}
 // @Failure      409  {object}  map[string]interface{}
@@ -389,6 +445,10 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 			reason = "no default LLM provider is configured"
 		}
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "cannot explain: " + reason})
+		return
+	}
+	if warn := h.checkAnalysisBudget(failureanalysis.EstimateExplainUSD(deps), 1, acknowledgedBudget(r)); warn != nil {
+		httpx.JSON(w, http.StatusConflict, warn)
 		return
 	}
 	settings, err := h.store.GetFailureAnalysisSettings()
