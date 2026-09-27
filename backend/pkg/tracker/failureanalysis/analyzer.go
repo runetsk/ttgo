@@ -32,6 +32,12 @@ type AnalyzeContext struct {
 	ProviderModel    string
 }
 
+// HistoryAvailable reports whether the context carries this test's history: its recent
+// failures or the rollup of the labels people gave them.
+func (c AnalyzeContext) HistoryAvailable() bool {
+	return c.SimilarFailuresRollup != "" || len(c.SimilarFailures) > 0
+}
+
 // AnalyzeResult maps 1:1 onto models.RunResultAnalysis (minus IDs/versioning/timestamps).
 type AnalyzeResult struct {
 	Verdict              string
@@ -54,6 +60,8 @@ type AnalyzeResult struct {
 	NarrativeStatus               string
 	PolicyVersion                 string
 	TypeSafeInputTokens           int
+	// HistoryAvailable: the context carried this test's history (see AnalyzeContext.HistoryAvailable).
+	HistoryAvailable bool
 
 	// DecisionStatus is models.DecisionStatusOK for a decision and DecisionStatusFailed for an
 	// attempt that produced none; ErrorCategory says why (or why a takeover did not happen).
@@ -175,6 +183,15 @@ func FailedResult(err error, deps AnalyzeDeps) *AnalyzeResult {
 // provider decides as today.
 // The settings page draws these branches (frontend/src/utils/analysisFlow.js); change both together.
 func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeResult, error) {
+	res, err := analyze(ctx, deps, in)
+	if res != nil {
+		res.HistoryAvailable = in.HistoryAvailable()
+	}
+	return res, err
+}
+
+// analyze is Analyze without the result's context bookkeeping.
+func analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeResult, error) {
 	ev := BuildEvidence(in)
 
 	var decision *Decision

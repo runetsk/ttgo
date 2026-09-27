@@ -10591,6 +10591,10 @@ const docTemplate = `{
                 "finish_reason": {
                     "type": "string"
                 },
+                "history_available": {
+                    "description": "HistoryAvailable: the evidence this analysis was built from carried the test's recent\nfailures or the rollup of the labels people gave them (spec B5 #25), so benchmarks can\ngrade with and without history apart. Clones copy their representative's value; rows from\nbefore the column read false.",
+                    "type": "boolean"
+                },
                 "id": {
                     "type": "string"
                 },

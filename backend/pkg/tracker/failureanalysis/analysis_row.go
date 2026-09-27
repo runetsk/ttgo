@@ -19,7 +19,7 @@ func AnalysisRowFrom(res *AnalyzeResult, resultID string) *models.RunResultAnaly
 		SuggestedDefectType: res.SuggestedDefectType, SuggestedDefectTypeConfidence: res.SuggestedDefectTypeConfidence,
 		DefectTypeProbabilities: res.DefectTypeProbabilities, NarrativeStatus: res.NarrativeStatus,
 		SuggestionSource: res.SuggestionSource,
-		PolicyVersion:    res.PolicyVersion, TypeSafeInputTokens: res.TypeSafeInputTokens,
+		PolicyVersion:    res.PolicyVersion, TypeSafeInputTokens: res.TypeSafeInputTokens, HistoryAvailable: res.HistoryAvailable,
 		DecisionStatus: status, ErrorCategory: res.ErrorCategory,
 		TakeoverFromVerdict: res.TakeoverFromVerdict, TakeoverFromConfidence: res.TakeoverFromConfidence,
 		TakeoverFromDefectType: res.TakeoverFromDefectType,

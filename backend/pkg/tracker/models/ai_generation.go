@@ -293,6 +293,11 @@ type RunResultAnalysis struct {
 	NarrativeStatus     string `json:"narrative_status" gorm:"not null;default:'ok'"`
 	PolicyVersion       string `json:"policy_version,omitempty"`
 	TypeSafeInputTokens int    `json:"typesafe_input_tokens"`
+	// HistoryAvailable: the evidence this analysis was built from carried the test's recent
+	// failures or the rollup of the labels people gave them (spec B5 #25), so benchmarks can
+	// grade with and without history apart. Clones copy their representative's value; rows from
+	// before the column read false.
+	HistoryAvailable bool `json:"history_available" gorm:"not null;default:false"`
 
 	// Grouping provenance. "" on representatives; on clones: how they were grouped and,
 	// for semantic clones, the probability/model/policy that justified the merge.
