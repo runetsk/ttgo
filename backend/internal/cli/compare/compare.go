@@ -60,11 +60,68 @@ func failedAttempt(a Analysis) bool {
 
 // Job is one analysis job of the run (the wire shape of GET /api/runs/{id}/analysis-jobs).
 type Job struct {
-	ID              string `json:"id"`
-	Status          string `json:"status"`
-	PipelineLabel   string `json:"pipeline_label"`
-	RetryFailedOnly bool   `json:"retry_failed_only"`
-	CreatedAt       string `json:"created_at"`
+	ID              string       `json:"id"`
+	Status          string       `json:"status"`
+	PipelineLabel   string       `json:"pipeline_label"`
+	RetryFailedOnly bool         `json:"retry_failed_only"`
+	CreatedAt       string       `json:"created_at"`
+	RateLimitHits   int          `json:"rate_limit_hits"`
+	Outcomes        *JobOutcomes `json:"outcomes"`
+}
+
+// JobOutcomes is the telemetry part of a job's outcomes: stage times in milliseconds over the
+// job's representatives and the 429s seen. All zero on servers from before job telemetry.
+type JobOutcomes struct {
+	DecisionMsAvg int `json:"decision_ms_avg"`
+	DecisionMsP50 int `json:"decision_ms_p50"`
+	DecisionMsMax int `json:"decision_ms_max"`
+	LLMMsAvg      int `json:"llm_ms_avg"`
+	LLMMsP50      int `json:"llm_ms_p50"`
+	LLMMsMax      int `json:"llm_ms_max"`
+	RateLimitHits int `json:"rate_limit_hits"`
+}
+
+// jobTiming is the job's telemetry with the rate-limit count taken from whichever of the job row
+// and its outcomes reports more; nil when the server sent none.
+func jobTiming(j Job) *JobOutcomes {
+	if j.Outcomes == nil {
+		if j.RateLimitHits == 0 {
+			return nil
+		}
+		return &JobOutcomes{RateLimitHits: j.RateLimitHits}
+	}
+	t := *j.Outcomes
+	if j.RateLimitHits > t.RateLimitHits {
+		t.RateLimitHits = j.RateLimitHits
+	}
+	return &t
+}
+
+func timingRecorded(t *JobOutcomes) bool {
+	return t != nil && (t.DecisionMsMax > 0 || t.LLMMsMax > 0 || t.RateLimitHits > 0)
+}
+
+func durationText(ms int) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%d ms", ms)
+	}
+	return fmt.Sprintf("%.1f s", float64(ms)/1000)
+}
+
+// timingText renders one job's decision and LLM time and its rate-limit hits.
+func timingText(t *JobOutcomes) string {
+	if !timingRecorded(t) {
+		return "timing not recorded"
+	}
+	stage := func(name string, avg, p50, hi int) string {
+		if hi == 0 {
+			return "no " + name + " time"
+		}
+		return fmt.Sprintf("%s avg %s · p50 %s · max %s", name, durationText(avg), durationText(p50), durationText(hi))
+	}
+	return fmt.Sprintf("%s; %s; %d rate-limit hit(s)",
+		stage("decision", t.DecisionMsAvg, t.DecisionMsP50, t.DecisionMsMax),
+		stage("LLM", t.LLMMsAvg, t.LLMMsP50, t.LLMMsMax), t.RateLimitHits)
 }
 
 // ParseJobs reads GET /api/runs/{id}/analysis-jobs.
@@ -144,12 +201,13 @@ type GroundTruth struct {
 // Column is one engine/model pair (and, for TypeSafe, one question-set policy
 // version) that analyzed at least one row.
 type Column struct {
-	Key    string `json:"key"`
-	Engine string `json:"engine"`
-	Model  string `json:"model"`
-	Policy string `json:"policy,omitempty"`
-	Job    string `json:"job,omitempty"`   // by-job columns: the job id
-	Label  string `json:"label,omitempty"` // by-job columns: the job's pipeline
+	Key    string       `json:"key"`
+	Engine string       `json:"engine"`
+	Model  string       `json:"model"`
+	Policy string       `json:"policy,omitempty"`
+	Job    string       `json:"job,omitempty"`    // by-job columns: the job id
+	Label  string       `json:"label,omitempty"`  // by-job columns: the job's pipeline
+	Timing *JobOutcomes `json:"timing,omitempty"` // by-job columns: the job's telemetry
 }
 
 // Cell is the latest analysis of one row by one column.
@@ -188,8 +246,9 @@ type Report struct {
 	// that names its model is a failed cell of that column.
 	FailedCalls int `json:"failed_calls"`
 	// Job is the job the report is limited to (--job); JobLabel its pipeline.
-	Job      string `json:"job,omitempty"`
-	JobLabel string `json:"job_label,omitempty"`
+	Job       string       `json:"job,omitempty"`
+	JobLabel  string       `json:"job_label,omitempty"`
+	JobTiming *JobOutcomes `json:"job_timing,omitempty"`
 	// DefectTypeMode is "mapping" when defect types were re-graded from the verdicts.
 	DefectTypeMode string `json:"defect_type_mode,omitempty"`
 	// Excluded counts stored analyses left out because they belong to another job or,
@@ -334,11 +393,16 @@ func PivotWith(results []Result, analyses map[string][]Analysis, opts Options) R
 	}
 	labels := map[string]string{}
 	order := map[string]int{}
+	byID := map[string]Job{}
 	for i, j := range opts.Jobs {
 		labels[j.ID] = j.PipelineLabel
 		order[j.ID] = i
+		byID[j.ID] = j
 	}
 	rep.JobLabel = labels[opts.Job]
+	if opts.Job != "" {
+		rep.JobTiming = jobTiming(byID[opts.Job])
+	}
 	seen := map[string]Column{}
 	for _, r := range results {
 		row := Row{Result: r, Cells: map[string]*Cell{}}
@@ -360,7 +424,7 @@ func PivotWith(results []Result, analyses map[string][]Analysis, opts Options) R
 			col := Column{Key: key, Engine: a.Engine, Model: a.ModelName, Policy: a.PolicyVersion}
 			if opts.ByJob {
 				key = "job " + shortID(job)
-				col = Column{Key: key, Job: job, Label: labels[job]}
+				col = Column{Key: key, Job: job, Label: labels[job], Timing: jobTiming(byID[job])}
 			}
 			if cur := row.Cells[key]; cur != nil && cur.Version >= a.Version {
 				continue
@@ -670,6 +734,7 @@ func Render(w io.Writer, rep Report, s Summary) {
 			label = "pipeline not recorded"
 		}
 		fmt.Fprintf(w, "Job: %s — %s\n", rep.Job, label)
+		fmt.Fprintf(w, "  %s\n", timingText(rep.JobTiming))
 	}
 	for _, c := range rep.Columns {
 		if c.Job != "" {
@@ -678,6 +743,7 @@ func Render(w io.Writer, rep Report, s Summary) {
 				label = "pipeline not recorded"
 			}
 			fmt.Fprintf(w, "%s = %s — %s\n", strings.ToUpper(c.Key), c.Job, label)
+			fmt.Fprintf(w, "  %s\n", timingText(c.Timing))
 		}
 	}
 	if rep.Excluded > 0 {

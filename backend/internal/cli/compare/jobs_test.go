@@ -137,3 +137,35 @@ func TestResolveJob(t *testing.T) {
 		t.Fatalf("an ambiguous prefix is an error: %v", err)
 	}
 }
+func TestPivotWith_ByJobShowsTimingAndRateLimits(t *testing.T) {
+	results, analyses, jobs := jobFixture()
+	jobs[0].Outcomes = &JobOutcomes{DecisionMsAvg: 420, DecisionMsP50: 410, DecisionMsMax: 490,
+		LLMMsAvg: 10300, LLMMsP50: 9800, LLMMsMax: 15200, RateLimitHits: 2}
+	jobs[0].RateLimitHits = 3 // the job row counted a 429 the outcomes did not: the larger count wins
+	rep := PivotWith(results, analyses, Options{ByJob: true, Jobs: jobs})
+
+	var out bytes.Buffer
+	Render(&out, rep, Summarize(rep))
+	text := out.String()
+	for _, want := range []string{
+		"decision avg 420 ms · p50 410 ms · max 490 ms; LLM avg 10.3 s · p50 9.8 s · max 15.2 s; 3 rate-limit hit(s)",
+		"timing not recorded", // the older job has no telemetry
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("render is missing %q:\n%s", want, text)
+		}
+	}
+
+	one := PivotWith(results, analyses, Options{Job: "bbbbbbbb-2222", Jobs: jobs})
+	if one.JobTiming == nil || one.JobTiming.RateLimitHits != 3 {
+		t.Fatalf("--job carries its job's timing: %+v", one.JobTiming)
+	}
+
+	parsed, err := ParseJobs([]byte(`[{"id":"j1","rate_limit_hits":1,"outcomes":{"groups":3,"decision_ms_avg":400,"decision_ms_p50":390,"decision_ms_max":450,"llm_ms_avg":0,"llm_ms_p50":0,"llm_ms_max":0,"rate_limit_hits":1}}]`))
+	if err != nil || parsed[0].Outcomes == nil || parsed[0].Outcomes.DecisionMsP50 != 390 || parsed[0].RateLimitHits != 1 {
+		t.Fatalf("parse: %+v %v", parsed, err)
+	}
+	if got := timingText(jobTiming(parsed[0])); got != "decision avg 400 ms · p50 390 ms · max 450 ms; no LLM time; 1 rate-limit hit(s)" {
+		t.Fatalf("a TypeSafe-only job has no LLM time: %q", got)
+	}
+}
