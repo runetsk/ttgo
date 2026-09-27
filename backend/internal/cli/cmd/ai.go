@@ -10,7 +10,7 @@ import (
 func newAICmd() *cobra.Command {
 	aiCmd := &cobra.Command{
 		Use:   "ai",
-		Short: "AI test generation",
+		Short: "AI test generation, failure analysis and settings",
 	}
 
 	providersCmd := &cobra.Command{
@@ -40,6 +40,8 @@ func newAICmd() *cobra.Command {
 		newAIGenerateCmd(),
 		newAIAcceptCmd(),
 		newAICompareCmd(),
+		newAITypeSafeCmd(),
+		newAIFeaturesCmd(),
 		templateCmd,
 	)
 

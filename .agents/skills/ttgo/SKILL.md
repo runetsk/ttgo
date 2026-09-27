@@ -43,7 +43,7 @@ Run `ttgo --help` to see all commands. Run `ttgo <command> --help` for subcomman
 | Defects | `ttgo defects` | list, link, unlink, create-issue |
 | Backups | `ttgo backups` | list, create, restore, delete, schedule get/set |
 | Webhooks | `ttgo webhooks` | list, create, delete |
-| AI | `ttgo ai` | providers (list/create/test/set-default/delete), generate, accept, template (get/set/reset) |
+| AI | `ttgo ai` | providers (list/create/test/set-default/delete), generate, accept, template (get/set/reset), compare, typesafe (get/set/test), features (get/set) |
 | Users | `ttgo users` | list, create, update, delete, restore |
 
 ## Workflow Examples

@@ -94,3 +94,34 @@ func (c *Client) GetAISeedStatus() (json.RawMessage, error) {
 	raw, _, err := c.GetRaw("/api/seed/ai", nil)
 	return raw, err
 }
+
+// GetTypeSafeSettings returns the TypeSafe.ai settings; the key is masked, with its status.
+func (c *Client) GetTypeSafeSettings() (json.RawMessage, error) {
+	raw, _, err := c.GetRaw("/api/settings/typesafe", nil)
+	return raw, err
+}
+
+// UpdateTypeSafeSettings sends a partial update: fields absent from patch keep their value.
+// Admin only.
+func (c *Client) UpdateTypeSafeSettings(patch map[string]interface{}) (json.RawMessage, error) {
+	raw, _, err := c.doRaw("PUT", "/api/settings/typesafe", nil, patch)
+	return raw, err
+}
+
+// TestTypeSafeConnection checks the stored key and model against TypeSafe.ai. Admin only.
+func (c *Client) TestTypeSafeConnection() (json.RawMessage, error) {
+	raw, _, err := c.PostRaw("/api/settings/typesafe/test", nil)
+	return raw, err
+}
+
+// GetAIFeatureSettings returns the AI master switch.
+func (c *Client) GetAIFeatureSettings() (json.RawMessage, error) {
+	raw, _, err := c.GetRaw("/api/settings/ai-features", nil)
+	return raw, err
+}
+
+// SetAIFeatureSettings switches every AI feature on or off. Admin only.
+func (c *Client) SetAIFeatureSettings(enabled bool) (json.RawMessage, error) {
+	raw, _, err := c.doRaw("PUT", "/api/settings/ai-features", nil, map[string]bool{"enabled": enabled})
+	return raw, err
+}
