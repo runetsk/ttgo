@@ -1,10 +1,11 @@
 // Pure text for the run's AI-analysis banner once its job has ended. No React, no network.
 // Consumer: RunAnalysisBanner.jsx
+import { usd } from './aiCost.js';
 
 const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 export function isTerminalJob(job) {
-    return ['completed', 'failed', 'cancelled'].includes(job?.status);
+    return ['completed', 'failed', 'cancelled', 'skipped'].includes(job?.status);
 }
 
 // jobSummary describes an ended job from its outcome counts (GET /runs/{id}/analysis-job).
@@ -13,6 +14,13 @@ export function isTerminalJob(job) {
 // those failed on a settings problem, which a retry cannot fix (the button stays).
 export function jobSummary(job) {
     if (!isTerminalJob(job)) return null;
+    if (job.status === 'skipped') {
+        // An automatic analysis the monthly budget held back; "Run anyway" starts it acknowledged.
+        return {
+            tone: 'warn', retryable: false, retryHint: null, runAnyway: true,
+            text: `Automatic analysis skipped: this run (~${usd(job.skip_estimate_usd)}) would exceed the monthly AI budget (${usd(job.skip_spent_usd)} of ${usd(job.skip_budget_usd)} spent).`,
+        };
+    }
     const o = job.outcomes || {};
     const failedRows = o.failed_rows || 0;
     const retryable = failedRows > 0;
@@ -45,4 +53,17 @@ export function jobSummary(job) {
 export function showEndedJob(summary, watchedItRun, dismissed) {
     if (!summary || dismissed) return false;
     return summary.tone !== 'ok' || watchedItRun;
+}
+
+const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
+
+// jobTelemetry: how long the job's stages took and how often a provider rate-limited it
+// (outcomes of GET /runs/{id}/analysis-job), or null when there is nothing to report.
+export function jobTelemetry(job) {
+    const o = job?.outcomes || {};
+    const parts = [];
+    if (o.decision_ms_max > 0) parts.push(`TypeSafe ${secs(o.decision_ms_avg)} avg (p50 ${secs(o.decision_ms_p50)}, max ${secs(o.decision_ms_max)})`);
+    if (o.llm_ms_max > 0) parts.push(`LLM ${secs(o.llm_ms_avg)} avg (p50 ${secs(o.llm_ms_p50)}, max ${secs(o.llm_ms_max)})`);
+    if (o.rate_limit_hits > 0) parts.push(plural(o.rate_limit_hits, 'rate-limit hit', 'rate-limit hits'));
+    return parts.length ? parts.join(' · ') : null;
 }

@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { toast } from './toast';
+import { isBudgetConflict, withBudgetConfirm } from './utils/aiCost.js';
 
 const api = axios.create({
     baseURL: '/api',
@@ -22,7 +23,9 @@ api.interceptors.response.use(
             return Promise.reject(error);
         }
 
-        if (!error.config?._silent) {
+        // A soft-budget 409 on a budget-aware call becomes a confirmation, not a toast.
+        const budgetQuestion = error.config?._budgetAware && isBudgetConflict(error);
+        if (!error.config?._silent && !budgetQuestion) {
             const message =
                 error?.response?.data?.error ||
                 error?.message ||
@@ -504,17 +507,24 @@ export const aiImport = {
 // ── AI Failure Analysis ──
 // A failed attempt is stored too: the server answers 502 with { error, analysis }. The error is
 // toasted by the interceptor; the call resolves with the stored row so the card can show it.
+// Soft AI budgets: an analysis start that would exceed one answers 409 { category: 'budget' }.
+// These calls ask (window.confirm) instead of toasting and resend with acknowledge_budget=true.
+const confirmBudget = (message) => window.confirm(message);
+const budgetConfig = (ack) => ({ _budgetAware: true, ...(ack ? { params: { acknowledge_budget: true } } : {}) });
+
 export const analyzeRunResult = (runResultId) =>
-    api.post(`/run-results/${runResultId}/analyze`).then(r => r.data).catch((err) => {
-        const stored = err?.response?.data?.analysis;
-        if (stored) return stored;
-        throw err;
-    });
+    withBudgetConfirm((ack) => api.post(`/run-results/${runResultId}/analyze`, undefined, budgetConfig(ack)), confirmBudget)
+        .then(r => r.data).catch((err) => {
+            const stored = err?.response?.data?.analysis;
+            if (stored) return stored;
+            throw err;
+        });
 
 // Explain asks the default LLM for the explanation a stored TypeSafe decision lacks; it
 // resolves with the same analysis, its decision unchanged.
 export const explainAnalysis = (runResultId, analysisId) =>
-    api.post(`/run-results/${runResultId}/analyses/${analysisId}/explain`).then(r => r.data);
+    withBudgetConfirm((ack) => api.post(`/run-results/${runResultId}/analyses/${analysisId}/explain`, undefined, budgetConfig(ack)), confirmBudget)
+        .then(r => r.data);
 
 export const listRunResultAnalyses = (runResultId) =>
     api.get(`/run-results/${runResultId}/analyses`).then(r => r.data);
@@ -522,8 +532,10 @@ export const listRunResultAnalyses = (runResultId) =>
 export const getCurrentRunAnalyses = (runId) =>
     api.get(`/runs/${runId}/analyses/current`).then(r => r.data);
 
-export const analyzeRunFailures = (runId) =>
-    api.post(`/runs/${runId}/analyze-failures`).then(r => r.data);
+// acknowledgeBudget: the user already agreed (the banner's "Run anyway" after a budget skip).
+export const analyzeRunFailures = (runId, { acknowledgeBudget = false } = {}) =>
+    withBudgetConfirm((ack) => api.post(`/runs/${runId}/analyze-failures`, undefined, budgetConfig(ack)), confirmBudget, acknowledgeBudget)
+        .then(r => r.data);
 
 export const getRunAnalysisJob = (runId) =>
     api.get(`/runs/${runId}/analysis-job`, { _silent: true }).then(r => r.data);
@@ -532,7 +544,8 @@ export const cancelRunAnalysisJob = (runId) =>
     api.post(`/runs/${runId}/analysis-job/cancel`).then(r => r.data);
 
 export const retryFailedRunAnalysis = (runId) =>
-    api.post(`/runs/${runId}/analysis-job/retry-failed`).then(r => r.data);
+    withBudgetConfirm((ack) => api.post(`/runs/${runId}/analysis-job/retry-failed`, undefined, budgetConfig(ack)), confirmBudget)
+        .then(r => r.data);
 
 export const getFailureAnalysisSettings = () =>
     api.get('/settings/ai-failure-analysis').then(r => r.data);

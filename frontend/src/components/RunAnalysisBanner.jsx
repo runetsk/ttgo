@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { getRunAnalysisJob, cancelRunAnalysisJob, retryFailedRunAnalysis } from '../api';
+import { getRunAnalysisJob, cancelRunAnalysisJob, retryFailedRunAnalysis, analyzeRunFailures } from '../api';
 import { useSubscription } from '../hooks/useSubscription';
-import { jobSummary, showEndedJob } from '../utils/analysisJob.js';
+import { jobSummary, showEndedJob, jobTelemetry } from '../utils/analysisJob.js';
 
 const dismissKey = (runId) => `ttgo.analysisBanner.dismissed.${runId}`;
 
@@ -76,6 +76,19 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
                 setRetrying(false);
             }
         };
+        const runAnyway = async () => {
+            setRetrying(true);
+            try {
+                const next = await analyzeRunFailures(runId, { acknowledgeBudget: true });
+                setJob(next);
+                setWatched(true);
+            } catch {
+                // toasted by the API interceptor
+            } finally {
+                setRetrying(false);
+            }
+        };
+        const telemetry = jobTelemetry(job);
         return (
             <div style={{
                 padding: '8px 14px', background: tone.bg, border: `1px solid ${tone.border}`, borderRadius: 8,
@@ -89,6 +102,11 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
                             {job.pipeline_label}
                         </span>
                     )}
+                    {telemetry && (
+                        <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 12 }} data-testid="run-analysis-telemetry">
+                            {telemetry}
+                        </span>
+                    )}
                     {summary.retryHint && (
                         <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 12 }} data-testid="run-analysis-retry-hint">
                             {summary.retryHint}
@@ -98,6 +116,11 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
                 {summary.retryable && (
                     <button onClick={retry} disabled={retrying} title={summary.retryHint || undefined} className="action-btn" style={{ padding: '4px 12px', fontSize: '0.78rem' }} data-testid="run-analysis-retry-failed">
                         {retrying ? 'Queuing…' : 'Retry failed groups'}
+                    </button>
+                )}
+                {summary.runAnyway && (
+                    <button onClick={runAnyway} disabled={retrying} className="action-btn" style={{ padding: '4px 12px', fontSize: '0.78rem' }} data-testid="run-analysis-run-anyway">
+                        {retrying ? 'Queuing…' : 'Run anyway'}
                     </button>
                 )}
                 <button onClick={dismiss} title="Hide until the next analysis" aria-label="Dismiss"

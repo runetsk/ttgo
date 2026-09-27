@@ -366,6 +366,7 @@ export default function TestRunDetail() {
                                 toast.success('Analysis queued');
                                 setAnalysisBannerRefresh(n => n + 1);
                             } catch (e) {
+                                if (e.budgetDeclined) return; // the user chose not to exceed the budget
                                 if (e.response?.status === 409) {
                                     toast.info ? toast.info('Analysis is already in progress') : toast.success('Analysis is already in progress');
                                     setAnalysisBannerRefresh(n => n + 1);

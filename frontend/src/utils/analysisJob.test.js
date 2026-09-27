@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isTerminalJob, jobSummary, showEndedJob } from './analysisJob.js';
+import { isTerminalJob, jobSummary, showEndedJob, jobTelemetry } from './analysisJob.js';
 
 test('isTerminalJob', () => {
     for (const s of ['completed', 'failed', 'cancelled']) assert.equal(isTerminalJob({ status: s }), true, s);
@@ -50,4 +50,25 @@ test('jobSummary: settings failures say retrying will not help yet', () => {
     assert.equal(jobSummary({ status: 'completed', outcomes: { decided: 1, failed: 1, failed_rows: 1 } }).retryHint, null);
     assert.match(jobSummary({ status: 'failed', error_message: 'x', outcomes: { failed_rows: 1, failed_configuration: 1 } }).retryHint,
         /^1 group failed on a settings problem/);
+});
+
+test('jobSummary: an automatic analysis skipped over the monthly budget offers Run anyway', () => {
+    const job = { status: 'skipped', skip_reason: 'budget', skip_estimate_usd: 0.42, skip_spent_usd: 9.8, skip_budget_usd: 10 };
+    assert.equal(isTerminalJob(job), true);
+    const s = jobSummary(job);
+    assert.equal(s.tone, 'warn');
+    assert.equal(s.runAnyway, true);
+    assert.equal(s.retryable, false);
+    assert.equal(s.text, 'Automatic analysis skipped: this run (~$0.42) would exceed the monthly AI budget ($9.80 of $10.00 spent).');
+    assert.equal(showEndedJob(s, false, false), true, 'shown until dismissed');
+});
+
+test('jobTelemetry: stage timing and rate-limit hits', () => {
+    assert.equal(jobTelemetry({ outcomes: {} }), null);
+    assert.equal(jobTelemetry({}), null);
+    assert.equal(jobTelemetry({ outcomes: {
+        decision_ms_avg: 1200, decision_ms_p50: 1100, decision_ms_max: 3400,
+        llm_ms_avg: 4000, llm_ms_p50: 3200, llm_ms_max: 9800, rate_limit_hits: 3,
+    } }), 'TypeSafe 1.2 s avg (p50 1.1 s, max 3.4 s) · LLM 4.0 s avg (p50 3.2 s, max 9.8 s) · 3 rate-limit hits');
+    assert.equal(jobTelemetry({ outcomes: { rate_limit_hits: 1 } }), '1 rate-limit hit');
 });
