@@ -13,6 +13,8 @@ import (
 func newAICompareCmd() *cobra.Command {
 	var answerKeyPath, jobID string
 	var byJob bool
+	var defectMode string
+	var contract bool
 	cmd := &cobra.Command{
 		Use:   "compare <run-id>",
 		Short: "Compare AI failure-analysis engines on a run",
@@ -30,11 +32,22 @@ job ran (decider, narrator, explanations, takeover threshold, fallback), so two
 passes with the same model but different settings stay apart. Analyses made
 outside a job (a single re-analyze) are left out of both.
 
+--defect-type-mode mapping re-grades every engine's defect type as the mapping of
+its verdict (the rule the LLM path uses), so TypeSafe and the LLMs compare like for
+like with no new calls; native (the default) grades the stored suggestions.
+--explanation-contract checks each column's explanations: one summary sentence,
+exactly one next action, at most two cited evidence items, and length percentiles.
+Grading is also split into rows analyzed with and without the test's history.
+
 With -o json the full pivot and summary are printed for scripting.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if jobID != "" && byJob {
 				return fmt.Errorf("--job and --by-job cannot be combined")
+			}
+			mode, err := compare.ParseDefectTypeMode(defectMode)
+			if err != nil {
+				return err
 			}
 			c, err := newClient()
 			if err != nil {
@@ -67,6 +80,7 @@ With -o json the full pivot and summary are printed for scripting.`,
 					opts.Job = j.ID
 				}
 			}
+			opts.DefectTypeMode = mode
 			histories := map[string][]compare.Analysis{}
 			for _, r := range results {
 				raw, err := c.ListRunResultAnalyses(r.ID)
@@ -90,13 +104,25 @@ With -o json the full pivot and summary are printed for scripting.`,
 			if n := compare.GradingNote(sum, len(gt) > 0); n != "" {
 				note = n
 			}
+			var checks []compare.ContractStats
+			if contract {
+				checks = compare.CheckExplanations(rep)
+			}
 			if outputMode() == "json" {
+				payload := map[string]any{"report": rep, "summary": sum, "note": note}
+				if contract {
+					payload["contract"] = checks
+				}
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
 				enc.SetEscapeHTML(false)
-				return enc.Encode(map[string]any{"report": rep, "summary": sum, "note": note})
+				return enc.Encode(payload)
 			}
 			compare.Render(cmd.OutOrStdout(), rep, sum)
+			if contract {
+				fmt.Fprintln(cmd.OutOrStdout())
+				compare.RenderContract(cmd.OutOrStdout(), checks)
+			}
 			if note != "" {
 				fmt.Fprintln(cmd.OutOrStdout(), note)
 			}
@@ -107,6 +133,10 @@ With -o json the full pivot and summary are printed for scripting.`,
 		"JSON answer key to grade against (a saved GET /api/seed/ai response or a perfseed manifest) instead of fetching it from the server")
 	cmd.Flags().StringVar(&jobID, "job", "", "only the analyses stored by this analysis job (id or unique prefix)")
 	cmd.Flags().BoolVar(&byJob, "by-job", false, "one column per analysis job, labelled by its pipeline, instead of per engine/model")
+	cmd.Flags().StringVar(&defectMode, "defect-type-mode", compare.DefectTypeModeNative,
+		"native: grade each engine's stored defect-type suggestion; mapping: re-grade every engine's defect type as its verdict's mapping (like for like, no new calls)")
+	cmd.Flags().BoolVar(&contract, "explanation-contract", false,
+		"also check each column's explanations: one summary sentence, one next action, at most two cited evidence items, plus length percentiles")
 	return cmd
 }
 

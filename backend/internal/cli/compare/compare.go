@@ -25,7 +25,7 @@ type Result struct {
 }
 
 // Analysis is one stored analysis version (the wire shape of
-// GET /api/run-results/{id}/analyses, minus the narrative).
+// GET /api/run-results/{id}/analyses, without the raw response).
 type Analysis struct {
 	RunResultID                   string   `json:"run_result_id"`
 	Version                       int      `json:"version"`
@@ -46,6 +46,10 @@ type Analysis struct {
 	ErrorCategory                 string   `json:"error_category"`
 	JobID                         *string  `json:"job_id"`
 	HistoryAvailable              bool     `json:"history_available"`
+	SourceAnalysisID              *string  `json:"source_analysis_id"`
+	Summary                       string   `json:"summary"`
+	NextAction                    string   `json:"next_action"`
+	Rationale                     string   `json:"rationale"`
 }
 
 // failedAttempt reports whether an analysis is a failed attempt rather than an answer.
@@ -224,6 +228,10 @@ type Cell struct {
 	Failed           bool     `json:"failed,omitempty"` // a failed attempt: no decision
 	ErrorCategory    string   `json:"error_category,omitempty"`
 	History          bool     `json:"history_available"` // the analysis had this test's history
+	Clone            bool     `json:"clone,omitempty"`   // a dedup clone: its representative's answer
+	Summary          string   `json:"-"`
+	NextAction       string   `json:"-"`
+	Rationale        string   `json:"-"`
 }
 
 // Row is one failing result with its cell per column.
@@ -435,6 +443,7 @@ func PivotWith(results []Result, analyses map[string][]Analysis, opts Options) R
 				SuggestionSource: a.SuggestionSource, NarrativeStatus: a.NarrativeStatus,
 				Tokens: a.TypeSafeInputTokens + a.TokenUsagePrompt + a.TokenUsageCompletion,
 				Failed: failed, ErrorCategory: a.ErrorCategory, History: a.HistoryAvailable,
+				Clone: a.SourceAnalysisID != nil, Summary: a.Summary, NextAction: a.NextAction, Rationale: a.Rationale,
 			}
 			if rep.DefectTypeMode == DefectTypeModeMapping && !failed {
 				// Like for like (spec B5 #26): every engine's suggestion becomes its verdict's
