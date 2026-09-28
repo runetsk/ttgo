@@ -70,11 +70,15 @@ type Job struct {
 	RetryFailedOnly bool         `json:"retry_failed_only"`
 	CreatedAt       string       `json:"created_at"`
 	RateLimitHits   int          `json:"rate_limit_hits"`
+	CallTimeouts    int          `json:"call_timeouts"`
+	HedgesFired     int          `json:"hedges_fired"`
+	HedgesWon       int          `json:"hedges_won"`
 	Outcomes        *JobOutcomes `json:"outcomes"`
 }
 
 // JobOutcomes is the telemetry part of a job's outcomes: stage times in milliseconds over the
-// job's representatives and the 429s seen. All zero on servers from before job telemetry.
+// job's representatives and the 429s, call timeouts and hedges seen. All zero on servers from
+// before job telemetry.
 type JobOutcomes struct {
 	DecisionMsAvg int `json:"decision_ms_avg"`
 	DecisionMsP50 int `json:"decision_ms_p50"`
@@ -83,26 +87,33 @@ type JobOutcomes struct {
 	LLMMsP50      int `json:"llm_ms_p50"`
 	LLMMsMax      int `json:"llm_ms_max"`
 	RateLimitHits int `json:"rate_limit_hits"`
+	CallTimeouts  int `json:"call_timeouts"`
+	HedgesFired   int `json:"hedges_fired"`
+	HedgesWon     int `json:"hedges_won"`
 }
 
-// jobTiming is the job's telemetry with the rate-limit count taken from whichever of the job row
-// and its outcomes reports more; nil when the server sent none.
+// jobTiming is the job's telemetry with each call count taken from whichever of the job row and
+// its outcomes reports more; nil when the server sent none.
 func jobTiming(j Job) *JobOutcomes {
+	row := JobOutcomes{RateLimitHits: j.RateLimitHits, CallTimeouts: j.CallTimeouts,
+		HedgesFired: j.HedgesFired, HedgesWon: j.HedgesWon}
 	if j.Outcomes == nil {
-		if j.RateLimitHits == 0 {
+		if row == (JobOutcomes{}) {
 			return nil
 		}
-		return &JobOutcomes{RateLimitHits: j.RateLimitHits}
+		return &row
 	}
 	t := *j.Outcomes
-	if j.RateLimitHits > t.RateLimitHits {
-		t.RateLimitHits = j.RateLimitHits
-	}
+	t.RateLimitHits = max(t.RateLimitHits, row.RateLimitHits)
+	t.CallTimeouts = max(t.CallTimeouts, row.CallTimeouts)
+	t.HedgesFired = max(t.HedgesFired, row.HedgesFired)
+	t.HedgesWon = max(t.HedgesWon, row.HedgesWon)
 	return &t
 }
 
 func timingRecorded(t *JobOutcomes) bool {
-	return t != nil && (t.DecisionMsMax > 0 || t.LLMMsMax > 0 || t.RateLimitHits > 0)
+	return t != nil && (t.DecisionMsMax > 0 || t.LLMMsMax > 0 || t.RateLimitHits > 0 ||
+		t.CallTimeouts > 0 || t.HedgesFired > 0)
 }
 
 func durationText(ms int) string {
@@ -112,7 +123,8 @@ func durationText(ms int) string {
 	return fmt.Sprintf("%.1f s", float64(ms)/1000)
 }
 
-// timingText renders one job's decision and LLM time and its rate-limit hits.
+// timingText renders one job's decision and LLM time, its rate-limit hits and, when any, its
+// LLM call timeouts and hedges.
 func timingText(t *JobOutcomes) string {
 	if !timingRecorded(t) {
 		return "timing not recorded"
@@ -123,9 +135,16 @@ func timingText(t *JobOutcomes) string {
 		}
 		return fmt.Sprintf("%s avg %s · p50 %s · max %s", name, durationText(avg), durationText(p50), durationText(hi))
 	}
-	return fmt.Sprintf("%s; %s; %d rate-limit hit(s)",
+	s := fmt.Sprintf("%s; %s; %d rate-limit hit(s)",
 		stage("decision", t.DecisionMsAvg, t.DecisionMsP50, t.DecisionMsMax),
 		stage("LLM", t.LLMMsAvg, t.LLMMsP50, t.LLMMsMax), t.RateLimitHits)
+	if t.CallTimeouts > 0 {
+		s += fmt.Sprintf("; %d call timeout(s)", t.CallTimeouts)
+	}
+	if t.HedgesFired > 0 {
+		s += fmt.Sprintf("; %d hedge(s) fired, %d won", t.HedgesFired, t.HedgesWon)
+	}
+	return s
 }
 
 // ParseJobs reads GET /api/runs/{id}/analysis-jobs.

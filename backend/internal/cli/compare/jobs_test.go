@@ -169,3 +169,29 @@ func TestPivotWith_ByJobShowsTimingAndRateLimits(t *testing.T) {
 		t.Fatalf("a TypeSafe-only job has no LLM time: %q", got)
 	}
 }
+
+func TestPivotWith_ByJobShowsCallTimeoutsAndHedges(t *testing.T) {
+	results, analyses, jobs := jobFixture()
+	jobs[0].Outcomes = &JobOutcomes{DecisionMsAvg: 420, DecisionMsP50: 410, DecisionMsMax: 490,
+		LLMMsAvg: 10300, LLMMsP50: 9800, LLMMsMax: 15200, CallTimeouts: 1, HedgesFired: 3, HedgesWon: 2}
+	jobs[0].CallTimeouts = 2 // the row counted more than the outcomes: the larger count wins
+	rep := PivotWith(results, analyses, Options{ByJob: true, Jobs: jobs})
+
+	var out bytes.Buffer
+	Render(&out, rep, Summarize(rep))
+	want := "decision avg 420 ms · p50 410 ms · max 490 ms; LLM avg 10.3 s · p50 9.8 s · max 15.2 s; 0 rate-limit hit(s); 2 call timeout(s); 3 hedge(s) fired, 2 won"
+	if !strings.Contains(out.String(), want) {
+		t.Fatalf("render is missing %q:\n%s", want, out.String())
+	}
+
+	parsed, err := ParseJobs([]byte(`[{"id":"j1","call_timeouts":1,"hedges_fired":1,"hedges_won":0}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := timingText(jobTiming(parsed[0])); got != "no decision time; no LLM time; 0 rate-limit hit(s); 1 call timeout(s); 1 hedge(s) fired, 0 won" {
+		t.Fatalf("latency counts on the job row alone are shown: %q", got)
+	}
+	if got := timingText(jobTiming(Job{ID: "old"})); got != "timing not recorded" {
+		t.Fatalf("an old job: %q", got)
+	}
+}
