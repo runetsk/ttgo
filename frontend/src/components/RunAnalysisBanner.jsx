@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { getRunAnalysisJob, cancelRunAnalysisJob, retryFailedRunAnalysis, analyzeRunFailures } from '../api';
 import { useSubscription } from '../hooks/useSubscription';
-import { jobSummary, showEndedJob, jobTelemetry } from '../utils/analysisJob.js';
+import { jobSummary, showEndedJob, jobTelemetry, runningNote, newerJobState } from '../utils/analysisJob.js';
 
 const dismissKey = (runId) => `ttgo.analysisBanner.dismissed.${runId}`;
 
@@ -50,9 +50,17 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
         if (typeof d.covered_failures === 'number') setCovered(d.covered_failures);
         if (event.type === 'run_analysis.completed') {
             // The event carries progress only; the outcome counts come with the job.
-            getRunAnalysisJob(runId).then((j) => { if (j) setJob(j); }).catch(() => {});
+            getRunAnalysisJob(runId).then((j) => setJob((prev) => newerJobState(prev, j))).catch(() => {});
         }
     }, [runId]));
+
+    // While a job runs, its outcome counts (explanations still being written) come only with the job
+    // itself, so refresh it, at most once a second, while the run's events arrive: decisions,
+    // explanations written (.updated) and progress. The subscription ends with the job.
+    const running = job?.status === 'queued' || job?.status === 'running';
+    useSubscription(runId && running ? `run:${runId}` : null, useCallback(() => {
+        getRunAnalysisJob(runId).then((j) => setJob((prev) => newerJobState(prev, j))).catch(() => {});
+    }, [runId]), { debounceMs: 1000 });
 
     if (!job) return null;
 
@@ -132,6 +140,7 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
     }
 
     const pct = job.capped_at > 0 ? Math.min(100, (job.analyzed_count / job.capped_at) * 100) : 0;
+    const note = runningNote(job);
 
     return (
         <div style={{
@@ -147,6 +156,7 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
             <span style={{ color: 'var(--text-primary)' }}>
                 {job.retry_failed_only ? 'AI retrying failed groups' : 'AI analyzing failures'} — {job.analyzed_count || 0} of {job.capped_at || 0} groups
                 {covered ? ` (covers ${covered} of ${job.total_failures || 0} failed results)` : ''}
+                {note && <span data-testid="run-analysis-explanations-pending"> · {note}</span>}
             </span>
             <div style={{ flex: 1, height: 3, background: 'var(--border-color)', borderRadius: 2, overflow: 'hidden', margin: '0 10px', minWidth: 80 }}>
                 <div style={{ height: '100%', width: `${pct}%`, background: 'var(--accent-indigo)', transition: 'width 0.3s ease' }} />

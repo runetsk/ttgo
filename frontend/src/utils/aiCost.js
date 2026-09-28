@@ -14,13 +14,13 @@ export function isBudgetConflict(err) {
     return err?.response?.status === 409 && err.response.data?.category === 'budget';
 }
 
-// budgetConfirmText turns the 409 budget payload into the question asked before resending.
+// budgetConfirmText turns the 409 budget payload into the question asked before resending. The server's estimate is worst case (every attempt, hedges included), and the question says so.
 export function budgetConfirmText(data) {
     const est = usd(data?.estimated_cost_usd);
     if (data?.scope === 'month') {
-        return `This analysis (~${est}) would exceed the monthly AI budget (${usd(data.month_spent_usd)} of ${usd(data.budget_usd)} spent). Run it anyway?`;
+        return `This analysis (worst case ~${est}) would exceed the monthly AI budget (${usd(data.month_spent_usd)} of ${usd(data.budget_usd)} spent). Run it anyway?`;
     }
-    return `This analysis is estimated at ~${est}, above the per-request AI budget of ${usd(data?.budget_usd)}. Run it anyway?`;
+    return `This analysis could cost up to ~${est} (worst case), above the per-request AI budget of ${usd(data?.budget_usd)}. Run it anyway?`;
 }
 
 // withBudgetConfirm sends once; on a soft-budget 409 it asks confirmFn and, if confirmed,

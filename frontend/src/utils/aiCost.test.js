@@ -24,9 +24,9 @@ test('isBudgetConflict only matches a 409 budget payload', () => {
 
 test('budgetConfirmText names the budget that would be exceeded', () => {
     assert.equal(budgetConfirmText({ scope: 'month', estimated_cost_usd: 0.42, month_spent_usd: 9.8, budget_usd: 10 }),
-        'This analysis (~$0.42) would exceed the monthly AI budget ($9.80 of $10.00 spent). Run it anyway?');
+        'This analysis (worst case ~$0.42) would exceed the monthly AI budget ($9.80 of $10.00 spent). Run it anyway?');
     assert.equal(budgetConfirmText({ scope: 'request', estimated_cost_usd: 0.08, budget_usd: 0.05 }),
-        'This analysis is estimated at ~$0.08, above the per-request AI budget of $0.05. Run it anyway?');
+        'This analysis could cost up to ~$0.08 (worst case), above the per-request AI budget of $0.05. Run it anyway?');
 });
 
 test('withBudgetConfirm: asks once and resends acknowledged', async () => {

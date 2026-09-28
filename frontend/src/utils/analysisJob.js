@@ -18,7 +18,7 @@ export function jobSummary(job) {
         // An automatic analysis the monthly budget held back; "Run anyway" starts it acknowledged.
         return {
             tone: 'warn', retryable: false, retryHint: null, runAnyway: true,
-            text: `Automatic analysis skipped: this run (~${usd(job.skip_estimate_usd)}) would exceed the monthly AI budget (${usd(job.skip_spent_usd)} of ${usd(job.skip_budget_usd)} spent).`,
+            text: `Automatic analysis skipped: this run (worst case ~${usd(job.skip_estimate_usd)}) would exceed the monthly AI budget (${usd(job.skip_spent_usd)} of ${usd(job.skip_budget_usd)} spent).`,
         };
     }
     const o = job.outcomes || {};
@@ -57,13 +57,34 @@ export function showEndedJob(summary, watchedItRun, dismissed) {
 
 const secs = (ms) => `${(ms / 1000).toFixed(1)} s`;
 
-// jobTelemetry: how long the job's stages took and how often a provider rate-limited it
-// (outcomes of GET /runs/{id}/analysis-job), or null when there is nothing to report.
+// jobTelemetry: how long the job's stages took, how often a provider rate-limited it, how many LLM
+// calls hit the per-call timeout and how many hedged requests fired and won (outcomes of
+// GET /runs/{id}/analysis-job, else the job's own columns), or null when there is nothing to report.
 export function jobTelemetry(job) {
     const o = job?.outcomes || {};
     const parts = [];
     if (o.decision_ms_max > 0) parts.push(`TypeSafe ${secs(o.decision_ms_avg)} avg (p50 ${secs(o.decision_ms_p50)}, max ${secs(o.decision_ms_max)})`);
     if (o.llm_ms_max > 0) parts.push(`LLM ${secs(o.llm_ms_avg)} avg (p50 ${secs(o.llm_ms_p50)}, max ${secs(o.llm_ms_max)})`);
     if (o.rate_limit_hits > 0) parts.push(plural(o.rate_limit_hits, 'rate-limit hit', 'rate-limit hits'));
+    const timeouts = o.call_timeouts ?? job?.call_timeouts ?? 0;
+    if (timeouts > 0) parts.push(plural(timeouts, 'LLM call timed out', 'LLM calls timed out'));
+    const fired = o.hedges_fired ?? job?.hedges_fired ?? 0;
+    if (fired > 0) parts.push(`${plural(fired, 'hedge', 'hedges')} fired, ${o.hedges_won ?? job?.hedges_won ?? 0} won`);
     return parts.length ? parts.join(' · ') : null;
+}
+
+// runningNote: what the running banner adds while decisions are already shown and their
+// explanations are still being written (outcomes.explanation_pending exists only while the job
+// runs), or null.
+export function runningNote(job) {
+    const n = job?.outcomes?.explanation_pending || 0;
+    return n > 0 ? `${plural(n, 'explanation', 'explanations')} in progress` : null;
+}
+
+// newerJobState picks what the banner shows when a refetched job lands: a response that left
+// while the job was still running must not replace the same job already known to have ended.
+export function newerJobState(prev, next) {
+    if (!next) return prev;
+    if (prev && prev.id === next.id && isTerminalJob(prev) && !isTerminalJob(next)) return prev;
+    return next;
 }
