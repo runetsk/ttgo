@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"ttgo/pkg/tracker/models"
+
+	"github.com/stretchr/testify/require"
 )
 
 // Real models drift to invented labels ("environment_or_infrastructure",
@@ -208,4 +210,56 @@ func TestBuildPromptDropOrderHoldsWithHumanLabeledHistory(t *testing.T) {
 	if strings.Contains(got, "prior failures") {
 		t.Errorf("dropped similar failures should also drop the rollup line\nfull:\n%s", got)
 	}
+}
+
+func TestBuildPromptRendersPastTriageDecisions(t *testing.T) {
+	examples := []TriageExample{
+		{FailureType: "timeout", ErrorMessage: "spinner\nnever went away", SuggestedDefectType: "product_bug", HumanDefectType: "automation_bug", Corrected: true},
+		{FailureType: "http", ErrorMessage: "500 on /cart", SuggestedDefectType: "product_bug", HumanDefectType: "product_bug"},
+	}
+	in := PromptInput{Template: DefaultPromptTemplate, TestName: "x", ErrorMessage: "x", Examples: examples}
+	got, meta, err := BuildPrompt(in)
+	require.NoError(t, err)
+	require.Contains(t, got, "### Past triage decisions")
+	require.Contains(t, got, "- [timeout] <<<DATA spinner never went away DATA>>> AI suggested product_bug, person decided automation_bug (corrected)\n")
+	require.Contains(t, got, "- [http] <<<DATA 500 on /cart DATA>>> AI suggested product_bug, person decided product_bug\n")
+	require.Equal(t, 2, meta.ExamplesSent)
+	require.Equal(t, "spinner\nnever went away", examples[0].ErrorMessage, "the caller's slice is not rewritten")
+
+	in.Examples = nil
+	got, meta, err = BuildPrompt(in)
+	require.NoError(t, err)
+	require.NotContains(t, got, "Past triage decisions", "no examples, no block")
+	require.Zero(t, meta.ExamplesSent)
+}
+
+func TestBuildPromptDropsExamplesBeforeLogsAndHistory(t *testing.T) {
+	in := PromptInput{
+		Template: DefaultPromptTemplate, TestName: "x", ErrorMessage: "x", FailureType: "x",
+		LogText:         strings.Repeat("L", 30000),
+		SimilarFailures: []SimilarFailure{{Status: "FAIL", ErrorMessage: "boom", DefectType: "product_bug"}},
+		Examples:        []TriageExample{{FailureType: "t", ErrorMessage: "EXAMPLE_MARKER", SuggestedDefectType: "product_bug", HumanDefectType: "automation_bug", Corrected: true}},
+		Steps:           []PromptStep{{Order: 1, Action: strings.Repeat("a", 25000), Expected: "e"}},
+	}
+	got, meta, err := BuildPrompt(in)
+	require.NoError(t, err)
+	require.LessOrEqual(t, len(got), PromptCharCap)
+	ex := strings.Index(meta.TruncationPrefix, "no examples")
+	logs := strings.Index(meta.TruncationPrefix, "no logs")
+	sims := strings.Index(meta.TruncationPrefix, "no similar failures")
+	require.True(t, ex >= 0 && logs > ex && sims > logs, "examples, then logs, then history: %q", meta.TruncationPrefix)
+	require.NotContains(t, got, "EXAMPLE_MARKER")
+	require.Zero(t, meta.ExamplesSent)
+}
+
+// The examples block is appended by code, so an admin-customized template sends it too.
+func TestBuildPromptAppendsExamplesToACustomTemplate(t *testing.T) {
+	in := PromptInput{Template: "USER:\nTest {{.TestName}}\n", TestName: "x",
+		Examples: []TriageExample{{FailureType: "timeout", ErrorMessage: "spinner", SuggestedDefectType: "product_bug", HumanDefectType: "automation_bug", Corrected: true}}}
+	got, meta, err := BuildPrompt(in)
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(got, "USER:\nTest x\n"))
+	require.Contains(t, got, "### Past triage decisions")
+	require.Contains(t, got, "- [timeout] <<<DATA spinner DATA>>> AI suggested product_bug, person decided automation_bug (corrected)\n")
+	require.Equal(t, 1, meta.ExamplesSent)
 }

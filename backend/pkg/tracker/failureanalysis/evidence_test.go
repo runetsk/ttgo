@@ -2,6 +2,7 @@ package failureanalysis
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +81,7 @@ func TestRenderState_ShapeAndConstantNote(t *testing.T) {
 	}
 	require.NotContains(t, s, "linked_requirements")
 	require.NotContains(t, s, "REQ-1")
+	require.NotContains(t, s, `"examples"`, "maxedContext carries no examples")
 	require.Equal(t, HistoryNote, state["history"].(map[string]any)["note"])
 	require.Contains(t, HistoryNote, "Other FAILED")
 	require.NotContains(t, HistoryNote, "earlier")
@@ -122,7 +124,8 @@ func TestRenderState_DropLadderAndHardCap(t *testing.T) {
 	ev := Evidence{ErrorMessage: strings.Repeat("E", ErrorMessageHeadCap), StackTrace: strings.Repeat("T", StackTraceHeadCap),
 		LogText: strings.Repeat("L", LogTextTailCap), Steps: []PromptStep{{Order: 1, Action: "a", Expected: "e"}},
 		LinkedDefects: []LinkedDefect{{Key: "D-1"}}, LinkedRequirements: []LinkedRequirement{{Key: "R-1"}},
-		SimilarFailures: []SimilarFailure{{ErrorMessage: "x"}}, SimilarFailuresRollup: "r"}
+		SimilarFailures: []SimilarFailure{{ErrorMessage: "x"}}, SimilarFailuresRollup: "r",
+		Examples: []TriageExample{{ErrorMessage: "a"}, {ErrorMessage: "b"}}}
 	var order []string
 	for {
 		dropped, ok := dropNext(&ev)
@@ -131,7 +134,7 @@ func TestRenderState_DropLadderAndHardCap(t *testing.T) {
 		}
 		order = append(order, dropped)
 	}
-	require.Equal(t, []string{"no logs", "no similar failures", "no steps", "no defects", "no requirements"}, order)
+	require.Equal(t, []string{"fewer examples", "fewer examples", "no logs", "no similar failures", "no steps", "no defects", "no requirements"}, order)
 	require.Equal(t, "", ev.SimilarFailuresRollup, "rollup is cleared with the rows it summarizes")
 
 	hard := Evidence{ErrorMessage: strings.Repeat("E", ErrorMessageHeadCap), StackTrace: strings.Repeat("T", StackTraceHeadCap)}
@@ -237,4 +240,126 @@ func TestRenderState_HonoursTheEvidenceStateCap(t *testing.T) {
 	state, meta = RenderState(ev)
 	require.NotEmpty(t, meta.TruncationPrefix, "the default 40k bound must trim")
 	require.Empty(t, state["failure"].(map[string]any)["log_tail"], "the log is the first block dropped")
+}
+
+// maxedExamples is one past the example limit, every field past its cap, with distinct
+// messages (E0-, E1-, …) so rank order can be checked after drops.
+func maxedExamples() []TriageExample {
+	out := make([]TriageExample, 0, models.MaxFewShotExamples+2)
+	for i := 0; i < models.MaxFewShotExamples+2; i++ {
+		out = append(out, TriageExample{ResultID: fmt.Sprintf("x%d", i),
+			FailureType:         strings.Repeat("f", EnvFieldCap+20),
+			ErrorMessage:        fmt.Sprintf("E%d-", i) + strings.Repeat("m", ExampleErrorCap+100),
+			SuggestedDefectType: strings.Repeat("s", 80), HumanDefectType: strings.Repeat("h", 80), Corrected: i%2 == 0})
+	}
+	return out
+}
+
+func TestBuildEvidence_CapsAndRedactsExamples(t *testing.T) {
+	in := baseContext()
+	in.Examples = maxedExamples()
+	ev := BuildEvidence(in)
+	require.Len(t, ev.Examples, models.MaxFewShotExamples)
+	require.Len(t, ev.Examples[0].ErrorMessage, ExampleErrorCap)
+	require.Len(t, ev.Examples[0].FailureType, EnvFieldCap)
+	require.Len(t, ev.Examples[0].SuggestedDefectType, SimilarLabelCap)
+	require.Len(t, ev.Examples[0].HumanDefectType, SimilarLabelCap)
+	require.True(t, ev.Examples[0].Corrected)
+	require.False(t, ev.Examples[1].Corrected)
+
+	secret := "abcdefghijklmnopqrstuvwxyz0123456789"
+	in.Examples = []TriageExample{{ErrorMessage: "Authorization: Bearer " + secret + "\nnext line"}}
+	in.RedactionEnabled = true
+	ev = BuildEvidence(in)
+	require.NotContains(t, ev.Examples[0].ErrorMessage, secret)
+	require.NotContains(t, ev.Examples[0].ErrorMessage, "\n", "one line, like the history rows")
+	require.Contains(t, in.Examples[0].ErrorMessage, secret, "the caller's examples are not mutated")
+	in.RedactionEnabled = false
+	require.Contains(t, BuildEvidence(in).Examples[0].ErrorMessage, secret)
+}
+
+func TestRenderState_ExamplesAndDefectKeys(t *testing.T) {
+	in := baseContext()
+	in.SimilarFailures = []SimilarFailure{
+		{RunStartedAt: time.Now(), Status: "FAIL", ErrorMessage: "boom", DefectType: "product_bug", DefectKey: "JIRA-9"},
+		{RunStartedAt: time.Now(), Status: "FAIL", ErrorMessage: "boom", DefectType: "product_bug"},
+	}
+	state, meta := RenderState(BuildEvidenceWithBudget(in, TypeSafeBudget()))
+	require.NotContains(t, state, "examples", "no examples: the state is exactly the v5 state")
+	require.Zero(t, meta.ExamplesSent)
+	sims := state["history"].(map[string]any)["similar_failures"].([]map[string]any)
+	require.Equal(t, "JIRA-9", sims[0]["human_defect_key"])
+	require.NotContains(t, sims[1], "human_defect_key", "no key, no slot")
+
+	in.Examples = []TriageExample{{FailureType: "timeout", ErrorMessage: "spinner", SuggestedDefectType: "product_bug",
+		HumanDefectType: "automation_bug", Corrected: true}}
+	state, meta = RenderState(BuildEvidenceWithBudget(in, TypeSafeBudget()))
+	require.Equal(t, 1, meta.ExamplesSent)
+	require.Equal(t, []map[string]any{{"failure_type": "timeout", "error_message": "spinner",
+		"ai_suggested_defect_type": "product_bug", "human_defect_type": "automation_bug", "corrected": true}}, state["examples"])
+}
+
+func TestRenderState_DropsExamplesFirstOneAtATime(t *testing.T) {
+	in := baseContext()
+	in.Result.LogText = strings.Repeat("l", 1000)
+	in.Examples = maxedExamples()
+	ev := BuildEvidenceWithBudget(in, TypeSafeBudget())
+	full, meta := RenderState(ev)
+	require.Equal(t, models.MaxFewShotExamples, meta.ExamplesSent)
+	require.Empty(t, meta.TruncationPrefix)
+	b, _ := json.Marshal(full)
+
+	ev.StateCap = len(b) - 1 // one byte over: exactly one example goes
+	state, meta := RenderState(ev)
+	require.Equal(t, models.MaxFewShotExamples-1, meta.ExamplesSent)
+	kept := state["examples"].([]map[string]any)
+	require.Len(t, kept, models.MaxFewShotExamples-1)
+	require.True(t, strings.HasPrefix(kept[0]["error_message"].(string), "E0-"), "the best-ranked example stays")
+	require.True(t, strings.HasPrefix(kept[len(kept)-1]["error_message"].(string), fmt.Sprintf("E%d-", models.MaxFewShotExamples-2)), "the lowest-ranked went first")
+	require.NotEmpty(t, state["failure"].(map[string]any)["log_tail"], "the log stays while an example can go")
+	require.Equal(t, "[context: fewer examples] ", meta.TruncationPrefix)
+	sb, _ := json.Marshal(state)
+	require.LessOrEqual(t, len(sb), ev.StateCap)
+
+	noExamples := ev
+	noExamples.Examples = nil
+	nb, _ := json.Marshal(stateObject(noExamples))
+	ev.StateCap = len(nb) // fits exactly without any example
+	state, meta = RenderState(ev)
+	require.Zero(t, meta.ExamplesSent)
+	require.NotContains(t, state, "examples")
+	require.NotEmpty(t, state["failure"].(map[string]any)["log_tail"], "every example goes before the log")
+	require.Equal(t, "[context: fewer examples] ", meta.TruncationPrefix, "repeated drops are named once")
+}
+
+// The TypeSafe bound holds with examples: at the maximum number of maxed examples and a defect key
+// on every history row, a state whose large fields fit renders whole, and one at every TypeSafe cap
+// drops the examples, then the log, and stays within TypeSafeStateCharCap.
+func TestRenderState_TypeSafeCapHoldsWithExamples(t *testing.T) {
+	in := maxedContext()
+	for i := range in.SimilarFailures {
+		in.SimilarFailures[i].DefectKey = strings.Repeat("k", 80)
+	}
+	in.Examples = maxedExamples()
+	state, meta := RenderState(BuildEvidenceWithBudget(in, TypeSafeBudget()))
+	b, _ := json.Marshal(state)
+	require.LessOrEqual(t, len(b), TypeSafeStateCharCap)
+	require.Equal(t, models.MaxFewShotExamples, meta.ExamplesSent, "the per-field caps leave room for every example")
+	require.Empty(t, meta.TruncationPrefix)
+
+	in.Result.ErrorMessage = strings.Repeat("E", TypeSafeErrorHeadCap+100)
+	in.Result.StackTrace = strings.Repeat("T", TypeSafeStackHeadCap+100)
+	in.Result.LogText = strings.Repeat("L", TypeSafeLogTailCap+100)
+	state, meta = RenderState(BuildEvidenceWithBudget(in, TypeSafeBudget()))
+	b, _ = json.Marshal(state)
+	require.LessOrEqual(t, len(b), TypeSafeStateCharCap)
+	require.Zero(t, meta.ExamplesSent)
+	require.True(t, strings.HasPrefix(meta.TruncationPrefix, "[context: fewer examples; no logs"), meta.TruncationPrefix)
+
+	for i := range in.Examples {
+		in.Examples[i].ErrorMessage = strings.Repeat("<", ExampleErrorCap) // 6 bytes each once JSON-escaped
+	}
+	state, _ = RenderState(BuildEvidenceWithBudget(in, TypeSafeBudget()))
+	b, _ = json.Marshal(state)
+	require.LessOrEqual(t, len(b), TypeSafeStateCharCap, "escaped example text cannot break the bound")
 }

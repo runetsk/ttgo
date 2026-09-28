@@ -6,6 +6,7 @@ import (
 	"strings"
 	"text/template"
 	"time"
+	"ttgo/pkg/tracker/models"
 )
 
 // Budget constants — see spec §Truncation budget.
@@ -115,6 +116,9 @@ type PromptInput struct {
 	// GroupMembers are other members' error lines, already redacted by BuildEvidence. They are
 	// rendered by code after the template (groupBlock), so a customized template gets them too.
 	GroupMembers []string
+	// Examples are past human triage decisions, already redacted by BuildEvidence; rendered by
+	// code after the template (examplesBlock). Templates may still range over them.
+	Examples []TriageExample
 
 	// Set only when a TypeSafe decision precedes the narrative call (spec §6). Admin templates
 	// may reference them; the code-owned system message carries the binding instruction.
@@ -126,12 +130,13 @@ type PromptInput struct {
 // PromptMeta reports what was trimmed so the caller can prefix Rationale.
 type PromptMeta struct {
 	TruncationPrefix string // e.g. "[context: no logs; trimmed similar failures]"
+	ExamplesSent     int    // few-shot examples left after the drop ladder
 }
 
-// BuildPrompt renders the template after applying truncation rules, then appends the related
-// failures of the group, if any. If the result still exceeds PromptCharCap, we drop fields in
-// this order: related failures → log_text → similar_failures → steps → linked_defects →
-// linked_requirements.
+// BuildPrompt renders the template after applying truncation rules, then appends the past
+// triage decisions and the related failures of the group, if any. If the result still exceeds
+// PromptCharCap, we drop fields in this order: related failures → examples → log_text →
+// similar_failures → steps → linked_defects → linked_requirements.
 func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 	in.StackTrace = headRunes(in.StackTrace, StackTraceHeadCap)
 	in.LogText = tailRunes(in.LogText, LogTextTailCap)
@@ -141,6 +146,15 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 	}
 	for i := range in.SimilarFailures {
 		in.SimilarFailures[i].ErrorMessage = oneline(headRunes(in.SimilarFailures[i].ErrorMessage, SimilarMsgCap))
+	}
+	exs := in.Examples
+	if len(exs) > models.MaxFewShotExamples {
+		exs = exs[:models.MaxFewShotExamples]
+	}
+	in.Examples = make([]TriageExample, len(exs)) // fresh slice: the caller's examples stay as they are
+	for i, e := range exs {
+		e.ErrorMessage = oneline(headRunes(e.ErrorMessage, ExampleErrorCap))
+		in.Examples[i] = e
 	}
 	members := in.GroupMembers
 	if len(members) > GroupMembersMax {
@@ -156,19 +170,23 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 		tmpl = DefaultPromptTemplate
 	}
 
+	// Every case below drops something or the default returns, so the loop ends.
 	dropped := []string{}
-	for pass := 0; pass < 6; pass++ {
+	for {
 		out, err := renderWithGroup(tmpl, in)
 		if err != nil {
 			return "", PromptMeta{}, err
 		}
 		if len(out) <= PromptCharCap {
-			return out, PromptMeta{TruncationPrefix: makePrefix(dropped)}, nil
+			return out, PromptMeta{TruncationPrefix: makePrefix(dropped), ExamplesSent: len(in.Examples)}, nil
 		}
 		switch {
 		case len(in.GroupMembers) > 0:
 			in.GroupMembers = nil
 			dropped = append(dropped, "no related failures")
+		case len(in.Examples) > 0:
+			in.Examples = nil
+			dropped = append(dropped, "no examples")
 		case len(in.LogText) > 0:
 			in.LogText = ""
 			dropped = append(dropped, "no logs")
@@ -186,20 +204,40 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 			in.LinkedRequirements = nil
 			dropped = append(dropped, "no requirements")
 		default:
-			return out, PromptMeta{TruncationPrefix: makePrefix(dropped)}, nil
+			return out, PromptMeta{TruncationPrefix: makePrefix(dropped), ExamplesSent: len(in.Examples)}, nil
 		}
 	}
-	out, err := renderWithGroup(tmpl, in)
-	return out, PromptMeta{TruncationPrefix: makePrefix(dropped)}, err
 }
 
-// renderWithGroup renders the template and appends the group's related failures.
+// renderWithGroup renders the template and appends the past triage decisions and the group's
+// related failures. Both blocks are added by code, not by the template, so an admin-customized
+// template sends them too.
 func renderWithGroup(tmpl string, in PromptInput) (string, error) {
 	out, err := render(tmpl, in)
 	if err != nil {
 		return "", err
 	}
-	return out + groupBlock(in.GroupMembers), nil
+	return out + examplesBlock(in.Examples) + groupBlock(in.GroupMembers), nil
+}
+
+// examplesBlock lists past human triage decisions (spec §C) as few-shot examples. It is ""
+// without examples, so a prompt with examples off is byte-for-byte what it was before them.
+func examplesBlock(examples []TriageExample) string {
+	if len(examples) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n### Past triage decisions (earlier failures a person triaged after an AI suggestion, most relevant first)\n")
+	b.WriteString("These use the defect-type vocabulary (product_bug | automation_bug | system_issue | to_investigate); never copy those as the verdict.\n")
+	for _, e := range examples {
+		b.WriteString("- [" + e.FailureType + "] <<<DATA " + e.ErrorMessage + " DATA>>> AI suggested " + e.SuggestedDefectType +
+			", person decided " + e.HumanDefectType)
+		if e.Corrected {
+			b.WriteString(" (corrected)")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // groupBlock lists the other failures analyzed as one group with this one (spec §A4), with

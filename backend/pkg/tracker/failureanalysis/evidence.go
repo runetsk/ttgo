@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"log/slog"
 	"strings"
+	"ttgo/pkg/tracker/models"
 	"unicode/utf8"
 )
 
-// Per-field caps (spec §6). Their sum is below StateCharCap by construction, which is what
-// makes StateCharCap a guarantee rather than a target; TestRenderState_BoundedByConstruction
-// asserts the arithmetic.
+// Per-field caps (spec §6). Without examples their sum is below StateCharCap by construction
+// (TestRenderState_BoundedByConstructionAtEveryCap); the few-shot examples fit inside
+// TypeSafeStateCharCap (TestRenderState_TypeSafeCapHoldsWithExamples) and are the first thing
+// the ladder drops.
 const (
+	ExampleErrorCap   = 300 // each few-shot example's error message
 	TestNameCap       = 200
 	CategoriesCap     = 200
 	EnvFieldCap       = 100 // environment, browser, os, app_version, failure_type
@@ -39,8 +42,9 @@ type Evidence struct {
 	SimilarFailuresRollup                              string
 	LinkedDefects                                      []LinkedDefect
 	LinkedRequirements                                 []LinkedRequirement
-	GroupMembers                                       []string // other members' error lines, redacted and capped; LLM prompts only
-	StateCap                                           int      // bound on the rendered JSON state; 0 = StateCharCap
+	Examples                                           []TriageExample // few-shot, redacted and capped, best first
+	GroupMembers                                       []string        // other members' error lines, redacted and capped; LLM prompts only
+	StateCap                                           int             // bound on the rendered JSON state; 0 = StateCharCap
 }
 
 // Budget is an engine's allowance for the three large text fields (runes) and
@@ -164,6 +168,19 @@ func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 	for i, lr := range in.LinkedRequirements {
 		ev.LinkedRequirements[i] = LinkedRequirement{Key: red(lr.Key), Title: red(lr.Title)}
 	}
+	exs := in.Examples
+	if len(exs) > models.MaxFewShotExamples {
+		exs = exs[:models.MaxFewShotExamples]
+	}
+	ev.Examples = make([]TriageExample, len(exs)) // fresh slice: never write into the caller's array
+	for i, e := range exs {
+		ev.Examples[i] = TriageExample{ResultID: e.ResultID,
+			ErrorMessage:        oneline(headRunes(red(e.ErrorMessage), ExampleErrorCap)),
+			FailureType:         headRunes(red(e.FailureType), EnvFieldCap),
+			SuggestedDefectType: headRunes(e.SuggestedDefectType, SimilarLabelCap),
+			HumanDefectType:     headRunes(e.HumanDefectType, SimilarLabelCap),
+			Corrected:           e.Corrected}
+	}
 	ev.GroupMembers = groupMemberLines(in, red)
 	return ev
 }
@@ -204,13 +221,16 @@ func (ev Evidence) PromptInput(template string) PromptInput {
 		ErrorMessage: ev.ErrorMessage, StackTrace: ev.StackTrace, LogText: ev.LogText,
 		SimilarFailures: ev.SimilarFailures, SimilarFailuresRollup: ev.SimilarFailuresRollup,
 		LinkedDefects: ev.LinkedDefects, LinkedRequirements: ev.LinkedRequirements,
-		GroupMembers: ev.GroupMembers,
+		GroupMembers: ev.GroupMembers, Examples: ev.Examples,
 	}
 }
 
 // dropNext removes the next optional block in the shared drop order and names it.
 func dropNext(ev *Evidence) (string, bool) {
 	switch {
+	case len(ev.Examples) > 0:
+		ev.Examples = ev.Examples[:len(ev.Examples)-1] // lowest ranked first, one at a time
+		return "fewer examples", true
 	case ev.LogText != "":
 		ev.LogText = ""
 		return "no logs", true
@@ -236,9 +256,10 @@ func applyHardCap(ev *Evidence) {
 }
 
 // RenderState builds the JSON state for TypeSafe (spec §6 shape). Linked requirements are
-// never included. The drop ladder runs against StateCharCap (unreachable by construction
-// with the per-field caps, kept as the safety net); if it is exhausted the hard cap truncates
-// stack then error, so the result is always <= StateCharCap.
+// never included. The drop ladder runs against the evidence's bound: few-shot examples go first,
+// one at a time, then the shared order; if the ladder is exhausted the hard cap truncates stack
+// then error, so the result is always within the bound. PromptMeta.ExamplesSent is how many
+// examples the returned state carries; the decider stamps the policy version from it.
 func RenderState(ev Evidence) (map[string]any, PromptMeta) {
 	bound := ev.StateCap
 	if bound <= 0 {
@@ -249,7 +270,7 @@ func RenderState(ev Evidence) (map[string]any, PromptMeta) {
 		state := stateObject(ev)
 		b, _ := json.Marshal(state)
 		if len(b) <= bound {
-			return state, PromptMeta{TruncationPrefix: makePrefix(dropped)}
+			return state, PromptMeta{TruncationPrefix: makePrefix(dropped), ExamplesSent: len(ev.Examples)}
 		}
 		name, ok := dropNext(&ev)
 		if !ok {
@@ -257,11 +278,20 @@ func RenderState(ev Evidence) (map[string]any, PromptMeta) {
 			state = stateObject(ev)
 			b, _ = json.Marshal(state)
 			slog.Debug("failure-analysis: state hard-capped", "bytes", len(b))
-			return state, PromptMeta{TruncationPrefix: makePrefix(append(dropped, "hard cap"))}
+			return state, PromptMeta{TruncationPrefix: makePrefix(append(dropped, "hard cap")), ExamplesSent: len(ev.Examples)}
 		}
 		slog.Debug("failure-analysis: TypeSafe state field dropped", "field", name, "bytes", len(b))
-		dropped = append(dropped, name)
+		dropped = appendOnce(dropped, name)
 	}
+}
+
+// appendOnce appends name unless it is already the last entry, so a block dropped one piece
+// at a time is named once.
+func appendOnce(list []string, name string) []string {
+	if n := len(list); n > 0 && list[n-1] == name {
+		return list
+	}
+	return append(list, name)
 }
 
 func stateObject(ev Evidence) map[string]any {
@@ -271,14 +301,18 @@ func stateObject(ev Evidence) map[string]any {
 	}
 	sims := make([]map[string]any, 0, len(ev.SimilarFailures))
 	for _, s := range ev.SimilarFailures {
-		sims = append(sims, map[string]any{"run_started_at": s.RunStartedAt.UTC().Format("2006-01-02T15:04:05Z"),
-			"status": s.Status, "error_message": s.ErrorMessage, "human_defect_type": s.DefectType})
+		row := map[string]any{"run_started_at": s.RunStartedAt.UTC().Format("2006-01-02T15:04:05Z"),
+			"status": s.Status, "error_message": s.ErrorMessage, "human_defect_type": s.DefectType}
+		if s.DefectKey != "" {
+			row["human_defect_key"] = s.DefectKey
+		}
+		sims = append(sims, row)
 	}
 	defects := make([]map[string]any, 0, len(ev.LinkedDefects))
 	for _, d := range ev.LinkedDefects {
 		defects = append(defects, map[string]any{"key": d.Key, "status": d.Status, "summary": d.Summary})
 	}
-	return map[string]any{
+	state := map[string]any{
 		"test": map[string]any{"name": ev.TestName, "categories": ev.Categories, "environment": ev.Env,
 			"browser": ev.Browser, "os": ev.OS, "app_version": ev.AppVersion, "steps": steps},
 		"failure": map[string]any{"failure_type": ev.FailureType, "error_message": ev.ErrorMessage,
@@ -286,4 +320,15 @@ func stateObject(ev Evidence) map[string]any {
 		"history":        map[string]any{"note": HistoryNote, "human_label_rollup": ev.SimilarFailuresRollup, "similar_failures": sims},
 		"linked_defects": defects,
 	}
+	// Past triage decisions (policy fa-verdict-v6). Absent, not empty, without examples, so a
+	// state with none is exactly the v5 state.
+	if len(ev.Examples) > 0 {
+		exs := make([]map[string]any, 0, len(ev.Examples))
+		for _, e := range ev.Examples {
+			exs = append(exs, map[string]any{"failure_type": e.FailureType, "error_message": e.ErrorMessage,
+				"ai_suggested_defect_type": e.SuggestedDefectType, "human_defect_type": e.HumanDefectType, "corrected": e.Corrected})
+		}
+		state["examples"] = exs
+	}
+	return state
 }
