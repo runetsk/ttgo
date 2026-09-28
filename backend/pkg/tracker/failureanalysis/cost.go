@@ -47,6 +47,18 @@ func costEvent(kind, engine, model string, refs CostRefs) *models.AIAnalysisCost
 		RunID: refs.RunID, JobID: refs.JobID, AnalysisID: refs.AnalysisID}
 }
 
+// llmEvent is one LLM ledger row for tokens a call billed, priced at the job's LLM prices.
+func llmEvent(kind, model string, prompt, completion int, deps JobDeps, refs CostRefs) *models.AIAnalysisCostEvent {
+	ev := costEvent(kind, models.AnalysisCostEngineLLM, model, refs)
+	ev.PromptTokens, ev.CompletionTokens = prompt, completion
+	ev.EstimatedCost = deps.Pricing.llmCost(prompt, completion)
+	if deps.Pricing.LLMProviderID != "" {
+		id := deps.Pricing.LLMProviderID
+		ev.ProviderID = &id
+	}
+	return ev
+}
+
 // CostEvents turns what one analysis or explanation spent into ledger rows: one TypeSafe
 // event when TypeSafe billed input tokens, one LLM event when the LLM billed tokens. Pass
 // representatives only; a clone made no call. kind is models.AnalysisCostKind*.
@@ -70,16 +82,29 @@ func CostEvents(kind string, res *AnalyzeResult, deps JobDeps, refs CostRefs) []
 		if res.Engine == models.AnalysisEngineGenerative && res.ModelName != "" {
 			model = res.ModelName // the model the provider says answered
 		}
-		ev := costEvent(kind, models.AnalysisCostEngineLLM, model, refs)
-		ev.PromptTokens, ev.CompletionTokens = res.TokenUsagePrompt, res.TokenUsageCompletion
-		ev.EstimatedCost = deps.Pricing.llmCost(res.TokenUsagePrompt, res.TokenUsageCompletion)
-		if deps.Pricing.LLMProviderID != "" {
-			id := deps.Pricing.LLMProviderID
-			ev.ProviderID = &id
-		}
-		out = append(out, ev)
+		out = append(out, llmEvent(kind, model, res.TokenUsagePrompt, res.TokenUsageCompletion, deps, refs))
 	}
 	return out
+}
+
+// DecisionCostEvents is what the decision phase billed (spec §A2): the TypeSafe event when
+// TypeSafe answered, and one LLM event for LLM tokens spent inside Decide (takeover, fallback,
+// generative-only, or what a failed attempt spent). A pending decision has spent no LLM tokens,
+// so its explanation is billed once, by NarrationCostEvents. Pass representatives only.
+func DecisionCostEvents(res *AnalyzeResult, deps JobDeps, refs CostRefs) []*models.AIAnalysisCostEvent {
+	return CostEvents(models.AnalysisCostKindAnalysis, res, deps, refs)
+}
+
+// NarrationCostEvents is what one narration billed: a single LLM event from the delta's own
+// usage, never a TypeSafe event (the decision phase recorded that). kind is
+// models.AnalysisCostKindAnalysis for the worker's narration and AnalysisCostKindExplain for
+// Explain. Nothing when the narration made no call (template error, no narrator). It is
+// recorded whether or not the narration's apply wins: the call was billed.
+func NarrationCostEvents(d NarrationDelta, deps JobDeps, refs CostRefs, kind string) []*models.AIAnalysisCostEvent {
+	if d.PromptTokens <= 0 && d.CompletionTokens <= 0 {
+		return nil
+	}
+	return []*models.AIAnalysisCostEvent{llmEvent(kind, deps.NarrativeModel, d.PromptTokens, d.CompletionTokens, deps, refs)}
 }
 
 // SemanticCostEvents is the one TypeSafe event for a job's semantic grouping pass, or none

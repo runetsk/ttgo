@@ -1,6 +1,7 @@
 package failureanalysis
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"ttgo/pkg/tracker/models"
@@ -130,4 +131,86 @@ func TestPlannedGroups(t *testing.T) {
 	require.Equal(t, 3, PlannedGroups(failures, false, 50))
 	require.Equal(t, 1, PlannedGroups(failures, true, 1), "capped at max analyses per run")
 	require.Equal(t, 0, PlannedGroups(nil, true, 50))
+}
+
+func phasePricing() JobDeps {
+	return JobDeps{NarrativeModel: "gpt-x", DeciderModel: "jev",
+		Pricing: Pricing{LLMProviderID: "prov-1", LLMPromptPerMTok: f64ptr(2), LLMCompletionPerMTok: f64ptr(10), TypeSafePerMTok: 0.042}}
+}
+
+func TestPhaseCostEvents_OneTypeSafeEventAndTheSameTotalsAsAnalyze(t *testing.T) {
+	ctx := context.Background()
+	deps := phasePricing()
+	refs := CostRefs{RunID: "run-1"}
+	ad := AnalyzeDeps{Narrative: &stubProvider{responses: []string{narrJSON}}, NarrativeModel: "gpt-x", Decider: fixedDecider{d: flakyDecision()}}
+
+	decided, err := Decide(ctx, ad, baseContext())
+	require.NoError(t, err)
+	decisionEvs := DecisionCostEvents(decided, deps, refs)
+	require.Len(t, decisionEvs, 1, "a pending decision has spent no LLM tokens yet")
+	require.Equal(t, models.AnalysisCostEngineTypeSafe, decisionEvs[0].Engine)
+	require.Equal(t, 777, decisionEvs[0].TypeSafeInputTokens)
+	require.Equal(t, models.AnalysisCostKindAnalysis, decisionEvs[0].Kind)
+
+	d, ok := Narrate(ctx, ad, baseContext(), decided)
+	require.True(t, ok)
+	narrationEvs := NarrationCostEvents(d, deps, refs, models.AnalysisCostKindAnalysis)
+	require.Len(t, narrationEvs, 1)
+	l := narrationEvs[0]
+	require.Equal(t, models.AnalysisCostEngineLLM, l.Engine)
+	require.Equal(t, "gpt-x", l.Model)
+	require.Equal(t, "prov-1", *l.ProviderID)
+	require.Equal(t, 100, l.PromptTokens)
+	require.Equal(t, 20, l.CompletionTokens)
+	require.InDelta(t, 0.0004, *l.EstimatedCost, 1e-12) // 100×$2/M + 20×$10/M
+	for _, e := range narrationEvs {
+		require.NotEqual(t, models.AnalysisCostEngineTypeSafe, e.Engine, "narration never bills TypeSafe again")
+	}
+
+	// Together the two phases bill exactly what one Analyze billed.
+	ad.Narrative = &stubProvider{responses: []string{narrJSON}}
+	full, err := Analyze(ctx, ad, baseContext())
+	require.NoError(t, err)
+	require.Equal(t, CostEvents(models.AnalysisCostKindAnalysis, full, deps, refs), append(decisionEvs, narrationEvs...))
+}
+
+func TestDecisionCostEvents_LLMSpentInsideDecide(t *testing.T) {
+	ctx := context.Background()
+	deps := phasePricing()
+	refs := CostRefs{RunID: "r"}
+
+	// Takeover: TypeSafe and the deciding LLM both billed in the decision phase.
+	unsure := flakyDecision()
+	unsure.VerdictConfidence = 0.40
+	res, err := Decide(ctx, AnalyzeDeps{Narrative: &stubProvider{responses: []string{goodVerdict}}, NarrativeModel: "gpt-x",
+		Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90}, baseContext())
+	require.NoError(t, err)
+	evs := DecisionCostEvents(res, deps, refs)
+	require.Len(t, evs, 2)
+	require.Equal(t, models.AnalysisCostEngineTypeSafe, evs[0].Engine)
+	require.Equal(t, models.AnalysisCostEngineLLM, evs[1].Engine)
+	require.Equal(t, 100, evs[1].PromptTokens)
+
+	// A failed generative attempt still bills the tokens it spent.
+	cut := &finishProvider{replies: [][2]string{{cutOff, "length"}, {cutOff, "length"}}}
+	res, err = Decide(ctx, AnalyzeDeps{Narrative: cut, NarrativeModel: "gpt-x"}, baseContext())
+	require.Error(t, err)
+	evs = DecisionCostEvents(res, deps, refs)
+	require.Len(t, evs, 1)
+	require.Equal(t, 200, evs[0].PromptTokens)
+	require.Equal(t, 2*ReplyTokenCap, evs[0].CompletionTokens)
+	require.Nil(t, DecisionCostEvents(nil, deps, refs))
+}
+
+func TestNarrationCostEvents_KindAndNothingWhenUnbilled(t *testing.T) {
+	deps := phasePricing()
+	jobID, analysisID := "job-1", "an-1"
+	refs := CostRefs{RunID: "run-1", JobID: &jobID, AnalysisID: &analysisID}
+	evs := NarrationCostEvents(NarrationDelta{PromptTokens: 10, CompletionTokens: 5}, deps, refs, models.AnalysisCostKindExplain)
+	require.Len(t, evs, 1)
+	require.Equal(t, models.AnalysisCostKindExplain, evs[0].Kind)
+	require.Equal(t, "an-1", *evs[0].AnalysisID)
+	require.Equal(t, "job-1", *evs[0].JobID)
+	require.Empty(t, NarrationCostEvents(NarrationDelta{NarrativeStatus: models.NarrativeStatusUnavailable, Reason: "template error"},
+		deps, refs, models.AnalysisCostKindAnalysis), "a narration that made no call bills nothing")
 }
