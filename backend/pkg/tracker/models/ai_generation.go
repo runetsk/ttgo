@@ -358,6 +358,10 @@ type RunResultAnalysis struct {
 	LLMMs        int    `json:"llm_ms,omitempty" gorm:"column:llm_ms"`
 	LLMCalls     int    `json:"llm_calls,omitempty" gorm:"column:llm_calls"`
 	FinishReason string `json:"finish_reason,omitempty" gorm:"column:finish_reason"`
+	// NarrativeRevision counts writes to this row's explanation (worker narration, Explain
+	// claims and applies, sweeps). Live updates of the same version replace the shown row only
+	// when their revision is not older, so a stale "pending" never hides a written explanation.
+	NarrativeRevision int `json:"narrative_revision" gorm:"column:narrative_revision;not null;default:0"`
 }
 
 // Failed reports whether the analysis attempt produced no decision.
@@ -417,6 +421,7 @@ type RunAnalysisJobOutcomes struct {
 	Unknown            int `json:"unknown"`             // decided "unknown" (a valid abstention)
 	NoExplanation      int `json:"no_explanation"`      // decided, explanation unavailable or unreadable
 	ExplanationSkipped int `json:"explanation_skipped"` // decided, explanations switched off
+	ExplanationPending int `json:"explanation_pending"` // decided, explanation still being written (non-zero only while the job runs)
 	TakenOver          int `json:"taken_over"`          // decided by the LLM below the TypeSafe threshold
 	FailedRows         int `json:"failed_rows"`         // failing results left without a decision
 

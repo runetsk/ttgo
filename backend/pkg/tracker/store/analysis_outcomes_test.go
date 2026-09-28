@@ -228,3 +228,35 @@ func TestAnalysisJobOutcomes_CallStats(t *testing.T) {
 	require.Equal(t, 2, o.HedgesFired)
 	require.Equal(t, 1, o.HedgesWon)
 }
+
+func TestAnalysisJobOutcomes_CountsExplanationsInProgress(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	job, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	jobID := job.ID
+	create := func(a *models.RunResultAnalysis) *models.RunResultAnalysis {
+		a.RunResultID = addFailingResult(t, s, runID).ID
+		a.JobID = &jobID
+		out, err := s.CreateAnalysis(a)
+		require.NoError(t, err)
+		return out
+	}
+	rep := create(&models.RunResultAnalysis{Engine: models.AnalysisEngineTypeSafe, Verdict: models.VerdictFlakyTest,
+		Confidence: models.ConfidenceHigh, NarrativeStatus: models.NarrativeStatusPending})
+	// A pending clone follows its representative and is not a second explanation in progress.
+	create(&models.RunResultAnalysis{Engine: models.AnalysisEngineTypeSafe, Verdict: models.VerdictFlakyTest,
+		Confidence: models.ConfidenceHigh, NarrativeStatus: models.NarrativeStatusPending, SourceAnalysisID: &rep.ID})
+	create(&models.RunResultAnalysis{Engine: models.AnalysisEngineTypeSafe, Verdict: models.VerdictProductBug,
+		Confidence: models.ConfidenceHigh, NarrativeStatus: models.NarrativeStatusOK})
+
+	o, err := s.AnalysisJobOutcomes(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 1, o.ExplanationPending)
+	require.Equal(t, 2, o.Decided)
+	require.Equal(t, 0, o.NoExplanation, "pending is not a missing explanation")
+
+	got, err := s.GetAnalysisByID(rep.ID)
+	require.NoError(t, err)
+	require.Equal(t, 0, got.NarrativeRevision, "a new row starts at revision 0")
+}
