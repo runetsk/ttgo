@@ -197,7 +197,8 @@ func FailedResult(err error, deps AnalyzeDeps, in AnalyzeContext) *AnalyzeResult
 		HistoryAvailable: in.HistoryAvailable(),
 	}
 	if errors.Is(err, ErrTypeSafeUnavailable) {
-		res.Engine, res.ModelName, res.PolicyVersion = models.AnalysisEngineTypeSafe, deps.DeciderModel, PolicyVersion
+		// Nothing was decided; the attempted request carried the context's examples.
+		res.Engine, res.ModelName, res.PolicyVersion = models.AnalysisEngineTypeSafe, deps.DeciderModel, PolicyVersionFor(len(in.Examples))
 	}
 	return res
 }

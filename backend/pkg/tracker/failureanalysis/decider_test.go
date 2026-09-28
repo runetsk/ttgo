@@ -24,7 +24,7 @@ func TestDecider_MapsAnswersAndSendsBothQuestions(t *testing.T) {
 	require.InDelta(t, 0.88, d.DefectTypeConfidence, 1e-9)
 	require.Equal(t, "jev-1.13.0", d.Model)
 	require.Equal(t, 777, d.InputTokens)
-	require.Equal(t, PolicyVersion, d.PolicyVersion)
+	require.Equal(t, PolicyVersionNoExamples, d.PolicyVersion)
 	require.Len(t, d.VerdictProbabilities, 6)
 	require.Len(t, d.DefectTypeProbabilities, 4)
 
@@ -175,5 +175,40 @@ func TestSuggestion_VerdictDecidesWhereItIsSure(t *testing.T) {
 		})
 	}
 	require.Less(t, VerdictDecidesSuggestionMin, VerdictHighMin, "v5 lets a verdict below the high bucket decide")
-	require.Equal(t, "fa-verdict-v5", PolicyVersion, "a rule change is a new policy, so calibration can be read per policy")
+	require.Equal(t, "fa-verdict-v5", PolicyVersionNoExamples, "a rule change is a new policy, so calibration can be read per policy")
+	require.Equal(t, "fa-verdict-v6", PolicyVersionWithExamples, "examples in the state are a different input, so a different policy")
+	require.Equal(t, PolicyVersionNoExamples, PolicyVersionFor(0))
+	require.Equal(t, PolicyVersionWithExamples, PolicyVersionFor(1))
+}
+
+func TestDecider_StampsThePolicyFromTheExamplesSent(t *testing.T) {
+	var states []map[string]any
+	fc := &fakeClient{fn: func(req typesafe.Request) (*typesafe.Response, error) {
+		states = append(states, req.State.(map[string]any))
+		return decisionResponse(models.VerdictFlakyTest, 0.93, 0.95, "automation_bug", 0.88, 0.9), nil
+	}}
+	dec := NewTypeSafeDecider(fc, "jev-1.13.0")
+
+	d, err := dec.Decide(context.Background(), BuildEvidenceWithBudget(baseContext(), TypeSafeBudget()))
+	require.NoError(t, err)
+	require.Equal(t, PolicyVersionNoExamples, d.PolicyVersion)
+	require.NotContains(t, states[0], "examples")
+
+	in := baseContext()
+	in.Examples = []TriageExample{{FailureType: "timeout", ErrorMessage: "spinner", SuggestedDefectType: "product_bug", HumanDefectType: "automation_bug", Corrected: true}}
+	d, err = dec.Decide(context.Background(), BuildEvidenceWithBudget(in, TypeSafeBudget()))
+	require.NoError(t, err)
+	require.Equal(t, PolicyVersionWithExamples, d.PolicyVersion)
+	require.Len(t, states[1]["examples"], 1)
+
+	// The ladder dropped every example: the decision was made without them, so it is v5.
+	ev := BuildEvidenceWithBudget(in, TypeSafeBudget())
+	noExamples := ev
+	noExamples.Examples = nil
+	b, _ := json.Marshal(stateObject(noExamples))
+	ev.StateCap = len(b)
+	d, err = dec.Decide(context.Background(), ev)
+	require.NoError(t, err)
+	require.Equal(t, PolicyVersionNoExamples, d.PolicyVersion, "stamped from what was sent, not what was built")
+	require.NotContains(t, states[2], "examples")
 }

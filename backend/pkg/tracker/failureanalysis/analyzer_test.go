@@ -224,7 +224,7 @@ func flakyDecision() *Decision {
 		VerdictProbabilities: map[string]float64{"flaky_test": 0.95, "product_bug": 0.03, "environment": 0.02},
 		SuggestedDefectType:  "automation_bug", DefectTypeConfidence: 0.88,
 		DefectTypeProbabilities: map[string]float64{"automation_bug": 0.9, "product_bug": 0.1},
-		Model:                   "jev-1.13.0", InputTokens: 777, PolicyVersion: PolicyVersion}
+		Model:                   "jev-1.13.0", InputTokens: 777, PolicyVersion: PolicyVersionNoExamples}
 }
 
 func TestAnalyze_TypeSafeDecidesGenerativeExplains(t *testing.T) {
@@ -241,7 +241,7 @@ func TestAnalyze_TypeSafeDecidesGenerativeExplains(t *testing.T) {
 	require.Equal(t, "N", out.NextAction)
 	require.Equal(t, "R", out.Rationale)
 	require.Equal(t, models.NarrativeStatusOK, out.NarrativeStatus)
-	require.Equal(t, PolicyVersion, out.PolicyVersion)
+	require.Equal(t, PolicyVersionNoExamples, out.PolicyVersion)
 	require.Equal(t, 777, out.TypeSafeInputTokens)
 	require.Contains(t, out.VerdictProbabilities, `"flaky_test":0.95`)
 

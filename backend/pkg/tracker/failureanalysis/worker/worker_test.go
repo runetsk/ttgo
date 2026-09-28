@@ -324,7 +324,7 @@ func TestWorker_TypeSafeDecidesAndClonesCarryProvenance(t *testing.T) {
 	require.Equal(t, models.VerdictFlakyTest, rep.Verdict, "TypeSafe's verdict wins over the LLM's product_bug")
 	require.Equal(t, "automation_bug", rep.SuggestedDefectType)
 	require.InDelta(t, 0.92, *rep.ConfidenceScore, 1e-9)
-	require.Equal(t, failureanalysis.PolicyVersion, rep.PolicyVersion)
+	require.Equal(t, failureanalysis.PolicyVersionNoExamples, rep.PolicyVersion)
 	require.Equal(t, 500, rep.TypeSafeInputTokens)
 	require.Equal(t, models.NarrativeStatusOK, rep.NarrativeStatus)
 
@@ -846,4 +846,71 @@ func TestWorkerSendsDefectKeyAndCategories(t *testing.T) {
 
 	require.Contains(t, prov.lastPrompt, "Categories: Payments")
 	require.Contains(t, prov.lastPrompt, "(human: product_bug → PAY-42)", "the history row names the defect linked to that result")
+}
+
+// A triaged decision on an earlier run reaches TypeSafe as an example, the decision is stamped
+// v6 and the job says few-shot; with examples off the state and the stamp are v5's.
+func TestWorker_FewShotExamplesReachTypeSafeAndStampThePolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		fewShot  int
+		policy   string
+		label    string
+		examples bool
+	}{
+		{"on", 4, failureanalysis.PolicyVersionWithExamples, "TypeSafe jev-1.13.0, no LLM, few-shot (4)", true},
+		{"off", 0, failureanalysis.PolicyVersionNoExamples, "TypeSafe jev-1.13.0, no LLM", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newStore(t)
+			run := seedRunWithFailures(t, s, [][2]string{{"timeout", "Timeout waiting for #checkout button after 5000ms"}})
+			prior := &models.TestRun{Name: "earlier"}
+			require.NoError(t, s.CreateTestRun(prior))
+			decided := time.Now().UTC().Add(-2 * time.Hour)
+			direct := false
+			require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: prior.ID, TestNameSnapshot: "other", AttemptNumber: 1,
+				Status: models.StatusFail, FailureType: "timeout", ErrorMessage: "EXAMPLE_MARKER spinner never went away",
+				DefectType: "automation_bug", SuggestedVerdict: models.VerdictProductBug, SuggestedDefectType: "product_bug",
+				SuggestedEngine: models.AnalysisEngineTypeSafe, SuggestedPolicyVersion: failureanalysis.PolicyVersionNoExamples,
+				SuggestedIsClone: &direct, DecidedAt: &decided, StartTime: decided.Add(-time.Hour)}))
+			job, _, err := s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+			require.NoError(t, err)
+
+			var mu sync.Mutex
+			var states []string
+			answer := tsVerdict("flaky_test", "automation_bug", 0.95)
+			ts := &fakeTS{fn: func(req typesafe.Request) (*typesafe.Response, error) {
+				if _, ok := req.Questions["verdict"]; ok {
+					b, _ := json.Marshal(req.State)
+					mu.Lock()
+					states = append(states, string(b))
+					mu.Unlock()
+				}
+				return answer(req)
+			}}
+			deps := failureanalysis.JobDeps{Decider: failureanalysis.NewTypeSafeDecider(ts, "jev-1.13.0"),
+				DeciderModel: "jev-1.13.0", FewShotExamples: tc.fewShot}
+			w := NewWorker(s, staticResolver(deps), nil, 10*time.Millisecond)
+			require.NoError(t, w.processOnce(context.Background()))
+
+			require.Len(t, states, 1)
+			require.Equal(t, tc.examples, strings.Contains(states[0], "EXAMPLE_MARKER"), states[0])
+			require.Equal(t, tc.examples, strings.Contains(states[0], `"examples"`))
+			if tc.examples {
+				require.Contains(t, states[0], `"corrected":true`)
+			}
+
+			got, err := s.GetAnalysisJob(job.ID)
+			require.NoError(t, err)
+			require.Equal(t, tc.label, got.PipelineLabel)
+			require.Contains(t, got.Pipeline, `"policy":"`+tc.policy+`"`)
+
+			analyses, err := s.GetCurrentAnalysesByRun(run.ID)
+			require.NoError(t, err)
+			require.Len(t, analyses, 1)
+			for _, a := range analyses {
+				require.Equal(t, tc.policy, a.PolicyVersion)
+			}
+		})
+	}
 }

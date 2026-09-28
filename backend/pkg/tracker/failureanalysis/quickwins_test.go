@@ -26,7 +26,7 @@ func TestAnalyze_NoFallbackRecordsTypeSafeFailure(t *testing.T) {
 	require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
 	require.Equal(t, models.AnalysisEngineTypeSafe, res.Engine)
 	require.Equal(t, "jev-latest", res.ModelName)
-	require.Equal(t, PolicyVersion, res.PolicyVersion, "lands in the same compare column as the decisions")
+	require.Equal(t, PolicyVersionNoExamples, res.PolicyVersion, "lands in the same compare column as the decisions")
 	require.Equal(t, "rate_limit", res.ErrorCategory)
 	require.True(t, strings.HasPrefix(res.Summary, "analysis failed: "))
 }
@@ -128,7 +128,10 @@ func TestPipelineLabel(t *testing.T) {
 		"minimax":                            {Narrator: "minimax"},
 		"TypeSafe jev, no LLM":               {Decider: "jev"},
 		"TypeSafe jev, explained by minimax": {Decider: "jev", Narrator: "minimax", Explanations: true},
-		"TypeSafe jev, decisions only, minimax below 90%": {Decider: "jev", Narrator: "minimax", TakeoverBelowPct: 90},
+		"TypeSafe jev, decisions only, minimax below 90%":  {Decider: "jev", Narrator: "minimax", TakeoverBelowPct: 90},
+		"TypeSafe jev, explained by minimax, few-shot (4)": {Decider: "jev", Narrator: "minimax", Explanations: true, FewShotExamples: 4},
+		"minimax, few-shot (2)":                            {Narrator: "minimax", FewShotExamples: 2},
+		"no engine":                                        {FewShotExamples: 4},
 	}
 	for want, p := range cases {
 		require.Equal(t, want, p.Label())
@@ -139,4 +142,27 @@ func TestErrCategory_DeadlineIsTimeout(t *testing.T) {
 	require.Equal(t, "timeout", errCategory(context.DeadlineExceeded))
 	require.Equal(t, "timeout", errCategory(errors.Join(errors.New("llm call"), context.DeadlineExceeded)))
 	require.Equal(t, "rate_limit", errCategory(&llm.ProviderError{Category: llm.ErrCatRateLimit}))
+}
+
+func TestFailedTypeSafeAttemptStampsThePolicyFromTheExamples(t *testing.T) {
+	tsErr := &typesafe.Error{Category: typesafe.CategoryNetwork, Message: "dial"}
+	deps := AnalyzeDeps{Decider: fixedDecider{err: tsErr}, DeciderModel: "jev-latest", NoLLMFallback: true}
+	in := baseContext()
+	in.Examples = []TriageExample{{ErrorMessage: "x", SuggestedDefectType: "product_bug", HumanDefectType: "product_bug"}}
+
+	res, err := Decide(context.Background(), deps, in)
+	require.ErrorIs(t, err, ErrTypeSafeUnavailable)
+	require.NotNil(t, res)
+	require.Equal(t, PolicyVersionWithExamples, res.PolicyVersion, "the attempted request carried examples")
+
+	require.Equal(t, PolicyVersionWithExamples, FailedResult(err, deps, in).PolicyVersion)
+	require.Equal(t, PolicyVersionNoExamples, FailedResult(err, deps, baseContext()).PolicyVersion)
+}
+
+func TestPipelinePolicyAndFewShotLabel(t *testing.T) {
+	p := JobDeps{Decider: fixedDecider{}, DeciderModel: "jev", FewShotExamples: 4}.Pipeline()
+	require.Equal(t, PolicyVersionWithExamples, p.Policy)
+	require.Equal(t, 4, p.FewShotExamples)
+	require.Equal(t, PolicyVersionNoExamples, JobDeps{Decider: fixedDecider{}, DeciderModel: "jev"}.Pipeline().Policy)
+	require.Equal(t, "", JobDeps{Narrative: &stubProvider{}, NarrativeModel: "m", FewShotExamples: 4}.Pipeline().Policy, "no decider, no policy")
 }

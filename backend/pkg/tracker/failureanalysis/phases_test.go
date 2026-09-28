@@ -256,7 +256,7 @@ func TestDecide_FailedRoutesReturnAStoreableResult(t *testing.T) {
 		require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
 		require.Equal(t, models.AnalysisEngineTypeSafe, res.Engine)
 		require.Equal(t, "jev-latest", res.ModelName)
-		require.Equal(t, PolicyVersion, res.PolicyVersion)
+		require.Equal(t, PolicyVersionNoExamples, res.PolicyVersion)
 		require.Equal(t, "rate_limit", res.ErrorCategory)
 		require.Equal(t, models.VerdictUnknown, res.Verdict)
 		require.Equal(t, models.NarrativeStatusUnavailable, res.NarrativeStatus)

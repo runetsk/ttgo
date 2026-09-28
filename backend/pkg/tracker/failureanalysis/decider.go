@@ -51,7 +51,7 @@ func NewTypeSafeDecider(c typesafe.Client, model string) Decider {
 }
 
 func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, error) {
-	resp, err := d.evaluate(ctx, ev)
+	resp, meta, err := d.evaluate(ctx, ev)
 	var te *typesafe.Error
 	if errors.As(err, &te) && te.Oversized {
 		// The budget is sized in characters against a token limit; when the
@@ -63,7 +63,7 @@ func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, e
 		}
 		ev.StateCap = bound / 2
 		slog.Warn("failure-analysis: TypeSafe rejected the state as oversized; retrying at half the bound", "bound", ev.StateCap)
-		resp, err = d.evaluate(ctx, ev)
+		resp, meta, err = d.evaluate(ctx, ev)
 	}
 	if err != nil {
 		return nil, err
@@ -78,12 +78,12 @@ func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, e
 		Verdict: v.Choice, VerdictConfidence: v.Confidence, VerdictProbabilities: v.Probabilities,
 		SuggestedDefectType: suggested, DefectTypeConfidence: suggestedConf, DefectTypeProbabilities: dt.Probabilities,
 		SuggestionSource: source,
-		Model:            resp.Model, InputTokens: resp.Usage.InputTokens, PolicyVersion: PolicyVersion,
+		Model:            resp.Model, InputTokens: resp.Usage.InputTokens, PolicyVersion: PolicyVersionFor(meta.ExamplesSent),
 	}, nil
 }
 
-// suggestion turns the two answers into the stored defect-type suggestion (policy
-// fa-verdict-v5). The verdict wins where it is sure:
+// suggestion turns the two answers into the stored defect-type suggestion (policies
+// fa-verdict-v5 and v6). The verdict wins where it is sure:
 //
 //   - A verdict at VerdictDecidesSuggestionMin or above, other than unknown, decides the
 //     suggestion through the same mapping the generative path uses, whether the defect-type
@@ -116,14 +116,16 @@ func suggestion(v, dt typesafe.Answer) (defectType, source string, confidence fl
 	return answered, "", dt.Confidence
 }
 
-// evaluate renders the state and asks both questions in one request.
-func (d *typesafeDecider) evaluate(ctx context.Context, ev Evidence) (*typesafe.Response, error) {
+// evaluate renders the state and asks both questions in one request. The meta says what the
+// state carried after its drop ladder (the policy is stamped from its ExamplesSent).
+func (d *typesafeDecider) evaluate(ctx context.Context, ev Evidence) (*typesafe.Response, PromptMeta, error) {
 	state, meta := RenderState(ev)
 	if meta.TruncationPrefix != "" {
 		slog.Debug("failure-analysis: TypeSafe state trimmed", "prefix", meta.TruncationPrefix)
 	}
-	return d.client.Evaluate(ctx, typesafe.Request{
+	resp, err := d.client.Evaluate(ctx, typesafe.Request{
 		State: state, Model: d.model,
 		Questions: map[string]typesafe.Question{"verdict": verdictQuestion(), "defect_type": defectTypeQuestion()},
 	})
+	return resp, meta, err
 }

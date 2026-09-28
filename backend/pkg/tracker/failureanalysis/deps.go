@@ -87,16 +87,20 @@ type Pipeline struct {
 	LLMFallback      bool   `json:"llm_fallback"`
 	Semantic         bool   `json:"semantic_grouping"`
 	ReplyTokenCap    int    `json:"reply_token_cap"`
+	FewShotExamples  int    `json:"few_shot_examples,omitempty"` // past triage decisions sent per failure (0 = off)
 }
 
 // Pipeline snapshots the route these dependencies produce.
 func (j JobDeps) Pipeline() Pipeline {
-	p := Pipeline{Narrator: j.NarrativeModel, Semantic: j.Semantic != nil, ReplyTokenCap: ReplyTokenCap}
+	p := Pipeline{Narrator: j.NarrativeModel, Semantic: j.Semantic != nil, ReplyTokenCap: ReplyTokenCap,
+		FewShotExamples: j.FewShotExamples}
 	if j.Narrative == nil {
 		p.Narrator = ""
 	}
 	if j.Decider != nil {
-		p.Decider, p.Policy = j.DeciderModel, PolicyVersion
+		// The policy rows get when their examples survive the state's ladder; a row whose state
+		// dropped every example is stamped v5 (see PolicyVersionFor).
+		p.Decider, p.Policy = j.DeciderModel, PolicyVersionFor(j.FewShotExamples)
 		p.Explanations = !j.NarrativeSkipped && j.Narrative != nil
 		p.TakeoverBelowPct = int(j.EscalateBelow*100 + 0.5)
 		p.LLMFallback = !j.NoLLMFallback && j.Narrative != nil
@@ -106,8 +110,17 @@ func (j JobDeps) Pipeline() Pipeline {
 	return p
 }
 
-// Label is a short human name for the route, such as "TypeSafe, minimax below 90%".
+// Label is a short human name for the route, such as "TypeSafe, minimax below 90%, few-shot (4)".
 func (p Pipeline) Label() string {
+	label := p.routeLabel()
+	if p.FewShotExamples > 0 && (p.Decider != "" || p.Narrator != "") {
+		label += fmt.Sprintf(", few-shot (%d)", p.FewShotExamples)
+	}
+	return label
+}
+
+// routeLabel names the engines and how they are combined.
+func (p Pipeline) routeLabel() string {
 	if p.Decider == "" {
 		if p.Narrator == "" {
 			return "no engine"

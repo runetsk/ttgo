@@ -8,11 +8,27 @@ import (
 
 // This file is the ONLY place TypeSafe questions, criteria and thresholds live.
 // Bump the matching policy version whenever any of them changes: stored analyses
-// record it, so calibration can be read per policy.
+// record it, so calibration can be read per policy. DefectKey and Categories fill
+// optional v5 slots and do not change the policy.
 const (
-	PolicyVersion         = "fa-verdict-v5"  // verdict + defect_type questions, thresholds and the suggestion rule (v5: a confident verdict decides the suggestion)
-	SemanticPolicyVersion = "fa-semantic-v1" // same-cause question and grouping thresholds
+	// PolicyVersionNoExamples: verdict + defect_type questions, thresholds and the suggestion rule
+	// (v5: a confident verdict decides the suggestion), with no past triage examples in the state.
+	PolicyVersionNoExamples = "fa-verdict-v5"
+	// PolicyVersionWithExamples: the same questions, thresholds and rule, with at least one past
+	// triage example in the state's `examples` array. Stamped per decision from the examples
+	// actually sent after the state's drop ladder, never from the setting.
+	PolicyVersionWithExamples = "fa-verdict-v6"
+	SemanticPolicyVersion     = "fa-semantic-v1" // same-cause question and grouping thresholds
 )
+
+// PolicyVersionFor is the policy a decision is made under, given how many few-shot examples its
+// state carried.
+func PolicyVersionFor(examplesSent int) string {
+	if examplesSent > 0 {
+		return PolicyVersionWithExamples
+	}
+	return PolicyVersionNoExamples
+}
 
 // Verdict-path thresholds (spec §6).
 const (
