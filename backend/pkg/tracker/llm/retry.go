@@ -11,9 +11,10 @@ import (
 // RetryOptions bounds ChatWithRetry. The zero value uses the defaults below.
 // sleep and jitter are test seams; production uses time.Timer and math/rand.
 type RetryOptions struct {
-	MaxAttempts int           // total attempts including the first (default 3)
-	BaseDelay   time.Duration // first backoff step (default 500ms)
-	MaxDelay    time.Duration // backoff cap (default 8s)
+	MaxAttempts   int           // total attempts including the first (default 3)
+	BaseDelay     time.Duration // first backoff step (default 500ms)
+	MaxDelay      time.Duration // backoff cap (default 8s)
+	MaxRetryAfter time.Duration // cap on a provider's Retry-After wait (0 = no cap)
 
 	sleep  func(ctx context.Context, d time.Duration) error
 	jitter func() float64 // uniform [0,1)
@@ -50,8 +51,8 @@ func (o *RetryOptions) withDefaults() RetryOptions {
 
 // ChatWithRetry calls p.Chat, retrying transient failures (rate limits,
 // 5xx/network) with bounded exponential backoff plus jitter. It honors a
-// provider Retry-After value when larger than the computed backoff and stops
-// immediately on context cancellation. Returns the response, the number of
+// provider Retry-After value when larger than the computed backoff (capped at
+// MaxRetryAfter when set) and stops immediately on context cancellation. Returns the response, the number of
 // retries performed, and the last error. Each rate-limit error is reported to
 // the context's callstats counter, if any.
 func ChatWithRetry(ctx context.Context, p Provider, req ChatRequest, opts RetryOptions) (*ChatResponse, int, error) {
@@ -79,8 +80,12 @@ func ChatWithRetry(ctx context.Context, p Provider, req ChatRequest, opts RetryO
 		}
 		// Half fixed + half jittered avoids thundering herds while keeping a floor.
 		delay = delay/2 + time.Duration(float64(delay/2)*o.jitter())
-		if pe.RetryAfter > delay {
-			delay = pe.RetryAfter
+		retryAfter := pe.RetryAfter
+		if o.MaxRetryAfter > 0 && retryAfter > o.MaxRetryAfter {
+			retryAfter = o.MaxRetryAfter
+		}
+		if retryAfter > delay {
+			delay = retryAfter
 		}
 		if err := o.sleep(ctx, delay); err != nil {
 			return nil, attempt, lastErr

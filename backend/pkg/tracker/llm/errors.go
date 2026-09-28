@@ -37,6 +37,9 @@ type ProviderError struct {
 	RetryAfter time.Duration
 	Message    string
 	Err        error // the underlying cause, when there is one (errors.Is/As see it)
+	// CallTimeout: the call was cut by our own per-call timeout (WithCallTimeout) while the
+	// caller's context was still live. Unlike a provider HTTP timeout it is retried once.
+	CallTimeout bool
 }
 
 func (e *ProviderError) Error() string { return e.Message }
@@ -44,11 +47,11 @@ func (e *ProviderError) Error() string { return e.Message }
 // Unwrap exposes the underlying cause (e.g. a *models.SecretError).
 func (e *ProviderError) Unwrap() error { return e.Err }
 
-// Retryable reports whether the failure is transient: rate limits and
-// 5xx/network-level provider failures. Timeouts are NOT retryable — the
-// provider timeout is respected, not doubled.
+// Retryable reports whether the failure is transient: rate limits, 5xx/network-level provider
+// failures and our own per-call timeouts. A provider timeout is NOT retryable — the provider
+// timeout is respected, not doubled — and neither is the caller's own deadline.
 func (e *ProviderError) Retryable() bool {
-	if e.Category == ErrCatRateLimit {
+	if e.CallTimeout || e.Category == ErrCatRateLimit {
 		return true
 	}
 	return e.Category == ErrCatProvider && (e.StatusCode == 0 || e.StatusCode >= 500)

@@ -132,3 +132,27 @@ func TestChatWithRetry_CapsDelayAtMaxDelay(t *testing.T) {
 	// If the cap branch were absent, this would be 2s/2 = 1s — so 750ms proves the cap fired.
 	assert.Equal(t, 750*time.Millisecond, slept[0])
 }
+
+func TestChatWithRetry_CapsRetryAfterAtMaxRetryAfter(t *testing.T) {
+	var slept []time.Duration
+	p := &scriptedProvider{results: []func() (*ChatResponse, error){
+		fail(&ProviderError{Category: ErrCatRateLimit, StatusCode: 429, RetryAfter: 2 * time.Minute, Message: "429"}),
+		ok(),
+	}}
+	opts := testOpts(&slept)
+	opts.MaxRetryAfter = 30 * time.Second
+	_, retries, err := ChatWithRetry(context.Background(), p, ChatRequest{}, opts)
+	require.NoError(t, err)
+	assert.Equal(t, 1, retries)
+	require.Len(t, slept, 1)
+	assert.Equal(t, 30*time.Second, slept[0], "Retry-After is honoured up to the cap")
+
+	slept = nil
+	p = &scriptedProvider{results: []func() (*ChatResponse, error){
+		fail(&ProviderError{Category: ErrCatRateLimit, StatusCode: 429, RetryAfter: 2 * time.Minute, Message: "429"}),
+		ok(),
+	}}
+	_, _, err = ChatWithRetry(context.Background(), p, ChatRequest{}, testOpts(&slept))
+	require.NoError(t, err)
+	assert.Equal(t, 2*time.Minute, slept[0], "0 = no cap")
+}

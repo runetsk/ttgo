@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClassifyStatus(t *testing.T) {
@@ -53,4 +54,11 @@ func TestParseRetryAfter(t *testing.T) {
 	assert.Equal(t, 30*time.Second, parseRetryAfter("999"), "capped at 30s")
 	assert.Equal(t, time.Duration(0), parseRetryAfter(""))
 	assert.Equal(t, time.Duration(0), parseRetryAfter("Wed, 21 Oct 2026 07:28:00 GMT"), "HTTP-date form unsupported -> 0")
+}
+
+func TestProviderError_CallTimeoutIsRetryable(t *testing.T) {
+	require.True(t, (&ProviderError{Category: ErrCatTimeout, CallTimeout: true}).Retryable(),
+		"our own per-call timeout is retried once")
+	require.False(t, (&ProviderError{Category: ErrCatTimeout}).Retryable(),
+		"a provider HTTP timeout is still respected, not doubled")
 }
