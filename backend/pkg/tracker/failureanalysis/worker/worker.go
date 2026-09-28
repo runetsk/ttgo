@@ -61,6 +61,13 @@ func (w *Worker) Run(ctx context.Context) {
 	} else if n > 0 {
 		slog.Info("failure-analysis: restart sweep marked jobs failed", "count", n)
 	}
+	// Single process (spec deployment assumption): nothing can be narrating at startup, so every
+	// pending explanation — a job's or an interrupted Explain's — will never be written.
+	if n, err := w.store.SweepPendingNarratives(""); err != nil {
+		slog.Warn("failure-analysis: restart sweep of pending explanations failed", "err", err)
+	} else if n > 0 {
+		slog.Info("failure-analysis: restart sweep settled pending explanations", "count", n)
+	}
 	t := time.NewTicker(w.interval)
 	defer t.Stop()
 	for {
@@ -90,6 +97,34 @@ func (w *Worker) recordCosts(events []*models.AIAnalysisCostEvent) {
 	for _, ev := range events {
 		if err := w.store.RecordAnalysisCostEvent(ev); err != nil {
 			slog.Warn("failure-analysis: cost event not recorded", "kind", ev.Kind, "engine", ev.Engine, "err", err)
+		}
+	}
+}
+
+// settlePending marks the job's explanations that will never be written unavailable and
+// republishes those rows, so no view keeps showing "Explanation being written…". Runs whenever
+// a claimed job ends — completed, cancelled, failed or stopped.
+func (w *Worker) settlePending(jobID, runID string) {
+	ids, err := w.store.PendingNarrativeIDs(jobID)
+	if err != nil {
+		slog.Warn("failure-analysis: pending explanations not listed", "job_id", jobID, "err", err)
+		return
+	}
+	if len(ids) == 0 {
+		return
+	}
+	n, err := w.store.SweepPendingNarratives(jobID)
+	if err != nil {
+		slog.Warn("failure-analysis: pending explanations not settled", "job_id", jobID, "err", err)
+		return
+	}
+	slog.Info("failure-analysis: settled explanations that were never written", "job_id", jobID, "count", n)
+	if w.bc == nil {
+		return
+	}
+	for _, id := range ids {
+		if a, _ := w.store.GetAnalysisByID(id); a != nil && a.NarrativeStatus != models.NarrativeStatusPending {
+			w.bc.BroadcastRunResultAnalysisUpdated(a, runID)
 		}
 	}
 }
@@ -367,6 +402,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 	if !claimed {
 		return nil // cancelled between pick-up and claim; the cancel wins
 	}
+	defer w.settlePending(job.ID, job.TestRunID) // every exit after the claim: cancel, failure, stop
 
 	deps, err := w.resolve(job.Trigger)
 	if errors.Is(err, failureanalysis.ErrAIDisabled) {
@@ -556,7 +592,8 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		return nil
 	}
 
-	saveCallStats() // before completion, so the completed job already carries it
+	saveCallStats()                        // before completion, so the completed job already carries it
+	w.settlePending(job.ID, job.TestRunID) // before completion, so the completed job has none in progress
 	changed, err := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, "")
 	if err != nil {
 		return err
