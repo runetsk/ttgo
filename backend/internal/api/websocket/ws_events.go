@@ -33,6 +33,7 @@ const (
 	EventRunAnalysisProgress      = "run_analysis.progress"
 	EventRunAnalysisCompleted     = "run_analysis.completed"
 	EventRunResultAnalysisCreated = "run_result_analysis.created"
+	EventRunResultAnalysisUpdated = "run_result_analysis.updated"
 )
 
 // Role constants for MinRole filtering.

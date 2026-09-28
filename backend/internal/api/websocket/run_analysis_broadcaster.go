@@ -39,10 +39,14 @@ func (b *RunAnalysisBroadcaster) BroadcastRunAnalysisCompleted(job *models.RunAn
 	}))
 }
 
-func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisCreated(a *models.RunResultAnalysis, testRunID string) {
-	payload := map[string]interface{}{
-		"run_result_id":                    a.RunResultID,
+// analysisPayload is the whole analysis the UI renders, shared by the .created and .updated
+// events: a client merging a live event (analysisMeta.js mergeAnalysis) never needs a refetch
+// and never replaces a fuller row with a partial one. analysis_id is kept for older clients.
+func analysisPayload(a *models.RunResultAnalysis) map[string]interface{} {
+	return map[string]interface{}{
+		"id":                               a.ID,
 		"analysis_id":                      a.ID,
+		"run_result_id":                    a.RunResultID,
 		"version":                          a.Version,
 		"verdict":                          a.Verdict,
 		"suggested_defect_type":            a.SuggestedDefectType,
@@ -53,19 +57,45 @@ func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisCreated(a *models.Run
 		"engine":                           a.Engine,
 		"model_name":                       a.ModelName,
 		"narrative_status":                 a.NarrativeStatus,
+		"narrative_revision":               a.NarrativeRevision,
+		"summary":                          a.Summary,
+		"next_action":                      a.NextAction,
+		"rationale":                        a.Rationale,
 		"dedup_group_key":                  a.DedupGroupKey,
 		"dedup_method":                     a.DedupMethod,
 		"dedup_p_same":                     a.DedupPSame,
+		"dedup_model":                      a.DedupModel,
+		"dedup_policy_version":             a.DedupPolicyVersion,
+		"source_analysis_id":               a.SourceAnalysisID,
 		"decision_status":                  a.DecisionStatus,
 		"error_category":                   a.ErrorCategory,
 		"takeover_from_verdict":            a.TakeoverFromVerdict,
 		"takeover_from_confidence":         a.TakeoverFromConfidence,
+		"takeover_from_defect_type":        a.TakeoverFromDefectType,
+		"policy_version":                   a.PolicyVersion,
+		"history_available":                a.HistoryAvailable,
+		"created_at":                       a.CreatedAt,
 		"job_id":                           a.JobID,
 	}
-	b.Hub.Broadcast(NewEvent(EventRunResultAnalysisCreated, runResultTopic(a.RunResultID), payload))
+}
+
+func (b *RunAnalysisBroadcaster) broadcastAnalysis(eventType string, a *models.RunResultAnalysis, testRunID string) {
+	payload := analysisPayload(a)
+	b.Hub.Broadcast(NewEvent(eventType, runResultTopic(a.RunResultID), payload))
 	if testRunID != "" {
-		b.Hub.Broadcast(NewEvent(EventRunResultAnalysisCreated, runTopic(testRunID), payload))
+		b.Hub.Broadcast(NewEvent(eventType, runTopic(testRunID), payload))
 	}
+}
+
+// BroadcastRunResultAnalysisCreated publishes a newly stored analysis version.
+func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisCreated(a *models.RunResultAnalysis, testRunID string) {
+	b.broadcastAnalysis(EventRunResultAnalysisCreated, a, testRunID)
+}
+
+// BroadcastRunResultAnalysisUpdated publishes a change to a stored version's explanation (a
+// narration landing, an Explain claim, a sweep). Same payload as .created.
+func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisUpdated(a *models.RunResultAnalysis, testRunID string) {
+	b.broadcastAnalysis(EventRunResultAnalysisUpdated, a, testRunID)
 }
 
 func runTopic(runID string) string    { return fmt.Sprintf("run:%s", runID) }
