@@ -103,25 +103,6 @@ func TestAnalyze_RecordsDecisionAndCallTiming(t *testing.T) {
 	require.GreaterOrEqual(t, out.DecisionMs, 0)
 }
 
-func TestExplain_NarratesTheStoredDecision(t *testing.T) {
-	score := 0.93
-	stored := &models.RunResultAnalysis{Engine: models.AnalysisEngineTypeSafe, Verdict: models.VerdictFlakyTest,
-		Confidence: models.ConfidenceHigh, ConfidenceScore: &score, SuggestedDefectType: "automation_bug",
-		VerdictProbabilities: `{"flaky_test":0.52,"product_bug":0.45}`, NarrativeStatus: models.NarrativeStatusSkipped}
-	prov := &recordingProvider{stubProvider: stubProvider{responses: []string{`{"summary":"S","next_action":"N","rationale":"R"}`}}}
-	out, err := Explain(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "m"}, baseContext(), stored)
-	require.NoError(t, err)
-	require.Equal(t, models.NarrativeStatusOK, out.NarrativeStatus)
-	require.Equal(t, "S", out.Summary)
-	sys := prov.reqs[0].Messages[0].Content
-	require.Contains(t, sys, "`flaky_test` (confidence 0.93)")
-	require.Contains(t, sys, "runner-up verdict was `product_bug`", "stored probabilities feed the runner-up hint")
-	require.Contains(t, sys, "at most two pieces of evidence", "the short contract is used")
-
-	_, err = Explain(context.Background(), AnalyzeDeps{}, baseContext(), stored)
-	require.ErrorIs(t, err, ErrNoNarrator)
-}
-
 func TestBuildEvidence_RedactsEveryOutgoingField(t *testing.T) {
 	in := baseContext()
 	in.Result.TestNameSnapshot = "Login as jane.doe@example.com"

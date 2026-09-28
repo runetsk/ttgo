@@ -74,29 +74,6 @@ func TestFailedResultIDsForRun_UsesTheCurrentVersion(t *testing.T) {
 	require.Equal(t, map[string]bool{still.ID: true}, ids, "a later successful version clears the failure")
 }
 
-func TestUpdateAnalysisNarrative_KeepsDecisionAndAddsUsage(t *testing.T) {
-	s := newTestStore(t)
-	rr := seedFailingResult(t, s)
-	score := 0.95
-	a, err := s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: rr.ID, Engine: models.AnalysisEngineTypeSafe,
-		Verdict: models.VerdictFlakyTest, Confidence: models.ConfidenceHigh, ConfidenceScore: &score,
-		NarrativeStatus: models.NarrativeStatusSkipped, TokenUsagePrompt: 10, LLMCalls: 1, LLMMs: 100})
-	require.NoError(t, err)
-
-	got, err := s.UpdateAnalysisNarrative(a.ID, NarrativeUpdate{Summary: "S", NextAction: "N", Rationale: "R",
-		NarrativeStatus: models.NarrativeStatusOK, AddPrompt: 300, AddCompletion: 40, AddLLMMs: 900, AddLLMCalls: 1, FinishReason: "stop"})
-	require.NoError(t, err)
-	require.Equal(t, "S", got.Summary)
-	require.Equal(t, models.NarrativeStatusOK, got.NarrativeStatus)
-	require.Equal(t, 310, got.TokenUsagePrompt)
-	require.Equal(t, 40, got.TokenUsageCompletion)
-	require.Equal(t, 1000, got.LLMMs)
-	require.Equal(t, 2, got.LLMCalls)
-	require.Equal(t, "stop", got.FinishReason)
-	require.Equal(t, models.VerdictFlakyTest, got.Verdict, "the decision is untouched")
-	require.Equal(t, a.Version, got.Version, "an explanation is not a new version")
-}
-
 func TestEnqueueRetryFailedForRun(t *testing.T) {
 	s := newTestStore(t)
 	runID := seedRun(t, s)

@@ -129,34 +129,6 @@ func (s *Store) GetAnalysisByID(id string) (*models.RunResultAnalysis, error) {
 	return &out, nil
 }
 
-// NarrativeUpdate is an explanation written after the decision was stored (on-demand
-// "Explain"). Token and timing fields are added to what the analysis already recorded.
-type NarrativeUpdate struct {
-	Summary, NextAction, Rationale, NarrativeStatus string
-	AddPrompt, AddCompletion, AddLLMMs, AddLLMCalls int
-	FinishReason                                    string
-}
-
-// UpdateAnalysisNarrative fills in the explanation of an existing analysis without touching
-// its decision. The decision stays immutable; only the narrative fields change.
-func (s *Store) UpdateAnalysisNarrative(id string, u NarrativeUpdate) (*models.RunResultAnalysis, error) {
-	err := s.db.Model(&models.RunResultAnalysis{}).Where("id = ?", id).Updates(map[string]interface{}{
-		"summary":                u.Summary,
-		"next_action":            u.NextAction,
-		"rationale":              u.Rationale,
-		"narrative_status":       u.NarrativeStatus,
-		"token_usage_prompt":     gorm.Expr("token_usage_prompt + ?", u.AddPrompt),
-		"token_usage_completion": gorm.Expr("token_usage_completion + ?", u.AddCompletion),
-		"llm_ms":                 gorm.Expr("llm_ms + ?", u.AddLLMMs),
-		"llm_calls":              gorm.Expr("llm_calls + ?", u.AddLLMCalls),
-		"finish_reason":          u.FinishReason,
-	}).Error
-	if err != nil {
-		return nil, err
-	}
-	return s.GetAnalysisByID(id)
-}
-
 // FailedResultIDsForRun returns the failing results of a run whose current analysis is a
 // failed attempt, so a retry can re-analyze just those.
 func (s *Store) FailedResultIDsForRun(runID string) (map[string]bool, error) {

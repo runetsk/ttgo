@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -431,10 +432,11 @@ func (h *Handler) RetryFailedRunAnalysis(w http.ResponseWriter, r *http.Request)
 }
 
 // ExplainAnalysis writes an explanation for a stored TypeSafe decision that has none, because
-// explanations were off or the explanation call failed. The decision is not re-run.
+// explanations were off or the explanation call failed. The decision is not re-run. A group is
+// explained once, through its representative, and every clone receives the same explanation.
 //
 // @Summary      Explain a stored TypeSafe decision
-// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true.
+// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true. A failed LLM call leaves the explanation unavailable with its reason (200).
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        id          path      string  true  "Run result ID"
@@ -468,7 +470,29 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "only a stored TypeSafe decision can be explained; re-analyze instead"})
 		return
 	}
-	if a.NarrativeStatus == models.NarrativeStatusOK {
+	// A clone carries its group's decision: the group is explained through its representative —
+	// its evidence, its members, its row — never from the clicked sibling.
+	rep, repResult := a, result
+	if a.SourceAnalysisID != nil {
+		src, err := h.store.GetAnalysisByID(*a.SourceAnalysisID)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		var srcResult *models.RunResult
+		if src != nil {
+			if srcResult, err = h.store.GetRunResultByID(src.RunResultID); err != nil {
+				httpx.Error(w, http.StatusInternalServerError, err)
+				return
+			}
+		}
+		if src == nil || srcResult == nil {
+			httpx.JSON(w, http.StatusConflict, map[string]string{"error": "this analysis's group representative no longer exists; re-analyze instead"})
+			return
+		}
+		rep, repResult = src, srcResult
+	}
+	if rep.NarrativeStatus == models.NarrativeStatusOK {
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "this analysis already has an explanation"})
 		return
 	}
@@ -502,35 +526,78 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	actx := failureanalysis.BuildContext(h.store, result, time.Now())
-	actx.RedactionEnabled = settings.RedactionEnabled
-	actx.PromptTemplate = settings.PromptTemplate
-	actx.ProviderModel = deps.NarrativeModel
-	ctx, calls := callstats.WithCounter(r.Context())
-	res, err := failureanalysis.Explain(ctx, deps.Analyze(), actx, a)
-	// A fired hedge was billed whether or not the explanation came back.
-	h.recordCosts(failureanalysis.HedgeCostEvents(calls.HedgePromptTokens(), deps,
-		failureanalysis.RefsFor(result.TestRunID, a.JobID, a)))
-	if err != nil {
-		httpx.Error(w, http.StatusBadGateway, err)
-		return
-	}
-	// Dated now, not on the analysis: explaining an old decision is this month's spend.
-	h.recordCosts(failureanalysis.CostEvents(models.AnalysisCostKindExplain, res, deps,
-		failureanalysis.RefsFor(result.TestRunID, a.JobID, a)))
-	updated, err := h.store.UpdateAnalysisNarrative(a.ID, store.NarrativeUpdate{
-		Summary: res.Summary, NextAction: res.NextAction, Rationale: res.Rationale, NarrativeStatus: res.NarrativeStatus,
-		AddPrompt: res.TokenUsagePrompt, AddCompletion: res.TokenUsageCompletion,
-		AddLLMMs: res.LLMMs, AddLLMCalls: res.LLMCalls, FinishReason: res.FinishReason,
-	})
+	members, err := h.store.ListGroupMemberResults(rep.ID)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	if h.broadcaster != nil {
-		h.broadcaster.BroadcastRunResultAnalysisCreated(updated, result.TestRunID)
+	actx := failureanalysis.BuildContext(h.store, repResult, time.Now())
+	actx.RedactionEnabled = settings.RedactionEnabled
+	actx.PromptTemplate = settings.PromptTemplate
+	actx.ProviderModel = deps.NarrativeModel
+	actx.GroupMembers = failureanalysis.GroupMemberErrors(repResult, members)
+
+	// Claim before calling the LLM: at most one explanation is in flight per group, and a
+	// request that loses the claim never spends anything.
+	claimed, err := h.store.ClaimExplanation(rep.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
 	}
-	httpx.JSON(w, http.StatusOK, updated)
+	if !claimed {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "this analysis is already being explained or has been explained"})
+		return
+	}
+	if pending, _ := h.store.GetAnalysisByID(rep.ID); pending != nil {
+		h.broadcastAnalysisUpdated([]*models.RunResultAnalysis{pending}, repResult.TestRunID)
+	}
+
+	// P1: the call runs under its own call-stats counter so fired hedges are billed below.
+	callCtx, calls := callstats.WithCounter(r.Context())
+	delta, ok := failureanalysis.Narrate(callCtx, deps.Analyze(), actx, failureanalysis.DecidedFromRow(rep))
+	if !ok { // cannot happen for a claimed decision; never leave the claim pending
+		delta = failureanalysis.NarrationDelta{NarrativeStatus: models.NarrativeStatusUnavailable, Reason: "nothing to explain",
+			Summary: "AI narrative unavailable: nothing to explain"}
+	}
+	if delta.Reason == "cancelled" { // P2's internal marker: the request was dropped mid-call
+		const why = "the request was cancelled before the explanation was written"
+		delta.NarrativeStatus, delta.Reason, delta.Summary, delta.NextAction = models.NarrativeStatusUnavailable, why, "AI narrative unavailable: "+why, ""
+	}
+	// Dated now, not on the analysis: explaining an old decision is this month's spend. Recorded
+	// whether or not the apply below wins: the call was billed.
+	refs := failureanalysis.RefsFor(repResult.TestRunID, rep.JobID, rep)
+	h.recordCosts(failureanalysis.NarrationCostEvents(delta, deps, refs, models.AnalysisCostKindExplain))
+	h.recordCosts(failureanalysis.HedgeCostEvents(calls.HedgePromptTokens(), deps, refs))
+	changed, err := h.store.ApplyNarration(rep.ID, delta)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if len(changed) == 0 {
+		slog.Info("failure-analysis: explanation not applied; its group was settled while it was written", "analysis_id", rep.ID)
+	}
+	h.broadcastAnalysisUpdated(changed, repResult.TestRunID)
+
+	clicked, err := h.store.GetAnalysisByID(a.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if clicked == nil {
+		httpx.Error(w, http.StatusNotFound, fmt.Errorf("analysis not found"))
+		return
+	}
+	httpx.JSON(w, http.StatusOK, clicked)
+}
+
+// broadcastAnalysisUpdated republishes analyses whose explanation changed.
+func (h *Handler) broadcastAnalysisUpdated(rows []*models.RunResultAnalysis, runID string) {
+	if h.broadcaster == nil {
+		return
+	}
+	for _, a := range rows {
+		h.broadcaster.BroadcastRunResultAnalysisUpdated(a, runID)
+	}
 }
 
 // CancelRunAnalysisJob marks the most recent active job as cancelled.

@@ -356,25 +356,6 @@ func decisionResult(decision *Decision) *AnalyzeResult {
 	}
 }
 
-// Explain writes an explanation for an already stored TypeSafe decision (on-demand "Explain"
-// or "Retry explanation"). The decision itself is not re-run and does not change; the result
-// carries only the narrative fields and what the LLM calls cost.
-func Explain(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext, a *models.RunResultAnalysis) (*AnalyzeResult, error) {
-	if deps.Narrative == nil {
-		return nil, ErrNoNarrator
-	}
-	decided := &AnalyzeResult{Verdict: a.Verdict, Confidence: a.Confidence, ConfidenceScore: a.ConfidenceScore,
-		VerdictProbabilities: a.VerdictProbabilities, SuggestedDefectType: a.SuggestedDefectType,
-		NarrativeStatus: models.NarrativeStatusPending}
-	d, _ := Narrate(ctx, deps, in, decided)
-	if d.Reason == narrationAbandoned {
-		return nil, ctx.Err()
-	}
-	out := &AnalyzeResult{Confidence: a.Confidence, NarrativeStatus: models.NarrativeStatusOK}
-	out.ApplyNarration(d)
-	return out, nil
-}
-
 // replyTruncated reports whether the provider stopped the reply at the token limit
 // ("length" for OpenAI-compatible APIs, "max_tokens" for Anthropic).
 func replyTruncated(r *llm.ChatResponse) bool {
