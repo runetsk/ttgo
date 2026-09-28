@@ -98,6 +98,29 @@ func SemanticCostEvents(rep SemanticReport, deps JobDeps, refs CostRefs) []*mode
 	return []*models.AIAnalysisCostEvent{ev}
 }
 
+// HedgeCostEvents is one hedge event per fired hedge whose call had a winner, priced at the
+// winner's prompt tokens: the hedged request sent the same prompt, and the cancelled request's
+// usage is never reported, so the event is an estimate (no completion tokens). A hedge whose
+// winner reported no usage has nothing to price and adds no event. winnerPrompts comes from
+// callstats (Counter.HedgePromptTokens).
+func HedgeCostEvents(winnerPrompts []int, deps JobDeps, refs CostRefs) []*models.AIAnalysisCostEvent {
+	var out []*models.AIAnalysisCostEvent
+	for _, prompt := range winnerPrompts {
+		if prompt <= 0 {
+			continue
+		}
+		ev := costEvent(models.AnalysisCostKindHedge, models.AnalysisCostEngineLLM, deps.NarrativeModel, refs)
+		ev.PromptTokens = prompt
+		ev.EstimatedCost = deps.Pricing.llmCost(prompt, 0)
+		if deps.Pricing.LLMProviderID != "" {
+			id := deps.Pricing.LLMProviderID
+			ev.ProviderID = &id
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
 // addCost sums known costs; nil stays nil only while every part is unknown.
 func addCost(total, part *float64) *float64 {
 	if part == nil {
@@ -111,10 +134,21 @@ func addCost(total, part *float64) *float64 {
 	return &v
 }
 
-// EstimateCallUSD is the worst-case cost of analyzing one group with these dependencies, by
-// generation's formula: the LLM prompt bound in characters / 4 plus the reply cap, and the
-// TypeSafe state bound / 4 at price_per_mtok. Only engines on the normal path count (an LLM
-// that is only the fallback does not). nil when nothing on the path is priced.
+// llmStageUSD is the worst case of one LLM stage (spec §B): the first call and the JSON repair,
+// each with its transient retry (4 attempts), each attempt the prompt bound in characters / 4
+// plus the reply cap; doubled when hedging may send every attempt twice.
+func llmStageUSD(deps JobDeps) *float64 {
+	attempts := 2 * TransportAttempts
+	if deps.HedgingOn {
+		attempts *= 2
+	}
+	return deps.Pricing.llmCost(attempts*PromptCharCap/4, attempts*ReplyTokenCap)
+}
+
+// EstimateCallUSD is the worst-case cost of analyzing one group with these dependencies: one
+// LLM stage (llmStageUSD) when the LLM is on the normal path (an LLM that is only the fallback
+// does not count), plus the TypeSafe state bound / 4 at price_per_mtok when TypeSafe decides.
+// nil when nothing on the path is priced.
 func EstimateCallUSD(deps JobDeps) *float64 {
 	var total *float64
 	if deps.Decider != nil {
@@ -122,17 +156,17 @@ func EstimateCallUSD(deps JobDeps) *float64 {
 	}
 	llmOnPath := deps.Narrative != nil && (deps.Decider == nil || !deps.NarrativeSkipped || deps.EscalateBelow > 0)
 	if llmOnPath {
-		total = addCost(total, deps.Pricing.llmCost(PromptCharCap/4, ReplyTokenCap))
+		total = addCost(total, llmStageUSD(deps))
 	}
 	return total
 }
 
-// EstimateExplainUSD is the worst-case cost of one explanation (an LLM call only).
+// EstimateExplainUSD is the worst-case cost of one explanation: one LLM stage.
 func EstimateExplainUSD(deps JobDeps) *float64 {
 	if deps.Narrative == nil {
 		return nil
 	}
-	return deps.Pricing.llmCost(PromptCharCap/4, ReplyTokenCap)
+	return llmStageUSD(deps)
 }
 
 // EstimateJobUSD is groups × EstimateCallUSD; nil when unpriced.

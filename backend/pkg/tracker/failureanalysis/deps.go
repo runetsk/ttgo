@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/typesafe"
 )
@@ -56,6 +57,13 @@ type JobDeps struct {
 	Semantic             *SemanticDeps
 	// Pricing is what this job's calls cost, captured when the dependencies were resolved.
 	Pricing Pricing
+	// TypeSafeTimeout and LLMCallTimeout are the per-call timeouts this job runs with (0 = that
+	// engine is not attached); GroupDeadlineFor derives the group deadline from them.
+	TypeSafeTimeout time.Duration
+	LLMCallTimeout  time.Duration
+	// HedgingOn: Narrative sends a hedged second request when the first is slow, so the
+	// worst-case estimate doubles its LLM part.
+	HedgingOn bool
 }
 
 // Analyze returns the analyzer-facing subset.

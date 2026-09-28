@@ -7,6 +7,7 @@ const (
 	AnalysisCostKindAnalysis = "analysis" // a representative's decision and explanation
 	AnalysisCostKindExplain  = "explain"  // an explanation written later for a stored decision
 	AnalysisCostKindSemantic = "semantic" // one job's semantic grouping pass
+	AnalysisCostKindHedge    = "hedge"    // a hedged second LLM request, priced at the winner's prompt (an estimate)
 
 	AnalysisCostEngineTypeSafe = "typesafe"
 	AnalysisCostEngineLLM      = "llm"

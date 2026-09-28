@@ -41,7 +41,7 @@ func requireBudget409(t *testing.T, rec *httptest.ResponseRecorder, scope string
 	return body
 }
 
-// One priced call is estimated at ~$0.08 (6,000 prompt + 2,048 reply tokens at $10/M), over a
+// One priced group is estimated at worst ~$0.32 (4 × (6,000 prompt + 2,048 reply) tokens at $10/M), over a
 // $0.01 per-request budget: every start asks first and proceeds once acknowledged.
 func TestAnalysisStarts_PerRequestBudgetNeedsAcknowledgement(t *testing.T) {
 	prov := &fixedReplyProvider{reply: verdictReply}
@@ -49,7 +49,8 @@ func TestAnalysisStarts_PerRequestBudgetNeedsAcknowledgement(t *testing.T) {
 	setBudgets(t, e.s, 0.01, 0)
 	result := map[string]string{"id": e.result.ID}
 
-	requireBudget409(t, serveQuery(e.h.AnalyzeRunResult, "", result), "request")
+	body := requireBudget409(t, serveQuery(e.h.AnalyzeRunResult, "", result), "request")
+	require.Contains(t, body["error"], "worst-case estimated cost")
 	require.Zero(t, prov.calls, "nothing is sent before the acknowledgement")
 	require.Equal(t, http.StatusCreated, serveQuery(e.h.AnalyzeRunResult, "?acknowledge_budget=true", result).Code)
 
@@ -84,15 +85,15 @@ func TestEnqueue_MonthlyBudgetCountsAnalysisSpend(t *testing.T) {
 	e := newQuickEnv(t, func(string) (failureanalysis.JobDeps, error) {
 		return pricedDeps(&fixedReplyProvider{reply: verdictReply}), nil
 	})
-	setBudgets(t, e.s, 0, 0.1)
-	spent := 0.05 // ~$0.08 alone fits under $0.10, not on top of this
+	setBudgets(t, e.s, 0, 0.4)
+	spent := 0.1 // the ~$0.32 worst case alone fits under $0.40, not on top of this
 	require.NoError(t, e.s.RecordAnalysisCostEvent(&models.AIAnalysisCostEvent{
 		Kind: models.AnalysisCostKindAnalysis, Engine: models.AnalysisCostEngineLLM, RunID: e.runID, EstimatedCost: &spent,
 	}))
 
 	body := requireBudget409(t, serveQuery(e.h.EnqueueRunAnalysis, "", map[string]string{"id": e.runID}), "month")
-	require.InDelta(t, 0.05, body["month_spent_usd"], 1e-9)
-	require.InDelta(t, 0.1, body["budget_usd"], 1e-9)
+	require.InDelta(t, 0.1, body["month_spent_usd"], 1e-9)
+	require.InDelta(t, 0.4, body["budget_usd"], 1e-9)
 }
 
 // An unpriced route has an unknown cost: budgets never hold it back.

@@ -120,20 +120,21 @@ func (h *Handler) checkBudget(cfg *models.LLMProviderConfig, promptChars, maxCom
 	if estimate == nil {
 		return nil
 	}
-	return h.budgetWarning(*estimate, *estimate, "this call")
+	return h.budgetWarning(*estimate, *estimate, "this call", "estimated cost")
 }
 
 // budgetWarning holds one start against the soft budgets: perCall (a single provider call)
 // against the per-request budget, total (everything the start will spend) against what is
-// left of the month. what names the start in the monthly message. nil = within budget.
-func (h *Handler) budgetWarning(perCall, total float64, what string) map[string]interface{} {
+// left of the month. what names the start in the monthly message; estimate names the figure
+// in the per-request message. nil = within budget.
+func (h *Handler) budgetWarning(perCall, total float64, what, estimate string) map[string]interface{} {
 	budgets, err := h.store.GetOrCreateAIBudgetSettings()
 	if err != nil {
 		return nil // fail open: budgets are soft
 	}
 	if budgets.PerRequestUSD > 0 && perCall > budgets.PerRequestUSD {
 		return map[string]interface{}{
-			"error":    fmt.Sprintf("estimated cost $%.4f exceeds the per-request budget $%.2f; resend with acknowledge_budget=true to proceed", perCall, budgets.PerRequestUSD),
+			"error":    fmt.Sprintf("%s $%.4f exceeds the per-request budget $%.2f; resend with acknowledge_budget=true to proceed", estimate, perCall, budgets.PerRequestUSD),
 			"category": "budget", "scope": "request",
 			"estimated_cost_usd": perCall, "budget_usd": budgets.PerRequestUSD,
 		}
@@ -165,7 +166,7 @@ func (h *Handler) checkAnalysisBudget(perCall *float64, calls int, acknowledged 
 	if acknowledged || perCall == nil || calls <= 0 {
 		return nil
 	}
-	return h.budgetWarning(*perCall, *perCall*float64(calls), "this analysis")
+	return h.budgetWarning(*perCall, *perCall*float64(calls), "this analysis at worst case", "worst-case estimated cost")
 }
 
 // jobBudgetWarning estimates a manual job of groups analyses with the route it would run now.

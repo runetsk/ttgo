@@ -142,7 +142,7 @@ type callStats struct {
 // chat sends one request with bounded transient retries and records the attempts.
 func (s *callStats) chat(ctx context.Context, p llm.Provider, req llm.ChatRequest) (*llm.ChatResponse, error) {
 	start := time.Now()
-	resp, retries, err := llm.ChatWithRetry(ctx, p, req, llm.RetryOptions{MaxAttempts: TransportAttempts})
+	resp, retries, err := llm.ChatWithRetry(ctx, p, req, llmRetryOptions())
 	s.calls += 1 + retries
 	s.ms += int(time.Since(start).Milliseconds())
 	if resp != nil {

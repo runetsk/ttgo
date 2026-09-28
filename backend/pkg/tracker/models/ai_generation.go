@@ -123,6 +123,15 @@ const (
 	MaxParallelGroups     = 8
 )
 
+// Failure-analysis LLM latency bounds (spec §B). The call timeout bounds each LLM request; a
+// hedge (0 = off) sends an identical second request when the first has not answered in time.
+const (
+	DefaultLLMCallTimeoutSeconds = 45
+	MinLLMCallTimeoutSeconds     = 10
+	MaxLLMCallTimeoutSeconds     = 120
+	MinHedgeAfterSeconds         = 3
+)
+
 // AIFailureAnalysisSettings stores admin configuration for the AI failure-analysis feature.
 // Singleton pattern — single row with fixed ID "singleton".
 type AIFailureAnalysisSettings struct {

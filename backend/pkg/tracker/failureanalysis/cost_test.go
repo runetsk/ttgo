@@ -84,32 +84,40 @@ func TestRefsFor(t *testing.T) {
 	require.Nil(t, refs.JobID)
 }
 
-func TestEstimateCallUSD_FollowsTheRoute(t *testing.T) {
+func TestEstimateCallUSD_IsWorstCasePerRoute(t *testing.T) {
 	priced := Pricing{LLMPromptPerMTok: f64ptr(1), LLMCompletionPerMTok: f64ptr(4), TypeSafePerMTok: 0.042}
-	llmCall := (float64(PromptCharCap/4)*1 + float64(ReplyTokenCap)*4) / 1e6
+	// One LLM stage at worst: the first call and the JSON repair, each with its transient retry.
+	llmStage := 4 * (float64(PromptCharCap/4)*1 + float64(ReplyTokenCap)*4) / 1e6
 	tsCall := float64(TypeSafeStateCharCap/4) * 0.042 / 1e6
 	decider := NewUnavailableDecider(errors.New("unused"))
 
 	llmOnly := JobDeps{Narrative: &stubProvider{}, Pricing: priced}
-	require.InDelta(t, llmCall, *EstimateCallUSD(llmOnly), 1e-12)
+	require.InDelta(t, llmStage, *EstimateCallUSD(llmOnly), 1e-12)
+
+	hedged := llmOnly
+	hedged.HedgingOn = true
+	require.InDelta(t, 2*llmStage, *EstimateCallUSD(hedged), 1e-12, "hedging may send every attempt twice")
 
 	explained := JobDeps{Narrative: &stubProvider{}, Decider: decider, Pricing: priced}
-	require.InDelta(t, tsCall+llmCall, *EstimateCallUSD(explained), 1e-12)
+	require.InDelta(t, tsCall+llmStage, *EstimateCallUSD(explained), 1e-12)
 
 	decisionsOnly := JobDeps{Narrative: &stubProvider{}, Decider: decider, NarrativeSkipped: true, Pricing: priced}
 	require.InDelta(t, tsCall, *EstimateCallUSD(decisionsOnly), 1e-12, "the LLM is only the fallback here")
 
 	takeover := decisionsOnly
 	takeover.EscalateBelow = 0.9
-	require.InDelta(t, tsCall+llmCall, *EstimateCallUSD(takeover), 1e-12)
+	require.InDelta(t, tsCall+llmStage, *EstimateCallUSD(takeover), 1e-12)
 
 	unpriced := JobDeps{Narrative: &stubProvider{}}
 	require.Nil(t, EstimateCallUSD(unpriced), "cost unknown: budget checks are skipped")
 
-	require.InDelta(t, llmCall, *EstimateExplainUSD(explained), 1e-12)
+	require.InDelta(t, llmStage, *EstimateExplainUSD(explained), 1e-12)
+	explainedHedged := explained
+	explainedHedged.HedgingOn = true
+	require.InDelta(t, 2*llmStage, *EstimateExplainUSD(explainedHedged), 1e-12)
 	require.Nil(t, EstimateExplainUSD(JobDeps{Decider: decider, Pricing: priced}), "no narrator, nothing to explain with")
 
-	require.InDelta(t, 3*llmCall, *EstimateJobUSD(llmOnly, 3), 1e-12)
+	require.InDelta(t, 3*llmStage, *EstimateJobUSD(llmOnly, 3), 1e-12)
 	require.Nil(t, EstimateJobUSD(unpriced, 3))
 }
 
