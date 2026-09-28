@@ -48,6 +48,24 @@ export const SETTING_HELP = {
         details: 'Lower it if the LLM provider answers with rate-limit errors.',
         example: '24 groups that wait about 6 s each on the LLM take about 2½ minutes one at a time and roughly half that four at a time; the slowest calls set the pace.',
     },
+    'fa.llm_call_timeout_seconds': {
+        title: 'LLM call timeout',
+        what: 'How long one request to the default LLM may take during failure analysis (10 to 120 s). A request cut off at this limit counts as a call timeout and is sent again once.',
+        details: 'It applies to every failure-analysis LLM call: deciding when the LLM decides, taking over, stepping in when TypeSafe is unavailable, explanations and Explain. Test generation keeps its own timeouts. The time one group may take grows with it: 3 × the TypeSafe timeout + 4 × this timeout + pauses, and never less than 5 minutes (7 minutes with the defaults).',
+        example: 'At 45 s, a call that would hang for two minutes is cut at 45 s and sent again, instead of holding its group for the whole two minutes.',
+    },
+    'fa.hedge_after_seconds': {
+        title: 'Hedge slow LLM calls after',
+        what: 'When an LLM request has not answered after this many seconds, an identical second request is sent; the first answer is used and the other is cancelled. 0 turns it off; otherwise from 3 s up to one second below the LLM call timeout.',
+        details: 'It trims the slow tail of LLM calls at the price of extra requests. Each hedge that fires is recorded as a "hedge" cost event priced at the winning request\'s prompt, an estimate because the cancelled request\'s usage is not reported, and budget estimates count the LLM part twice while it is on. The run banner shows how many hedges fired and won.',
+        example: 'At 10 s: answers that take the usual 6 s are untouched; a call still waiting at 10 s gets a twin, and whichever answers first is used.',
+    },
+    'fa.few_shot_examples': {
+        title: 'Past triage examples',
+        what: 'How many past failures that people triaged (0 to 8) go with each group, so the LLM and TypeSafe.ai see how this team labels failures. 0 turns it off.',
+        details: 'Examples come from other runs, from the 90 days before the failure being analyzed: failures where the AI suggested a defect type for that result itself and a person set product bug, automation bug or system issue. The same test comes first, then the same failure type, then the newest, with agreements and corrections balanced. Each example\'s error is cut to 300 characters and redacted when Redact secrets is on; examples are dropped first when the evidence is too long (in the LLM prompt, right after the group\'s related failures). Decisions made with at least one example are stamped fa-verdict-v6, others fa-verdict-v5, so the accuracy panel can tell them apart.',
+        example: 'A timeout on #checkout that people twice marked as an automation bug, although the AI said product bug, is shown to the model with that correction.',
+    },
     'fa.prompt_template': {
         title: 'Prompt template',
         what: 'The instructions and layout sent to the LLM with the failure evidence.',
@@ -122,7 +140,7 @@ export const STEP_HELP = {
         example: '120 failing results that come from 9 distinct errors need 9 analyses, not 120.',
     },
     evidence: {
-        what: 'For each group, one result is sent with its context: the error, stack, log and steps, the environment, linked defects and requirements, and how this test failed in the 30 days before.',
+        what: 'For each group, one result is sent with its context: the error, stack, log and steps, the environment, linked defects and requirements, how this test failed in the 30 days before, and, with Past triage examples on, a few past failures people triaged.',
         example: 'A test that failed with the same timeout three times last week points the model toward a flaky test.',
     },
     decide: {
@@ -130,7 +148,7 @@ export const STEP_HELP = {
         example: 'TypeSafe answers "flaky test, 93% sure"; with "Ask the LLM below" at 90% that answer is kept.',
     },
     explain: {
-        what: 'An explanation is a summary, a suggested next action and the reasoning, written by the default LLM.',
+        what: 'An explanation is a summary, a suggested next action and the reasoning, written by the default LLM after the decision is shown: one per group, copied to every result in it.',
         example: 'With explanations off, a TypeSafe decision shows "No explanation was written" and an Explain button.',
     },
     store: {

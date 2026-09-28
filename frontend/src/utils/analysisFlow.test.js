@@ -228,3 +228,31 @@ test('an undecryptable default LLM key leaves the LLM out with the server reason
     const fine = resolveRoute({ aiEnabled: true, typesafe: TS, provider: { ...APPROVED, api_key_status: 'ok' }, trigger: 'manual' });
     assert.equal(fine.llm, 'OpenRouter (minimax)');
 });
+
+test('the LLM chips show the call timeout and hedging, with the server defaults when unset', () => {
+    const f = flow({ failureAnalysis: { ...FA, llm_call_timeout_seconds: 60, hedge_after_seconds: 10 } });
+    assert.equal(chipOf(f, 'fa.llm_call_timeout_seconds').value, '60 s');
+    assert.equal(chipOf(f, 'fa.hedge_after_seconds').value, 'After 10 s');
+    const defaults = flow();
+    assert.equal(chipOf(defaults, 'fa.llm_call_timeout_seconds').value, '45 s');
+    assert.equal(chipOf(defaults, 'fa.hedge_after_seconds').value, 'Off');
+    assert.equal(chipOf(flow({ provider: null }), 'fa.llm_call_timeout_seconds'), undefined, 'no LLM, no LLM chips');
+    const llmOnly = flow({ typesafe: { ...TS, enabled: false } });
+    assert.equal(chipOf(llmOnly, 'fa.llm_call_timeout_seconds').value, '45 s', 'shown on the LLM-decides route too');
+});
+
+test('the explanation step says the decision is shown first', () => {
+    const f = flow();
+    assert.ok(step(f, 'explain').notes.some((n) => n.includes('"Explanation being written…"')), JSON.stringify(step(f, 'explain').notes));
+    const off = flow({ typesafe: { ...TS, narrative_enabled: false } });
+    assert.ok(!step(off, 'explain').notes.some((n) => n.includes('Explanation being written')), 'nothing is written after the decision');
+});
+
+test('past triage examples are shown on the evidence step', () => {
+    assert.equal(chipOf(flow(), 'fa.few_shot_examples').value, 'Up to 4');
+    assert.ok(step(flow(), 'evidence').notes.some((n) => /^Up to 4 past failures/.test(n)));
+    const off = flow({ failureAnalysis: { ...FA, few_shot_examples: 0 } });
+    assert.equal(chipOf(off, 'fa.few_shot_examples').value, 'Off');
+    assert.ok(!step(off, 'evidence').notes.some((n) => /past failures/.test(n)));
+    assert.equal(chipOf(flow({ invalid: ['fa.few_shot_examples'] }), 'fa.few_shot_examples').invalid, true);
+});

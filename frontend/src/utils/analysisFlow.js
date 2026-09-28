@@ -10,6 +10,7 @@
 // Where the page cannot know something (a provider's own settings, a key never tried) the model
 // says so rather than guessing.
 import { defaultProvider } from './typesafeSettings.js';
+import { FA_DEFAULTS } from './failureAnalysisSettings.js';
 
 const KEY_USABLE = { stored: true, new: true, none: false, removing: false, unreadable: false };
 const KEY_LABEL = { stored: 'Stored', new: 'New, not yet checked', none: 'None', removing: 'Being removed', unreadable: 'Unreadable' };
@@ -125,6 +126,13 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
             : `${name}, ${provider.allow_auto_failure_analysis ? 'approved' : 'not approved'} for automatic analysis`);
     const aiChip = chip('ai.enabled', 'AI features', onOff(aiEnabled));
     const tsOff = typesafeVerdictOff(route, ts);
+    // Every failure-analysis LLM call runs under the call timeout, hedged when that is on.
+    const llmTimeout = fa?.llm_call_timeout_seconds ?? FA_DEFAULTS.llm_call_timeout_seconds;
+    const hedge = fa?.hedge_after_seconds ?? FA_DEFAULTS.hedge_after_seconds;
+    const llmChips = route.llm ? [
+        chip('fa.llm_call_timeout_seconds', 'LLM call timeout', `${llmTimeout} s`),
+        chip('fa.hedge_after_seconds', 'Hedge slow LLM calls', hedge > 0 ? `After ${hedge} s` : 'Off'),
+    ] : [];
 
     // 1. Start
     const blockReason = !aiEnabled ? 'AI features are off: nothing is analyzed.'
@@ -192,13 +200,20 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
 
     // 3. Evidence
     const redact = !!fa.redaction_enabled;
+    const examples = fa.few_shot_examples ?? FA_DEFAULTS.few_shot_examples;
     const evidence = {
         id: 'evidence', title: 'Prepare the evidence',
         detail: "The error, stack, log and steps of one result per group, with this test's failures from the 30 days before it.",
         status: redact ? 'run' : 'warn',
         reason: redact ? null : 'Redact secrets is off: failure text is sent as recorded.',
-        notes: redact ? ['Recognized secrets are replaced before anything is sent in steps 2, 4 and 5.'] : [],
-        chips: [chip('fa.redaction_enabled', 'Redact secrets', onOff(redact))],
+        notes: [
+            ...(redact ? ['Recognized secrets are replaced before anything is sent in steps 2, 4 and 5.'] : []),
+            ...(examples > 0 ? [`Up to ${examples} past failures people triaged in other runs go with each group as examples.`] : []),
+        ],
+        chips: [
+            chip('fa.redaction_enabled', 'Redact secrets', onOff(redact)),
+            chip('fa.few_shot_examples', 'Past triage examples', examples > 0 ? `Up to ${examples}` : 'Off'),
+        ],
         sends: [], parts: [],
     };
 
@@ -215,6 +230,7 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
                 chip('ts.enabled', 'TypeSafe.ai', onOff(ts?.enabled)),
                 ...(ts?.enabled ? [chip('ts.verdict_engine_enabled', 'Use for failure verdicts', onOff(ts.verdict_engine_enabled))] : []),
                 providerChip,
+                ...llmChips,
             ],
             sends: ['llm'], parts: [],
         };
@@ -289,8 +305,11 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
         explain = {
             id: 'explain', title: 'Explain', status,
             reason: status === 'skip' ? 'No explanation is written; Explain on a result writes one on demand.' : null,
-            detail: '', notes: [],
-            chips: [chip('ts.narrative_enabled', 'Write an explanation', onOff(ts.narrative_enabled)), providerChip],
+            detail: '',
+            notes: ts.narrative_enabled && route.llm && !noKey
+                ? ['The decision is shown as soon as TypeSafe answers; the result reads "Explanation being written…" until the explanation arrives. One explanation is written per group and copied to every result in it.']
+                : [],
+            chips: [chip('ts.narrative_enabled', 'Write an explanation', onOff(ts.narrative_enabled)), providerChip, ...llmChips],
             sends: parts.some((p) => p.sends.length > 0) ? ['llm'] : [],
             partsLabel: 'Depends on the path in step 4:', parts,
         };

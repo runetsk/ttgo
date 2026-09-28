@@ -13,8 +13,8 @@ import { ToggleCard, FieldRow, HelpToggle } from './aiSettings/SettingsControls'
 import { cs } from './aiSettings/settingsControlStyles';
 import { SETTING_HELP } from '../utils/analysisSettingsHelp';
 import {
-    validateFailureAnalysisDraft, isFailureAnalysisDirty, parseWholeNumber,
-    MAX_ANALYSES_MIN, MAX_ANALYSES_MAX, PARALLEL_MIN, PARALLEL_MAX,
+    validateFailureAnalysisDraft, isFailureAnalysisDirty, parseWholeNumber, withFailureAnalysisDefaults, hedgeMax,
+    MAX_ANALYSES_MIN, MAX_ANALYSES_MAX, PARALLEL_MIN, PARALLEL_MAX, LLM_TIMEOUT_MIN, LLM_TIMEOUT_MAX, FEW_SHOT_MIN, FEW_SHOT_MAX,
 } from '../utils/failureAnalysisSettings';
 import { toast } from '../toast';
 import { errorDescriptors, saveError } from '../utils/saveBar';
@@ -37,8 +37,9 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
 
     useEffect(() => {
         getFailureAnalysisSettings().then((s) => {
-            setSettings(s);
-            setOriginal(s);
+            const loaded = withFailureAnalysisDefaults(s);
+            setSettings(loaded);
+            setOriginal(loaded);
         }).catch((e) => {
             console.error('Load settings failed', e);
             setLoadError(true);
@@ -70,12 +71,16 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                 dedup_enabled:         settings.dedup_enabled,
                 redaction_enabled:     settings.redaction_enabled,
                 prompt_template:       settings.prompt_template,
+                llm_call_timeout_seconds: settings.llm_call_timeout_seconds,
+                hedge_after_seconds:      settings.hedge_after_seconds,
+                few_shot_examples:        settings.few_shot_examples,
             });
         } catch (err) {
             throw saveError(err, 'Failed to save the failure-analysis settings');
         }
-        setSettings(next);
-        setOriginal(next);
+        const saved = withFailureAnalysisDefaults(next);
+        setSettings(saved);
+        setOriginal(saved);
     };
     const discardDraft = () => { if (original) setSettings(original); };
     const saving = useSaveSection('failureAnalysis', {
@@ -106,9 +111,9 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
     const reset = async () => {
         setResetting(true);
         try {
-            const next = await resetFailureAnalysisPrompt();
-            setSettings(next);
-            setOriginal(next);
+            const fresh = withFailureAnalysisDefaults(await resetFailureAnalysisPrompt());
+            setSettings(fresh);
+            setOriginal(fresh);
             toast.success('Prompt template reset to default');
         } catch (e) {
             toast.error('Reset failed: ' + e.message);
@@ -190,6 +195,42 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     min={PARALLEL_MIN} max={PARALLEL_MAX} disabled={locked}
                     value={numberValue(settings.parallel_groups)}
                     onChange={(e) => update({ parallel_groups: parseWholeNumber(e.target.value) })}
+                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
+            </FieldRow>
+
+            <FieldRow label="LLM call timeout (s)" htmlFor="fa-llm-timeout"
+                setting="fa.llm_call_timeout_seconds" help={SETTING_HELP['fa.llm_call_timeout_seconds']}
+                hint={errors.llm_call_timeout_seconds
+                    ? <span style={cs.fieldError}>{errors.llm_call_timeout_seconds}</span>
+                    : 'How long one LLM request may take before it is cut off and sent again.'}>
+                <input id="fa-llm-timeout" data-testid="fa-llm-timeout" className="modern-input" type="number"
+                    min={LLM_TIMEOUT_MIN} max={LLM_TIMEOUT_MAX} disabled={locked}
+                    value={numberValue(settings.llm_call_timeout_seconds)}
+                    onChange={(e) => update({ llm_call_timeout_seconds: parseWholeNumber(e.target.value) })}
+                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
+            </FieldRow>
+
+            <FieldRow label="Hedge slow LLM calls after (s)" htmlFor="fa-hedge-after"
+                setting="fa.hedge_after_seconds" help={SETTING_HELP['fa.hedge_after_seconds']}
+                hint={errors.hedge_after_seconds
+                    ? <span style={cs.fieldError}>{errors.hedge_after_seconds}</span>
+                    : '0 = off. After this long without an answer the same request is sent again and the first answer is used.'}>
+                <input id="fa-hedge-after" data-testid="fa-hedge-after" className="modern-input" type="number"
+                    min={0} max={hedgeMax(settings.llm_call_timeout_seconds)} disabled={locked}
+                    value={numberValue(settings.hedge_after_seconds)}
+                    onChange={(e) => update({ hedge_after_seconds: parseWholeNumber(e.target.value) })}
+                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
+            </FieldRow>
+
+            <FieldRow label="Past triage examples" htmlFor="fa-few-shot"
+                setting="fa.few_shot_examples" help={SETTING_HELP['fa.few_shot_examples']}
+                hint={errors.few_shot_examples
+                    ? <span style={cs.fieldError}>{errors.few_shot_examples}</span>
+                    : 'Past failures people triaged, sent with each group as examples. 0 = off.'}>
+                <input id="fa-few-shot" data-testid="fa-few-shot" className="modern-input" type="number"
+                    min={FEW_SHOT_MIN} max={FEW_SHOT_MAX} disabled={locked}
+                    value={numberValue(settings.few_shot_examples)}
+                    onChange={(e) => update({ few_shot_examples: parseWholeNumber(e.target.value) })}
                     style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
             </FieldRow>
 

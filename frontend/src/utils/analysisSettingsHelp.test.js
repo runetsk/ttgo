@@ -26,7 +26,7 @@ test('every setting the diagram names has a hint', () => {
     for (const input of inputs()) {
         for (const step of buildAnalysisFlow(input).steps) for (const c of step.chips) keys.add(c.key);
     }
-    assert.equal(keys.size, 17, [...keys].join(', '));
+    assert.equal(keys.size, 20, [...keys].join(', '));
     for (const key of keys) assert.ok(SETTING_HELP[key], `no hint for ${key}`);
 });
 
@@ -48,4 +48,10 @@ test('hints state the numbers the server uses', () => {
     assert.match(SETTING_HELP['fa.parallel_groups'].what, /1 to 8/);
     assert.match(SETTING_HELP['ts.timeout_seconds'].what, /5 to 300/);
     assert.match(SETTING_HELP['fa.dedup_enabled'].details, /30000ms/);
+    assert.match(SETTING_HELP['fa.llm_call_timeout_seconds'].what, /10 to 120 s/);
+    assert.match(SETTING_HELP['fa.hedge_after_seconds'].what, /0 turns it off/);
+    assert.match(SETTING_HELP['fa.hedge_after_seconds'].what, /from 3 s/);
+    assert.match(SETTING_HELP['fa.few_shot_examples'].what, /0 to 8/);
+    assert.match(SETTING_HELP['fa.few_shot_examples'].details, /90 days/);
+    assert.match(SETTING_HELP['fa.few_shot_examples'].details, /fa-verdict-v6/);
 });
