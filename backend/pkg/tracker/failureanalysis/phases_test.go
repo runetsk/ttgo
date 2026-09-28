@@ -3,7 +3,9 @@ package failureanalysis
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/typesafe"
@@ -224,4 +226,148 @@ func TestApplyNarration_AddsUsageAndKeepsTheDecision(t *testing.T) {
 	require.Empty(t, res.Rationale)
 	require.Empty(t, res.RawResponse)
 	require.Equal(t, "length", res.FinishReason)
+}
+
+// sleepyDecider takes wait to answer with err, so the time a failed decision took is visible.
+type sleepyDecider struct {
+	wait time.Duration
+	err  error
+}
+
+func (s sleepyDecider) Decide(context.Context, Evidence) (*Decision, error) {
+	time.Sleep(s.wait)
+	return nil, s.err
+}
+
+// TestDecide_FailedRoutesReturnAStoreableResult covers the rows of spec §A1's route table
+// that end in an error: Decide returns the failed attempt to store with the error.
+func TestDecide_FailedRoutesReturnAStoreableResult(t *testing.T) {
+	ctx := context.Background()
+	in := parityContext()
+	tsDown := &typesafe.Error{Category: typesafe.CategoryRateLimit, Status: 429, Message: "slow down"}
+	slowDown := sleepyDecider{wait: 20 * time.Millisecond, err: tsDown}
+
+	t.Run("TypeSafe unavailable, fallback off", func(t *testing.T) {
+		prov := &stubProvider{responses: []string{goodVerdict}}
+		deps := AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test", Decider: slowDown, DeciderModel: "jev-latest", NoLLMFallback: true}
+		res, err := Decide(ctx, deps, in)
+		require.ErrorIs(t, err, ErrTypeSafeUnavailable)
+		require.NotNil(t, res, "a failed attempt is stored")
+		require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
+		require.Equal(t, models.AnalysisEngineTypeSafe, res.Engine)
+		require.Equal(t, "jev-latest", res.ModelName)
+		require.Equal(t, PolicyVersion, res.PolicyVersion)
+		require.Equal(t, "rate_limit", res.ErrorCategory)
+		require.Equal(t, models.VerdictUnknown, res.Verdict)
+		require.Equal(t, models.NarrativeStatusUnavailable, res.NarrativeStatus)
+		require.True(t, strings.HasPrefix(res.Summary, "analysis failed: "), res.Summary)
+		require.True(t, res.HistoryAvailable)
+		require.GreaterOrEqual(t, res.DecisionMs, 15, "the time TypeSafe took is kept")
+		require.Equal(t, 0, prov.calls, "the fallback is off: nothing reaches the LLM")
+		_, ok := Narrate(ctx, deps, in, res)
+		require.False(t, ok)
+	})
+
+	t.Run("TypeSafe unavailable, no narrator", func(t *testing.T) {
+		res, err := Decide(ctx, AnalyzeDeps{Decider: slowDown, DeciderModel: "jev-latest"}, in)
+		require.ErrorIs(t, err, ErrTypeSafeUnavailable)
+		require.Equal(t, models.AnalysisEngineTypeSafe, res.Engine)
+		require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
+		require.True(t, res.HistoryAvailable)
+		require.GreaterOrEqual(t, res.DecisionMs, 15)
+	})
+
+	t.Run("TypeSafe unavailable, the fallback LLM fails", func(t *testing.T) {
+		prov := &stubProvider{responses: []string{""}, errs: []error{errors.New("boom")}}
+		res, err := Decide(ctx, AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test", Decider: slowDown}, in)
+		require.Error(t, err)
+		require.NotErrorIs(t, err, ErrTypeSafeUnavailable)
+		require.Equal(t, models.AnalysisEngineGenerative, res.Engine)
+		require.Equal(t, "gpt-test", res.ModelName)
+		require.Equal(t, "error", res.ErrorCategory)
+		require.Equal(t, 1, res.LLMCalls, "the fallback call is counted")
+		require.GreaterOrEqual(t, res.DecisionMs, 15)
+		require.True(t, res.HistoryAvailable)
+	})
+
+	t.Run("generative-only, provider error", func(t *testing.T) {
+		prov := &stubProvider{responses: []string{""}, errs: []error{&llm.ProviderError{Category: llm.ErrCatTimeout, Message: "t"}}}
+		res, err := Decide(ctx, AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, in)
+		require.Error(t, err)
+		require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
+		require.Equal(t, models.AnalysisEngineGenerative, res.Engine)
+		require.Equal(t, "timeout", res.ErrorCategory)
+		require.Equal(t, 1, res.LLMCalls)
+		require.True(t, res.HistoryAvailable)
+	})
+
+	t.Run("generative-only, cut off twice", func(t *testing.T) {
+		prov := &finishProvider{replies: [][2]string{{cutOff, "length"}, {cutOff, "length"}}}
+		res, err := Decide(ctx, AnalyzeDeps{Narrative: prov, NarrativeModel: "deepseek-test"}, in)
+		require.ErrorIs(t, err, ErrReplyTruncated)
+		require.Equal(t, "truncated", res.ErrorCategory)
+		require.Equal(t, 200, res.TokenUsagePrompt)
+		require.Equal(t, 2*ReplyTokenCap, res.TokenUsageCompletion)
+		require.Equal(t, 2, res.LLMCalls)
+		require.Equal(t, "length", res.FinishReason)
+	})
+
+	t.Run("generative-only, no provider", func(t *testing.T) {
+		res, err := Decide(ctx, AnalyzeDeps{}, in)
+		require.Error(t, err)
+		require.NotNil(t, res)
+		require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
+		require.Equal(t, 0, res.LLMCalls)
+		require.True(t, res.HistoryAvailable)
+	})
+
+	t.Run("an abandoned request stores nothing", func(t *testing.T) {
+		cctx, cancel := context.WithCancel(ctx)
+		cancel()
+		prov := &stubProvider{responses: []string{""}, errs: []error{context.Canceled}}
+		res, err := Decide(cctx, AnalyzeDeps{Narrative: prov}, in)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Nil(t, res)
+		res, err = Decide(cctx, AnalyzeDeps{Decider: fixedDecider{err: tsDown}}, in)
+		require.ErrorIs(t, err, context.Canceled)
+		require.Nil(t, res)
+	})
+
+	t.Run("Analyze returns the same failed result", func(t *testing.T) {
+		prov := &stubProvider{responses: []string{""}, errs: []error{errors.New("boom")}}
+		res, err := Analyze(ctx, AnalyzeDeps{Narrative: prov, NarrativeModel: "gpt-test"}, in)
+		require.Error(t, err)
+		require.NotNil(t, res)
+		require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
+		require.Equal(t, "analysis failed: "+err.Error(), res.Summary)
+	})
+}
+
+func TestFailedResult_KeepsHistoryAvailability(t *testing.T) {
+	deps := AnalyzeDeps{NarrativeModel: "gpt-test"}
+	res := FailedResult(context.DeadlineExceeded, deps, parityContext())
+	require.True(t, res.HistoryAvailable, "a group deadline before Decide returned still says whether history was there")
+	require.Equal(t, "timeout", res.ErrorCategory)
+	require.Equal(t, models.AnalysisEngineGenerative, res.Engine)
+	require.False(t, FailedResult(context.DeadlineExceeded, deps, AnalyzeContext{}).HistoryAvailable)
+}
+
+func TestDecide_FailedTakeoverKeepsItsCalls(t *testing.T) {
+	unsure := flakyDecision()
+	unsure.VerdictConfidence = 0.60
+	prov := &stubProvider{responses: []string{""}, errs: []error{&llm.ProviderError{Category: llm.ErrCatTimeout, Message: "t"}}}
+	res, err := Decide(context.Background(), AnalyzeDeps{Narrative: prov, NarrativeModel: "m", Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90}, parityContext())
+	require.NoError(t, err)
+	require.Equal(t, models.AnalysisEngineTypeSafe, res.Engine)
+	require.Equal(t, "timeout", res.ErrorCategory)
+	require.Equal(t, 1, res.LLMCalls, "the failed takeover call is counted")
+
+	cut := &finishProvider{replies: [][2]string{{cutOff, "length"}, {cutOff, "length"}}}
+	res, err = Decide(context.Background(), AnalyzeDeps{Narrative: cut, NarrativeModel: "m", Decider: fixedDecider{d: unsure}, EscalateBelow: 0.90}, parityContext())
+	require.NoError(t, err)
+	require.Equal(t, "truncated", res.ErrorCategory)
+	require.Equal(t, 2, res.LLMCalls)
+	require.Equal(t, "length", res.FinishReason)
+	require.Equal(t, 2*ReplyTokenCap, res.TokenUsageCompletion)
+	require.Equal(t, models.NarrativeStatusUnavailable, res.NarrativeStatus)
 }

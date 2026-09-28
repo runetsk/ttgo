@@ -33,7 +33,21 @@ const narrJSON = `{"summary":"S","next_action":"N","rationale":"R"}`
 
 // parityIntended lists, per case, the differences from the pre-Wave-2 output that spec §A1
 // asks for. Each is applied to the golden (legacy) record before comparing.
-var parityIntended = map[string]func(*AnalyzeResult){}
+var parityIntended = map[string]func(*AnalyzeResult){
+	// §A1: a failed attempt is built inside Decide. It keeps HistoryAvailable and the LLM calls
+	// and finish reason it spent (DecisionMs and LLMMs are wall-clock and zeroed on both sides).
+	"ts_down_no_fallback":    func(r *AnalyzeResult) { r.HistoryAvailable = true },
+	"ts_down_no_narrator":    func(r *AnalyzeResult) { r.HistoryAvailable = true },
+	"ts_down_fallback_error": func(r *AnalyzeResult) { r.HistoryAvailable, r.LLMCalls = true, 1 },
+	"gen_error":              func(r *AnalyzeResult) { r.HistoryAvailable, r.LLMCalls = true, 1 },
+	"gen_repair_error":       func(r *AnalyzeResult) { r.HistoryAvailable, r.LLMCalls = true, 2 },
+	"gen_truncated":          func(r *AnalyzeResult) { r.HistoryAvailable, r.LLMCalls, r.FinishReason = true, 2, "length" },
+	"gen_no_provider":        func(r *AnalyzeResult) { r.HistoryAvailable = true },
+	// §A1 route table: a failed takeover keeps the failed attempt's calls and finish reason,
+	// not only its tokens.
+	"takeover_error":     func(r *AnalyzeResult) { r.LLMCalls = 1 },
+	"takeover_truncated": func(r *AnalyzeResult) { r.LLMCalls, r.FinishReason = 2, "length" },
+}
 
 // tape records every request a provider receives and forwards it.
 type tape struct {
@@ -191,7 +205,9 @@ func runParity(t *testing.T, pc parityCase) parityRecord {
 	rec := parityRecord{}
 	if err != nil {
 		rec.Err = err.Error()
-		res = FailedResult(err, deps) // how the worker and sync analyze stored a failed attempt
+		if res == nil { // an error before Decide built its failed result (none in these cases)
+			res = FailedResult(err, deps, in)
+		}
 	}
 	require.NotNil(t, res, pc.name)
 	res.DecisionMs, res.LLMMs = 0, 0 // wall-clock timings are never byte-stable

@@ -243,7 +243,7 @@ func TestResolver_MissingKeyIsTypeSafeUnavailableNotAnLLMRoute(t *testing.T) {
 	_, aerr := failureanalysis.Analyze(context.Background(), d.Analyze(),
 		failureanalysis.AnalyzeContext{Result: &models.RunResult{ID: "r", ErrorMessage: "boom"}})
 	require.ErrorIs(t, aerr, failureanalysis.ErrTypeSafeUnavailable)
-	require.Equal(t, "configuration", failureanalysis.FailedResult(aerr, d.Analyze()).ErrorCategory)
+	require.Equal(t, "configuration", failureanalysis.FailedResult(aerr, d.Analyze(), failureanalysis.AnalyzeContext{}).ErrorCategory)
 }
 func TestResolver_UndecryptableLLMKey(t *testing.T) {
 	s := resolverStore(t)
@@ -263,7 +263,7 @@ func TestResolver_UndecryptableLLMKey(t *testing.T) {
 	require.NotNil(t, d.Narrative)
 	_, cerr := d.Narrative.Chat(context.Background(), llm.ChatRequest{})
 	require.ErrorIs(t, cerr, models.ErrSecretUndecryptable)
-	require.Equal(t, "configuration", failureanalysis.FailedResult(cerr, d.Analyze()).ErrorCategory)
+	require.Equal(t, "configuration", failureanalysis.FailedResult(cerr, d.Analyze(), failureanalysis.AnalyzeContext{}).ErrorCategory)
 
 	// Explain never gets a provider that can only fail: it says why instead.
 	e, err := resolve(failureanalysis.TriggerExplain)

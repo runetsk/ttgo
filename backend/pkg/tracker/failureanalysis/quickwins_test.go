@@ -22,7 +22,7 @@ func TestAnalyze_NoFallbackRecordsTypeSafeFailure(t *testing.T) {
 	require.ErrorIs(t, err, ErrTypeSafeUnavailable)
 	require.Equal(t, 0, prov.calls, "the fallback is off: failure data never reaches the LLM")
 
-	res := FailedResult(err, deps)
+	res := FailedResult(err, deps, baseContext())
 	require.Equal(t, models.DecisionStatusFailed, res.DecisionStatus)
 	require.Equal(t, models.AnalysisEngineTypeSafe, res.Engine)
 	require.Equal(t, "jev-latest", res.ModelName)

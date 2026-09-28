@@ -332,7 +332,9 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		}
 		if err != nil {
 			slog.Warn("failure-analysis: analysis attempt failed", "err", err, "result_id", rep.ID)
-			res = failureanalysis.FailedResult(err, analyzeDeps)
+			if res == nil { // an error before Decide built its failed result (group deadline); Part 3 passes the group's context
+				res = failureanalysis.FailedResult(err, analyzeDeps, failureanalysis.AnalyzeContext{})
+			}
 		}
 
 		repRowIn := failureanalysis.AnalysisRowFrom(res, rep.ID)

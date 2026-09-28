@@ -59,7 +59,7 @@ func TestUnavailableDecider_AppliesTheFallbackSwitch(t *testing.T) {
 	deps := AnalyzeDeps{Decider: NewUnavailableDecider(cfgErr), DeciderModel: "jev-latest", NoLLMFallback: true}
 	_, err := Analyze(context.Background(), deps, baseContext())
 	require.ErrorIs(t, err, ErrTypeSafeUnavailable)
-	res := FailedResult(err, deps)
+	res := FailedResult(err, deps, baseContext())
 	require.Equal(t, models.AnalysisEngineTypeSafe, res.Engine)
 	require.Equal(t, "configuration", res.ErrorCategory)
 

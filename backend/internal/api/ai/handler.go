@@ -107,7 +107,9 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 		// Record the failed attempt like the batch worker does, so the version history shows
 		// it with the engine, model, category and tokens it cost; then report the failure.
 		attemptErr = err
-		res = failureanalysis.FailedResult(err, deps.Analyze())
+		if res == nil { // Analyze returns the failed attempt it built; nil only before Decide ran
+			res = failureanalysis.FailedResult(err, deps.Analyze(), actx)
+		}
 	}
 	row := failureanalysis.AnalysisRowFrom(res, result.ID)
 	row.CreatedBy = ptrOrNil(userID)

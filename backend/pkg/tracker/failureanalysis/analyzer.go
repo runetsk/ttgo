@@ -113,11 +113,14 @@ var ErrTypeSafeUnavailable = errors.New("TypeSafe.ai unavailable and the LLM fal
 // ErrNoNarrator: an explanation was requested but no LLM provider is available.
 var ErrNoNarrator = errors.New("no LLM provider is available to write the explanation")
 
-// usageError carries the tokens an LLM exchange consumed before it failed, so a failed
-// analysis still records what it cost. errors.Is and errors.As see through it.
+// usageError carries what an LLM exchange spent before it failed — tokens, calls, time and the
+// last finish reason — so a failed analysis still records what it cost. errors.Is and
+// errors.As see through it; its text is the wrapped error's.
 type usageError struct {
 	err                error
 	prompt, completion int
+	calls, ms          int
+	finish             string
 }
 
 func (e *usageError) Error() string { return e.err.Error() }
@@ -131,6 +134,16 @@ func UsageFromError(err error) (prompt, completion int) {
 		return ue.prompt, ue.completion
 	}
 	return 0, 0
+}
+
+// statsFromError returns the LLM calls, milliseconds and last finish reason an analysis spent
+// before it failed with err, or zeros when err carries none.
+func statsFromError(err error) (calls, ms int, finish string) {
+	var ue *usageError
+	if errors.As(err, &ue) {
+		return ue.calls, ue.ms, ue.finish
+	}
+	return 0, 0, ""
 }
 
 // callStats accumulates what the LLM calls of one analysis cost in time and attempts.
@@ -160,10 +173,12 @@ func (s *callStats) apply(out *AnalyzeResult) {
 }
 
 // FailedResult is the record of an attempt that produced no decision: the engine and model
-// that were tried, why it failed, and the tokens it consumed. Shared by the batch worker and
-// the single-result handler so both store failures the same way.
-func FailedResult(err error, deps AnalyzeDeps) *AnalyzeResult {
+// that were tried, why it failed, what it spent and whether the context carried this test's
+// history. Decide builds it for its own errors; callers use it only for an error raised before
+// Decide returned (a group deadline), passing the context they built, or AnalyzeContext{}.
+func FailedResult(err error, deps AnalyzeDeps, in AnalyzeContext) *AnalyzeResult {
 	p, c := UsageFromError(err)
+	calls, ms, finish := statsFromError(err)
 	res := &AnalyzeResult{
 		Engine: models.AnalysisEngineGenerative, ModelName: deps.NarrativeModel,
 		Verdict: models.VerdictUnknown, Confidence: models.ConfidenceLow,
@@ -171,6 +186,8 @@ func FailedResult(err error, deps AnalyzeDeps) *AnalyzeResult {
 		NarrativeStatus: models.NarrativeStatusUnavailable,
 		DecisionStatus:  models.DecisionStatusFailed, ErrorCategory: errCategory(err),
 		TokenUsagePrompt: p, TokenUsageCompletion: c,
+		LLMCalls: calls, LLMMs: ms, FinishReason: finish,
+		HistoryAvailable: in.HistoryAvailable(),
 	}
 	if errors.Is(err, ErrTypeSafeUnavailable) {
 		res.Engine, res.ModelName, res.PolicyVersion = models.AnalysisEngineTypeSafe, deps.DeciderModel, PolicyVersion
@@ -201,10 +218,16 @@ func Analyze(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*Analyze
 // or below the takeover threshold. A TypeSafe decision that should be explained comes back
 // NarrativeStatusPending, for Narrate; every other route comes back final.
 // The settings page draws these branches (frontend/src/utils/analysisFlow.js); change both together.
+// On an error it returns the storeable failed attempt with the error (spec §A1), or nil when the context was cancelled.
 func Decide(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeResult, error) {
-	res, _, err := decide(ctx, deps, in)
+	res, decisionMs, err := decide(ctx, deps, in)
 	if err != nil {
-		return nil, err
+		if abandoned(ctx) {
+			return nil, err // a cancelled job or a closed request stores nothing
+		}
+		failed := FailedResult(err, deps, in)
+		failed.DecisionMs = decisionMs
+		return failed, err
 	}
 	res.HistoryAvailable = in.HistoryAvailable()
 	return res, nil
@@ -273,6 +296,7 @@ func decide(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeR
 			slog.Warn("failure-analysis: LLM takeover failed, keeping TypeSafe's decision", "err", err)
 			escalationFailed = errCategory(err)
 			esc.TokenUsagePrompt, esc.TokenUsageCompletion = UsageFromError(err)
+			esc.LLMCalls, esc.LLMMs, esc.FinishReason = statsFromError(err)
 		}
 	}
 
@@ -408,9 +432,14 @@ func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext,
 		ResponseFormat: &llm.ResponseFormat{Type: "json_object"},
 	}
 	stats := &callStats{}
+	// spent wraps an error with what this exchange cost so far; the error text is unchanged.
+	spent := func(err error, prompt, completion int) error {
+		return &usageError{err: err, prompt: prompt, completion: completion,
+			calls: stats.calls, ms: stats.ms, finish: stats.finish}
+	}
 	resp, err := stats.chat(ctx, deps.Narrative, req)
 	if err != nil {
-		return nil, fmt.Errorf("llm call: %w", err)
+		return nil, spent(fmt.Errorf("llm call: %w", err), 0, 0)
 	}
 	parsed, parseErr := parseVerdict(resp.Content)
 	totalPrompt := tokens(resp, true)
@@ -422,14 +451,14 @@ func analyzeGenerative(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext,
 			llm.ChatMessage{Role: "user", Content: repairMessage(resp)})
 		resp2, err2 := stats.chat(ctx, deps.Narrative, retryReq)
 		if err2 != nil {
-			return nil, &usageError{err: fmt.Errorf("llm retry: %w", err2), prompt: totalPrompt, completion: totalCompletion}
+			return nil, spent(fmt.Errorf("llm retry: %w", err2), totalPrompt, totalCompletion)
 		}
 		totalPrompt += tokens(resp2, true)
 		totalCompletion += tokens(resp2, false)
 		parsed, parseErr = parseVerdict(resp2.Content)
 		if parseErr != nil && replyTruncated(resp2) {
 			// No complete answer came back: a failed call, not the model saying "unknown".
-			return nil, fmt.Errorf("llm call: %w", &usageError{err: ErrReplyTruncated, prompt: totalPrompt, completion: totalCompletion})
+			return nil, fmt.Errorf("llm call: %w", spent(ErrReplyTruncated, totalPrompt, totalCompletion))
 		}
 		if parseErr != nil {
 			// Two complete but unreadable replies: no decision. The row keeps the raw text for
