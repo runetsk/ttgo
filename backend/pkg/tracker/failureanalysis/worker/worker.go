@@ -38,6 +38,7 @@ type Broadcaster interface {
 	BroadcastRunAnalysisProgress(job *models.RunAnalysisJob, coveredFailures int)
 	BroadcastRunAnalysisCompleted(job *models.RunAnalysisJob, coveredFailures int)
 	BroadcastRunResultAnalysisCreated(a *models.RunResultAnalysis, testRunID string)
+	BroadcastRunResultAnalysisUpdated(a *models.RunResultAnalysis, testRunID string)
 }
 
 // Worker is a polling background job runner.
@@ -116,13 +117,6 @@ func (w *Worker) watchCancel(ctx context.Context, cancel context.CancelFunc, job
 	}
 }
 
-// groupOutcome is one group's finished analysis, handed from its goroutine to the writer.
-type groupOutcome struct {
-	group *failureanalysis.FailureGroup
-	res   *failureanalysis.AnalyzeResult
-	err   error
-}
-
 // parallelGroups bounds the stored setting; a row from before the setting reads as 0.
 func parallelGroups(n int) int {
 	switch {
@@ -134,16 +128,87 @@ func parallelGroups(n int) int {
 	return n
 }
 
-// analyzeGroups runs analyze for up to parallel groups at once, each under deadline, and
-// delivers every outcome on the returned channel, which is closed once
-// all started groups have finished. No group starts after the job is cancelled: the
-// feeder checks the job context and the stored status before each one. The channel is
-// buffered for every group, so a writer that stops reading early never blocks a sender.
+// groupPhase tags what a group goroutine hands the writer.
+type groupPhase string
+
+const (
+	phaseDecided  groupPhase = "decided"  // the decision (or a failed attempt), to be stored
+	phaseNarrated groupPhase = "narrated" // the explanation of a stored pending decision
+)
+
+// decidedAck is the writer's one answer to a decided outcome: the stored representative's id,
+// or why it could not be stored (the group then does not narrate).
+type decidedAck struct {
+	repID string
+	err   error
+}
+
+// groupOutcome is what a group goroutine hands the single writer.
+type groupOutcome struct {
+	phase groupPhase
+	group *failureanalysis.FailureGroup
+
+	// decided
+	res *failureanalysis.AnalyzeResult
+	err error
+	ack chan decidedAck // buffered (1); the writer answers every decided outcome exactly once
+
+	// narrated
+	repAnalysisID string
+	delta         failureanalysis.NarrationDelta
+}
+
+// groupFuncs are the two phases of one group's analysis.
+type groupFuncs struct {
+	decide  func(context.Context, *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, failureanalysis.AnalyzeContext, error)
+	narrate func(context.Context, failureanalysis.AnalyzeContext, *failureanalysis.AnalyzeResult) (failureanalysis.NarrationDelta, bool)
+}
+
+// errAbandoned acks a decided outcome the writer dropped because the job was cancelled.
+var errAbandoned = errors.New("abandoned: the job was cancelled")
+
+// cancelledNarrationReason is why a pending explanation was given up between or during phases.
+const cancelledNarrationReason = "the analysis was cancelled or timed out before the explanation was written"
+
+// narrationCancelled is the internal NarrationDelta.Reason P2's Narrate sets when its context
+// was cancelled mid-call (Analyze turns it into ctx.Err()). If P2 exported a constant for it,
+// use that instead of this literal.
+const narrationCancelled = "cancelled"
+
+// cancelledDelta settles a pending group whose narration was cut off, keeping what any call
+// it made cost (it was billed).
+func cancelledDelta(spent failureanalysis.NarrationDelta) failureanalysis.NarrationDelta {
+	return failureanalysis.NarrationDelta{
+		NarrativeStatus: models.NarrativeStatusUnavailable, Reason: cancelledNarrationReason,
+		Summary:      "AI narrative unavailable: " + cancelledNarrationReason,
+		PromptTokens: spent.PromptTokens, CompletionTokens: spent.CompletionTokens,
+		LLMMs: spent.LLMMs, LLMCalls: spent.LLMCalls,
+	}
+}
+
+// analyzeGroups runs up to parallel groups at once, each under its own deadline, in two phases:
+// decide, hand the decision to the writer, and — when it is pending an explanation and the
+// writer acked the stored representative — narrate and hand the explanation over too. No group
+// starts after the job is cancelled. The channel holds two outcomes per group and every send
+// also watches the job context, so no goroutine blocks after the writer stops; it is closed
+// once every started group has ended.
 func (w *Worker) analyzeGroups(jobCtx context.Context, cancelJob context.CancelFunc, jobID string,
-	groups []*failureanalysis.FailureGroup, parallel int, deadline time.Duration,
-	analyze func(context.Context, *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, error),
+	groups []*failureanalysis.FailureGroup, parallel int, deadline time.Duration, fns groupFuncs,
 ) <-chan groupOutcome {
-	out := make(chan groupOutcome, len(groups))
+	out := make(chan groupOutcome, 2*len(groups))
+	send := func(o groupOutcome) bool {
+		select { // room in the buffer: deliver even after a cancel, so a finished result is kept
+		case out <- o:
+			return true
+		default:
+		}
+		select {
+		case out <- o:
+			return true
+		case <-jobCtx.Done():
+			return false
+		}
+	}
 	go func() {
 		defer close(out)
 		slots := make(chan struct{}, parallel)
@@ -165,12 +230,128 @@ func (w *Worker) analyzeGroups(jobCtx context.Context, cancelJob context.CancelF
 				defer func() { <-slots }()
 				gctx, cancel := context.WithTimeout(jobCtx, deadline)
 				defer cancel()
-				res, err := analyze(gctx, g)
-				out <- groupOutcome{group: g, res: res, err: err}
+
+				res, actx, err := fns.decide(gctx, g)
+				ack := make(chan decidedAck, 1)
+				if !send(groupOutcome{phase: phaseDecided, group: g, res: res, err: err, ack: ack}) {
+					return
+				}
+				if err != nil || res == nil || res.NarrativeStatus != models.NarrativeStatusPending {
+					return
+				}
+				var reply decidedAck
+				select {
+				case reply = <-ack:
+				case <-gctx.Done():
+					return // the writer stopped or the group ran out of time; the job-end sweep settles the rows
+				}
+				if reply.err != nil {
+					return // the representative was not stored: nothing to explain
+				}
+				var delta failureanalysis.NarrationDelta
+				if gctx.Err() == nil {
+					d, ok := fns.narrate(gctx, actx, res)
+					if !ok {
+						return
+					}
+					delta = d
+				}
+				// Narrate reports a cut-off call with the internal Reason "cancelled"; it (and any
+				// non-ok delta once the group context ended) becomes a readable unavailable delta,
+				// applied now rather than left for the sweep, so live views settle immediately.
+				if delta.Reason == narrationCancelled || (gctx.Err() != nil && delta.NarrativeStatus != models.NarrativeStatusOK) {
+					delta = cancelledDelta(delta)
+				}
+				send(groupOutcome{phase: phaseNarrated, group: g, repAnalysisID: reply.repID, delta: delta})
 			}(g)
 		}
 	}()
 	return out
+}
+
+// jobWriter stores one job's outcomes. Only processOnce's goroutine uses it, so the store sees
+// a single writer.
+type jobWriter struct {
+	w        *Worker
+	deps     failureanalysis.JobDeps
+	runID    string
+	jobID    string
+	semantic failureanalysis.SemanticReport
+}
+
+// writeDecided stores a group's decision — the representative, then one clone per other
+// member, all with the decision's narrative status (pending while the explanation is written) —
+// records the decision's cost events and publishes each row. It returns the representative's
+// id; an error means it could not be stored and the group must not narrate.
+func (jw *jobWriter) writeDecided(g *failureanalysis.FailureGroup, res *failureanalysis.AnalyzeResult) (string, error) {
+	rep := g.Representative
+	jobID := jw.jobID
+	repRowIn := failureanalysis.AnalysisRowFrom(res, rep.ID)
+	repRowIn.JobID = &jobID
+	repRow, err := jw.w.store.CreateAnalysis(repRowIn)
+	// Clones below copy this answer and make no call, so only the representative bills.
+	jw.w.recordCosts(failureanalysis.DecisionCostEvents(res, jw.deps, failureanalysis.RefsFor(jw.runID, &jobID, repRow)))
+	if err != nil {
+		slog.Warn("failure-analysis: persist representative failed", "err", err, "result_id", rep.ID)
+		return "", err
+	}
+	if jw.w.bc != nil {
+		jw.w.bc.BroadcastRunResultAnalysisCreated(repRow, jw.runID)
+	}
+	for _, sib := range g.Members {
+		if sib.ID == rep.ID {
+			continue
+		}
+		groupKey, sourceID := g.Key, repRow.ID
+		clone := failureanalysis.AnalysisRowFrom(res, sib.ID)
+		clone.JobID = &jobID
+		clone.RawResponse = ""
+		clone.TypeSafeInputTokens = 0
+		clone.TokenUsagePrompt, clone.TokenUsageCompletion = 0, 0
+		clone.DecisionMs, clone.LLMMs, clone.LLMCalls, clone.FinishReason = 0, 0, 0, ""
+		clone.DedupGroupKey, clone.SourceAnalysisID = &groupKey, &sourceID
+		if p, ok := g.SemanticMembers[sib.ID]; ok {
+			pp := p
+			clone.DedupMethod, clone.DedupPSame = models.DedupMethodSemantic, &pp
+			clone.DedupModel, clone.DedupPolicyVersion = jw.semantic.Model, jw.semantic.PolicyVersion
+			clone.Rationale = "[Grouped semantically with representative analysis] " + res.Rationale
+		} else {
+			clone.DedupMethod = models.DedupMethodSignature
+			clone.Rationale = "[Grouped from representative analysis] " + res.Rationale
+		}
+		cloneRow, err := jw.w.store.CreateAnalysis(clone)
+		if err != nil {
+			slog.Warn("failure-analysis: persist clone failed", "err", err) // a clone never fails the ack
+			continue
+		}
+		if jw.w.bc != nil {
+			jw.w.bc.BroadcastRunResultAnalysisCreated(cloneRow, jw.runID)
+		}
+	}
+	return repRow.ID, nil
+}
+
+// writeNarrated applies a group's explanation to the representative and its clones in one
+// transaction and republishes every changed row. The call's cost is recorded whether or not
+// the apply wins: it was billed.
+func (jw *jobWriter) writeNarrated(repID string, d failureanalysis.NarrationDelta) {
+	jobID := jw.jobID
+	jw.w.recordCosts(failureanalysis.NarrationCostEvents(d, jw.deps,
+		failureanalysis.CostRefs{RunID: jw.runID, JobID: &jobID, AnalysisID: &repID}, models.AnalysisCostKindAnalysis))
+	changed, err := jw.w.store.ApplyNarration(repID, d)
+	if err != nil {
+		slog.Warn("failure-analysis: explanation not stored", "analysis_id", repID, "err", err)
+		return
+	}
+	if len(changed) == 0 {
+		slog.Info("failure-analysis: explanation arrived after its group was settled; not applied", "analysis_id", repID)
+		return
+	}
+	if jw.w.bc != nil {
+		for _, a := range changed {
+			jw.w.bc.BroadcastRunResultAnalysisUpdated(a, jw.runID)
+		}
+	}
 }
 
 // processOnce picks up at most one queued job and runs it to completion.
@@ -306,82 +487,54 @@ func (w *Worker) processOnce(ctx context.Context) error {
 	}
 	groups = groups[:cap]
 
-	// Groups are analyzed ParallelGroups at a time: the TypeSafe and LLM calls, which are
-	// nearly all of a job's time, overlap. Results are written here, on this goroutine only,
-	// in the order they finish, so the store sees one writer as before.
+	// Groups are analyzed ParallelGroups at a time in two phases: the decision is stored and
+	// published as soon as it exists, and a TypeSafe decision's explanation lands on the same
+	// rows afterwards. Outcomes are written here, on this goroutine only, so the store sees one
+	// writer as before.
 	analyzeDeps := deps.Analyze()
-	outcomes := w.analyzeGroups(jobCtx, cancelJob, job.ID, groups, parallelGroups(settings.ParallelGroups), jobGroupDeadline(deps),
-		func(gctx context.Context, g *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, error) {
+	jobID := job.ID
+	outcomes := w.analyzeGroups(jobCtx, cancelJob, jobID, groups, parallelGroups(settings.ParallelGroups), jobGroupDeadline(deps), groupFuncs{
+		decide: func(gctx context.Context, g *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, failureanalysis.AnalyzeContext, error) {
 			actx := failureanalysis.BuildContext(w.store, g.Representative, time.Now())
 			actx.RedactionEnabled = settings.RedactionEnabled
 			actx.PromptTemplate = settings.PromptTemplate
 			actx.ProviderModel = deps.NarrativeModel
-			return failureanalysis.Analyze(gctx, analyzeDeps, actx)
-		})
+			actx.GroupMembers = failureanalysis.GroupMemberErrors(g.Representative, g.Members)
+			res, err := failureanalysis.Decide(gctx, analyzeDeps, actx)
+			if err != nil && res == nil {
+				res = failureanalysis.FailedResult(err, analyzeDeps, actx)
+			}
+			return res, actx, err
+		},
+		narrate: func(gctx context.Context, actx failureanalysis.AnalyzeContext, decided *failureanalysis.AnalyzeResult) (failureanalysis.NarrationDelta, bool) {
+			return failureanalysis.Narrate(gctx, analyzeDeps, actx, decided)
+		},
+	})
 
-	jobID := job.ID
+	jw := &jobWriter{w: w, deps: deps, runID: job.TestRunID, jobID: jobID, semantic: semanticReport}
 	covered, done := 0, 0
 	for out := range outcomes {
-		g, res, err := out.group, out.res, out.err
-		rep := g.Representative
-		if err != nil && ctx.Err() != nil {
-			return ctx.Err()
-		}
-		if err != nil && cancelled() {
-			continue // abandoned by the cancel; a result that came back before it is still stored
-		}
-		if err != nil {
-			slog.Warn("failure-analysis: analysis attempt failed", "err", err, "result_id", rep.ID)
-			if res == nil { // an error before Decide built its failed result (group deadline); Part 3 passes the group's context
-				res = failureanalysis.FailedResult(err, analyzeDeps, failureanalysis.AnalyzeContext{})
-			}
-		}
-
-		repRowIn := failureanalysis.AnalysisRowFrom(res, rep.ID)
-		repRowIn.JobID = &jobID
-		repRow, err := w.store.CreateAnalysis(repRowIn)
-		// Clones below copy this answer and make no call, so only the representative bills.
-		w.recordCosts(failureanalysis.CostEvents(models.AnalysisCostKindAnalysis, res, deps,
-			failureanalysis.RefsFor(job.TestRunID, &jobID, repRow)))
-		if err != nil {
-			slog.Warn("failure-analysis: persist representative failed", "err", err)
+		if out.phase == phaseNarrated {
+			jw.writeNarrated(out.repAnalysisID, out.delta)
 			continue
 		}
-		if w.bc != nil {
-			w.bc.BroadcastRunResultAnalysisCreated(repRow, job.TestRunID)
+		g := out.group
+		if out.err != nil && ctx.Err() != nil {
+			out.ack <- decidedAck{err: ctx.Err()}
+			return ctx.Err()
 		}
-
-		for _, sib := range g.Members {
-			if sib.ID == rep.ID {
-				continue
-			}
-			groupKey, sourceID := g.Key, repRow.ID
-			clone := failureanalysis.AnalysisRowFrom(res, sib.ID)
-			clone.JobID = &jobID
-			clone.RawResponse = ""
-			clone.TypeSafeInputTokens = 0
-			clone.TokenUsagePrompt, clone.TokenUsageCompletion = 0, 0
-			clone.DecisionMs, clone.LLMMs, clone.LLMCalls, clone.FinishReason = 0, 0, 0, ""
-			clone.DedupGroupKey, clone.SourceAnalysisID = &groupKey, &sourceID
-			if p, ok := g.SemanticMembers[sib.ID]; ok {
-				pp := p
-				clone.DedupMethod, clone.DedupPSame = models.DedupMethodSemantic, &pp
-				clone.DedupModel, clone.DedupPolicyVersion = semanticReport.Model, semanticReport.PolicyVersion
-				clone.Rationale = "[Grouped semantically with representative analysis] " + res.Rationale
-			} else {
-				clone.DedupMethod = models.DedupMethodSignature
-				clone.Rationale = "[Grouped from representative analysis] " + res.Rationale
-			}
-			cloneRow, err := w.store.CreateAnalysis(clone)
-			if err != nil {
-				slog.Warn("failure-analysis: persist clone failed", "err", err)
-				continue
-			}
-			if w.bc != nil {
-				w.bc.BroadcastRunResultAnalysisCreated(cloneRow, job.TestRunID)
-			}
+		if out.err != nil && cancelled() {
+			out.ack <- decidedAck{err: errAbandoned}
+			continue // abandoned by the cancel; a result that came back before it is still stored
 		}
-
+		if out.err != nil {
+			slog.Warn("failure-analysis: analysis attempt failed", "err", out.err, "result_id", g.Representative.ID)
+		}
+		repID, err := jw.writeDecided(g, out.res)
+		out.ack <- decidedAck{repID: repID, err: err}
+		if err != nil {
+			continue
+		}
 		covered += len(g.Members)
 		done++
 		if err := w.store.UpdateAnalysisJobProgress(job.ID, done, unique, cap, total); err != nil {
