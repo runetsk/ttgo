@@ -4870,7 +4870,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true.",
+                "description": "Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true. A failed LLM call leaves the explanation unavailable with its reason (200).",
                 "produces": [
                     "application/json"
                 ],
@@ -10733,6 +10733,10 @@ const docTemplate = `{
                 },
                 "model_name": {
                     "type": "string"
+                },
+                "narrative_revision": {
+                    "description": "NarrativeRevision counts writes to this row's explanation (worker narration, Explain\nclaims and applies, sweeps). Live updates of the same version replace the shown row only\nwhen their revision is not older, so a stale \"pending\" never hides a written explanation.",
+                    "type": "integer"
                 },
                 "narrative_status": {
                     "type": "string"
