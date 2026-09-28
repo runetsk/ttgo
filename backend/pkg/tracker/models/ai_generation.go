@@ -132,13 +132,36 @@ const (
 	MinHedgeAfterSeconds         = 3
 )
 
+// ValidateLLMLatency checks a call-timeout / hedge-delay pair; the error text is the settings
+// API's 400 message.
+func ValidateLLMLatency(callTimeoutSeconds, hedgeAfterSeconds int) error {
+	if callTimeoutSeconds < MinLLMCallTimeoutSeconds || callTimeoutSeconds > MaxLLMCallTimeoutSeconds {
+		return fmt.Errorf("llm_call_timeout_seconds must be between %d and %d", MinLLMCallTimeoutSeconds, MaxLLMCallTimeoutSeconds)
+	}
+	if hedgeAfterSeconds == 0 {
+		return nil
+	}
+	if hedgeAfterSeconds < MinHedgeAfterSeconds {
+		return fmt.Errorf("hedge_after_seconds must be 0 (off) or at least %d", MinHedgeAfterSeconds)
+	}
+	if hedgeAfterSeconds >= callTimeoutSeconds {
+		return fmt.Errorf("hedge_after_seconds must be less than llm_call_timeout_seconds (%d)", callTimeoutSeconds)
+	}
+	return nil
+}
+
 // AIFailureAnalysisSettings stores admin configuration for the AI failure-analysis feature.
 // Singleton pattern — single row with fixed ID "singleton".
 type AIFailureAnalysisSettings struct {
-	ID                    string    `json:"id"                      gorm:"primaryKey"` // always "singleton"
-	EnabledOnCompletion   bool      `json:"enabled_on_completion"   gorm:"not null;default:false"`
-	MaxAnalysesPerRun     int       `json:"max_analyses_per_run"    gorm:"not null;default:20"`
-	ParallelGroups        int       `json:"parallel_groups"         gorm:"not null;default:4"` // failure groups analyzed at once by a job, 1..MaxParallelGroups
+	ID                  string `json:"id"                      gorm:"primaryKey"` // always "singleton"
+	EnabledOnCompletion bool   `json:"enabled_on_completion"   gorm:"not null;default:false"`
+	MaxAnalysesPerRun   int    `json:"max_analyses_per_run"    gorm:"not null;default:20"`
+	ParallelGroups      int    `json:"parallel_groups"         gorm:"not null;default:4"` // failure groups analyzed at once by a job, 1..MaxParallelGroups
+	// LLMCallTimeoutSeconds bounds each failure-analysis LLM request (10–120, default 45); a call
+	// cut by it is retried once. HedgeAfterSeconds (0 = off, else ≥ 3 and below the timeout)
+	// sends an identical second request when the first has not answered by then.
+	LLMCallTimeoutSeconds int       `json:"llm_call_timeout_seconds" gorm:"column:llm_call_timeout_seconds;not null;default:45"`
+	HedgeAfterSeconds     int       `json:"hedge_after_seconds"      gorm:"column:hedge_after_seconds;not null;default:0"`
 	DedupEnabled          bool      `json:"dedup_enabled"           gorm:"not null;default:true"`
 	RedactionEnabled      bool      `json:"redaction_enabled"       gorm:"not null;default:true"`
 	PromptTemplate        string    `json:"prompt_template"         gorm:"type:text;not null"`

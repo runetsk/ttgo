@@ -7572,6 +7572,75 @@ const docTemplate = `{
                 }
             }
         },
+        "/settings/ai-failure-analysis": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "The singleton settings: automatic analysis, caps, parallel groups, dedup, redaction, prompt template, and the LLM latency settings llm_call_timeout_seconds (10–120, default 45) and hedge_after_seconds (0 = off).",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "Get failure-analysis settings",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.AIFailureAnalysisSettings"
+                        }
+                    }
+                }
+            },
+            "put": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). 400 with the reason when a value is out of range.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "Update failure-analysis settings",
+                "parameters": [
+                    {
+                        "description": "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_models.AIFailureAnalysisSettings"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/settings/confluence": {
             "get": {
                 "security": [
@@ -9504,6 +9573,50 @@ const docTemplate = `{
                 },
                 "per_request_usd": {
                     "type": "number"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_pkg_tracker_models.AIFailureAnalysisSettings": {
+            "type": "object",
+            "properties": {
+                "created_at": {
+                    "type": "string"
+                },
+                "dedup_enabled": {
+                    "type": "boolean"
+                },
+                "default_prompt_template": {
+                    "type": "string"
+                },
+                "enabled_on_completion": {
+                    "type": "boolean"
+                },
+                "hedge_after_seconds": {
+                    "type": "integer"
+                },
+                "id": {
+                    "description": "always \"singleton\"",
+                    "type": "string"
+                },
+                "llm_call_timeout_seconds": {
+                    "description": "LLMCallTimeoutSeconds bounds each failure-analysis LLM request (10–120, default 45); a call\ncut by it is retried once. HedgeAfterSeconds (0 = off, else ≥ 3 and below the timeout)\nsends an identical second request when the first has not answered by then.",
+                    "type": "integer"
+                },
+                "max_analyses_per_run": {
+                    "type": "integer"
+                },
+                "parallel_groups": {
+                    "description": "failure groups analyzed at once by a job, 1..MaxParallelGroups",
+                    "type": "integer"
+                },
+                "prompt_template": {
+                    "type": "string"
+                },
+                "redaction_enabled": {
+                    "type": "boolean"
                 },
                 "updated_at": {
                     "type": "string"

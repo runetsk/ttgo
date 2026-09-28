@@ -117,3 +117,30 @@ func TestFailureAnalysisSettings_ParallelGroups(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 6, got.ParallelGroups, "0 keeps the stored value")
 }
+
+func TestFailureAnalysisSettings_LLMLatency(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	require.Equal(t, models.DefaultLLMCallTimeoutSeconds, got.LLMCallTimeoutSeconds, "a new install times calls out at 45 s")
+	require.Equal(t, 0, got.HedgeAfterSeconds, "hedging is off by default")
+
+	base := models.AIFailureAnalysisSettings{MaxAnalysesPerRun: 20, DedupEnabled: true, RedactionEnabled: true, PromptTemplate: "p"}
+	tuned := base
+	tuned.LLMCallTimeoutSeconds, tuned.HedgeAfterSeconds = 60, 10
+	got, err = s.UpdateFailureAnalysisSettings(&tuned)
+	require.NoError(t, err)
+	require.Equal(t, 60, got.LLMCallTimeoutSeconds)
+	require.Equal(t, 10, got.HedgeAfterSeconds)
+
+	got, err = s.UpdateFailureAnalysisSettings(&base) // a caller that predates the settings
+	require.NoError(t, err)
+	require.Equal(t, 60, got.LLMCallTimeoutSeconds, "0 keeps the stored pair")
+	require.Equal(t, 10, got.HedgeAfterSeconds)
+
+	off := base
+	off.LLMCallTimeoutSeconds, off.HedgeAfterSeconds = 60, 0
+	got, err = s.UpdateFailureAnalysisSettings(&off)
+	require.NoError(t, err)
+	require.Equal(t, 0, got.HedgeAfterSeconds, "a set timeout writes the hedge too, so it can be switched off")
+}

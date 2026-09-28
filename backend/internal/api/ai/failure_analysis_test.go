@@ -801,3 +801,56 @@ func TestFailureAnalysisSettings_ParallelGroups(t *testing.T) {
 	require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
 	require.Equal(t, 2, got.ParallelGroups, "omitting the field keeps the stored value")
 }
+
+func TestFailureAnalysisSettings_LLMLatency(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	put := func(extra map[string]interface{}) *httptest.ResponseRecorder {
+		b := map[string]interface{}{
+			"enabled_on_completion": false, "max_analyses_per_run": 20, "dedup_enabled": true,
+			"redaction_enabled": true, "prompt_template": "x",
+		}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return doRequest(env, "PUT", "/api/settings/ai-failure-analysis", b)
+	}
+	decode := func(rr *httptest.ResponseRecorder) models.AIFailureAnalysisSettings {
+		t.Helper()
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var got models.AIFailureAnalysisSettings
+		require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+		return got
+	}
+
+	got := decode(doRequest(env, "GET", "/api/settings/ai-failure-analysis", nil))
+	require.Equal(t, 45, got.LLMCallTimeoutSeconds)
+	require.Equal(t, 0, got.HedgeAfterSeconds)
+
+	for _, bad := range []map[string]interface{}{
+		{"llm_call_timeout_seconds": 9},
+		{"llm_call_timeout_seconds": 121},
+		{"hedge_after_seconds": 2},
+		{"hedge_after_seconds": -1},
+		{"hedge_after_seconds": 45}, // not below the stored 45 s timeout
+		{"llm_call_timeout_seconds": 20, "hedge_after_seconds": 20},
+	} {
+		rr := put(bad)
+		require.Equal(t, http.StatusBadRequest, rr.Code, "%v: %s", bad, rr.Body.String())
+	}
+
+	got = decode(put(map[string]interface{}{"llm_call_timeout_seconds": 60, "hedge_after_seconds": 10}))
+	require.Equal(t, 60, got.LLMCallTimeoutSeconds)
+	require.Equal(t, 10, got.HedgeAfterSeconds)
+
+	got = decode(put(nil))
+	require.Equal(t, 60, got.LLMCallTimeoutSeconds, "omitting the fields keeps the stored values")
+	require.Equal(t, 10, got.HedgeAfterSeconds)
+
+	rr := put(map[string]interface{}{"llm_call_timeout_seconds": 10})
+	require.Equal(t, http.StatusBadRequest, rr.Code, "the stored 10 s hedge would no longer be below the timeout")
+
+	got = decode(put(map[string]interface{}{"hedge_after_seconds": 0}))
+	require.Equal(t, 0, got.HedgeAfterSeconds, "hedging switched off")
+	require.Equal(t, 60, got.LLMCallTimeoutSeconds)
+}

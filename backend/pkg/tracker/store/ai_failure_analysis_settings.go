@@ -23,6 +23,7 @@ func (s *Store) seedFailureAnalysisSettings() error {
 			EnabledOnCompletion:   false,
 			MaxAnalysesPerRun:     20,
 			ParallelGroups:        models.DefaultParallelGroups,
+			LLMCallTimeoutSeconds: models.DefaultLLMCallTimeoutSeconds,
 			DedupEnabled:          true,
 			RedactionEnabled:      true,
 			PromptTemplate:        failureanalysis.DefaultPromptTemplate,
@@ -64,6 +65,7 @@ func (s *Store) GetFailureAnalysisSettings() (*models.AIFailureAnalysisSettings,
 
 // UpdateFailureAnalysisSettings overwrites mutable fields. DefaultPromptTemplate is immutable.
 // ParallelGroups 0 means "keep the current value", so callers that predate it do not reset it.
+// LLMCallTimeoutSeconds 0 keeps both latency settings.
 func (s *Store) UpdateFailureAnalysisSettings(in *models.AIFailureAnalysisSettings) (*models.AIFailureAnalysisSettings, error) {
 	updates := map[string]interface{}{
 		"enabled_on_completion": in.EnabledOnCompletion,
@@ -75,6 +77,13 @@ func (s *Store) UpdateFailureAnalysisSettings(in *models.AIFailureAnalysisSettin
 	}
 	if in.ParallelGroups > 0 {
 		updates["parallel_groups"] = in.ParallelGroups
+	}
+	// The latency pair is written together: a caller that sets the timeout also says whether
+	// hedging is on (0 = off). Timeout 0 means "keep both", so callers that predate them do not
+	// reset them.
+	if in.LLMCallTimeoutSeconds > 0 {
+		updates["llm_call_timeout_seconds"] = in.LLMCallTimeoutSeconds
+		updates["hedge_after_seconds"] = in.HedgeAfterSeconds
 	}
 	if err := s.db.Model(&models.AIFailureAnalysisSettings{}).
 		Where("id = ?", failureAnalysisSettingsID).

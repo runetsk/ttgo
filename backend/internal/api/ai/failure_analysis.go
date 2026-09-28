@@ -15,6 +15,15 @@ import (
 	"ttgo/pkg/tracker/store"
 )
 
+// GetFailureAnalysisSettings returns the failure-analysis settings.
+//
+// @Summary      Get failure-analysis settings
+// @Description  The singleton settings: automatic analysis, caps, parallel groups, dedup, redaction, prompt template, and the LLM latency settings llm_call_timeout_seconds (10–120, default 45) and hedge_after_seconds (0 = off).
+// @Tags         ai-failure-analysis
+// @Produce      json
+// @Success      200  {object}  models.AIFailureAnalysisSettings
+// @Router       /settings/ai-failure-analysis [get]
+// @Security     BearerAuth
 func (h *Handler) GetFailureAnalysisSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := h.store.GetFailureAnalysisSettings()
 	if err != nil {
@@ -24,14 +33,28 @@ func (h *Handler) GetFailureAnalysisSettings(w http.ResponseWriter, r *http.Requ
 	httpx.JSON(w, http.StatusOK, s)
 }
 
+// UpdateFailureAnalysisSettings replaces the failure-analysis settings.
+//
+// @Summary      Update failure-analysis settings
+// @Description  parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). 400 with the reason when a value is out of range.
+// @Tags         ai-failure-analysis
+// @Accept       json
+// @Produce      json
+// @Param        body  body  object  true  "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds"
+// @Success      200  {object}  models.AIFailureAnalysisSettings
+// @Failure      400  {object}  map[string]interface{}
+// @Router       /settings/ai-failure-analysis [put]
+// @Security     BearerAuth
 func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		EnabledOnCompletion bool   `json:"enabled_on_completion"`
-		MaxAnalysesPerRun   int    `json:"max_analyses_per_run"`
-		ParallelGroups      *int   `json:"parallel_groups"` // omitted = keep the current value
-		DedupEnabled        bool   `json:"dedup_enabled"`
-		RedactionEnabled    bool   `json:"redaction_enabled"`
-		PromptTemplate      string `json:"prompt_template"`
+		EnabledOnCompletion   bool   `json:"enabled_on_completion"`
+		MaxAnalysesPerRun     int    `json:"max_analyses_per_run"`
+		ParallelGroups        *int   `json:"parallel_groups"` // omitted = keep the current value
+		DedupEnabled          bool   `json:"dedup_enabled"`
+		RedactionEnabled      bool   `json:"redaction_enabled"`
+		PromptTemplate        string `json:"prompt_template"`
+		LLMCallTimeoutSeconds *int   `json:"llm_call_timeout_seconds"` // omitted = keep
+		HedgeAfterSeconds     *int   `json:"hedge_after_seconds"`      // omitted = keep; 0 = off
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -53,13 +76,34 @@ func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.R
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "prompt_template is required"})
 		return
 	}
+	current, err := h.store.GetFailureAnalysisSettings()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	callTimeout, hedgeAfter := current.LLMCallTimeoutSeconds, current.HedgeAfterSeconds
+	if callTimeout == 0 {
+		callTimeout = models.DefaultLLMCallTimeoutSeconds
+	}
+	if req.LLMCallTimeoutSeconds != nil {
+		callTimeout = *req.LLMCallTimeoutSeconds
+	}
+	if req.HedgeAfterSeconds != nil {
+		hedgeAfter = *req.HedgeAfterSeconds
+	}
+	if err := models.ValidateLLMLatency(callTimeout, hedgeAfter); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	updated, err := h.store.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{
-		EnabledOnCompletion: req.EnabledOnCompletion,
-		MaxAnalysesPerRun:   req.MaxAnalysesPerRun,
-		ParallelGroups:      parallel,
-		DedupEnabled:        req.DedupEnabled,
-		RedactionEnabled:    req.RedactionEnabled,
-		PromptTemplate:      req.PromptTemplate,
+		EnabledOnCompletion:   req.EnabledOnCompletion,
+		MaxAnalysesPerRun:     req.MaxAnalysesPerRun,
+		ParallelGroups:        parallel,
+		DedupEnabled:          req.DedupEnabled,
+		RedactionEnabled:      req.RedactionEnabled,
+		PromptTemplate:        req.PromptTemplate,
+		LLMCallTimeoutSeconds: callTimeout,
+		HedgeAfterSeconds:     hedgeAfter,
 	})
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
