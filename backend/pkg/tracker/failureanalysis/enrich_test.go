@@ -19,6 +19,16 @@ type mockSource struct {
 	history    []*models.RunResult
 	historyErr error
 
+	resultDefects    map[string][]models.Defect
+	resultDefectsErr error
+	resultDefectIDs  []string
+	examples         []TriageExample
+	examplesErr      error
+	exampleCalls     int
+	gotExampleFilter TriageExampleFilter
+	categories       []string
+	categoriesErr    error
+
 	// captured call state
 	defectsCalls int
 	reqsCalls    int
@@ -90,7 +100,7 @@ func TestBuildContextMapsAllSlots(t *testing.T) {
 		},
 	}
 
-	ctx := BuildContext(src, result, now)
+	ctx := BuildContext(src, result, now, 0)
 
 	// Env fields copied straight off the RunResult.
 	require.Same(t, result, ctx.Result)
@@ -113,7 +123,7 @@ func TestBuildContextMapsAllSlots(t *testing.T) {
 	// Requirements: Identifier -> Key, Title -> Title.
 	require.Equal(t, []LinkedRequirement{{Key: "REQ-1", Title: "Must be able to login"}}, ctx.LinkedRequirements)
 
-	// History rows carry DefectType; DefectKey is empty in v1.
+	// History rows carry DefectType; a row with no result-scoped defect has no DefectKey.
 	require.Len(t, ctx.SimilarFailures, 3)
 	require.Equal(t, "FAIL", ctx.SimilarFailures[0].Status)
 	require.Equal(t, "boom1", ctx.SimilarFailures[0].ErrorMessage)
@@ -150,7 +160,7 @@ func TestBuildContextSourceErrorsAreBestEffort(t *testing.T) {
 	}
 
 	// Must not panic and must not lose the free (query-less) slots.
-	ctx := BuildContext(src, result, now)
+	ctx := BuildContext(src, result, now, 0)
 
 	require.Nil(t, ctx.LinkedDefects)
 	require.Nil(t, ctx.LinkedRequirements)
@@ -177,7 +187,7 @@ func TestBuildContextNilTestCaseIDSkipsQueries(t *testing.T) {
 
 	// nil TestCaseID (deleted test case): env + steps only, no cross-entity queries.
 	result := &models.RunResult{ID: "rr1", TestRunID: "run1", TestCaseID: nil, Environment: "e2e", Steps: steps}
-	ctx := BuildContext(src, result, now)
+	ctx := BuildContext(src, result, now, 0)
 
 	require.Equal(t, "e2e", ctx.Env)
 	require.Len(t, ctx.Steps, 1)
@@ -191,7 +201,7 @@ func TestBuildContextNilTestCaseIDSkipsQueries(t *testing.T) {
 
 	// Empty-string TestCaseID takes the same skip path.
 	result.TestCaseID = strptr("")
-	ctx = BuildContext(src, result, now)
+	ctx = BuildContext(src, result, now, 0)
 	require.Nil(t, ctx.LinkedDefects)
 	require.Zero(t, src.defectsCalls)
 	require.Zero(t, src.historyCalls)
@@ -203,12 +213,12 @@ func TestBuildContextMalformedStepsJSON(t *testing.T) {
 
 	// Malformed JSON -> nil steps, never a panic.
 	bad := &models.RunResult{ID: "rr1", TestCaseID: nil, Steps: json.RawMessage(`[{"action": bad`)}
-	ctx := BuildContext(src, bad, now)
+	ctx := BuildContext(src, bad, now, 0)
 	require.Nil(t, ctx.Steps)
 
 	// Absent / empty steps also yield nil.
-	require.Nil(t, BuildContext(src, &models.RunResult{ID: "rr2"}, now).Steps)
-	require.Nil(t, BuildContext(src, &models.RunResult{ID: "rr3", Steps: json.RawMessage(`[]`)}, now).Steps)
+	require.Nil(t, BuildContext(src, &models.RunResult{ID: "rr2"}, now, 0).Steps)
+	require.Nil(t, BuildContext(src, &models.RunResult{ID: "rr3", Steps: json.RawMessage(`[]`)}, now, 0).Steps)
 }
 
 func TestBuildContextStepOrderSynthesizedAndRollupEmptyWithoutLabels(t *testing.T) {
@@ -228,7 +238,7 @@ func TestBuildContextStepOrderSynthesizedAndRollupEmptyWithoutLabels(t *testing.
 	}
 	result := &models.RunResult{ID: "rr1", TestRunID: "run1", TestCaseID: strptr("tc1"), Steps: steps}
 
-	ctx := BuildContext(src, result, now)
+	ctx := BuildContext(src, result, now, 0)
 	require.Equal(t, 1, ctx.Steps[0].Order)
 	require.Equal(t, 2, ctx.Steps[1].Order)
 
@@ -249,7 +259,7 @@ func TestBuildContextStepOrderZeroBasedRenderedOneBased(t *testing.T) {
 	require.NoError(t, err)
 
 	result := &models.RunResult{ID: "rr1", TestRunID: "run1", TestCaseID: strptr("tc1"), Steps: steps}
-	ctx := BuildContext(&mockSource{}, result, now)
+	ctx := BuildContext(&mockSource{}, result, now, 0)
 
 	require.Len(t, ctx.Steps, 3)
 	require.Equal(t, 1, ctx.Steps[0].Order)
@@ -276,13 +286,101 @@ func TestBuildContextHistoryEndsWhenTheResultRan(t *testing.T) {
 	ran := time.Date(2026, 9, 21, 3, 0, 0, 0, time.UTC)
 
 	src := &mockSource{}
-	BuildContext(src, &models.RunResult{TestRunID: "old-run", TestCaseID: strptr("tc1"), StartTime: ran, CreatedAt: ran.Add(time.Minute)}, now)
+	BuildContext(src, &models.RunResult{TestRunID: "old-run", TestCaseID: strptr("tc1"), StartTime: ran, CreatedAt: ran.Add(time.Minute)}, now, 0)
 	require.True(t, src.gotBefore.Equal(ran), "analyzing an older run must not see what came after it: %v", src.gotBefore)
 	require.True(t, src.gotSince.Equal(ran.AddDate(0, 0, -enrichHistoryDays)), "the 30-day lookback counts back from the result")
 
 	// Recorded without timing (a manual result): when its row was written.
 	written := time.Date(2026, 9, 20, 9, 30, 0, 0, time.UTC)
-	BuildContext(src, &models.RunResult{TestRunID: "manual-run", TestCaseID: strptr("tc1"), CreatedAt: written}, now)
+	BuildContext(src, &models.RunResult{TestRunID: "manual-run", TestCaseID: strptr("tc1"), CreatedAt: written}, now, 0)
 	require.True(t, src.gotBefore.Equal(written), "%v", src.gotBefore)
 	require.True(t, src.gotSince.Equal(written.AddDate(0, 0, -enrichHistoryDays)))
+}
+
+func TestBuildContextDefectKeyPerHistoryRow(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	src := &mockSource{
+		history: []*models.RunResult{
+			{ID: "h1", StartTime: now.Add(-1 * time.Hour), Status: models.StatusFail, DefectType: "product_bug"},
+			{ID: "h2", StartTime: now.Add(-2 * time.Hour), Status: models.StatusFail, DefectType: "product_bug"},
+			{ID: "h3", StartTime: now.Add(-3 * time.Hour), Status: models.StatusFail},
+		},
+		resultDefects: map[string][]models.Defect{
+			"h1": {{ID: "d-newest-0001", ExternalKey: "JIRA-9"}, {ID: "d-older-0002", ExternalKey: "JIRA-1"}},
+			"h2": {{ID: "abcdefghijkl"}},
+		},
+	}
+	ctx := BuildContext(src, &models.RunResult{ID: "rr", TestRunID: "run", TestCaseID: strptr("tc1")}, now, 0)
+	require.Len(t, ctx.SimilarFailures, 3)
+	require.Equal(t, "JIRA-9", ctx.SimilarFailures[0].DefectKey, "the first result-scoped defect (most recently linked)")
+	require.Equal(t, "abcdefgh", ctx.SimilarFailures[1].DefectKey, "no external key: the short id")
+	require.Equal(t, "", ctx.SimilarFailures[2].DefectKey, "no defect on that result")
+	require.Equal(t, []string{"h1", "h2", "h3"}, src.resultDefectIDs)
+
+	src.resultDefectsErr = errContext("links down")
+	ctx = BuildContext(src, &models.RunResult{ID: "rr", TestRunID: "run", TestCaseID: strptr("tc1")}, now, 0)
+	require.Len(t, ctx.SimilarFailures, 3, "a failed key lookup keeps the history row")
+	require.Equal(t, "", ctx.SimilarFailures[0].DefectKey)
+}
+
+func TestBuildContextExamples(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	ran := time.Date(2026, 9, 21, 10, 0, 0, 0, time.FixedZone("EEST", 3*3600))
+	result := &models.RunResult{ID: "rr", TestRunID: "run-1", TestCaseID: strptr("tc1"), FailureType: "timeout", StartTime: ran}
+
+	src := &mockSource{examples: []TriageExample{{ResultID: "x1", ErrorMessage: "boom"}}}
+	ctx := BuildContext(src, result, now, 4)
+	require.Equal(t, 1, src.exampleCalls)
+	f := src.gotExampleFilter
+	require.Equal(t, "tc1", f.TestCaseID)
+	require.Equal(t, "timeout", f.FailureType)
+	require.Equal(t, "run-1", f.ExcludeRunID)
+	require.Equal(t, 4, f.Limit)
+	require.True(t, f.Before.Equal(ran), "examples end when the analyzed failure happened: %v", f.Before)
+	require.Equal(t, time.UTC, f.Before.Location(), "the anchor is passed as UTC")
+	require.True(t, f.Since.Equal(ran.AddDate(0, 0, -ExampleWindowDays)))
+	require.Equal(t, time.UTC, f.Since.Location())
+	require.Equal(t, src.examples, ctx.Examples)
+
+	off := &mockSource{}
+	require.Nil(t, BuildContext(off, result, now, 0).Examples)
+	require.Zero(t, off.exampleCalls, "0 = off: no query")
+
+	BuildContext(off, result, now, 50)
+	require.Equal(t, models.MaxFewShotExamples, off.gotExampleFilter.Limit, "the limit is clamped to the maximum")
+
+	// A deleted test case still gets examples from other tests, with no test-case preference.
+	orphan := &mockSource{examples: []TriageExample{{ResultID: "x2"}}}
+	ctx = BuildContext(orphan, &models.RunResult{ID: "rr", TestRunID: "run-1", FailureType: "timeout", StartTime: ran}, now, 4)
+	require.Equal(t, "", orphan.gotExampleFilter.TestCaseID)
+	require.Len(t, ctx.Examples, 1)
+	require.Zero(t, orphan.defectsCalls, "the test-case queries are still skipped")
+
+	failing := &mockSource{examplesErr: errContext("db down")}
+	require.Nil(t, BuildContext(failing, result, now, 4).Examples, "a failed lookup leaves the slot empty")
+}
+
+func TestBuildContextCategories(t *testing.T) {
+	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
+	result := &models.RunResult{ID: "rr", TestRunID: "run", TestCaseID: strptr("tc1")}
+	src := &mockSource{categories: []string{"Checkout", "Smoke"}}
+	require.Equal(t, "Checkout; Smoke", BuildContext(src, result, now, 0).Categories)
+
+	src.categoriesErr = errContext("db down")
+	require.Equal(t, "", BuildContext(src, result, now, 0).Categories)
+}
+
+func (m *mockSource) ListDefectsByResult(resultID string) ([]models.Defect, error) {
+	m.resultDefectIDs = append(m.resultDefectIDs, resultID)
+	return m.resultDefects[resultID], m.resultDefectsErr
+}
+
+func (m *mockSource) ListTriageExamples(f TriageExampleFilter) ([]TriageExample, error) {
+	m.exampleCalls++
+	m.gotExampleFilter = f
+	return m.examples, m.examplesErr
+}
+
+func (m *mockSource) ListCategoryNamesByTestCase(string) ([]string, error) {
+	return m.categories, m.categoriesErr
 }

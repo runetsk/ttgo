@@ -55,6 +55,9 @@ type JobDeps struct {
 	NoLLMFallback        bool
 	LLMUnavailableReason string
 	Semantic             *SemanticDeps
+	// FewShotExamples is how many past triage decisions accompany each failure (0 = off), from the
+	// failure-analysis settings at resolve time. Callers pass it to BuildContext.
+	FewShotExamples int
 	// Pricing is what this job's calls cost, captured when the dependencies were resolved.
 	Pricing Pricing
 	// TypeSafeTimeout and LLMCallTimeout are the per-call timeouts this job runs with (0 = that

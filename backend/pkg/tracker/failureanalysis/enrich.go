@@ -21,8 +21,11 @@ import (
 // match the store methods exactly (value vs pointer in params and returns).
 type EnrichmentSource interface {
 	ListDefectsByTestCase(string) ([]models.Defect, error)
+	ListDefectsByResult(string) ([]models.Defect, error)
 	ListRequirementsByTestCase(string) ([]*models.Requirement, error)
 	ListRecentFailuresByTestCase(string, time.Time, time.Time, int, string) ([]*models.RunResult, error)
+	ListTriageExamples(TriageExampleFilter) ([]TriageExample, error)
+	ListCategoryNamesByTestCase(string) ([]string, error)
 }
 
 // Enrichment window/limits for the historical-failure lookup.
@@ -52,14 +55,18 @@ type stepDTO struct {
 // query logs a warning and leaves that slot empty but never fails the build —
 // BuildContext never returns an error. Env fields and steps come straight off
 // the RunResult (no query); a result with a nil/empty TestCaseID (deleted test
-// case) still gets those, and the three cross-entity queries are skipped.
+// case) still gets those and the few-shot examples, and the test-case queries are skipped.
 //
 // History covers the 30 days before the analyzed result ran and nothing after it:
 // analyzing an older run must not see later runs' failures or the labels people
 // gave them. now is used only for a result with no time of its own.
 //
+// fewShot is how many past triage decisions to attach as examples (0 = off, clamped to
+// models.MaxFewShotExamples). They too end when the analyzed result ran, go back
+// ExampleWindowDays, and never come from its own run.
+//
 // Callers layer PromptTemplate/RedactionEnabled/ProviderModel onto the result.
-func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time) AnalyzeContext {
+func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time, fewShot int) AnalyzeContext {
 	ctx := AnalyzeContext{
 		Result:     result,
 		Env:        result.Environment,
@@ -69,10 +76,25 @@ func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time)
 		Steps:      buildSteps(result.Steps),
 	}
 
-	if result.TestCaseID == nil || *result.TestCaseID == "" {
+	before := historyAnchor(result, now)
+	tcID := ""
+	if result.TestCaseID != nil {
+		tcID = *result.TestCaseID
+	}
+
+	if n := clampFewShot(fewShot); n > 0 {
+		f := TriageExampleFilter{TestCaseID: tcID, FailureType: result.FailureType, ExcludeRunID: result.TestRunID,
+			Before: before.UTC(), Since: before.AddDate(0, 0, -ExampleWindowDays).UTC(), Limit: n}
+		if ex, err := src.ListTriageExamples(f); err != nil {
+			slog.Warn("failure-analysis: enrich examples failed", "err", err, "result_id", result.ID)
+		} else {
+			ctx.Examples = ex
+		}
+	}
+
+	if tcID == "" {
 		return ctx
 	}
-	tcID := *result.TestCaseID
 
 	if defects, err := src.ListDefectsByTestCase(tcID); err != nil {
 		slog.Warn("failure-analysis: enrich defects failed", "err", err, "test_case_id", tcID)
@@ -86,12 +108,17 @@ func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time)
 		ctx.LinkedRequirements = mapRequirements(reqs)
 	}
 
-	before := historyAnchor(result, now)
+	if names, err := src.ListCategoryNamesByTestCase(tcID); err != nil {
+		slog.Warn("failure-analysis: enrich categories failed", "err", err, "test_case_id", tcID)
+	} else {
+		ctx.Categories = strings.Join(names, "; ") // BuildEvidence caps it at CategoriesCap
+	}
+
 	since := before.AddDate(0, 0, -enrichHistoryDays)
 	if hist, err := src.ListRecentFailuresByTestCase(tcID, since, before, enrichHistoryLimit, result.TestRunID); err != nil {
 		slog.Warn("failure-analysis: enrich history failed", "err", err, "test_case_id", tcID)
 	} else {
-		ctx.SimilarFailures = mapSimilarFailures(hist)
+		ctx.SimilarFailures = mapSimilarFailures(src, hist)
 		ctx.SimilarFailuresRollup = rollupDefectTypes(hist)
 	}
 
@@ -168,7 +195,7 @@ func mapRequirements(reqs []*models.Requirement) []LinkedRequirement {
 	return out
 }
 
-func mapSimilarFailures(hist []*models.RunResult) []SimilarFailure {
+func mapSimilarFailures(src EnrichmentSource, hist []*models.RunResult) []SimilarFailure {
 	if len(hist) == 0 {
 		return nil
 	}
@@ -182,12 +209,29 @@ func mapSimilarFailures(hist []*models.RunResult) []SimilarFailure {
 			Status:       string(r.Status),
 			ErrorMessage: r.ErrorMessage,
 			DefectType:   r.DefectType,
-			// DefectKey: left empty in v1 — see enrich.go [decision]. The 3-method
-			// EnrichmentSource has no per-result defect lookup, and attributing a
-			// test-case-scoped defect to a specific historical row would be wrong.
+			DefectKey:    resultDefectKey(src, r.ID),
 		})
 	}
 	return out
+}
+
+// resultDefectKey names the defect a person linked to that specific historical result: the first
+// result-scoped defect (ListDefectsByResult orders the most recently linked first), by its
+// external key or else its short id. A test-case-scoped defect is never attributed to one row.
+// A failed lookup logs and leaves the key empty.
+func resultDefectKey(src EnrichmentSource, resultID string) string {
+	if resultID == "" {
+		return ""
+	}
+	defects, err := src.ListDefectsByResult(resultID)
+	if err != nil {
+		slog.Warn("failure-analysis: enrich history defect key failed", "err", err, "result_id", resultID)
+		return ""
+	}
+	if len(defects) == 0 {
+		return ""
+	}
+	return firstNonEmpty(defects[0].ExternalKey, shortID(defects[0].ID))
 }
 
 // rollupDefectTypes renders a one-line distribution of the human triage labels

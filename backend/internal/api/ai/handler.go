@@ -92,7 +92,7 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	if err != nil {
 		return nil, err
 	}
-	actx := failureanalysis.BuildContext(h.store, result, time.Now())
+	actx := failureanalysis.BuildContext(h.store, result, time.Now(), deps.FewShotExamples)
 	actx.RedactionEnabled = settings.RedactionEnabled
 	actx.PromptTemplate = settings.PromptTemplate
 	actx.ProviderModel = deps.NarrativeModel

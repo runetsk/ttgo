@@ -361,3 +361,20 @@ func TestResolver_WrappedUnavailableProviderKeepsItsError(t *testing.T) {
 	_, cerr := d.Narrative.Chat(context.Background(), llm.ChatRequest{})
 	require.ErrorIs(t, cerr, models.ErrSecretUndecryptable)
 }
+
+func TestResolver_CarriesFewShotExamples(t *testing.T) {
+	s := resolverStore(t)
+	r := newAnalyzeDepsResolver(s, nil)
+	d, err := r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Equal(t, models.DefaultFewShotExamples, d.FewShotExamples, "a new install sends four examples")
+
+	cur, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	cur.FewShotExamples = 0
+	_, err = s.UpdateFailureAnalysisSettings(cur)
+	require.NoError(t, err)
+	d, err = r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Zero(t, d.FewShotExamples, "read live, like every other setting")
+}

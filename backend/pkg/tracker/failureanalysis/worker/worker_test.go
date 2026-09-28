@@ -807,3 +807,43 @@ func TestWorker_ShutdownBetweenGroupsIsNotCompletion(t *testing.T) {
 	got, _ := s.GetAnalysisJob(job.ID)
 	require.Equal(t, models.RunAnalysisJobStatusRunning, got.Status, "two groups never ran, so the job is not complete")
 }
+
+func TestWorkerSendsDefectKeyAndCategories(t *testing.T) {
+	s := newStore(t)
+	folder, err := s.CreateFolder("Checkout Suite", nil)
+	require.NoError(t, err)
+	tc := &models.TestCase{FolderID: folder.ID, Name: "Pay by card"}
+	require.NoError(t, s.CreateTestCase(tc))
+	tcID := tc.ID
+	cat, err := s.CreateCategory("Payments", "")
+	require.NoError(t, err)
+	require.NoError(t, s.AssignCategoryToTest(cat.ID, tcID))
+
+	// An earlier failure of this test, labeled and linked to its own defect.
+	priorRun := &models.TestRun{Name: "nightly"}
+	require.NoError(t, s.CreateTestRun(priorRun))
+	prior := &models.RunResult{TestRunID: priorRun.ID, TestCaseID: &tcID, TestNameSnapshot: tc.Name,
+		AttemptNumber: 1, Status: models.StatusFail, FailureType: "assertion",
+		ErrorMessage: "card declined", DefectType: "product_bug", StartTime: time.Now().Add(-24 * time.Hour)}
+	require.NoError(t, s.AddRunResult(prior))
+	defect := &models.Defect{Title: "Card payments declined", Status: "open", ExternalKey: "PAY-42"}
+	require.NoError(t, s.CreateDefect(defect))
+	_, err = s.LinkDefectToResult(defect.ID, prior.ID, tcID)
+	require.NoError(t, err)
+
+	run := &models.TestRun{Name: "current"}
+	require.NoError(t, s.CreateTestRun(run))
+	require.NoError(t, s.AddRunResult(&models.RunResult{TestRunID: run.ID, TestCaseID: &tcID, TestNameSnapshot: tc.Name,
+		AttemptNumber: 1, Status: models.StatusFail, FailureType: "assertion", ErrorMessage: "card declined again", StartTime: time.Now()}))
+	_, err = s.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{MaxAnalysesPerRun: 5, DedupEnabled: true, RedactionEnabled: false})
+	require.NoError(t, err)
+	_, _, err = s.MaybeEnqueueForRun(run.ID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+
+	prov := &capturingProvider{}
+	w := NewWorker(s, staticResolver(failureanalysis.JobDeps{Narrative: prov, NarrativeModel: "mock"}), nil, 10*time.Millisecond)
+	require.NoError(t, w.processOnce(context.Background()))
+
+	require.Contains(t, prov.lastPrompt, "Categories: Payments")
+	require.Contains(t, prov.lastPrompt, "(human: product_bug → PAY-42)", "the history row names the defect linked to that result")
+}

@@ -26,6 +26,9 @@ type AnalyzeContext struct {
 	OS                    string
 	AppVersion            string
 	Categories            string
+	// Examples are past human triage decisions (few-shot), best first; BuildEvidence caps and
+	// redacts them. Empty when few-shot examples are off or none qualify.
+	Examples []TriageExample
 	// GroupMembers are the raw error messages of the other failures analyzed with this one as
 	// one group (the worker fills it). BuildEvidence redacts, caps and filters them for the
 	// "Related failures in this group" prompt block; the TypeSafe decision never sees them.

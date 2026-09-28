@@ -133,6 +133,13 @@ func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failur
 		if deps.Narrative != nil {
 			applyLLMLatency(st, &deps)
 		}
+		// Few-shot examples go to both engines. They are optional context, so a settings read
+		// failure leaves them off instead of failing the job.
+		if fa, err := st.GetFailureAnalysisSettings(); err != nil {
+			slog.Warn("failure-analysis: settings could not be loaded; no few-shot examples", "err", err)
+		} else {
+			deps.FewShotExamples = fa.FewShotExamples
+		}
 		return deps, nil
 	}
 }

@@ -1,6 +1,9 @@
 package failureanalysis
 
-import "time"
+import (
+	"time"
+	"ttgo/pkg/tracker/models"
+)
 
 // TriageExample is one past human triage decision on a failing result the AI had suggested a
 // defect type for: a few-shot example of how people here classify failures. The fields are
@@ -27,4 +30,19 @@ type TriageExampleFilter struct {
 	Before       time.Time // decided strictly before this instant (when the analyzed failure happened)
 	Since        time.Time // decided at or after this instant (the lookback floor)
 	Limit        int       // at most this many; <= 0 returns nothing
+}
+
+// ExampleWindowDays is how far back, from when the analyzed failure happened, triage decisions
+// are eligible as examples.
+const ExampleWindowDays = 90
+
+// clampFewShot bounds the configured number of examples to 0..models.MaxFewShotExamples.
+func clampFewShot(n int) int {
+	switch {
+	case n < 0:
+		return 0
+	case n > models.MaxFewShotExamples:
+		return models.MaxFewShotExamples
+	}
+	return n
 }

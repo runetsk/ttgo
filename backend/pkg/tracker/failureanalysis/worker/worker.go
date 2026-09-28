@@ -531,7 +531,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 	jobID := job.ID
 	outcomes := w.analyzeGroups(jobCtx, cancelJob, jobID, groups, parallelGroups(settings.ParallelGroups), jobGroupDeadline(deps), groupFuncs{
 		decide: func(gctx context.Context, g *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, failureanalysis.AnalyzeContext, error) {
-			actx := failureanalysis.BuildContext(w.store, g.Representative, time.Now())
+			actx := failureanalysis.BuildContext(w.store, g.Representative, time.Now(), deps.FewShotExamples)
 			actx.RedactionEnabled = settings.RedactionEnabled
 			actx.PromptTemplate = settings.PromptTemplate
 			actx.ProviderModel = deps.NarrativeModel

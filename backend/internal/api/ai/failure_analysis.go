@@ -542,7 +542,7 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
-	actx := failureanalysis.BuildContext(h.store, repResult, time.Now())
+	actx := failureanalysis.BuildContext(h.store, repResult, time.Now(), deps.FewShotExamples)
 	actx.RedactionEnabled = settings.RedactionEnabled
 	actx.PromptTemplate = settings.PromptTemplate
 	actx.ProviderModel = deps.NarrativeModel
