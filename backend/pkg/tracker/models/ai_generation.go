@@ -245,6 +245,7 @@ const (
 // Narrative outcomes for a TypeSafe-decided analysis. Generative rows are always "ok".
 const (
 	NarrativeStatusOK          = "ok"
+	NarrativeStatusPending     = "pending"     // a TypeSafe decision whose explanation has not been written yet
 	NarrativeStatusUnavailable = "unavailable" // no narrative provider, or it failed
 	NarrativeStatusUnparseable = "unparseable" // narrative came back but was not valid JSON twice
 	NarrativeStatusSkipped     = "skipped"     // explanations switched off in TypeSafe settings; decision only
