@@ -1112,6 +1112,7 @@ function AIVerdictCell({ result, analysis, onAnalyze }) {
             confidenceScore={analysis.confidence_score}
             failed={isFailedAnalysis(analysis)}
             errorCategory={analysis.error_category}
+            narrativeStatus={analysis.narrative_status}
         />
     );
 }

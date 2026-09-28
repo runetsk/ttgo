@@ -23,7 +23,7 @@ const CONF_SHORT = { low: 'low', medium: 'med', high: 'high' };
 
 // failed: the attempt made no decision, so there is no verdict to show (its stored "unknown" is
 // a placeholder, not TypeSafe's or the LLM's answer).
-export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine, modelName, confidenceScore, failed, errorCategory, style }) {
+export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine, modelName, confidenceScore, failed, errorCategory, narrativeStatus, style }) {
     if (failed) {
         return (
             <span title={failureHeading({ error_category: errorCategory })} data-testid="ai-verdict-failed" style={{
@@ -35,7 +35,7 @@ export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine
         );
     }
     const color = COLORS[verdict] || COLORS.unknown;
-    const title = badgeTitle({ engine, model_name: modelName, confidence_score: confidenceScore });
+    const title = badgeTitle({ engine, model_name: modelName, confidence_score: confidenceScore, narrative_status: narrativeStatus });
     return (
         <span title={title} style={{
             background: color.bg, color: color.fg,

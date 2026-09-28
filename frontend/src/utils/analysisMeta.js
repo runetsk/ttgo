@@ -1,15 +1,25 @@
 // Pure text derivations for the AI analysis card and verdict badge. No React, no network.
-// Consumers: AIVerdictBadge.jsx, RunResultDetail.jsx
+// Consumers: AIVerdictBadge.jsx, RunResultDetail.jsx, TestRunDetail.jsx
 import { suggestionLabel } from './defectSuggestion.js';
 
 const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : null);
 
+// PENDING_EXPLANATION is what a TypeSafe decision shows while its explanation is still being
+// written (the worker narrates after publishing the decision; Explain claims the row while it runs).
+export const PENDING_EXPLANATION = 'Explanation being written…';
+
+export function isPendingNarrative(analysis) {
+    return analysis?.narrative_status === 'pending' && !isFailedAnalysis(analysis);
+}
+
 export function badgeTitle(analysis) {
-    if (analysis?.engine !== 'typesafe') return undefined;
+    const pending = isPendingNarrative(analysis) ? PENDING_EXPLANATION : null;
+    if (analysis?.engine !== 'typesafe') return pending || undefined;
     const parts = ['TypeSafe'];
     if (analysis.model_name) parts.push(analysis.model_name);
     const c = fmt(analysis.confidence_score);
-    return `${parts.join(' ')}${c ? ` · confidence ${c}` : ''}`;
+    const base = `${parts.join(' ')}${c ? ` · confidence ${c}` : ''}`;
+    return pending ? `${base} · ${pending}` : base;
 }
 
 export function analysisMetaParts(analysis) {
@@ -83,13 +93,72 @@ export function explainAction(analysis) {
     }
 }
 
-// shouldReplaceAnalysis decides whether a live analysis event replaces the one on screen for a
-// result. Explain fills in an existing version in place and broadcasts it, and it can be run on
-// an older version, so an event for a lower version than the one shown is ignored; the same
-// version (an explanation filled in) or a newer one replaces it.
-export function shouldReplaceAnalysis(current, incoming) {
-    if (!current) return true;
-    return (incoming?.version ?? 0) >= (current?.version ?? 0);
+// mergeAnalysis decides which copy of a result's analysis to show when a live event or a REST
+// refresh brings another one. A newer version wins. Within one version, the later explanation
+// wins: the incoming copy replaces the shown one only if its narrative_revision is at least as
+// high, so a late `pending` never overwrites a written explanation. Explain can fill in an older
+// version and broadcasts it; that event never rolls the row back. Two copies of the same analysis
+// are merged, so a field the incoming copy lacks is kept. Returns `current` itself when nothing
+// changes.
+export function mergeAnalysis(current, incoming) {
+    if (!incoming) return current;
+    if (!current) return incoming;
+    const cv = current.version ?? 0;
+    const iv = incoming.version ?? 0;
+    if (iv < cv) return current;
+    if (iv === cv && (incoming.narrative_revision ?? 0) < (current.narrative_revision ?? 0)) return current;
+    return incoming.id && incoming.id === current.id ? { ...current, ...incoming } : incoming;
+}
+
+// mergeAnalysisList applies one incoming analysis to a result's version list (newest first):
+// the same analysis is merged in place with mergeAnalysis, and a new one is added in version
+// order. Returns `list` itself when nothing changes.
+export function mergeAnalysisList(list, incoming) {
+    if (!incoming?.id) return list;
+    const rows = Array.isArray(list) ? list : [];
+    const i = rows.findIndex((r) => r.id === incoming.id);
+    if (i >= 0) {
+        const merged = mergeAnalysis(rows[i], incoming);
+        if (merged === rows[i]) return list;
+        const next = rows.slice();
+        next[i] = merged;
+        return next;
+    }
+    return [...rows, incoming].sort((a, b) => (b.version ?? 0) - (a.version ?? 0));
+}
+
+// Fields of the shared `run_result_analysis.created` / `.updated` payload that older servers did
+// not send. They are copied only when present, so an event never blanks a field the row has.
+const EVENT_OPTIONAL = ['summary', 'next_action', 'rationale', 'narrative_revision', 'source_analysis_id', 'created_at', 'policy_version', 'history_available'];
+
+// analysisFromEvent turns a live analysis event's data into the row shape the REST endpoints
+// return, or null when it names no result.
+export function analysisFromEvent(d) {
+    if (!d?.run_result_id) return null;
+    const row = {
+        id: d.analysis_id ?? d.id,
+        run_result_id: d.run_result_id,
+        version: d.version,
+        verdict: d.verdict,
+        suggested_defect_type: d.suggested_defect_type,
+        suggested_defect_type_confidence: d.suggested_defect_type_confidence ?? null,
+        suggestion_source: d.suggestion_source || '',
+        confidence: d.confidence,
+        confidence_score: d.confidence_score ?? null,
+        engine: d.engine || 'generative',
+        model_name: d.model_name || '',
+        narrative_status: d.narrative_status || 'ok',
+        decision_status: d.decision_status || 'ok',
+        error_category: d.error_category || '',
+        takeover_from_verdict: d.takeover_from_verdict || '',
+        takeover_from_confidence: d.takeover_from_confidence ?? null,
+        job_id: d.job_id || null,
+        dedup_group_key: d.dedup_group_key || null,
+        dedup_method: d.dedup_method || '',
+        dedup_p_same: d.dedup_p_same ?? null,
+    };
+    for (const k of EVENT_OPTIONAL) if (d[k] !== undefined) row[k] = d[k];
+    return row;
 }
 
 // takeoverNote says what TypeSafe decided when the LLM took over below the threshold.
@@ -102,6 +171,7 @@ export function takeoverNote(analysis) {
 export function narrativeNotice(analysis) {
     if (isFailedAnalysis(analysis)) return null;
     switch (analysis?.narrative_status) {
+        case 'pending': return PENDING_EXPLANATION;
         case 'unavailable': return 'The explanation could not be generated; the classification above still stands.';
         case 'unparseable': return 'The model returned an unreadable explanation; the raw text is under Rationale.';
         case 'skipped': return 'No explanation was written because explanations are switched off in the TypeSafe.ai settings. The classification above is TypeSafe\'s decision.';

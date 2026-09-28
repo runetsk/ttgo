@@ -1,14 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import DefectLinkPanel from './DefectLinkPanel';
 import CommentsPanel from './CommentsPanel';
 import ScreenshotGallery from './ScreenshotGallery';
 import AIVerdictBadge from './AIVerdictBadge';
 import { analyzeRunResult, explainAnalysis, listRunResultAnalyses, uploadScreenshots } from '../api';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
+import { useSubscription } from '../hooks/useSubscription';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
 import { isManualStepResults } from '../utils/stepResults';
 import { isFailureStatus } from '../utils/resultStatus';
-import { analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, failureAdvice, explainAction, takeoverNote } from '../utils/analysisMeta.js';
+import { analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, failureAdvice, explainAction, takeoverNote, isPendingNarrative, analysisFromEvent, mergeAnalysisList } from '../utils/analysisMeta.js';
 import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
@@ -25,15 +26,28 @@ const RunResultDetail = ({ result, attempts }) => {
     const [galleryOpen, setGalleryOpen] = useState(false);
     const [galleryIndex, setGalleryIndex] = useState(0);
     const [uploadingShots, setUploadingShots] = useState(false);
+    const [analysesFor, setAnalysesFor] = useState(null); // the result whose analyses are loaded
+
+    // While the AI tab is open this result's analyses arrive live: a new analysis (.created) and an
+    // explanation written after its decision was shown (.updated). Called before the early return
+    // below (hook order).
+    useSubscription(detailTab === 'ai' && analysesFor ? `run_result:${analysesFor}` : null, useCallback((event) => {
+        if (event.type !== 'run_result_analysis.created' && event.type !== 'run_result_analysis.updated') return;
+        const incoming = analysisFromEvent(event.data);
+        if (!incoming || incoming.run_result_id !== analysesFor) return;
+        setAnalyses((prev) => mergeAnalysisList(prev ?? [], incoming));
+    }, [analysesFor]));
 
     const loadAnalyses = async (resultId) => {
+        setAnalysesFor(resultId); // subscribe while the list loads, so no explanation is missed
         try {
             const list = await listRunResultAnalyses(resultId);
-            const arr = Array.isArray(list) ? list : [];
-            setAnalyses(arr);
-            setSelectedVersion(arr[0]?.version || null);
+            const fetched = Array.isArray(list) ? list : [];
+            // An event can land while the list loads; keep whichever copy of each version is newer.
+            setAnalyses((prev) => (Array.isArray(prev) ? prev : []).reduce(mergeAnalysisList, fetched));
+            setSelectedVersion(null); // null: follow the newest version
         } catch {
-            setAnalyses([]);
+            setAnalyses((prev) => prev ?? []);
         }
     };
 
@@ -185,7 +199,7 @@ const RunResultDetail = ({ result, attempts }) => {
                                         <span style={{ marginLeft: 6, verticalAlign: 'middle' }}>
                                             <AIVerdictBadge verdict={analyses[0].verdict} confidence={analyses[0].confidence} dedupGroup={!!analyses[0].dedup_group_key}
                                                 engine={analyses[0].engine} modelName={analyses[0].model_name} confidenceScore={analyses[0].confidence_score}
-                                                failed={isFailedAnalysis(analyses[0])} errorCategory={analyses[0].error_category} />
+                                                failed={isFailedAnalysis(analyses[0])} errorCategory={analyses[0].error_category} narrativeStatus={analyses[0].narrative_status} />
                                         </span>
                                     )}
                                 </button>
@@ -243,8 +257,8 @@ const RunResultDetail = ({ result, attempts }) => {
                                         setAnalyzing(true);
                                         try {
                                             const row = await analyzeRunResult(activeResult.id);
-                                            setAnalyses([row]);
-                                            setSelectedVersion(row.version);
+                                            setAnalyses((prev) => mergeAnalysisList(prev ?? [], row));
+                                            setSelectedVersion(null);
                                         } catch {
                                             // toasted by the API interceptor
                                         } finally {
@@ -256,13 +270,13 @@ const RunResultDetail = ({ result, attempts }) => {
                                 </button>
                             ) : (
                                 <AIAnalysisCard
-                                    analysis={analyses.find(a => a.version === selectedVersion) || analyses[0]}
+                                    analysis={analyses.find((a) => a.version === (selectedVersion ?? analyses[0]?.version)) || analyses[0]}
                                     onReAnalyze={async () => {
                                         setAnalyzing(true);
                                         try {
                                             const row = await analyzeRunResult(activeResult.id);
-                                            setAnalyses([row, ...analyses]);
-                                            setSelectedVersion(row.version);
+                                            setAnalyses((prev) => mergeAnalysisList(prev, row));
+                                            setSelectedVersion(null);
                                         } catch {
                                             // toasted by the API interceptor
                                         } finally {
@@ -274,16 +288,16 @@ const RunResultDetail = ({ result, attempts }) => {
                                         setExplaining(true);
                                         try {
                                             const row = await explainAnalysis(activeResult.id, a.id);
-                                            setAnalyses((prev) => prev.map((x) => (x.id === row.id ? row : x)));
+                                            setAnalyses((prev) => mergeAnalysisList(prev, row));
                                         } catch {
-                                            // toasted by the API interceptor
+                                            // toasted by the API interceptor (409: already being explained)
                                         } finally {
                                             setExplaining(false);
                                         }
                                     }}
                                     explaining={explaining}
                                     versions={analyses}
-                                    selectedVersion={selectedVersion}
+                                    selectedVersion={selectedVersion ?? analyses[0]?.version}
                                     onSelectVersion={setSelectedVersion}
                                 />
                             )}
@@ -547,9 +561,14 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
 
     const failed = isFailedAnalysis(analysis);
     const action = explainAction(analysis);
-    // A decision without an explanation: one notice and the Explain button instead of empty
-    // Summary and Next-action boxes. An unreadable explanation keeps its raw text under Rationale.
-    const compact = !!action && analysis.narrative_status !== 'unparseable';
+    const pending = isPendingNarrative(analysis);
+    // A decision without an explanation, or one whose explanation is still being written: one
+    // notice instead of empty Summary and Next-action boxes. An unreadable explanation keeps its
+    // raw text under Rationale.
+    const compact = pending || (!!action && analysis.narrative_status !== 'unparseable');
+    const noticeTone = pending
+        ? { background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.22)' }
+        : { background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)' };
     const reason = analysis.narrative_status === 'unavailable' ? analysis.summary : null;
     const takeover = takeoverNote(analysis);
     const hasNextAction = !!(analysis.next_action && analysis.next_action.trim() && analysis.next_action.trim() !== '—');
@@ -562,7 +581,7 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <AIVerdictBadge verdict={analysis.verdict} confidence={analysis.confidence} dedupGroup={!!analysis.dedup_group_key}
                         engine={analysis.engine} modelName={analysis.model_name} confidenceScore={analysis.confidence_score}
-                        failed={failed} errorCategory={analysis.error_category} />
+                        failed={failed} errorCategory={analysis.error_category} narrativeStatus={analysis.narrative_status} />
                     {groupingNote(analysis) && (
                         <span title={groupingNote(analysis)} style={{ color: 'var(--text-secondary)', fontSize: 11 }} data-testid="analysis-grouping-note">
                             ↳ {groupingNote(analysis)}
@@ -589,7 +608,7 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
             {narrativeNotice(analysis) && (
                 // The button sits under the text, not at the far end of the row: the detail panel is as
                 // wide as the results grid, which can run well past the viewport.
-                <div style={{ background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)', borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }} data-testid="analysis-narrative-notice">
+                <div style={{ ...noticeTone, borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }} data-testid="analysis-narrative-notice" data-status={pending ? 'pending' : analysis.narrative_status}>
                     <div>
                         {narrativeNotice(analysis)}
                         {reason && <div style={{ marginTop: 4, fontSize: '0.78rem' }} data-testid="analysis-narrative-reason">{reason}</div>}

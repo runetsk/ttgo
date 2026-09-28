@@ -13,7 +13,7 @@ import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { latestAttempts, applyResultDelta } from '../utils/runResults';
 import { isFailureStatus } from '../utils/resultStatus';
-import { shouldReplaceAnalysis } from '../utils/analysisMeta.js';
+import { analysisFromEvent, mergeAnalysis } from '../utils/analysisMeta.js';
 import DefectsTab from './testRunDetail/DefectsTab';
 import TimelineTab from './testRunDetail/TimelineTab';
 import CompareTab from './testRunDetail/CompareTab';
@@ -72,34 +72,15 @@ export default function TestRunDetail() {
     // 018-websocket-realtime: subscribe to real-time run updates instead of polling
     const { registerRefresh, unregisterRefresh } = useWebSocket();
     useSubscription(runId ? `run:${runId}` : null, useCallback((event) => {
-        if (event.type === 'run_result_analysis.created') {
-            const d = event.data || {};
-            if (!d.run_result_id) return;
+        if (event.type === 'run_result_analysis.created' || event.type === 'run_result_analysis.updated') {
+            const incoming = analysisFromEvent(event.data);
+            if (!incoming) return;
             setCurrentAnalyses((prev) => {
-                const incoming = {
-                    id: d.analysis_id,
-                    version: d.version,
-                    verdict: d.verdict,
-                    suggested_defect_type: d.suggested_defect_type,
-                    suggested_defect_type_confidence: d.suggested_defect_type_confidence ?? null,
-                    suggestion_source: d.suggestion_source || '',
-                    confidence: d.confidence,
-                    confidence_score: d.confidence_score ?? null,
-                    engine: d.engine || 'generative',
-                    model_name: d.model_name || '',
-                    narrative_status: d.narrative_status || 'ok',
-                    decision_status: d.decision_status || 'ok',
-                    error_category: d.error_category || '',
-                    takeover_from_verdict: d.takeover_from_verdict || '',
-                    takeover_from_confidence: d.takeover_from_confidence ?? null,
-                    job_id: d.job_id || null,
-                    dedup_group_key: d.dedup_group_key || null,
-                    dedup_method: d.dedup_method || '',
-                    dedup_p_same: d.dedup_p_same ?? null,
-                };
-                // Explain can fill in an older version and broadcasts it; never roll the grid back.
-                if (!shouldReplaceAnalysis(prev[d.run_result_id], incoming)) return prev;
-                return { ...prev, [d.run_result_id]: incoming };
+                // A decision arrives first (pending), its explanation later (.updated); Explain can
+                // fill in an older version. mergeAnalysis keeps whichever copy is newer.
+                const current = prev[incoming.run_result_id];
+                const next = mergeAnalysis(current, incoming);
+                return next === current ? prev : { ...prev, [incoming.run_result_id]: next };
             });
             return;
         }
@@ -119,8 +100,8 @@ export default function TestRunDetail() {
     // these bindings during render, so declaring them later is a TDZ crash.
     // Two orderings can make a REST response wrong by the time it lands, and a blind
     // setCurrentAnalyses(fetched) loses to both: an older fetch resolving after a newer one, and
-    // a `run_result_analysis.created` WS event delivering an analysis the response predates.
-    // The sequence retires stale responses; the per-result version merge keeps whichever side
+    // a `run_result_analysis.created`/`.updated` WS event delivering an analysis the response predates.
+    // The sequence retires stale responses; `mergeAnalysis` keeps whichever side
     // holds the newer analysis, so a live suggestion is never clobbered back to a stale one.
     const analysesSeq = useRef(0);
     const loadCurrentAnalyses = useCallback(() => {
@@ -132,10 +113,9 @@ export default function TestRunDetail() {
                 setCurrentAnalyses((prev) => {
                     const merged = { ...(fetched || {}) };
                     for (const [resultId, live] of Object.entries(prev || {})) {
-                        const incoming = merged[resultId];
-                        if (!incoming || (live?.version ?? 0) > (incoming?.version ?? 0)) {
-                            merged[resultId] = live;
-                        }
+                        // The fetched row wins unless the live one is newer: a newer version, or a
+                        // later explanation of the same version (narrative_revision).
+                        merged[resultId] = mergeAnalysis(live, merged[resultId]);
                     }
                     return merged;
                 });
