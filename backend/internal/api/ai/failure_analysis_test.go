@@ -854,3 +854,47 @@ func TestFailureAnalysisSettings_LLMLatency(t *testing.T) {
 	require.Equal(t, 0, got.HedgeAfterSeconds, "hedging switched off")
 	require.Equal(t, 60, got.LLMCallTimeoutSeconds)
 }
+
+func TestFailureAnalysisSettings_FewShotExamples(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	body := func(extra map[string]interface{}) map[string]interface{} {
+		b := map[string]interface{}{
+			"enabled_on_completion": false, "max_analyses_per_run": 20, "dedup_enabled": true,
+			"redaction_enabled": true, "prompt_template": "x",
+		}
+		for k, v := range extra {
+			b[k] = v
+		}
+		return b
+	}
+	put := func(extra map[string]interface{}) (int, models.AIFailureAnalysisSettings) {
+		rr := doRequest(env, "PUT", "/api/settings/ai-failure-analysis", body(extra))
+		var got models.AIFailureAnalysisSettings
+		if rr.Code == http.StatusOK {
+			require.NoError(t, json.NewDecoder(rr.Body).Decode(&got))
+		}
+		return rr.Code, got
+	}
+
+	code, got := put(nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, models.DefaultFewShotExamples, got.FewShotExamples, "omitting the field keeps the default")
+
+	for _, bad := range []int{-1, models.MaxFewShotExamples + 1} {
+		code, _ = put(map[string]interface{}{"few_shot_examples": bad})
+		require.Equal(t, http.StatusBadRequest, code, "few_shot_examples=%d", bad)
+	}
+
+	code, got = put(map[string]interface{}{"few_shot_examples": 0})
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, 0, got.FewShotExamples, "0 switches examples off")
+
+	code, got = put(nil)
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, 0, got.FewShotExamples, "omitting the field keeps the stored 0")
+
+	code, got = put(map[string]interface{}{"few_shot_examples": models.MaxFewShotExamples})
+	require.Equal(t, http.StatusOK, code)
+	require.Equal(t, models.MaxFewShotExamples, got.FewShotExamples)
+}

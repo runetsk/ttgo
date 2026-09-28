@@ -23,6 +23,7 @@ func (s *Store) seedFailureAnalysisSettings() error {
 			EnabledOnCompletion:   false,
 			MaxAnalysesPerRun:     20,
 			ParallelGroups:        models.DefaultParallelGroups,
+			FewShotExamples:       models.DefaultFewShotExamples,
 			LLMCallTimeoutSeconds: models.DefaultLLMCallTimeoutSeconds,
 			DedupEnabled:          true,
 			RedactionEnabled:      true,
@@ -65,7 +66,8 @@ func (s *Store) GetFailureAnalysisSettings() (*models.AIFailureAnalysisSettings,
 
 // UpdateFailureAnalysisSettings overwrites mutable fields. DefaultPromptTemplate is immutable.
 // ParallelGroups 0 means "keep the current value", so callers that predate it do not reset it.
-// LLMCallTimeoutSeconds 0 keeps both latency settings.
+// LLMCallTimeoutSeconds 0 keeps both latency settings. FewShotExamples is written as given,
+// because 0 means off; the PUT handler fills it from the stored value when a request omits it.
 func (s *Store) UpdateFailureAnalysisSettings(in *models.AIFailureAnalysisSettings) (*models.AIFailureAnalysisSettings, error) {
 	updates := map[string]interface{}{
 		"enabled_on_completion": in.EnabledOnCompletion,
@@ -73,6 +75,7 @@ func (s *Store) UpdateFailureAnalysisSettings(in *models.AIFailureAnalysisSettin
 		"dedup_enabled":         in.DedupEnabled,
 		"redaction_enabled":     in.RedactionEnabled,
 		"prompt_template":       in.PromptTemplate,
+		"few_shot_examples":     in.FewShotExamples,
 		"updated_at":            time.Now(),
 	}
 	if in.ParallelGroups > 0 {

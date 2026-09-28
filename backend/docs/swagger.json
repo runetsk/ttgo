@@ -7596,7 +7596,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). 400 with the reason when a value is out of range.",
+                "description": "parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). few_shot_examples (0..8, 0 = off: how many past human triage decisions accompany each analyzed failure) also keeps its stored value when omitted. 400 with the reason when a value is out of range.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7609,7 +7609,7 @@
                 "summary": "Update failure-analysis settings",
                 "parameters": [
                     {
-                        "description": "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds",
+                        "description": "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds, few_shot_examples",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -9587,6 +9587,10 @@
                 },
                 "enabled_on_completion": {
                     "type": "boolean"
+                },
+                "few_shot_examples": {
+                    "description": "past triage decisions sent per failure, 0..MaxFewShotExamples (0 = off)",
+                    "type": "integer"
                 },
                 "hedge_after_seconds": {
                     "type": "integer"

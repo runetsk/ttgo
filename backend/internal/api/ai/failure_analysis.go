@@ -38,11 +38,11 @@ func (h *Handler) GetFailureAnalysisSettings(w http.ResponseWriter, r *http.Requ
 // UpdateFailureAnalysisSettings replaces the failure-analysis settings.
 //
 // @Summary      Update failure-analysis settings
-// @Description  parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). 400 with the reason when a value is out of range.
+// @Description  parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). few_shot_examples (0..8, 0 = off: how many past human triage decisions accompany each analyzed failure) also keeps its stored value when omitted. 400 with the reason when a value is out of range.
 // @Tags         ai-failure-analysis
 // @Accept       json
 // @Produce      json
-// @Param        body  body  object  true  "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds"
+// @Param        body  body  object  true  "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds, few_shot_examples"
 // @Success      200  {object}  models.AIFailureAnalysisSettings
 // @Failure      400  {object}  map[string]interface{}
 // @Router       /settings/ai-failure-analysis [put]
@@ -57,6 +57,7 @@ func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.R
 		PromptTemplate        string `json:"prompt_template"`
 		LLMCallTimeoutSeconds *int   `json:"llm_call_timeout_seconds"` // omitted = keep
 		HedgeAfterSeconds     *int   `json:"hedge_after_seconds"`      // omitted = keep; 0 = off
+		FewShotExamples       *int   `json:"few_shot_examples"`        // omitted = keep; 0 = off
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -97,6 +98,15 @@ func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.R
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	// 0 is a value (examples off), so an omitted field carries the stored one through.
+	fewShot := current.FewShotExamples
+	if req.FewShotExamples != nil {
+		fewShot = *req.FewShotExamples
+		if fewShot < 0 || fewShot > models.MaxFewShotExamples {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("few_shot_examples must be between 0 and %d", models.MaxFewShotExamples)})
+			return
+		}
+	}
 	updated, err := h.store.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{
 		EnabledOnCompletion:   req.EnabledOnCompletion,
 		MaxAnalysesPerRun:     req.MaxAnalysesPerRun,
@@ -106,6 +116,7 @@ func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.R
 		PromptTemplate:        req.PromptTemplate,
 		LLMCallTimeoutSeconds: callTimeout,
 		HedgeAfterSeconds:     hedgeAfter,
+		FewShotExamples:       fewShot,
 	})
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)

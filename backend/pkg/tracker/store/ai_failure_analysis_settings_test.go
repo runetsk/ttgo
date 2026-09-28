@@ -144,3 +144,30 @@ func TestFailureAnalysisSettings_LLMLatency(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, got.HedgeAfterSeconds, "a set timeout writes the hedge too, so it can be switched off")
 }
+
+func TestFailureAnalysisSettings_FewShotExamples(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	require.Equal(t, models.DefaultFewShotExamples, got.FewShotExamples, "a new install sends four examples")
+
+	got.FewShotExamples = 0
+	got, err = s.UpdateFailureAnalysisSettings(got)
+	require.NoError(t, err)
+	require.Equal(t, 0, got.FewShotExamples, "0 is a value (examples off), not 'keep'")
+
+	got.FewShotExamples = models.MaxFewShotExamples
+	got, err = s.UpdateFailureAnalysisSettings(got)
+	require.NoError(t, err)
+	require.Equal(t, models.MaxFewShotExamples, got.FewShotExamples)
+}
+
+// An install that predates the column gets the default when AutoMigrate adds it.
+func TestFailureAnalysisSettings_FewShotExamplesMigratesToTheDefault(t *testing.T) {
+	s := newTestStore(t)
+	require.NoError(t, s.db.Migrator().DropColumn(&models.AIFailureAnalysisSettings{}, "few_shot_examples"))
+	require.NoError(t, s.db.AutoMigrate(&models.AIFailureAnalysisSettings{}))
+	got, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	require.Equal(t, models.DefaultFewShotExamples, got.FewShotExamples)
+}

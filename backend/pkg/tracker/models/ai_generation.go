@@ -123,6 +123,12 @@ const (
 	MaxParallelGroups     = 8
 )
 
+// Past human triage decisions sent with each analyzed failure as few-shot examples (0 = off).
+const (
+	DefaultFewShotExamples = 4
+	MaxFewShotExamples     = 8
+)
+
 // Failure-analysis LLM latency bounds (spec §B). The call timeout bounds each LLM request; a
 // hedge (0 = off) sends an identical second request when the first has not answered in time.
 const (
@@ -156,7 +162,8 @@ type AIFailureAnalysisSettings struct {
 	ID                  string `json:"id"                      gorm:"primaryKey"` // always "singleton"
 	EnabledOnCompletion bool   `json:"enabled_on_completion"   gorm:"not null;default:false"`
 	MaxAnalysesPerRun   int    `json:"max_analyses_per_run"    gorm:"not null;default:20"`
-	ParallelGroups      int    `json:"parallel_groups"         gorm:"not null;default:4"` // failure groups analyzed at once by a job, 1..MaxParallelGroups
+	ParallelGroups      int    `json:"parallel_groups"         gorm:"not null;default:4"`                          // failure groups analyzed at once by a job, 1..MaxParallelGroups
+	FewShotExamples     int    `json:"few_shot_examples"       gorm:"column:few_shot_examples;not null;default:4"` // past triage decisions sent per failure, 0..MaxFewShotExamples (0 = off)
 	// LLMCallTimeoutSeconds bounds each failure-analysis LLM request (10–120, default 45); a call
 	// cut by it is retried once. HedgeAfterSeconds (0 = off, else ≥ 3 and below the timeout)
 	// sends an identical second request when the first has not answered by then.
