@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"testing"
+	"time"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/llm"
 	"ttgo/pkg/tracker/models"
@@ -304,4 +305,59 @@ func TestResolver_CapturesThePricesInForce(t *testing.T) {
 	require.InDelta(t, 1.5, *d.Pricing.LLMPromptPerMTok, 1e-12)
 	require.InDelta(t, 6.0, *d.Pricing.LLMCompletionPerMTok, 1e-12)
 	require.InDelta(t, 0.2, d.Pricing.TypeSafePerMTok, 1e-12)
+}
+
+func TestResolver_BoundsEveryLLMCall(t *testing.T) {
+	s := resolverStore(t)
+	r := newAnalyzeDepsResolver(s, nil)
+
+	d, err := r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.NotNil(t, d.Narrative)
+	require.Equal(t, 45*time.Second, d.LLMCallTimeout, "the default call timeout")
+	require.False(t, d.HedgingOn)
+	require.Zero(t, d.TypeSafeTimeout, "TypeSafe does not decide here")
+
+	cur, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	cur.LLMCallTimeoutSeconds, cur.HedgeAfterSeconds = 60, 10
+	_, err = s.UpdateFailureAnalysisSettings(cur)
+	require.NoError(t, err)
+	enableTypeSafe(t, s, false)
+
+	for _, trigger := range []string{models.RunAnalysisJobTriggerManual, failureanalysis.TriggerExplain} {
+		d, err = r(trigger)
+		require.NoError(t, err)
+		require.NotNil(t, d.Narrative, trigger)
+		require.Equal(t, 60*time.Second, d.LLMCallTimeout, trigger)
+		require.True(t, d.HedgingOn, trigger)
+	}
+	require.Equal(t, 30*time.Second, d.TypeSafeTimeout, "TypeSafe decides with its 30 s default")
+
+	// A row from before the settings (or a corrupt value) falls back to the defaults.
+	require.NoError(t, s.DB().Model(&models.AIFailureAnalysisSettings{}).Where("id = ?", "singleton").
+		Updates(map[string]interface{}{"llm_call_timeout_seconds": 0, "hedge_after_seconds": 0}).Error)
+	d, err = r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Equal(t, 45*time.Second, d.LLMCallTimeout)
+	require.False(t, d.HedgingOn)
+}
+
+// The wrappers pass other errors through untouched: the undecryptable-key provider still fails
+// with the key error, now inside the call timeout.
+func TestResolver_WrappedUnavailableProviderKeepsItsError(t *testing.T) {
+	s := resolverStore(t)
+	cfg, err := s.GetDefaultProviderConfig()
+	require.NoError(t, err)
+	box, err := secretbox.New([]byte("0123456789abcdef0123456789abcdef"))
+	require.NoError(t, err)
+	foreign, err := box.Encrypt("k")
+	require.NoError(t, err)
+	require.NoError(t, s.DB().Exec("UPDATE llm_provider_configs SET api_key = ? WHERE id = ?", foreign, cfg.ID).Error)
+
+	d, err := newAnalyzeDepsResolver(s, typesafe.NewClientFactory(nil))(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Equal(t, 45*time.Second, d.LLMCallTimeout)
+	_, cerr := d.Narrative.Chat(context.Background(), llm.ChatRequest{})
+	require.ErrorIs(t, cerr, models.ErrSecretUndecryptable)
 }

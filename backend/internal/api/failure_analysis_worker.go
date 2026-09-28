@@ -63,6 +63,7 @@ const llmKeyUnreadableReason = "the default LLM provider's stored key can't be d
 //     to decide fails resolution with the key error;
 //   - every TypeSafe client is built through tsf, the process-wide factory with the shared
 //     rate limiter (nil = unlimited, for tests);
+//   - an attached LLM is wrapped with the per-call timeout and optional hedge (applyLLMLatency);
 //   - the settings page draws these rules (frontend/src/utils/analysisFlow.js); change both together.
 func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failureanalysis.DepsResolver {
 	return func(trigger string) (failureanalysis.JobDeps, error) {
@@ -129,8 +130,28 @@ func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failur
 				deps.EscalateBelow = float64(ts.EscalateBelowPct) / 100
 			}
 		}
+		if deps.Narrative != nil {
+			applyLLMLatency(st, &deps)
+		}
 		return deps, nil
 	}
+}
+
+// applyLLMLatency bounds every failure-analysis LLM call — generative decisions, fallback,
+// takeover, narration and Explain all go through deps.Narrative — with the per-call timeout
+// and, when switched on, a hedged second request inside it (spec §B). Settings that cannot be
+// read fall back to the defaults: 45 s, no hedging.
+func applyLLMLatency(st *store.Store, deps *failureanalysis.JobDeps) {
+	timeoutS, hedgeS := models.DefaultLLMCallTimeoutSeconds, 0
+	if fas, err := st.GetFailureAnalysisSettings(); err != nil {
+		slog.Warn("failure-analysis: settings unavailable; using the default LLM call timeout", "err", err)
+	} else {
+		timeoutS, hedgeS = fas.LLMCallTimeoutSeconds, fas.HedgeAfterSeconds
+	}
+	timeout := failureanalysis.LLMCallTimeoutFor(timeoutS)
+	hedge := failureanalysis.HedgeAfterFor(hedgeS, timeout)
+	deps.LLMCallTimeout, deps.HedgingOn = timeout, hedge > 0
+	deps.Narrative = llm.WithCallTimeout(llm.WithHedge(deps.Narrative, hedge), timeout)
 }
 
 // newAutoAnalyzeGate answers, at run completion, whether an automatic analysis could run now:
@@ -207,6 +228,10 @@ func resolveTypeSafe(st *store.Store, tsf *typesafe.ClientFactory, trigger strin
 	}
 	if !ts.VerdictEngineEnabled {
 		return nil
+	}
+	deps.TypeSafeTimeout = time.Duration(ts.TimeoutSeconds) * time.Second
+	if deps.TypeSafeTimeout <= 0 {
+		deps.TypeSafeTimeout = 30 * time.Second // the TypeSafe client's own default
 	}
 	deps.Decider = failureanalysis.NewTypeSafeDecider(client, ts.Model)
 	deps.DeciderModel = ts.Model
