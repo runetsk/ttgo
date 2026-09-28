@@ -3,6 +3,7 @@ package failureanalysis
 import (
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -38,7 +39,8 @@ type Evidence struct {
 	SimilarFailuresRollup                              string
 	LinkedDefects                                      []LinkedDefect
 	LinkedRequirements                                 []LinkedRequirement
-	StateCap                                           int // bound on the rendered JSON state; 0 = StateCharCap
+	GroupMembers                                       []string // other members' error lines, redacted and capped; LLM prompts only
+	StateCap                                           int      // bound on the rendered JSON state; 0 = StateCharCap
 }
 
 // Budget is an engine's allowance for the three large text fields (runes) and
@@ -162,7 +164,36 @@ func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 	for i, lr := range in.LinkedRequirements {
 		ev.LinkedRequirements[i] = LinkedRequirement{Key: red(lr.Key), Title: red(lr.Title)}
 	}
+	ev.GroupMembers = groupMemberLines(in, red)
 	return ev
+}
+
+// groupMemberLines picks up to GroupMembersMax error lines from the group's other members
+// (spec §A4). A blank line, the representative's own error and repeats are skipped, compared
+// after the signature normalizer, so a signature group (identical normalized errors) adds
+// nothing. Each line is redacted when redaction is on, capped at GroupMemberMsgCap runes and
+// flattened to one line. nil when nothing is left.
+func groupMemberLines(in AnalyzeContext, red func(string) string) []string {
+	if len(in.GroupMembers) == 0 {
+		return nil
+	}
+	seen := map[string]bool{normalize(oneline(in.Result.ErrorMessage)): true}
+	var out []string
+	for _, m := range in.GroupMembers {
+		if len(out) == GroupMembersMax {
+			break
+		}
+		if strings.TrimSpace(m) == "" {
+			continue
+		}
+		key := normalize(oneline(m))
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		out = append(out, oneline(headRunes(red(m), GroupMemberMsgCap)))
+	}
+	return out
 }
 
 // PromptInput converts evidence into the template's data struct.
@@ -173,6 +204,7 @@ func (ev Evidence) PromptInput(template string) PromptInput {
 		ErrorMessage: ev.ErrorMessage, StackTrace: ev.StackTrace, LogText: ev.LogText,
 		SimilarFailures: ev.SimilarFailures, SimilarFailuresRollup: ev.SimilarFailuresRollup,
 		LinkedDefects: ev.LinkedDefects, LinkedRequirements: ev.LinkedRequirements,
+		GroupMembers: ev.GroupMembers,
 	}
 }
 

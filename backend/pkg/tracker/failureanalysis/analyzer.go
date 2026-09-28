@@ -26,6 +26,10 @@ type AnalyzeContext struct {
 	OS                    string
 	AppVersion            string
 	Categories            string
+	// GroupMembers are the raw error messages of the other failures analyzed with this one as
+	// one group (the worker fills it). BuildEvidence redacts, caps and filters them for the
+	// "Related failures in this group" prompt block; the TypeSafe decision never sees them.
+	GroupMembers []string
 
 	PromptTemplate   string
 	RedactionEnabled bool

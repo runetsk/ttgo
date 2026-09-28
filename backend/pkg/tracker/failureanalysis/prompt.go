@@ -16,6 +16,8 @@ const (
 	SimilarMsgCap       = 200
 	PromptCharCap       = 24000
 	ErrorMessageHeadCap = 4000 // new: applies to both engines (spec §6 compatibility exception)
+	GroupMembersMax     = 5    // other members' error lines in the "Related failures in this group" block
+	GroupMemberMsgCap   = 300  // runes per member line
 )
 
 // DefaultPromptTemplate is the shipped-default admin-editable template.
@@ -110,6 +112,9 @@ type PromptInput struct {
 	SimilarFailuresRollup string // one-line human-label distribution rollup
 	LinkedDefects         []LinkedDefect
 	LinkedRequirements    []LinkedRequirement
+	// GroupMembers are other members' error lines, already redacted by BuildEvidence. They are
+	// rendered by code after the template (groupBlock), so a customized template gets them too.
+	GroupMembers []string
 
 	// Set only when a TypeSafe decision precedes the narrative call (spec §6). Admin templates
 	// may reference them; the code-owned system message carries the binding instruction.
@@ -123,9 +128,10 @@ type PromptMeta struct {
 	TruncationPrefix string // e.g. "[context: no logs; trimmed similar failures]"
 }
 
-// BuildPrompt renders the template after applying truncation rules.
-// If the rendered size still exceeds PromptCharCap, we drop fields in this
-// order: log_text → similar_failures → steps → linked_defects → linked_requirements.
+// BuildPrompt renders the template after applying truncation rules, then appends the related
+// failures of the group, if any. If the result still exceeds PromptCharCap, we drop fields in
+// this order: related failures → log_text → similar_failures → steps → linked_defects →
+// linked_requirements.
 func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 	in.StackTrace = headRunes(in.StackTrace, StackTraceHeadCap)
 	in.LogText = tailRunes(in.LogText, LogTextTailCap)
@@ -136,6 +142,14 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 	for i := range in.SimilarFailures {
 		in.SimilarFailures[i].ErrorMessage = oneline(headRunes(in.SimilarFailures[i].ErrorMessage, SimilarMsgCap))
 	}
+	members := in.GroupMembers
+	if len(members) > GroupMembersMax {
+		members = members[:GroupMembersMax]
+	}
+	in.GroupMembers = make([]string, len(members)) // fresh slice: never write into the caller's array
+	for i, m := range members {
+		in.GroupMembers[i] = oneline(headRunes(m, GroupMemberMsgCap))
+	}
 
 	tmpl := in.Template
 	if tmpl == "" {
@@ -143,8 +157,8 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 	}
 
 	dropped := []string{}
-	for pass := 0; pass < 5; pass++ {
-		out, err := render(tmpl, in)
+	for pass := 0; pass < 6; pass++ {
+		out, err := renderWithGroup(tmpl, in)
 		if err != nil {
 			return "", PromptMeta{}, err
 		}
@@ -152,6 +166,9 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 			return out, PromptMeta{TruncationPrefix: makePrefix(dropped)}, nil
 		}
 		switch {
+		case len(in.GroupMembers) > 0:
+			in.GroupMembers = nil
+			dropped = append(dropped, "no related failures")
 		case len(in.LogText) > 0:
 			in.LogText = ""
 			dropped = append(dropped, "no logs")
@@ -172,8 +189,33 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 			return out, PromptMeta{TruncationPrefix: makePrefix(dropped)}, nil
 		}
 	}
-	out, err := render(tmpl, in)
+	out, err := renderWithGroup(tmpl, in)
 	return out, PromptMeta{TruncationPrefix: makePrefix(dropped)}, err
+}
+
+// renderWithGroup renders the template and appends the group's related failures.
+func renderWithGroup(tmpl string, in PromptInput) (string, error) {
+	out, err := render(tmpl, in)
+	if err != nil {
+		return "", err
+	}
+	return out + groupBlock(in.GroupMembers), nil
+}
+
+// groupBlock lists the other failures analyzed as one group with this one (spec §A4), with
+// the instruction to explain their shared cause. It is "" without members, so a prompt for an
+// ungrouped failure is byte-for-byte the rendered template.
+func groupBlock(members []string) string {
+	if len(members) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n### Related failures in this group\n")
+	b.WriteString("These other failures were grouped with this one as the same problem. Explain the cause they share, not only this instance.\n")
+	for _, m := range members {
+		b.WriteString("- <<<DATA " + m + " DATA>>>\n")
+	}
+	return b.String()
 }
 
 func render(tmpl string, in PromptInput) (string, error) {
