@@ -214,3 +214,14 @@ func (s *Store) CreateSkippedAnalysisJob(runID, reason string, estimateUSD, spen
 func (s *Store) SetAnalysisJobRateLimitHits(id string, hits int) error {
 	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).Update("rate_limit_hits", hits).Error
 }
+
+// SetAnalysisJobCallStats records the job's call telemetry: rate-limit responses, LLM calls cut
+// by the per-call timeout, hedged requests sent and hedges that won.
+func (s *Store) SetAnalysisJobCallStats(id string, rateLimits, callTimeouts, hedgesFired, hedgesWon int) error {
+	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"rate_limit_hits": rateLimits,
+		"call_timeouts":   callTimeouts,
+		"hedges_fired":    hedgesFired,
+		"hedges_won":      hedgesWon,
+	}).Error
+}

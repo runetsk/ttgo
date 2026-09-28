@@ -5479,7 +5479,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses. Outcomes include stage timing (decision_ms_avg/p50/max, llm_ms_avg/p50/max over representatives) and rate_limit_hits.",
+                "description": "Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses. Outcomes include stage timing (decision_ms_avg/p50/max, llm_ms_avg/p50/max over representatives), rate_limit_hits, and the LLM latency counts call_timeouts, hedges_fired and hedges_won.",
                 "produces": [
                     "application/json"
                 ],
@@ -10341,6 +10341,10 @@ const docTemplate = `{
                 "analyzed_count": {
                     "type": "integer"
                 },
+                "call_timeouts": {
+                    "description": "LLM tail latency (spec §B): calls cut by the per-call timeout, hedged second requests\nsent, and hedges that answered first.",
+                    "type": "integer"
+                },
                 "capped_at": {
                     "type": "integer"
                 },
@@ -10355,6 +10359,12 @@ const docTemplate = `{
                 },
                 "error_message": {
                     "type": "string"
+                },
+                "hedges_fired": {
+                    "type": "integer"
+                },
+                "hedges_won": {
+                    "type": "integer"
                 },
                 "id": {
                     "type": "string"

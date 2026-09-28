@@ -216,8 +216,14 @@ func (s *Store) AnalysisJobOutcomes(jobID string) (models.RunAnalysisJobOutcomes
 	}
 	o.DecisionMsAvg, o.DecisionMsP50, o.DecisionMsMax = msStats(decision)
 	o.LLMMsAvg, o.LLMMsP50, o.LLMMsMax = msStats(llmMs)
-	err = s.db.Raw(`SELECT COALESCE(MAX(rate_limit_hits), 0) FROM run_analysis_jobs WHERE id = ?`, jobID).
-		Scan(&o.RateLimitHits).Error
+	var calls struct{ RateLimitHits, CallTimeouts, HedgesFired, HedgesWon int }
+	err = s.db.Raw(`SELECT COALESCE(MAX(rate_limit_hits), 0) AS rate_limit_hits,
+			COALESCE(MAX(call_timeouts), 0) AS call_timeouts,
+			COALESCE(MAX(hedges_fired), 0) AS hedges_fired,
+			COALESCE(MAX(hedges_won), 0) AS hedges_won
+		FROM run_analysis_jobs WHERE id = ?`, jobID).Scan(&calls).Error
+	o.RateLimitHits, o.CallTimeouts, o.HedgesFired, o.HedgesWon =
+		calls.RateLimitHits, calls.CallTimeouts, calls.HedgesFired, calls.HedgesWon
 	return o, err
 }
 

@@ -206,3 +206,25 @@ func TestAnalysisJobOutcomes_TimingAndRateLimits(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 3, stored.RateLimitHits)
 }
+
+func TestAnalysisJobOutcomes_CallStats(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	job, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	require.NoError(t, s.SetAnalysisJobCallStats(job.ID, 4, 3, 2, 1))
+
+	stored, err := s.GetAnalysisJob(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 4, stored.RateLimitHits)
+	require.Equal(t, 3, stored.CallTimeouts)
+	require.Equal(t, 2, stored.HedgesFired)
+	require.Equal(t, 1, stored.HedgesWon)
+
+	o, err := s.AnalysisJobOutcomes(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 4, o.RateLimitHits)
+	require.Equal(t, 3, o.CallTimeouts)
+	require.Equal(t, 2, o.HedgesFired)
+	require.Equal(t, 1, o.HedgesWon)
+}

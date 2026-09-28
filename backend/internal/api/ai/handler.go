@@ -9,6 +9,7 @@ import (
 	"time"
 	"ttgo/internal/api/httpx"
 	"ttgo/internal/api/websocket"
+	"ttgo/pkg/tracker/callstats"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
@@ -95,6 +96,8 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	actx.RedactionEnabled = settings.RedactionEnabled
 	actx.PromptTemplate = settings.PromptTemplate
 	actx.ProviderModel = deps.NarrativeModel
+	// A counter of its own, so the hedges this analysis fires are billed with it.
+	ctx, calls := callstats.WithCounter(ctx)
 	res, err := failureanalysis.Analyze(ctx, deps.Analyze(), actx)
 	var attemptErr error
 	if err != nil {
@@ -110,6 +113,8 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	row.CreatedBy = ptrOrNil(userID)
 	row, err = h.store.CreateAnalysis(row)
 	h.recordCosts(failureanalysis.CostEvents(models.AnalysisCostKindAnalysis, res, deps,
+		failureanalysis.RefsFor(result.TestRunID, nil, row)))
+	h.recordCosts(failureanalysis.HedgeCostEvents(calls.HedgePromptTokens(), deps,
 		failureanalysis.RefsFor(result.TestRunID, nil, row)))
 	if err != nil {
 		return nil, err

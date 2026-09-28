@@ -401,6 +401,11 @@ type RunAnalysisJob struct {
 	// RateLimitHits counts every 429 the job saw from TypeSafe (decisions and semantic
 	// grouping) and the LLM, including ones a retry then got past.
 	RateLimitHits int `json:"rate_limit_hits" gorm:"not null;default:0"`
+	// LLM tail latency (spec §B): calls cut by the per-call timeout, hedged second requests
+	// sent, and hedges that answered first.
+	CallTimeouts int `json:"call_timeouts" gorm:"column:call_timeouts;not null;default:0"`
+	HedgesFired  int `json:"hedges_fired"  gorm:"column:hedges_fired;not null;default:0"`
+	HedgesWon    int `json:"hedges_won"    gorm:"column:hedges_won;not null;default:0"`
 }
 
 // RunAnalysisJobOutcomes summarises what a job's representative analyses produced.
@@ -427,6 +432,9 @@ type RunAnalysisJobOutcomes struct {
 	LLMMsP50      int `json:"llm_ms_p50"`
 	LLMMsMax      int `json:"llm_ms_max"`
 	RateLimitHits int `json:"rate_limit_hits"` // copied from the job
+	CallTimeouts  int `json:"call_timeouts"`   // copied from the job
+	HedgesFired   int `json:"hedges_fired"`    // copied from the job
+	HedgesWon     int `json:"hedges_won"`      // copied from the job
 }
 
 // GeneratedStep is a single step in a generated test case draft.

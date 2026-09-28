@@ -14,10 +14,20 @@ import (
 	"ttgo/pkg/tracker/store"
 )
 
-// GroupDeadline bounds one group's whole analysis: the TypeSafe call, the LLM call with its
-// transient retry and JSON repair, and the explanation. A group that runs past it is recorded
-// as a failed attempt (category "timeout") and the job moves on.
-var GroupDeadline = 5 * time.Minute
+// GroupDeadline is the floor of a group's deadline. Each job derives its own bound from its
+// timeouts (failureanalysis.GroupDeadlineFor: the TypeSafe call, one LLM stage with its retries
+// and JSON repair, backoffs); a group that runs past it is recorded as a failed attempt
+// (category "timeout") and the job moves on. Lowering GroupDeadline below
+// failureanalysis.MinGroupDeadline (tests) caps every group at that value instead.
+var GroupDeadline = failureanalysis.MinGroupDeadline
+
+// jobGroupDeadline is the bound for every group of a job resolved with deps.
+func jobGroupDeadline(deps failureanalysis.JobDeps) time.Duration {
+	if GroupDeadline < failureanalysis.MinGroupDeadline {
+		return GroupDeadline
+	}
+	return failureanalysis.GroupDeadlineFor(deps.TypeSafeTimeout, deps.LLMCallTimeout)
+}
 
 // cancelPoll is how often a running job checks whether it was cancelled, so an in-flight
 // provider request is abandoned instead of finishing first.
@@ -124,13 +134,13 @@ func parallelGroups(n int) int {
 	return n
 }
 
-// analyzeGroups runs analyze for up to parallel groups at once, each under its own
-// GroupDeadline, and delivers every outcome on the returned channel, which is closed once
+// analyzeGroups runs analyze for up to parallel groups at once, each under deadline, and
+// delivers every outcome on the returned channel, which is closed once
 // all started groups have finished. No group starts after the job is cancelled: the
 // feeder checks the job context and the stored status before each one. The channel is
 // buffered for every group, so a writer that stops reading early never blocks a sender.
 func (w *Worker) analyzeGroups(jobCtx context.Context, cancelJob context.CancelFunc, jobID string,
-	groups []*failureanalysis.FailureGroup, parallel int,
+	groups []*failureanalysis.FailureGroup, parallel int, deadline time.Duration,
 	analyze func(context.Context, *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, error),
 ) <-chan groupOutcome {
 	out := make(chan groupOutcome, len(groups))
@@ -153,7 +163,7 @@ func (w *Worker) analyzeGroups(jobCtx context.Context, cancelJob context.CancelF
 			go func(g *failureanalysis.FailureGroup) {
 				defer wg.Done()
 				defer func() { <-slots }()
-				gctx, cancel := context.WithTimeout(jobCtx, GroupDeadline)
+				gctx, cancel := context.WithTimeout(jobCtx, deadline)
 				defer cancel()
 				res, err := analyze(gctx, g)
 				out <- groupOutcome{group: g, res: res, err: err}
@@ -203,14 +213,22 @@ func (w *Worker) processOnce(ctx context.Context) error {
 
 	jobCtx, cancelJob := context.WithCancel(ctx)
 	defer cancelJob()
-	// Every TypeSafe and LLM call of the job reports its 429s here (semantic pass included).
+	// Every TypeSafe and LLM call of the job reports its 429s, call timeouts and hedges here
+	// (semantic pass included).
 	jobCtx, calls := callstats.WithCounter(jobCtx)
-	saveRateLimits := func() {
-		if err := w.store.SetAnalysisJobRateLimitHits(job.ID, calls.RateLimitHits()); err != nil {
-			slog.Warn("failure-analysis: rate-limit count not recorded", "job_id", job.ID, "err", err)
+	saveCallStats := func() {
+		if err := w.store.SetAnalysisJobCallStats(job.ID, calls.RateLimitHits(), calls.CallTimeouts(),
+			calls.HedgesFired(), calls.HedgesWon()); err != nil {
+			slog.Warn("failure-analysis: call stats not recorded", "job_id", job.ID, "err", err)
 		}
 	}
-	defer saveRateLimits() // also for cancelled and interrupted jobs
+	defer saveCallStats() // also for cancelled and interrupted jobs
+	// Fired hedges are billed once per job, when it ends however it ends: the counter is
+	// shared by the job's parallel groups, so they are tied to the job, not to one analysis.
+	defer func() {
+		w.recordCosts(failureanalysis.HedgeCostEvents(calls.HedgePromptTokens(), deps,
+			failureanalysis.CostRefs{RunID: job.TestRunID, JobID: &job.ID}))
+	}()
 	go w.watchCancel(jobCtx, cancelJob, job.ID)
 	cancelled := func() bool { return jobCtx.Err() != nil && ctx.Err() == nil }
 
@@ -292,7 +310,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 	// nearly all of a job's time, overlap. Results are written here, on this goroutine only,
 	// in the order they finish, so the store sees one writer as before.
 	analyzeDeps := deps.Analyze()
-	outcomes := w.analyzeGroups(jobCtx, cancelJob, job.ID, groups, parallelGroups(settings.ParallelGroups),
+	outcomes := w.analyzeGroups(jobCtx, cancelJob, job.ID, groups, parallelGroups(settings.ParallelGroups), jobGroupDeadline(deps),
 		func(gctx context.Context, g *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, error) {
 			actx := failureanalysis.BuildContext(w.store, g.Representative, time.Now())
 			actx.RedactionEnabled = settings.RedactionEnabled
@@ -383,7 +401,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		return nil
 	}
 
-	saveRateLimits() // before completion, so the completed job already carries it
+	saveCallStats() // before completion, so the completed job already carries it
 	changed, err := w.store.UpdateAnalysisJobStatus(job.ID, models.RunAnalysisJobStatusCompleted, "")
 	if err != nil {
 		return err

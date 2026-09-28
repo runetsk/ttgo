@@ -10,6 +10,7 @@ import (
 	"time"
 	"ttgo/internal/api/authctx"
 	"ttgo/internal/api/httpx"
+	"ttgo/pkg/tracker/callstats"
 	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/store"
@@ -331,7 +332,7 @@ func (h *Handler) jobView(job *models.RunAnalysisJob) (*analysisJobView, error) 
 // pipeline and outcomes. Used to grade one job as a whole (`ttgo ai compare --by-job`).
 //
 // @Summary      List a run's analysis jobs
-// @Description  Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses. Outcomes include stage timing (decision_ms_avg/p50/max, llm_ms_avg/p50/max over representatives) and rate_limit_hits.
+// @Description  Every failure-analysis job of the run, newest first, with the pipeline it ran (decider, narrator, explanations, takeover threshold, fallback, reply cap) and the outcome counts of its analyses. Outcomes include stage timing (decision_ms_avg/p50/max, llm_ms_avg/p50/max over representatives), rate_limit_hits, and the LLM latency counts call_timeouts, hedges_fired and hedges_won.
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        id   path      string  true  "Run ID"
@@ -505,7 +506,11 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 	actx.RedactionEnabled = settings.RedactionEnabled
 	actx.PromptTemplate = settings.PromptTemplate
 	actx.ProviderModel = deps.NarrativeModel
-	res, err := failureanalysis.Explain(r.Context(), deps.Analyze(), actx, a)
+	ctx, calls := callstats.WithCounter(r.Context())
+	res, err := failureanalysis.Explain(ctx, deps.Analyze(), actx, a)
+	// A fired hedge was billed whether or not the explanation came back.
+	h.recordCosts(failureanalysis.HedgeCostEvents(calls.HedgePromptTokens(), deps,
+		failureanalysis.RefsFor(result.TestRunID, a.JobID, a)))
 	if err != nil {
 		httpx.Error(w, http.StatusBadGateway, err)
 		return
