@@ -26,6 +26,18 @@ type NarrationDelta struct {
 	CompletionTokens int
 	LLMMs            int
 	LLMCalls         int
+
+	// Narrative transfer check (spec §2), set by RunTransferCheck after an ok narration.
+	// Fits maps a semantic clone's RESULT id to P(this explanation describes its failure);
+	// ApplyNarration writes it to that clone's narrative_fit and NULL to every other semantic
+	// clone. TransferFailed: the check ran and failed or was cut off (fits stay NULL).
+	// TransferUnchecked: clones past TransferMaxChunks × TransferChunk. TransferTokens and
+	// TransferModel: what the check billed (cost kind transfer), also when it failed.
+	Fits              map[string]float64
+	TransferFailed    bool
+	TransferUnchecked int
+	TransferTokens    int
+	TransferModel     string
 }
 
 // narrationAbandoned is the Reason of a narration whose context was cancelled mid-call. Such

@@ -55,6 +55,9 @@ type JobDeps struct {
 	NoLLMFallback        bool
 	LLMUnavailableReason string
 	Semantic             *SemanticDeps
+	// Transfer nil = no narrative transfer check: the resolver sets it with Semantic (the same
+	// client) when dedup is on. The check runs after an ok narration on the group's semantic clones.
+	Transfer *TransferDeps
 	// FewShotExamples is how many past triage decisions accompany each failure (0 = off), from the
 	// failure-analysis settings at resolve time. Callers pass it to BuildContext.
 	FewShotExamples int

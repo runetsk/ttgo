@@ -278,3 +278,29 @@ func knownDefectAskable(defs []LinkedDefect) bool {
 	}
 	return true
 }
+
+// Narrative transfer check (spec §2, R1): does a group's explanation, written from the
+// representative, also describe each semantically grouped result?
+const (
+	TransferFitMin    = 0.50 // a semantic clone below it is flagged: the explanation may not apply to it
+	TransferChunk     = 40   // semantic clones per transfer request
+	TransferMaxChunks = 1    // transfer requests per group (R10); further clones stay unchecked
+)
+
+// transferQuestion asks whether the group's explanation describes `failures[j]` of the
+// chunk-local array (j >= 1; index 0 is the representative the explanation was written from).
+// The index is in the text because question ids are never shown to the model.
+func transferQuestion(j int) typesafe.Question {
+	return typesafe.Question{
+		Type: "noul",
+		Instructions: map[string]any{
+			"question": fmt.Sprintf("Does `explanation` correctly describe the failure in `failures[%d]`?", j),
+			"context":  "`explanation` was written for `failures[0]`. Judge only whether it also holds for the named failure.",
+			"failure":  j,
+		},
+		Criteria: map[string]any{
+			"true":  "The named failure shows the same failing operation and the same error condition that `explanation` describes, and the specifics the explanation states (endpoint, selector, component, asserted or observed value, error type) match what the named failure shows. Run identifiers, timestamps, and wording are incidental; a duration or identifier is not incidental when it is the asserted value or identifies the failing resource.",
+			"false": "The named failure shows a different operation, endpoint, selector, or component, a different error type or asserted value, contradicts a specific the explanation states, or does not show enough to tell. A redaction placeholder carries no information: it neither confirms nor contradicts a specific.",
+		},
+	}
+}
