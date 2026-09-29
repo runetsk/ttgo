@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -8,13 +9,21 @@ import (
 	"ttgo/pkg/tracker/store"
 )
 
+// Reranker re-orders the first page of results (TypeSafe.ai, spec Wave 5 §4) and reports whether
+// it did; on any problem it returns the results unchanged and false.
+type Reranker func(ctx context.Context, query string, results []store.SearchResult) ([]store.SearchResult, bool)
+
 type Handler struct {
-	store *store.Store
+	store  *store.Store
+	rerank Reranker
 }
 
 func NewHandler(s *store.Store) *Handler {
 	return &Handler{store: s}
 }
+
+// SetReranker wires the re-ranker used for ?rerank=true (nil = never re-rank).
+func (h *Handler) SetReranker(r Reranker) { h.rerank = r }
 
 // handleSearch godoc
 // @Summary      Search test cases
@@ -25,6 +34,7 @@ func NewHandler(s *store.Store) *Handler {
 // @Param        q       query     string  true   "Search query"
 // @Param        limit   query     int     false  "Maximum number of results to return"  default(50)
 // @Param        offset  query     int     false  "Number of results to skip"            default(0)
+// @Param        rerank  query     bool    false  "Re-rank the first page with TypeSafe.ai when its search re-ranking is on (results then carry relevance; the response says reranked)"
 // @Success      200  {object}  map[string]interface{}
 // @Failure      500  {object}  map[string]string
 // @Router       /search [get]
@@ -60,9 +70,16 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The first page may be re-ranked by TypeSafe.ai; any problem keeps the BM25 order.
+	reranked := false
+	if want, _ := strconv.ParseBool(r.URL.Query().Get("rerank")); want && offset == 0 && h.rerank != nil && len(results) > 1 {
+		results, reranked = h.rerank(r.Context(), q, results)
+	}
+
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{
-		"results": results,
-		"total":   total,
-		"query":   q,
+		"results":  results,
+		"total":    total,
+		"query":    q,
+		"reranked": reranked,
 	})
 }

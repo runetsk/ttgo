@@ -74,6 +74,9 @@ type SearchResult struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	FolderID    string `json:"folder_id"`
+	// Relevance is TypeSafe.ai's probability that the result is what the query looks for, set only
+	// when the first page was re-ranked (spec Wave 5 §4).
+	Relevance *float64 `json:"relevance,omitempty"`
 }
 
 // sanitizeFTSQuery escapes the query for safe use in FTS5.
@@ -112,7 +115,7 @@ func (s *Store) SearchTestCases(query string, limit, offset int) ([]SearchResult
 		return nil, 0, err
 	}
 
-	rows, err := s.db.Raw(baseSQL+` LIMIT ? OFFSET ?`, ftsQuery, limit, offset).Rows()
+	rows, err := s.db.Raw(baseSQL+` ORDER BY fts.rank, tc.id LIMIT ? OFFSET ?`, ftsQuery, limit, offset).Rows()
 	if err != nil {
 		return nil, 0, err
 	}

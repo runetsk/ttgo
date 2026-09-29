@@ -9,6 +9,7 @@ import (
 
 func newSearchCmd() *cobra.Command {
 	var limit, offset int
+	var rerank bool
 	cmd := &cobra.Command{
 		Use:   "search <query>",
 		Short: "Search across tests, requirements, and runs",
@@ -18,7 +19,7 @@ func newSearchCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			raw, err := c.Search(args[0], limit, offset)
+			raw, err := c.Search(args[0], limit, offset, rerank)
 			if err != nil {
 				return err
 			}
@@ -37,10 +38,12 @@ func newSearchCmd() *cobra.Command {
 				{Header: "TYPE", Key: "type"},
 				{Header: "ID", Key: "id"},
 				{Header: "NAME", Key: "name"},
+				{Header: "RELEVANCE", Key: "relevance"},
 			})
 		},
 	}
 	cmd.Flags().IntVar(&limit, "limit", 50, "Max results")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Offset")
+	cmd.Flags().BoolVar(&rerank, "rerank", false, "Re-rank the first page with TypeSafe.ai (needs its search re-ranking switched on)")
 	return cmd
 }

@@ -61,7 +61,9 @@ func mountAPIRoutes(s *Server, api *routegroup.Bundle) {
 	apiruns.Mount(api, apiruns.NewHandlerWithNotifier(s.store, s.Hub, s.notifyRunCompleted).
 		WithAutoAnalysis(newAutoAnalysis(s.store, s.analyzeDepsResolver())), s.requireAuth)
 	apicustomfields.Mount(api, apicustomfields.NewHandler(s.store), s.requireAuth, s.requireAdmin)
-	apisearch.Mount(api, apisearch.NewHandler(s.store), s.requireAuth)
+	searchHandler := apisearch.NewHandler(s.store)
+	searchHandler.SetReranker(s.ensureAIHandler().RerankSearch)
+	apisearch.Mount(api, searchHandler, s.requireAuth)
 	apitokens.Mount(api, apitokens.NewHandler(s.store), s.requireAdmin)
 	apiwebhooks.Mount(api, apiwebhooks.NewHandler(s.store), s.requireAuth)
 	apibackups.Mount(api, s.backups, s.requireAdmin)

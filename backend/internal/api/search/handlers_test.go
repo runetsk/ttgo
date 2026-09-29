@@ -72,3 +72,18 @@ func TestSearch_BadPagination(t *testing.T) {
 	w := do(t, st, "/api/search?q=foo&limit=abc&offset=-1")
 	assert.Equal(t, http.StatusOK, w.Code)
 }
+
+// Wave 5 §4: rerank=true with re-ranking unavailable keeps the BM25 order and says so.
+func TestSearch_RerankUnavailableKeepsBM25(t *testing.T) {
+	st := newStore(t)
+	root, _ := st.CreateFolder("Root", nil)
+	require.NoError(t, st.CreateTestCase(&models.TestCase{Name: "Login Test", FolderID: root.ID}))
+	require.NoError(t, st.CreateTestCase(&models.TestCase{Name: "Login audit", FolderID: root.ID}))
+
+	w := do(t, st, "/api/search?q=Login&rerank=true")
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, false, resp["reranked"])
+	assert.Len(t, resp["results"], 2)
+}
