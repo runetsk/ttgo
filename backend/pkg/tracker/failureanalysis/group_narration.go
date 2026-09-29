@@ -45,7 +45,21 @@ func DecidedFromRow(a *models.RunResultAnalysis) *AnalyzeResult {
 		ConfidenceScore: a.ConfidenceScore, VerdictProbabilities: a.VerdictProbabilities,
 		SuggestedDefectType: a.SuggestedDefectType, SuggestedDefectTypeConfidence: a.SuggestedDefectTypeConfidence,
 		SuggestionSource: a.SuggestionSource, DefectTypeProbabilities: a.DefectTypeProbabilities,
-		PolicyVersion: a.PolicyVersion, HistoryAvailable: a.HistoryAvailable,
+		PolicyVersion: a.PolicyVersion, HistoryAvailable: a.HistoryAvailable, Signals: a.Signals,
 		DecisionStatus: a.DecisionStatus, NarrativeStatus: models.NarrativeStatusPending,
 	}
+}
+
+// DecidedForExplain is DecidedFromRow for an on-demand Explain of a group, or of a clone through
+// its representative (spec R8). in is the context Explain rebuilt from the store; rows and
+// members may have changed since the decision, so a guarded decision keeps only the checked
+// blocks whose text is unchanged (VerifiedAgainst over the TypeSafe-budget evidence), and
+// Narrate sends only those. An unguarded row (before policy v7) is returned as DecidedFromRow
+// does; Narrate then drops its related failures. The stored row is not changed.
+func DecidedForExplain(a *models.RunResultAnalysis, in AnalyzeContext) *AnalyzeResult {
+	d := DecidedFromRow(a)
+	if s := ParseSignals(a.Signals); s.Guarded() {
+		d.Signals = SignalsJSON(s.VerifiedAgainst(BuildEvidenceWithBudget(in, TypeSafeBudget())))
+	}
+	return d
 }

@@ -99,7 +99,9 @@ func TestNarrate_ExplainsTheSharedCause(t *testing.T) {
 	prov := &recordingProvider{stubProvider: stubProvider{responses: []string{narrJSON}}}
 	in := baseContext()
 	in.GroupMembers = []string{"socket hang up", "connection reset by peer"}
-	decided := decisionResult(flakyDecision())
+	checked := flakyDecision()
+	checked.Signals = everyBlockChecked(in, 0.02) // the injection question covered the members too
+	decided := decisionResult(checked)
 	decided.NarrativeStatus = models.NarrativeStatusPending
 	_, ok := Narrate(context.Background(), AnalyzeDeps{Narrative: prov}, in, decided)
 	require.True(t, ok)

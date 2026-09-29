@@ -339,6 +339,13 @@ type RunResultAnalysis struct {
 	// before the column read false.
 	HistoryAvailable bool `json:"history_available" gorm:"not null;default:false"`
 
+	// Signals is the JSON of TypeSafe's companion answers and the evidence blocks its injection
+	// question covered (failureanalysis.Signals: injection, flaky_history, recurring, outside_app,
+	// known_defect, members_checked, checked_blocks, evidence_hash, block_hashes; answer keys only
+	// for the questions asked). '' on rows before policy v7 and on LLM-only routes. Clones copy
+	// their representative's; a takeover keeps TypeSafe's.
+	Signals string `json:"signals" gorm:"column:signals;type:text;not null;default:''"`
+
 	// Grouping provenance. "" on representatives; on clones: how they were grouped and,
 	// for semantic clones, the probability/model/policy that justified the merge.
 	DedupMethod        string   `json:"dedup_method,omitempty" gorm:"default:''"`

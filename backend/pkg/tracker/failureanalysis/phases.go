@@ -60,7 +60,7 @@ func Narrate(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext, decided *
 		return unavailableDelta(reason, PromptMeta{}), true
 	}
 	decision := decisionOf(decided)
-	pin := BuildEvidence(in).PromptInput(in.PromptTemplate)
+	pin := narratorEvidence(in, ParseSignals(decided.Signals)).PromptInput(in.PromptTemplate)
 	pin.DecidedVerdict, pin.DecidedConfidence, pin.DecidedDefectType = decision.Verdict, decided.Confidence, decision.SuggestedDefectType
 	prompt, meta, err := BuildPrompt(pin)
 	if err != nil {
@@ -147,4 +147,17 @@ func decisionOf(r *AnalyzeResult) *Decision {
 		_ = json.Unmarshal([]byte(r.VerdictProbabilities), &d.VerdictProbabilities)
 	}
 	return d
+}
+
+// narratorEvidence is the evidence an explanation may see after a TypeSafe decision (spec R8):
+// with guard signals, only the blocks the injection question covered (the others are emptied
+// and named "not checked" in the rationale's prefix); without them (a decision made before
+// policy v7), everything but the group's related failures.
+func narratorEvidence(in AnalyzeContext, s Signals) Evidence {
+	ev := BuildEvidence(in)
+	if !s.Guarded() {
+		ev.GroupMembers = nil
+		return ev
+	}
+	return ev.OnlyBlocks(s.CheckedBlocks)
 }

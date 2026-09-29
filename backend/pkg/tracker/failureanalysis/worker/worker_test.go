@@ -255,6 +255,23 @@ func tsVerdict(verdict, defect string, pSame float64) func(req typesafe.Request)
 			dp[defect] = 0.91
 			resp.Answers["verdict"] = typesafe.Answer{Type: "choice", Choice: verdict, Confidence: 0.92, Probabilities: vp}
 			resp.Answers["defect_type"] = typesafe.Answer{Type: "choice", Choice: defect, Confidence: 0.87, Probabilities: dp}
+			// Wave 3 companions: nothing flagged, no known defect. Answering injection makes the
+			// decision guarded, so its narration gets every block the state carried.
+			for id, q := range req.Questions {
+				switch {
+				case id == "verdict" || id == "defect_type":
+				case q.Type == "noul":
+					resp.Answers[id] = typesafe.Answer{Type: "noul", Noul: 0.05}
+				case q.Type == "choice":
+					opts := q.Criteria.(map[string]any)
+					probs := make(map[string]float64, len(opts))
+					for k := range opts {
+						probs[k] = 0
+					}
+					probs[failureanalysis.KnownDefectNone] = 1
+					resp.Answers[id] = typesafe.Answer{Type: "choice", Choice: failureanalysis.KnownDefectNone, Confidence: 0.9, Probabilities: probs}
+				}
+			}
 			return resp, nil
 		}
 		for id := range req.Questions {

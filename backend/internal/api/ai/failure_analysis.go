@@ -565,7 +565,9 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 
 	// P1: the call runs under its own call-stats counter so fired hedges are billed below.
 	callCtx, calls := callstats.WithCounter(r.Context())
-	delta, ok := failureanalysis.Narrate(callCtx, deps.Analyze(), actx, failureanalysis.DecidedFromRow(rep))
+	// R8: only evidence the decision's injection question covered, and that is unchanged since,
+	// reaches the LLM.
+	delta, ok := failureanalysis.Narrate(callCtx, deps.Analyze(), actx, failureanalysis.DecidedForExplain(rep, actx))
 	if !ok { // cannot happen for a claimed decision; never leave the claim pending
 		delta = failureanalysis.NarrationDelta{NarrativeStatus: models.NarrativeStatusUnavailable, Reason: "nothing to explain",
 			Summary: "AI narrative unavailable: nothing to explain"}

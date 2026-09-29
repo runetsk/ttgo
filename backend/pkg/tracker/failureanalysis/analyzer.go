@@ -75,6 +75,9 @@ type AnalyzeResult struct {
 	TypeSafeInputTokens           int
 	// HistoryAvailable: the context carried this test's history (see AnalyzeContext.HistoryAvailable).
 	HistoryAvailable bool
+	// Signals is SignalsJSON of TypeSafe's companion answers and checked blocks; "" when
+	// TypeSafe did not decide.
+	Signals string
 
 	// DecisionStatus is models.DecisionStatusOK for a decision and DecisionStatusFailed for an
 	// attempt that produced none; ErrorCategory says why (or why a takeover did not happen).
@@ -281,6 +284,18 @@ func decide(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeR
 		return res, decisionMs, err
 	}
 
+	// Injection guard (spec Wave 3 §1.4): the evidence carries instructions addressed to an AI.
+	// TypeSafe's decision stands (it answered typed questions), but nothing of this failure goes
+	// to the LLM: no takeover, even below the threshold, and no explanation. The row is final.
+	// Explain can still send it on an explicit override.
+	if decision.Signals.InjectionFlagged() {
+		out := decisionResult(decision)
+		out.DecisionMs = decisionMs
+		out.NarrativeStatus = models.NarrativeStatusUnavailable
+		out.Summary = InjectionSummary
+		return out, decisionMs, nil
+	}
+
 	// Takeover: TypeSafe is not confident enough, so the LLM decides as the generative
 	// pipeline would. The row is an LLM analysis (graded on the LLM ladder); it records
 	// TypeSafe's own decision and carries TypeSafe's tokens because both ran.
@@ -289,13 +304,19 @@ func decide(ctx context.Context, deps AnalyzeDeps, in AnalyzeContext) (*AnalyzeR
 	if deps.EscalateBelow > 0 && deps.Narrative != nil && decision.VerdictConfidence < deps.EscalateBelow {
 		prefix := fmt.Sprintf("[verdict engine: TypeSafe unsure (%s at %.2f, below %.2f); the LLM decided] ",
 			decision.Verdict, decision.VerdictConfidence, deps.EscalateBelow)
-		res, err := analyzeGenerative(ctx, deps, in, ev, prefix)
+		takeoverEv := ev
+		if decision.Signals.Guarded() {
+			// R8: the LLM that takes over sees only the blocks TypeSafe's injection question covered.
+			takeoverEv = ev.OnlyBlocks(decision.Signals.CheckedBlocks)
+		}
+		res, err := analyzeGenerative(ctx, deps, in, takeoverEv, prefix)
 		if abandoned(ctx) {
 			return nil, decisionMs, ctx.Err()
 		}
 		switch {
 		case err == nil && res.DecisionStatus != models.DecisionStatusFailed:
 			res.TypeSafeInputTokens = decision.InputTokens
+			res.Signals = SignalsJSON(decision.Signals)
 			res.DecisionMs = decisionMs
 			res.TakeoverFromVerdict = decision.Verdict
 			res.TakeoverFromConfidence = f64ptr(decision.VerdictConfidence)
@@ -360,6 +381,7 @@ func decisionResult(decision *Decision) *AnalyzeResult {
 		DefectTypeProbabilities:       jsonOrEmpty(decision.DefectTypeProbabilities),
 		PolicyVersion:                 decision.PolicyVersion,
 		TypeSafeInputTokens:           decision.InputTokens,
+		Signals:                       SignalsJSON(decision.Signals),
 		ModelName:                     decision.Model,
 		NarrativeStatus:               models.NarrativeStatusOK,
 		DecisionStatus:                models.DecisionStatusOK,
