@@ -4,14 +4,19 @@ import {
     updateFailureAnalysisSettings,
     resetFailureAnalysisPrompt,
     getFailureAnalysisAccuracy,
+    getAutoApplyGate,
 } from '../api';
 import {
     summarizeAccuracy, confidenceRows, verdictRows, engineRows,
     AGREEMENT_LABEL, AGREEMENT_TOOLTIP, ALL_VERSIONS, splitLabel, unknownNote, coverageRows, policyOptions,
 } from './aiSettings/accuracyFormat';
-import { ToggleCard, FieldRow, HelpToggle } from './aiSettings/SettingsControls';
+import { ToggleCard, FieldRow, HelpToggle, SuffixInput } from './aiSettings/SettingsControls';
 import { cs } from './aiSettings/settingsControlStyles';
 import { SETTING_HELP } from '../utils/analysisSettingsHelp';
+import {
+    gatePct, autoApplyToggleLocked, autoApplyErrors, gateText, gateScope,
+    AUTO_APPLY_MIN_CONFIDENCE_MIN, AUTO_APPLY_MIN_CONFIDENCE_MAX,
+} from '../utils/autoApplySettings';
 import {
     validateFailureAnalysisDraft, isFailureAnalysisDirty, parseWholeNumber, withFailureAnalysisDefaults, hedgeMax,
     MAX_ANALYSES_MIN, MAX_ANALYSES_MAX, PARALLEL_MIN, PARALLEL_MAX, LLM_TIMEOUT_MIN, LLM_TIMEOUT_MAX, FEW_SHOT_MIN, FEW_SHOT_MAX,
@@ -48,7 +53,28 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
     }, []);
 
     const modified = useMemo(() => !!settings && !!original && isFailureAnalysisDirty(settings, original), [settings, original]);
-    const errors = useMemo(() => (settings ? validateFailureAnalysisDraft(settings) : {}), [settings]);
+    // The accuracy gate at the threshold being edited (the saved one while the draft is invalid).
+    // The answer is held with the threshold it was fetched for, so a late answer for another value
+    // never shows. setState runs only in the fetch callbacks, not in the effect body.
+    const wantedGatePct = gatePct(settings, original);
+    const [gateState, setGateState] = useState({ pct: null, gate: null, error: false });
+    useEffect(() => {
+        if (wantedGatePct == null) return undefined;
+        let alive = true;
+        const timer = setTimeout(() => {
+            getAutoApplyGate(wantedGatePct)
+                .then((g) => { if (alive) setGateState({ pct: wantedGatePct, gate: g, error: false }); })
+                .catch(() => { if (alive) setGateState({ pct: wantedGatePct, gate: null, error: true }); });
+        }, 250);
+        return () => { alive = false; clearTimeout(timer); };
+    }, [wantedGatePct]);
+    const gate = gateState.pct === wantedGatePct ? gateState.gate : null;
+    const gateError = gateState.pct === wantedGatePct && gateState.error;
+
+    const errors = useMemo(
+        () => (settings ? { ...validateFailureAnalysisDraft(settings), ...autoApplyErrors(settings, original, gate) } : {}),
+        [settings, original, gate],
+    );
 
     // Report to the section that draws the process diagram (same contract as TypeSafeSettingsCard).
     useEffect(() => {
@@ -74,6 +100,8 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                 llm_call_timeout_seconds: settings.llm_call_timeout_seconds,
                 hedge_after_seconds:      settings.hedge_after_seconds,
                 few_shot_examples:        settings.few_shot_examples,
+                auto_apply_defect_type:    settings.auto_apply_defect_type,
+                auto_apply_min_confidence: settings.auto_apply_min_confidence,
             });
         } catch (err) {
             throw saveError(err, 'Failed to save the failure-analysis settings');
@@ -232,6 +260,39 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                     value={numberValue(settings.few_shot_examples)}
                     onChange={(e) => update({ few_shot_examples: parseWholeNumber(e.target.value) })}
                     style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
+            </FieldRow>
+
+            <div style={s.autoApplyBlock} data-testid="fa-auto-apply-block">
+                <ToggleCard
+                    icon={svgIcon(<><path d="M20 6 9 17l-5-5" /></>)}
+                    iconColor="#22c55e"
+                    label="Set the defect type automatically"
+                    desc="Write TypeSafe.ai's suggested defect type to untriaged failures when it is at least as sure as the minimum below. The run grid marks these labels AI."
+                    checked={settings.auto_apply_defect_type}
+                    disabled={locked || autoApplyToggleLocked(settings, original, gate)}
+                    onChange={(v) => update({ auto_apply_defect_type: v })}
+                    testId="fa-auto-apply"
+                    setting="fa.auto_apply_defect_type" help={SETTING_HELP['fa.auto_apply_defect_type']}
+                />
+                <div style={s.gateLine} data-testid="fa-auto-apply-gate" data-open={gate ? String(!!gate.open) : 'unknown'}>
+                    <span style={{ ...s.gateDot, background: gate?.open ? 'var(--accent-green, #22c55e)' : gate ? '#eab308' : 'var(--border-color)' }} />
+                    <span style={{ color: gate?.open ? 'var(--aig-tone-green-fg)' : 'var(--text-primary)', fontWeight: 600 }}>
+                        {gateError ? 'Accuracy gate unavailable' : gateText(gate)}
+                    </span>
+                </div>
+                {gateScope(gate) && <div style={s.fieldHint} data-testid="fa-auto-apply-gate-scope">{gateScope(gate)}</div>}
+                {errors.auto_apply_defect_type && <div style={cs.fieldError} data-testid="fa-auto-apply-error">{errors.auto_apply_defect_type}</div>}
+            </div>
+
+            <FieldRow label="Minimum confidence for automatic labels" htmlFor="fa-auto-apply-min"
+                setting="fa.auto_apply_min_confidence" help={SETTING_HELP['fa.auto_apply_min_confidence']}
+                hint={errors.auto_apply_min_confidence
+                    ? <span style={cs.fieldError}>{errors.auto_apply_min_confidence}</span>
+                    : "TypeSafe.ai's defect-type confidence needed before a label is written. The gate above is measured at this threshold."}>
+                <SuffixInput suffix="%" id="fa-auto-apply-min" data-testid="fa-auto-apply-min"
+                    min={AUTO_APPLY_MIN_CONFIDENCE_MIN} max={AUTO_APPLY_MIN_CONFIDENCE_MAX} disabled={locked}
+                    value={numberValue(settings.auto_apply_min_confidence)}
+                    onChange={(e) => update({ auto_apply_min_confidence: parseWholeNumber(e.target.value) })} />
             </FieldRow>
 
             {/* Prompt template */}
@@ -498,6 +559,23 @@ const s = {
         fontWeight: 700,
         color: 'var(--text-primary)',
         marginBottom: 2,
+    },
+    autoApplyBlock: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+    },
+    gateLine: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        fontSize: '0.8rem',
+        padding: '0 2px',
+    },
+    gateDot: {
+        width: 8, height: 8,
+        borderRadius: '50%',
+        flexShrink: 0,
     },
     accuracyPanel: {
         display: 'flex',

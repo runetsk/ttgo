@@ -1,6 +1,8 @@
 // Pure helpers for the AI Failure Analysis settings card. No React, no network.
 // Ranges match the server (backend/internal/api/ai/failure_analysis.go).
-// Consumers: components/AIFailureAnalysisSettings.jsx, utils/analysisFlow.js (via the card's state).
+// Consumers: components/AIFailureAnalysisSettings.jsx, utils/analysisFlow.js (via the card's state). Auto-apply rules: autoApplySettings.js.
+
+import { AUTO_APPLY_DEFAULTS, minConfidenceError } from './autoApplySettings.js';
 
 export const MAX_ANALYSES_MIN = 1;
 export const MAX_ANALYSES_MAX = 500;
@@ -15,12 +17,12 @@ export const FEW_SHOT_MAX = 8;
 // Server defaults of the fields added with the tail-latency and few-shot settings. A settings
 // object without them (an older server, a test mock) reads as these values instead of failing
 // validation or looking unsaved.
-export const FA_DEFAULTS = { llm_call_timeout_seconds: 45, hedge_after_seconds: 0, few_shot_examples: 4 };
+export const FA_DEFAULTS = { llm_call_timeout_seconds: 45, hedge_after_seconds: 0, few_shot_examples: 4, ...AUTO_APPLY_DEFAULTS };
 
 // The fields the card saves; anything else in the settings object (id, timestamps) is ignored.
 export const FA_FIELDS = [
     'enabled_on_completion', 'max_analyses_per_run', 'parallel_groups', 'dedup_enabled', 'redaction_enabled', 'prompt_template',
-    'llm_call_timeout_seconds', 'hedge_after_seconds', 'few_shot_examples',
+    'llm_call_timeout_seconds', 'hedge_after_seconds', 'few_shot_examples', 'auto_apply_defect_type', 'auto_apply_min_confidence',
 ];
 
 const wholeIn = (n, min, max) => Number.isInteger(n) && n >= min && n <= max;
@@ -59,6 +61,8 @@ export function validateFailureAnalysisDraft(draft) {
     if (!wholeIn(draft?.few_shot_examples, FEW_SHOT_MIN, FEW_SHOT_MAX)) {
         errors.few_shot_examples = `Enter a whole number from ${FEW_SHOT_MIN} to ${FEW_SHOT_MAX}.`;
     }
+    const minConfidence = minConfidenceError(draft?.auto_apply_min_confidence);
+    if (minConfidence) errors.auto_apply_min_confidence = minConfidence;
     if (typeof draft?.prompt_template !== 'string' || draft.prompt_template.trim() === '') {
         errors.prompt_template = 'The prompt template cannot be empty.';
     }

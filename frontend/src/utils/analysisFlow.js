@@ -20,6 +20,13 @@ const KEY_REASON = {
     unreadable: 'the stored API key cannot be decrypted',
 };
 const LLM_CHECKED_NOTE = "The default LLM's own settings (key, model) are checked when the analysis runs.";
+// Wave 3 notes. The guard and the companion questions ride on TypeSafe's verdict request; the
+// transfer check follows an explanation when semantic grouping runs; auto-apply writes labels.
+const COMPANION_NOTE = 'In the same request TypeSafe also answers companion questions: a flaky pattern in the recent outcomes, the same failure seen before, an error from outside the app, and which linked defect matches. Each answer of 80% or more shows as a chip on the result.';
+const GUARD_NOTE = 'Injection guard: TypeSafe checks the failure text and the related failures of its group for instructions aimed at an AI. At 80% or more its decision is kept, but nothing from that group is sent to the LLM. Nothing is checked when TypeSafe is unavailable and the LLM steps in.';
+const NO_GUARD_NOTE = 'With the LLM deciding, nothing checks the failure text for prompt injection before it is sent.';
+const GUARD_EXPLAIN_NOTE = 'A group flagged for possible prompt injection gets no explanation; Explain on it asks before sending the failure to the LLM.';
+const TRANSFER_NOTE = 'After a group is explained, TypeSafe checks that the explanation fits each semantically grouped result (up to 40 per group). A result below 50% reads "This explanation may not apply to this result" and offers Explain this result.';
 const RETRY_NOTE = 'Retry failed groups is a manual action using the current settings, even for a run first analyzed automatically, so TypeSafe.ai is used whenever it is enabled.';
 const IDLE_STEPS = [
     ['group', 'Group the failures'],
@@ -225,7 +232,7 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
         decide = {
             id: 'decide', title: 'Decide the verdict', status: 'run',
             detail: `${route.llm} decides the verdict and explains it in one answer.`,
-            notes: [`The LLM decides because ${tsOff}.`, ...llmNotes],
+            notes: [`The LLM decides because ${tsOff}.`, ...llmNotes, NO_GUARD_NOTE],
             chips: [
                 chip('ts.enabled', 'TypeSafe.ai', onOff(ts?.enabled)),
                 ...(ts?.enabled ? [chip('ts.verdict_engine_enabled', 'Use for failure verdicts', onOff(ts.verdict_engine_enabled))] : []),
@@ -246,7 +253,7 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
             status: noKey ? 'warn' : 'run',
             reason: noKey ? `No usable API key (${KEY_REASON[route.key]}): every decision takes the "TypeSafe unavailable" path.` : null,
             detail: `TypeSafe.ai (${ts.model}) answers the verdict and defect-type questions.`,
-            notes: [...(route.key === 'new' ? ['New API key, checked on first use.'] : []), ...llmNotes],
+            notes: [...(route.key === 'new' ? ['New API key, checked on first use.'] : []), ...(noKey ? [] : [COMPANION_NOTE, GUARD_NOTE]), ...llmNotes],
             chips: [
                 chip('ts.verdict_engine_enabled', 'Use for failure verdicts', 'On'),
                 chip('ts.model', 'Model', ts.model),
@@ -307,7 +314,11 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
             reason: status === 'skip' ? 'No explanation is written; Explain on a result writes one on demand.' : null,
             detail: '',
             notes: ts.narrative_enabled && route.llm && !noKey
-                ? ['The decision is shown as soon as TypeSafe answers; the result reads "Explanation being written…" until the explanation arrives. One explanation is written per group and copied to every result in it.']
+                ? [
+                    'The decision is shown as soon as TypeSafe answers; the result reads "Explanation being written…" until the explanation arrives. One explanation is written per group and copied to every result in it.',
+                    GUARD_EXPLAIN_NOTE,
+                    ...(semanticSkip ? [] : [TRANSFER_NOTE]),
+                ]
                 : [],
             chips: [chip('ts.narrative_enabled', 'Write an explanation', onOff(ts.narrative_enabled)), providerChip, ...llmChips],
             sends: parts.some((p) => p.sends.length > 0) ? ['llm'] : [],
@@ -315,12 +326,19 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
         };
     }
 
-    // 6. Store
+    // 6. Store (and auto-apply)
+    const autoApply = fa.auto_apply_defect_type ?? FA_DEFAULTS.auto_apply_defect_type;
+    const minConfidence = fa.auto_apply_min_confidence ?? FA_DEFAULTS.auto_apply_min_confidence;
+    const autoApplyNotes = !autoApply ? []
+        : route.tsDecides && !noKey
+            ? [`Defect types TypeSafe.ai suggests with ${minConfidence}% confidence or more are written to untriaged failures while the accuracy gate is open; the run grid marks them "AI". A person's label is never overwritten, and flagged or taken-over decisions are never applied.`]
+            : ['Auto-apply needs TypeSafe.ai deciding; suggestions from the LLM are never applied.'];
     const store = {
         id: 'store', title: 'Store and show', status: 'run',
         detail: dedup ? 'The answer is saved on every result in its group and shown on the run.' : 'Each analysis is saved on its result and shown on the run.',
-        notes: ['A failed attempt is kept as a failed analysis; Retry failed groups on the run tries those groups again.'],
-        chips: [], sends: [], parts: [],
+        notes: ['A failed attempt is kept as a failed analysis; Retry failed groups on the run tries those groups again.', ...autoApplyNotes],
+        chips: [chip('fa.auto_apply_defect_type', 'Set the defect type automatically', autoApply ? `At ≥ ${minConfidence}%` : 'Off')],
+        sends: [], parts: [],
     };
 
     return { trigger: mode, blocked: false, canAnalyze: true, unredacted: !redact, steps: [start, group, evidence, decide, explain, store] };

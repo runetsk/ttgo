@@ -26,7 +26,7 @@ export const SETTING_HELP = {
     'ts.semantic_dedup_enabled': {
         title: 'Semantic failure grouping',
         what: 'After identical grouping, TypeSafe.ai merges groups of the same failure type that it is at least 80% sure describe the same failure.',
-        details: 'Only groups whose wording overlaps are compared. TypeSafe.ai receives short excerpts: the test name, failure type, error and the start of the stack. These calls happen before the cap, so Max analyses per run does not limit them. Needs Deduplicate similar failures and a usable TypeSafe.ai key.',
+        details: 'Only groups whose wording overlaps are compared. TypeSafe.ai receives short excerpts: the test name, failure type, error and the start of the stack. These calls happen before the cap, so Max analyses per run does not limit them. Needs Deduplicate similar failures and a usable TypeSafe.ai key. After a group is explained, TypeSafe.ai also checks, in one request, that the explanation fits each semantically grouped result (up to 40 per group). A result rated below 50% shows "This explanation may not apply to this result" and an Explain this result button.',
         example: '"POST /api/orders failed: upstream payment service returned 503" and "POST /api/orders failed: payment gateway unavailable (503)" → one group.',
         off: 'Only identical failures are grouped.',
     },
@@ -66,6 +66,18 @@ export const SETTING_HELP = {
         details: 'Examples come from other runs, from the 90 days before the failure being analyzed: failures where the AI suggested a defect type for that result itself and a person set product bug, automation bug or system issue. The same test comes first, then the same failure type, then the newest, with agreements and corrections balanced. Each example\'s error is cut to 300 characters and redacted when Redact secrets is on; examples are dropped first when the evidence is too long (in the LLM prompt, right after the group\'s related failures). Decisions made with at least one example are stamped fa-verdict-v8, others fa-verdict-v7 (fa-verdict-v6 and fa-verdict-v5 before the companion questions), so the accuracy panel can tell them apart.',
         example: 'A timeout on #checkout that people twice marked as an automation bug, although the AI said product bug, is shown to the model with that correction.',
     },
+    'fa.auto_apply_defect_type': {
+        title: 'Set the defect type automatically',
+        what: 'When TypeSafe.ai answers the defect-type question at or above the minimum confidence, its suggestion is written to failures nobody has triaged yet (To Investigate). The run grid marks these labels "AI" with a Confirm button. Off by default.',
+        details: 'It can be switched on only while its accuracy gate is open. The gate needs at least 50 failures, from the last 90 days, where people triaged TypeSafe\'s own defect-type suggestion made at this minimum confidence (fa-verdict-v7 and fa-verdict-v8 decisions only), and people must have agreed with at least 95 % of them. Confirming a label auto-apply set does not count: only independent triage does. Each analysis checks the gate once. While the gate is closed, nothing is applied and the run banner says "Auto-apply paused". Only TypeSafe decisions answered by the defect-type question qualify. LLM decisions, takeovers, suggestions derived from the verdict and decisions flagged for possible prompt injection never do. A person\'s label is never overwritten, and a newer analysis moves or resets only labels auto-apply wrote. AI labels do not count as decisions: the accuracy panel, the past triage examples and the history the AI sees all leave them out.',
+        example: 'At 95 %: "Automation bug, 97 % sure" on an untriaged failure → the row reads Automation bug with an AI badge; Confirm records it as your decision.',
+        off: 'Suggestions stay suggestions: Accept on each row writes them.',
+    },
+    'fa.auto_apply_min_confidence': {
+        title: 'Minimum confidence for automatic labels',
+        what: "TypeSafe.ai's defect-type confidence needed before its suggestion is written (80 to 99 %, default 95 %). The accuracy gate is measured at this threshold.",
+        example: 'Raising it from 95 to 98 applies fewer labels, and the gate then counts only suggestions made with 98 % confidence or more.',
+    },
     'fa.prompt_template': {
         title: 'Prompt template',
         what: 'The instructions and layout sent to the LLM with the failure evidence.',
@@ -98,6 +110,7 @@ export const SETTING_HELP = {
     'ts.verdict_engine_enabled': {
         title: 'Use for failure verdicts',
         what: 'TypeSafe.ai answers two multiple-choice questions, the verdict and the defect type, with a probability for every option and a confidence.',
+        details: 'In the same request TypeSafe.ai answers companion questions. They ask whether the failure text contains instructions aimed at an AI (possible prompt injection), whether the recent outcomes alternate between pass and fail, whether the same failure was seen before, whether the error comes from outside the app, and which linked defect matches. Answers of 80% or more show as chips on the result. At 80% or more on prompt injection the decision is kept, but no explanation is written for the group, and Explain asks before sending the failure to the LLM. The guard runs only when TypeSafe decides: with the LLM deciding, or stepping in because TypeSafe is unavailable, nothing checks the failure text. Decisions are stamped fa-verdict-v7, or fa-verdict-v8 with past triage examples.',
         off: 'The default LLM decides.',
     },
     'ts.allow_auto_failure_analysis': {
@@ -144,15 +157,15 @@ export const STEP_HELP = {
         example: 'A test that failed with the same timeout three times last week points the model toward a flaky test.',
     },
     decide: {
-        what: 'Someone chooses the verdict (product bug, flaky test, environment issue…) and suggests a defect type: TypeSafe.ai when it is set up to decide, otherwise the default LLM.',
+        what: 'Someone chooses the verdict (product bug, flaky test, environment issue…) and suggests a defect type: TypeSafe.ai when it is set up to decide, otherwise the default LLM. In the same request TypeSafe answers companion questions and checks the failure for possible prompt injection.',
         example: 'TypeSafe answers "flaky test, 93% sure"; with "Ask the LLM below" at 90% that answer is kept.',
     },
     explain: {
-        what: 'An explanation is a summary, a suggested next action and the reasoning, written by the default LLM after the decision is shown: one per group, copied to every result in it.',
+        what: 'An explanation is a summary, a suggested next action and the reasoning, written by the default LLM after the decision is shown: one per group, copied to every result in it. A group flagged for possible prompt injection gets none, and a grouped result the explanation may not fit is marked.',
         example: 'With explanations off, a TypeSafe decision shows "No explanation was written" and an Explain button.',
     },
     store: {
-        what: 'Every analysis is kept as a version on its result and shown on the run page and in the run grid.',
+        what: 'Every analysis is kept as a version on its result and shown on the run page and in the run grid. With "Set the defect type automatically" on and its accuracy gate open, confident TypeSafe defect types are also written to untriaged failures.',
         example: 'Re-analyze adds a new version; a failed attempt shows as "Analysis failed" and can be retried.',
     },
 };

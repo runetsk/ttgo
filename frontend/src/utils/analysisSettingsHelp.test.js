@@ -26,7 +26,7 @@ test('every setting the diagram names has a hint', () => {
     for (const input of inputs()) {
         for (const step of buildAnalysisFlow(input).steps) for (const c of step.chips) keys.add(c.key);
     }
-    assert.equal(keys.size, 20, [...keys].join(', '));
+    assert.equal(keys.size, 21, [...keys].join(', '));
     for (const key of keys) assert.ok(SETTING_HELP[key], `no hint for ${key}`);
 });
 
@@ -54,4 +54,14 @@ test('hints state the numbers the server uses', () => {
     assert.match(SETTING_HELP['fa.few_shot_examples'].what, /0 to 8/);
     assert.match(SETTING_HELP['fa.few_shot_examples'].details, /90 days/);
     assert.match(SETTING_HELP['fa.few_shot_examples'].details, /fa-verdict-v8/);
+    assert.match(SETTING_HELP['fa.auto_apply_defect_type'].details, /95 %/);
+    assert.match(SETTING_HELP['fa.auto_apply_defect_type'].details, /at least 50/);
+    assert.match(SETTING_HELP['fa.auto_apply_defect_type'].details, /90 days/);
+    assert.match(SETTING_HELP['fa.auto_apply_defect_type'].details, /fa-verdict-v7 and fa-verdict-v8/);
+    assert.match(SETTING_HELP['fa.auto_apply_defect_type'].details, /Confirming a label auto-apply set does not count/);
+    assert.match(SETTING_HELP['fa.auto_apply_min_confidence'].what, /80 to 99/);
+    assert.match(SETTING_HELP['ts.verdict_engine_enabled'].details, /80%/);
+    assert.match(SETTING_HELP['ts.verdict_engine_enabled'].details, /fa-verdict-v7/);
+    assert.match(SETTING_HELP['ts.verdict_engine_enabled'].details, /only when TypeSafe decides/);
+    assert.match(SETTING_HELP['ts.semantic_dedup_enabled'].details, /50%/);
 });

@@ -5,6 +5,7 @@ import { validateFailureAnalysisDraft, isFailureAnalysisDirty, parseWholeNumber,
 const FA = {
     enabled_on_completion: false, max_analyses_per_run: 20, parallel_groups: 4, dedup_enabled: true, redaction_enabled: true,
     prompt_template: 'Classify.', llm_call_timeout_seconds: 45, hedge_after_seconds: 0, few_shot_examples: 4,
+    auto_apply_defect_type: false, auto_apply_min_confidence: 95,
 };
 
 test('a valid draft has no errors', () => {
@@ -80,4 +81,19 @@ test('isFailureAnalysisDirty covers the new fields', () => {
     assert.equal(isFailureAnalysisDirty({ ...FA, hedge_after_seconds: 10 }, FA), true);
     assert.equal(isFailureAnalysisDirty({ ...FA, few_shot_examples: 0 }, FA), true);
     assert.equal(isFailureAnalysisDirty({ ...FA, llm_call_timeout_seconds: 60 }, FA), true);
+});
+
+test('the auto-apply minimum confidence must be a whole number from 80 to 99', () => {
+    for (const bad of [79, 100, NaN, 90.5]) {
+        assert.match(validateFailureAnalysisDraft({ ...FA, auto_apply_min_confidence: bad }).auto_apply_min_confidence, /from 80 to 99/, String(bad));
+    }
+    assert.equal(validateFailureAnalysisDraft({ ...FA, auto_apply_min_confidence: 80 }).auto_apply_min_confidence, undefined);
+});
+
+test('withFailureAnalysisDefaults fills the auto-apply fields, and they count as unsaved changes', () => {
+    const filled = withFailureAnalysisDefaults({ ...FA, auto_apply_defect_type: undefined, auto_apply_min_confidence: undefined });
+    assert.equal(filled.auto_apply_defect_type, false);
+    assert.equal(filled.auto_apply_min_confidence, 95);
+    assert.equal(isFailureAnalysisDirty({ ...FA, auto_apply_defect_type: true }, FA), true);
+    assert.equal(isFailureAnalysisDirty({ ...FA, auto_apply_min_confidence: 90 }, FA), true);
 });

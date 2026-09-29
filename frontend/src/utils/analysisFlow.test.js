@@ -256,3 +256,37 @@ test('past triage examples are shown on the evidence step', () => {
     assert.ok(!step(off, 'evidence').notes.some((n) => /past failures/.test(n)));
     assert.equal(chipOf(flow({ invalid: ['fa.few_shot_examples'] }), 'fa.few_shot_examples').invalid, true);
 });
+
+test('the decide step names the injection guard and the companion questions when TypeSafe decides', () => {
+    const notes = step(flow(), 'decide').notes;
+    assert.ok(notes.some((n) => /^Injection guard:/.test(n)), JSON.stringify(notes));
+    assert.ok(notes.some((n) => /companion questions/.test(n)));
+    const noKey = step(flow({ typesafe: { ...TS, api_key_status: 'missing' } }), 'decide').notes;
+    assert.ok(!noKey.some((n) => /^Injection guard:/.test(n)), 'no TypeSafe answer, no guard');
+    const llmOnly = step(flow({ typesafe: { ...TS, enabled: false } }), 'decide');
+    assert.ok(llmOnly.notes.some((n) => /nothing checks the failure text for prompt injection/.test(n)));
+    assert.equal(llmOnly.notes[0], 'The LLM decides because TypeSafe.ai is off.', 'the reason stays first');
+});
+
+test('the explain step names the guard, and the transfer check only when semantic grouping runs', () => {
+    const on = step(flow(), 'explain').notes;
+    assert.ok(on.some((n) => n.includes('"This explanation may not apply to this result"')), JSON.stringify(on));
+    assert.ok(on.some((n) => /flagged for possible prompt injection/.test(n)));
+    const noSemantic = step(flow({ typesafe: { ...TS, semantic_dedup_enabled: false } }), 'explain').notes;
+    assert.ok(!noSemantic.some((n) => n.includes('may not apply')));
+    const noDedup = step(flow({ failureAnalysis: { ...FA, dedup_enabled: false } }), 'explain').notes;
+    assert.ok(!noDedup.some((n) => n.includes('may not apply')));
+    const noNarrative = step(flow({ typesafe: { ...TS, narrative_enabled: false } }), 'explain').notes;
+    assert.deepEqual(noNarrative, [], 'nothing is written after the decision');
+});
+
+test('the store step shows auto-apply', () => {
+    assert.equal(chipOf(flow(), 'fa.auto_apply_defect_type').value, 'Off', 'the server default when unset');
+    assert.deepEqual(step(flow(), 'store').notes.filter((n) => /auto-apply/i.test(n)), []);
+    const on = flow({ failureAnalysis: { ...FA, auto_apply_defect_type: true, auto_apply_min_confidence: 97 } });
+    assert.equal(chipOf(on, 'fa.auto_apply_defect_type').value, 'At ≥ 97%');
+    assert.ok(step(on, 'store').notes.some((n) => /^Defect types TypeSafe\.ai suggests with 97% confidence or more/.test(n)), JSON.stringify(step(on, 'store').notes));
+    const llmOnly = flow({ typesafe: { ...TS, enabled: false }, failureAnalysis: { ...FA, auto_apply_defect_type: true } });
+    assert.ok(step(llmOnly, 'store').notes.some((n) => /^Auto-apply needs TypeSafe\.ai deciding/.test(n)));
+    assert.equal(chipOf(flow({ invalid: ['fa.auto_apply_defect_type'] }), 'fa.auto_apply_defect_type').invalid, true);
+});

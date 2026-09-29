@@ -567,6 +567,12 @@ export const updateFailureAnalysisSettings = (body) =>
 export const resetFailureAnalysisPrompt = () =>
     api.post('/settings/ai-failure-analysis/prompt/reset').then(r => r.data);
 
+// The auto-apply accuracy gate at a minimum confidence (80–99). The response's min_confidence
+// names the threshold its figures were measured at. Silent: the card shows its own error line.
+export const getAutoApplyGate = (minConfidencePct) =>
+    api.get('/settings/ai-failure-analysis/auto-apply-gate', { params: { min_confidence: minConfidencePct }, _silent: true })
+        .then(r => r.data);
+
 export const getFailureAnalysisAccuracy = (days = 30, policyVersion = '') =>
     api.get('/ai/failure-analysis/accuracy', {
         params: policyVersion ? { days, policy_version: policyVersion } : { days },
