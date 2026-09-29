@@ -447,13 +447,14 @@ var aiTemplates = []aiTemplate{
 		key: "payment-gateway-503-alt", failureType: "http",
 		verdict: models.VerdictInfrastructure, status: models.StatusError,
 		scenario: aiScenPersistent, cases: 3, startAge: 1, endAge: 0,
-		caseStem:    "Payments — capture a pre-authorized card",
+		// The same authorize call failing the same way, reported by another HTTP client.
+		caseStem:    "Payments — authorize a saved card",
 		sameCauseAs: "payment-gateway-503",
 		message: func(rng *rand.Rand, _ string) string {
-			return fmt.Sprintf("Payment capture failed: sandbox-gateway.pay.example unavailable (HTTP 503), circuit breaker open for incident PAY-%04d", 1000+rng.IntN(9000))
+			return fmt.Sprintf("AxiosError: Request failed with status code 503 (Service Unavailable) for POST /api/v1/payments/authorize; upstream sandbox-gateway.pay.example reports its circuit open, incident PAY-%04d", 1000+rng.IntN(9000))
 		},
 		stack: func(rng *rand.Rand, msg string) string {
-			return jsStack(msg, "PaymentsApi", "capture", "payments.spec.js", rng)
+			return jsStack(msg, "PaymentsApi", "authorize", "payments.spec.js", rng)
 		},
 	},
 	{
@@ -462,8 +463,9 @@ var aiTemplates = []aiTemplate{
 		scenario: aiScenPersistent, cases: 3, startAge: 6, endAge: 0,
 		caseStem:    "Orders — summary lists the order status",
 		sameCauseAs: "order-summary-null-typeerror",
+		// The same null read in the same render call, in Safari's wording instead of Chrome's.
 		message: func(_ *rand.Rand, _ string) string {
-			return "TypeError: order summary is null, so OrderSummary.render could not read the order status (static/js/OrderSummary.4f2c1a.js:88:21) in the browser console"
+			return "TypeError: null is not an object (evaluating 'order.status') thrown by the application at OrderSummary.render (static/js/OrderSummary.4f2c1a.js:88:21); captured from the Safari console"
 		},
 		stack: func(rng *rand.Rand, msg string) string { return appStack(msg, "OrderSummary", "render", rng) },
 	},
