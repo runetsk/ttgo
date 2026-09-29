@@ -59,8 +59,15 @@ func (h *Handler) ParseImport(w http.ResponseWriter, r *http.Request) {
 
 	testCases, unparseable, detectedFormat, err := importparser.ParseImportContent(req.Content, req.FormatHint, parseLLMResponse)
 
-	// If deterministic parsers failed, attempt LLM-powered fallback.
+	// If the deterministic parsers failed, TypeSafe.ai first classifies each line and the cases are
+	// assembled from the lines themselves (spec Wave 5 §1); the LLM fallback runs when that is not
+	// available or finds nothing.
 	var llmDebug map[string]interface{}
+	if err != nil || len(testCases) == 0 {
+		if tsCases, debug := h.typesafeImportStructure(r.Context(), req.Content); len(tsCases) > 0 {
+			testCases, detectedFormat, unparseable, llmDebug, err = tsCases, "typesafe", nil, debug, nil
+		}
+	}
 	if err != nil || len(testCases) == 0 {
 		llmCases, debug, llmErr := h.llmParseImportFallback(r.Context(), req.Content)
 		if llmErr != nil {
