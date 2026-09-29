@@ -1,5 +1,99 @@
 basePath: /api
 definitions:
+  internal_api_ai.SemanticMergeView:
+    properties:
+      can_split:
+        type: boolean
+      group_size:
+        type: integer
+      other_groups:
+        type: integer
+      pair:
+        $ref: '#/definitions/internal_api_ai.semanticPairView'
+      representative:
+        $ref: '#/definitions/internal_api_ai.semanticFailure'
+      result:
+        $ref: '#/definitions/internal_api_ai.semanticFailure'
+      split_blocked_reason:
+        type: string
+      split_group_size:
+        type: integer
+    type: object
+  internal_api_ai.semanticFailure:
+    properties:
+      error_message:
+        type: string
+      failure_type:
+        type: string
+      result_id:
+        type: string
+      test_name:
+        type: string
+    type: object
+  internal_api_ai.semanticPairView:
+    properties:
+      answered_model:
+        type: string
+      created_at:
+        type: string
+      model:
+        type: string
+      p_same:
+        type: number
+      policy_version:
+        type: string
+      remembered_from:
+        type: string
+      source:
+        type: string
+    type: object
+  ttgo_internal_api_ai.SemanticMergeView:
+    properties:
+      can_split:
+        type: boolean
+      group_size:
+        type: integer
+      other_groups:
+        type: integer
+      pair:
+        $ref: '#/definitions/ttgo_internal_api_ai.semanticPairView'
+      representative:
+        $ref: '#/definitions/ttgo_internal_api_ai.semanticFailure'
+      result:
+        $ref: '#/definitions/ttgo_internal_api_ai.semanticFailure'
+      split_blocked_reason:
+        type: string
+      split_group_size:
+        type: integer
+    type: object
+  ttgo_internal_api_ai.semanticFailure:
+    properties:
+      error_message:
+        type: string
+      failure_type:
+        type: string
+      result_id:
+        type: string
+      test_name:
+        type: string
+    type: object
+  ttgo_internal_api_ai.semanticPairView:
+    properties:
+      answered_model:
+        type: string
+      created_at:
+        type: string
+      model:
+        type: string
+      p_same:
+        type: number
+      policy_version:
+        type: string
+      remembered_from:
+        type: string
+      source:
+        type: string
+    type: object
   ttgo_pkg_tracker_failureanalysis.GateStatus:
     properties:
       accuracy:
@@ -628,9 +722,19 @@ definitions:
         description: 'RetryFailedOnly: re-analyze only the groups whose current analysis
           failed.'
         type: boolean
+      scope_result_ids:
+        description: |-
+          ScopeResultIDs (JSON array, '' = the whole run) limits the job to these failing results; a
+          split sets it to the results taken out of a semantic merge (SplitFromAnalysisID).
+        type: string
       semantic_input_tokens:
         description: TypeSafe tokens used by semantic grouping
         type: integer
+      semantic_report:
+        description: |-
+          SemanticReport is the semantic pass's counts as JSON text (blocks, candidates, asked,
+          remembered, human_blocked, merged, skipped, requests); '' when no pass completed.
+        type: string
       skip_budget_usd:
         type: number
       skip_estimate_usd:
@@ -642,6 +746,8 @@ definitions:
         type: string
       skip_spent_usd:
         type: number
+      split_from_analysis_id:
+        type: string
       started_at:
         type: string
       status:
@@ -1422,6 +1528,11 @@ definitions:
         type: string
       latest_run_rows:
         type: integer
+      same_cause_as:
+        description: |-
+          SameCauseAs names the template this one shares a cause with ("" = none): semantic grouping
+          is right to merge the two, and wrong to merge it with anything else.
+        type: string
       sample_message:
         type: string
       scenario:
@@ -4742,6 +4853,101 @@ paths:
       security:
       - BearerAuth: []
       summary: Explain a stored TypeSafe decision
+      tags:
+      - ai-failure-analysis
+  /run-results/{id}/analyses/{analysisId}/semantic:
+    get:
+      description: 'For a result grouped semantically (dedup_method semantic): the
+        representative''s and this result''s failure, the job''s decision about the
+        pair (p_same, source typesafe = asked in that analysis or memory = reused
+        from an earlier one, with remembered_from, model, policy_version), how many
+        results carry the group''s decision (group_size), how many a split would take
+        out (split_group_size, the results sharing this result''s error signature
+        that are still the latest failing attempts), how many other error signatures
+        the split keeps it apart from (other_groups), and whether a split is possible
+        now (can_split, split_blocked_reason). 409 when the analysis was not grouped
+        semantically.'
+      parameters:
+      - description: Run result ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Analysis ID
+        in: path
+        name: analysisId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/internal_api_ai.SemanticMergeView'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Inspect a semantic merge
+      tags:
+      - ai-failure-analysis
+  /run-results/{id}/analyses/{analysisId}/split:
+    post:
+      description: 'Takes every result that shares this result''s error signature
+        out of its semantic group (those that are still the latest failing attempts)
+        and queues an analysis limited to them (the job''s scope_result_ids, split_from_analysis_id).
+        The person''s judgement is recorded as a permanent "different" between this
+        signature and every other signature of the merged group, so later analyses
+        never merge them again. The rest of the group keeps its decision. 409 when
+        the analysis was not grouped semantically, when a split is not possible now
+        (split_blocked_reason of GET …/semantic: AI switched off, an analysis already
+        running, a newer analysis of the result, the representative gone, nothing
+        left to split), or when the estimated cost exceeds a soft AI budget and acknowledge_budget
+        is not true.'
+      parameters:
+      - description: Run result ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Analysis ID
+        in: path
+        name: analysisId
+        required: true
+        type: string
+      - description: Proceed although a soft AI budget would be exceeded
+        in: query
+        name: acknowledge_budget
+        type: boolean
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/ttgo_pkg_tracker_models.RunAnalysisJob'
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Split a result out of a semantic merge
       tags:
       - ai-failure-analysis
   /run-results/{id}/analyze:
