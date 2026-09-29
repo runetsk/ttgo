@@ -40,6 +40,17 @@ type SemanticDeps struct {
 	Client typesafe.Client
 	Model  string
 	Redact bool
+	// Remember (nil = no memory) returns an earlier decision for a signature pair: a person's
+	// split (source human, any age) or a TypeSafe answer still valid for this model and policy
+	// (spec Wave 4 §2). A remembered pair is not asked again.
+	Remember func(sigA, sigB string) (Remembered, bool)
+}
+
+// Remembered is an earlier decision about a signature pair.
+type Remembered struct {
+	P         float64 // TypeSafe's probability; 0 for a person's split
+	Source    string  // SemanticSourceTypeSafe or SemanticSourceHuman
+	CreatedAt time.Time
 }
 
 // JobDeps is everything one analysis job needs, resolved per job from live settings.

@@ -16,6 +16,32 @@ var ErrCancelled = errors.New("semantic grouping cancelled")
 type SemanticReport struct {
 	Blocks, Candidates, Asked, Requests, Merged, Skipped, InputTokens int
 	Model, PolicyVersion                                              string
+	// Remembered pairs reused an earlier TypeSafe answer; HumanBlocked pairs were kept apart by a
+	// person's split. Neither was asked.
+	Remembered, HumanBlocked int
+	// Pairs is every pair the pass decided (asked, remembered or pinned), for the pair record.
+	Pairs []SemanticPairOutcome
+}
+
+// SemanticPairOutcome is one decided pair of a pass: the two group signatures (SigA < SigB), their
+// representative results in this job, the probability used (0 for a person's split), where it came
+// from, the model that answered (TypeSafe answers only) and whether the two groups ended merged.
+type SemanticPairOutcome struct {
+	SigA, SigB       string
+	ResultA, ResultB string
+	P                *float64
+	Source           string
+	AnsweredModel    string
+	Merged           bool
+}
+
+// SummaryJSON is the job's stored semantic_report: the counts, without the pairs (those are rows).
+func (r SemanticReport) SummaryJSON() string {
+	b, _ := json.Marshal(map[string]int{
+		"blocks": r.Blocks, "candidates": r.Candidates, "asked": r.Asked, "remembered": r.Remembered,
+		"human_blocked": r.HumanBlocked, "merged": r.Merged, "skipped": r.Skipped, "requests": r.Requests,
+	})
+	return string(b)
 }
 
 type semPair struct {
@@ -46,10 +72,36 @@ func MergeGroupsSemantically(ctx context.Context, deps SemanticDeps, groups []*F
 	if len(pairs) == 0 {
 		return groups, rep, nil
 	}
-	chunks, skipped := chunkPairs(pairs, deps.Redact)
-	rep.Skipped = skipped
 
 	asked := map[[2]string]float64{} // (keyA,keyB) sorted -> noul
+	var outcomes []SemanticPairOutcome
+	decide := func(p semPair, v float64, source, model string) {
+		asked[pairKey(p.a.Key, p.b.Key)] = v
+		pv := v
+		outcomes = append(outcomes, SemanticPairOutcome{SigA: p.a.Key, SigB: p.b.Key,
+			ResultA: p.a.Representative.ID, ResultB: p.b.Representative.ID, P: &pv, Source: source, AnsweredModel: model})
+	}
+	// Memory first (spec Wave 4 §2): a person's split pins the pair apart; a remembered TypeSafe
+	// answer is reused. Only the rest is asked.
+	toAsk := pairs[:0:0]
+	for _, p := range pairs {
+		if deps.Remember != nil {
+			if r, ok := deps.Remember(p.a.Key, p.b.Key); ok {
+				if r.Source == SemanticSourceHuman {
+					decide(p, 0, SemanticSourceHuman, "")
+					rep.HumanBlocked++
+				} else {
+					decide(p, r.P, SemanticSourceMemory, "")
+					rep.Remembered++
+				}
+				continue
+			}
+		}
+		toAsk = append(toAsk, p)
+	}
+	chunks, skipped := chunkPairs(toAsk, deps.Redact)
+	rep.Skipped = skipped
+
 	for _, ch := range chunks {
 		if cancelled() {
 			return groups, rep, ErrCancelled
@@ -72,7 +124,7 @@ func MergeGroupsSemantically(ctx context.Context, deps SemanticDeps, groups []*F
 		}
 		for _, p := range ch.pairs {
 			if v, ok := answers[p.k]; ok {
-				asked[pairKey(p.a.Key, p.b.Key)] = v
+				decide(p, v, SemanticSourceTypeSafe, model)
 				rep.Asked++
 			}
 		}
@@ -80,6 +132,18 @@ func MergeGroupsSemantically(ctx context.Context, deps SemanticDeps, groups []*F
 
 	merged := clusterCompleteLinkage(groups, asked)
 	rep.Merged = len(groups) - len(merged)
+	// A pair is merged when both representatives ended in the same output group.
+	clusterOf := map[string]int{}
+	for i, g := range merged {
+		for _, m := range g.Members {
+			clusterOf[m.ID] = i
+		}
+	}
+	for i := range outcomes {
+		o := &outcomes[i]
+		o.Merged = clusterOf[o.ResultA] == clusterOf[o.ResultB]
+	}
+	rep.Pairs = outcomes
 	return merged, rep, nil
 }
 

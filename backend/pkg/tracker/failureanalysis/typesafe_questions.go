@@ -64,6 +64,17 @@ const (
 	ExcerptStackChars      = 600   // per-representative stack excerpt
 )
 
+// Semantic memory (spec Wave 4 §2): a TypeSafe same-cause answer is reused for the same signature
+// pair, model and policy for SemanticMemoryDays; a person's split is kept for good.
+const SemanticMemoryDays = 30
+
+// Where a semantic pair decision came from (semantic_pairs.source).
+const (
+	SemanticSourceTypeSafe = "typesafe" // asked in this job
+	SemanticSourceMemory   = "memory"   // an earlier TypeSafe answer, reused
+	SemanticSourceHuman    = "human"    // a person split the merge
+)
+
 // HistoryNote is a constant sent inside the state so the model reads history correctly.
 // It says "other" rather than "earlier" for historical reasons: until 2026-09-23 the query
 // window ended at analysis time, so a re-analysis of an old result could include later
