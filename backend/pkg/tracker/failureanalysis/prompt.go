@@ -120,6 +120,11 @@ type PromptInput struct {
 	// code after the template (examplesBlock). Templates may still range over them.
 	Examples []TriageExample
 
+	// NotChecked names evidence blocks emptied because TypeSafe's injection question did not
+	// cover them (spec R8). BuildPrompt lists them first in the truncation prefix; the prompt
+	// text itself is unchanged by it.
+	NotChecked []string
+
 	// Set only when a TypeSafe decision precedes the narrative call (spec §6). Admin templates
 	// may reference them; the code-owned system message carries the binding instruction.
 	DecidedVerdict    string
@@ -172,6 +177,9 @@ func BuildPrompt(in PromptInput) (string, PromptMeta, error) {
 
 	// Every case below drops something or the default returns, so the loop ends.
 	dropped := []string{}
+	if len(in.NotChecked) > 0 {
+		dropped = append(dropped, "not checked: "+strings.Join(in.NotChecked, ", "))
+	}
 	for {
 		out, err := renderWithGroup(tmpl, in)
 		if err != nil {

@@ -49,7 +49,10 @@ type Evidence struct {
 	GroupMembers []string
 	// RecentOutcomes is history.recent_outcomes (TypeSafe state only): P/F/E/S, oldest first.
 	RecentOutcomes string
-	StateCap       int // bound on the rendered JSON state; 0 = StateCharCap
+	// NotChecked names blocks OnlyBlocks emptied because the injection question did not cover
+	// them (spec R8); PromptInput passes it on so the truncation prefix says so.
+	NotChecked []string
+	StateCap   int // bound on the rendered JSON state; 0 = StateCharCap
 }
 
 // Budget is an engine's allowance for the three large text fields (runes) and
@@ -227,7 +230,7 @@ func (ev Evidence) PromptInput(template string) PromptInput {
 		ErrorMessage: ev.ErrorMessage, StackTrace: ev.StackTrace, LogText: ev.LogText,
 		SimilarFailures: ev.SimilarFailures, SimilarFailuresRollup: ev.SimilarFailuresRollup,
 		LinkedDefects: ev.LinkedDefects, LinkedRequirements: ev.LinkedRequirements,
-		GroupMembers: ev.GroupMembers, Examples: ev.Examples,
+		GroupMembers: ev.GroupMembers, Examples: ev.Examples, NotChecked: ev.NotChecked,
 	}
 }
 
