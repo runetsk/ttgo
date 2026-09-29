@@ -19,18 +19,19 @@ func (s *Store) seedFailureAnalysisSettings() error {
 	err := s.db.First(&row, "id = ?", failureAnalysisSettingsID).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = models.AIFailureAnalysisSettings{
-			ID:                    failureAnalysisSettingsID,
-			EnabledOnCompletion:   false,
-			MaxAnalysesPerRun:     20,
-			ParallelGroups:        models.DefaultParallelGroups,
-			FewShotExamples:       models.DefaultFewShotExamples,
-			LLMCallTimeoutSeconds: models.DefaultLLMCallTimeoutSeconds,
-			DedupEnabled:          true,
-			RedactionEnabled:      true,
-			PromptTemplate:        failureanalysis.DefaultPromptTemplate,
-			DefaultPromptTemplate: failureanalysis.DefaultPromptTemplate,
-			CreatedAt:             time.Now(),
-			UpdatedAt:             time.Now(),
+			ID:                     failureAnalysisSettingsID,
+			EnabledOnCompletion:    false,
+			MaxAnalysesPerRun:      20,
+			ParallelGroups:         models.DefaultParallelGroups,
+			FewShotExamples:        models.DefaultFewShotExamples,
+			LLMCallTimeoutSeconds:  models.DefaultLLMCallTimeoutSeconds,
+			AutoApplyMinConfidence: models.DefaultAutoApplyMinConfidence,
+			DedupEnabled:           true,
+			RedactionEnabled:       true,
+			PromptTemplate:         failureanalysis.DefaultPromptTemplate,
+			DefaultPromptTemplate:  failureanalysis.DefaultPromptTemplate,
+			CreatedAt:              time.Now(),
+			UpdatedAt:              time.Now(),
 		}
 		return s.db.Create(&row).Error
 	}
@@ -104,4 +105,23 @@ func (s *Store) ResetFailureAnalysisPrompt() error {
 			"prompt_template": failureanalysis.DefaultPromptTemplate,
 			"updated_at":      time.Now(),
 		}).Error
+}
+
+// SetFailureAnalysisAutoApply writes the auto-apply pair (spec §3.2). It is separate from
+// UpdateFailureAnalysisSettings so callers that predate the pair never switch it off; the PUT
+// handler resolves "omitted = keep" and the gate before calling it.
+func (s *Store) SetFailureAnalysisAutoApply(enabled bool, minConfidence int) (*models.AIFailureAnalysisSettings, error) {
+	if err := models.ValidateAutoApplyMinConfidence(minConfidence); err != nil {
+		return nil, err
+	}
+	if err := s.db.Model(&models.AIFailureAnalysisSettings{}).
+		Where("id = ?", failureAnalysisSettingsID).
+		Updates(map[string]interface{}{
+			"auto_apply_defect_type":    enabled,
+			"auto_apply_min_confidence": minConfidence,
+			"updated_at":                time.Now(),
+		}).Error; err != nil {
+		return nil, err
+	}
+	return s.GetFailureAnalysisSettings()
 }

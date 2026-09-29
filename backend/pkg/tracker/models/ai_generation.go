@@ -192,14 +192,20 @@ type AIFailureAnalysisSettings struct {
 	// LLMCallTimeoutSeconds bounds each failure-analysis LLM request (10–120, default 45); a call
 	// cut by it is retried once. HedgeAfterSeconds (0 = off, else ≥ 3 and below the timeout)
 	// sends an identical second request when the first has not answered by then.
-	LLMCallTimeoutSeconds int       `json:"llm_call_timeout_seconds" gorm:"column:llm_call_timeout_seconds;not null;default:45"`
-	HedgeAfterSeconds     int       `json:"hedge_after_seconds"      gorm:"column:hedge_after_seconds;not null;default:0"`
-	DedupEnabled          bool      `json:"dedup_enabled"           gorm:"not null;default:true"`
-	RedactionEnabled      bool      `json:"redaction_enabled"       gorm:"not null;default:true"`
-	PromptTemplate        string    `json:"prompt_template"         gorm:"type:text;not null"`
-	DefaultPromptTemplate string    `json:"default_prompt_template" gorm:"type:text;not null"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	LLMCallTimeoutSeconds int `json:"llm_call_timeout_seconds" gorm:"column:llm_call_timeout_seconds;not null;default:45"`
+	HedgeAfterSeconds     int `json:"hedge_after_seconds"      gorm:"column:hedge_after_seconds;not null;default:0"`
+	// AutoApplyDefectType lets a qualifying TypeSafe decision label its failing results by itself
+	// (spec §3); AutoApplyMinConfidence is the defect-type confidence it needs, in percent
+	// (MinAutoApplyMinConfidence..MaxAutoApplyMinConfidence). Switching it on is refused while
+	// the accuracy gate is closed; a job that finds the gate closed pauses instead.
+	AutoApplyDefectType    bool      `json:"auto_apply_defect_type"    gorm:"column:auto_apply_defect_type;not null;default:false"`
+	AutoApplyMinConfidence int       `json:"auto_apply_min_confidence" gorm:"column:auto_apply_min_confidence;not null;default:95"`
+	DedupEnabled           bool      `json:"dedup_enabled"           gorm:"not null;default:true"`
+	RedactionEnabled       bool      `json:"redaction_enabled"       gorm:"not null;default:true"`
+	PromptTemplate         string    `json:"prompt_template"         gorm:"type:text;not null"`
+	DefaultPromptTemplate  string    `json:"default_prompt_template" gorm:"type:text;not null"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
 }
 
 // AIFeatureSettings is the global master switch for all AI capabilities

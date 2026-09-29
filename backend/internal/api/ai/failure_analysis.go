@@ -38,26 +38,29 @@ func (h *Handler) GetFailureAnalysisSettings(w http.ResponseWriter, r *http.Requ
 // UpdateFailureAnalysisSettings replaces the failure-analysis settings.
 //
 // @Summary      Update failure-analysis settings
-// @Description  parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). few_shot_examples (0..8, 0 = off: how many past human triage decisions accompany each analyzed failure) also keeps its stored value when omitted. 400 with the reason when a value is out of range.
+// @Description  parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). few_shot_examples (0..8, 0 = off: how many past human triage decisions accompany each analyzed failure) also keeps its stored value when omitted. 400 with the reason when a value is out of range. auto_apply_defect_type (default false) lets a direct TypeSafe decision at or above auto_apply_min_confidence (percent, 80–99, default 95) label its failing results itself; both keep their stored values when omitted. Switching auto_apply_defect_type on is refused with 409 {error, gate} while the accuracy gate is closed.
 // @Tags         ai-failure-analysis
 // @Accept       json
 // @Produce      json
-// @Param        body  body  object  true  "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds, few_shot_examples"
+// @Param        body  body  object  true  "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds, few_shot_examples, auto_apply_defect_type, auto_apply_min_confidence"
 // @Success      200  {object}  models.AIFailureAnalysisSettings
 // @Failure      400  {object}  map[string]interface{}
+// @Failure      409  {object}  map[string]interface{}
 // @Router       /settings/ai-failure-analysis [put]
 // @Security     BearerAuth
 func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		EnabledOnCompletion   bool   `json:"enabled_on_completion"`
-		MaxAnalysesPerRun     int    `json:"max_analyses_per_run"`
-		ParallelGroups        *int   `json:"parallel_groups"` // omitted = keep the current value
-		DedupEnabled          bool   `json:"dedup_enabled"`
-		RedactionEnabled      bool   `json:"redaction_enabled"`
-		PromptTemplate        string `json:"prompt_template"`
-		LLMCallTimeoutSeconds *int   `json:"llm_call_timeout_seconds"` // omitted = keep
-		HedgeAfterSeconds     *int   `json:"hedge_after_seconds"`      // omitted = keep; 0 = off
-		FewShotExamples       *int   `json:"few_shot_examples"`        // omitted = keep; 0 = off
+		EnabledOnCompletion    bool   `json:"enabled_on_completion"`
+		MaxAnalysesPerRun      int    `json:"max_analyses_per_run"`
+		ParallelGroups         *int   `json:"parallel_groups"` // omitted = keep the current value
+		DedupEnabled           bool   `json:"dedup_enabled"`
+		RedactionEnabled       bool   `json:"redaction_enabled"`
+		PromptTemplate         string `json:"prompt_template"`
+		LLMCallTimeoutSeconds  *int   `json:"llm_call_timeout_seconds"`  // omitted = keep
+		HedgeAfterSeconds      *int   `json:"hedge_after_seconds"`       // omitted = keep; 0 = off
+		FewShotExamples        *int   `json:"few_shot_examples"`         // omitted = keep; 0 = off
+		AutoApplyDefectType    *bool  `json:"auto_apply_defect_type"`    // omitted = keep; enabling needs the gate open
+		AutoApplyMinConfidence *int   `json:"auto_apply_min_confidence"` // omitted = keep; percent, 80..99
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -107,6 +110,33 @@ func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.R
 			return
 		}
 	}
+	// Auto-apply (spec §3.2): omitted fields keep their stored values; switching it on is refused
+	// while the accuracy gate is closed at the threshold it would run with.
+	autoOn, autoMin := current.AutoApplyDefectType, current.AutoApplyMinConfidence
+	if autoMin == 0 {
+		autoMin = models.DefaultAutoApplyMinConfidence
+	}
+	if req.AutoApplyMinConfidence != nil {
+		autoMin = *req.AutoApplyMinConfidence
+	}
+	if err := models.ValidateAutoApplyMinConfidence(autoMin); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.AutoApplyDefectType != nil {
+		autoOn = *req.AutoApplyDefectType
+	}
+	if autoOn && !current.AutoApplyDefectType {
+		gate, err := h.store.AutoApplyGate(float64(autoMin) / 100)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		if !gate.Open {
+			httpx.JSON(w, http.StatusConflict, map[string]interface{}{"error": autoApplyGateClosed, "gate": gate})
+			return
+		}
+	}
 	updated, err := h.store.UpdateFailureAnalysisSettings(&models.AIFailureAnalysisSettings{
 		EnabledOnCompletion:   req.EnabledOnCompletion,
 		MaxAnalysesPerRun:     req.MaxAnalysesPerRun,
@@ -122,8 +152,18 @@ func (h *Handler) UpdateFailureAnalysisSettings(w http.ResponseWriter, r *http.R
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
+	updated, err = h.store.SetFailureAnalysisAutoApply(autoOn, autoMin)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
 	httpx.JSON(w, http.StatusOK, updated)
 }
+
+// autoApplyGateClosed is the 409 message for switching auto-apply on while the gate is closed.
+var autoApplyGateClosed = fmt.Sprintf("auto-apply stays off until the accuracy gate opens: it needs at least %d TypeSafe "+
+	"decisions at this confidence graded by people in the last %d days, %.0f%% of them agreeing",
+	failureanalysis.AutoApplyGateMinGraded, failureanalysis.AutoApplyGateWindowDays, failureanalysis.AutoApplyGateMinAccuracy*100)
 
 func (h *Handler) ResetFailureAnalysisPrompt(w http.ResponseWriter, r *http.Request) {
 	if err := h.store.ResetFailureAnalysisPrompt(); err != nil {
@@ -852,4 +892,45 @@ func (h *Handler) GetFailureAnalysisAccuracy(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	httpx.JSON(w, http.StatusOK, rep)
+}
+
+// GetAutoApplyGate reports the accuracy gate auto-apply needs.
+//
+// @Summary      Auto-apply accuracy gate
+// @Description  How TypeSafe's direct defect-type suggestions at or above a confidence fared against human triage over the last 90 days (decision time), counting only decisions made under the current question policies (policies): graded, agreed, accuracy and open (at least min_graded graded and min_accuracy agreement). min_confidence (percent, 80–99) defaults to the stored auto_apply_min_confidence.
+// @Tags         ai-failure-analysis
+// @Produce      json
+// @Param        min_confidence  query     int  false  "Confidence threshold in percent (80-99)"
+// @Success      200  {object}  failureanalysis.GateStatus
+// @Failure      400  {object}  map[string]interface{}
+// @Router       /settings/ai-failure-analysis/auto-apply-gate [get]
+// @Security     BearerAuth
+func (h *Handler) GetAutoApplyGate(w http.ResponseWriter, r *http.Request) {
+	cur, err := h.store.GetFailureAnalysisSettings()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	pct := cur.AutoApplyMinConfidence
+	if pct == 0 {
+		pct = models.DefaultAutoApplyMinConfidence
+	}
+	if q := r.URL.Query().Get("min_confidence"); q != "" {
+		v, err := strconv.Atoi(q)
+		if err != nil {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "min_confidence must be a whole percent"})
+			return
+		}
+		pct = v
+	}
+	if err := models.ValidateAutoApplyMinConfidence(pct); err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": strings.Replace(err.Error(), "auto_apply_min_confidence", "min_confidence", 1)})
+		return
+	}
+	gate, err := h.store.AutoApplyGate(float64(pct) / 100)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, gate)
 }
