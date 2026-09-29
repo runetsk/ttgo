@@ -656,6 +656,8 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 		slog.Info("failure-analysis: explanation not applied; its group was settled while it was written", "analysis_id", rep.ID)
 	}
 	h.broadcastAnalysisUpdated(changed, repResult.TestRunID)
+	// R10: the semantic clones' AI labels follow the fits this Explain computed.
+	h.followSemanticCloneLabels(rep, changed, deps, repResult.TestRunID)
 
 	clicked, err := h.store.GetAnalysisByID(a.ID)
 	if err != nil {

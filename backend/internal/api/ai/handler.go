@@ -124,6 +124,7 @@ func (h *Handler) analyzeSync(ctx context.Context, result *models.RunResult, use
 	if h.broadcaster != nil {
 		h.broadcaster.BroadcastRunResultAnalysisCreated(row, result.TestRunID)
 	}
+	h.followAutoLabel(result, res, deps)
 	if attemptErr != nil {
 		return row, attemptErr
 	}

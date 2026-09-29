@@ -321,6 +321,9 @@ type jobWriter struct {
 	runID    string
 	jobID    string
 	semantic failureanalysis.SemanticReport
+	// autoValues: representative analysis id → the defect type its group qualified for, so the
+	// narrated phase can label the group's semantic clones (auto-apply on only).
+	autoValues map[string]string
 }
 
 // writeDecided stores a group's decision — the representative, then one clone per other
@@ -405,6 +408,7 @@ func (jw *jobWriter) writeNarrated(repID string, d failureanalysis.NarrationDelt
 			jw.w.bc.BroadcastRunResultAnalysisUpdated(a, jw.runID)
 		}
 	}
+	jw.autoApplyNarrated(repID, changed)
 }
 
 // processOnce picks up at most one queued job and runs it to completion.
@@ -444,6 +448,13 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		if err := w.store.SetAnalysisJobPipeline(job.ID, string(b), pipeline.Label()); err != nil {
 			slog.Warn("failure-analysis: pipeline record failed", "err", err)
 		}
+	}
+	autoState := deps.AutoApplyState
+	if autoState == "" {
+		autoState = models.AutoApplyStateOff
+	}
+	if err := w.store.SetAnalysisJobAutoApplyState(job.ID, autoState); err != nil {
+		slog.Warn("failure-analysis: auto-apply state not recorded", "job_id", job.ID, "err", err)
 	}
 
 	jobCtx, cancelJob := context.WithCancel(ctx)
@@ -600,6 +611,7 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		if err != nil {
 			continue
 		}
+		jw.autoApplyDecided(g, out.res, repID)
 		covered += len(g.Members)
 		done++
 		if err := w.store.UpdateAnalysisJobProgress(job.ID, done, unique, cap, total); err != nil {

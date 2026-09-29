@@ -103,3 +103,17 @@ func (b *RunAnalysisBroadcaster) BroadcastRunResultAnalysisUpdated(a *models.Run
 
 func runTopic(runID string) string    { return fmt.Sprintf("run:%s", runID) }
 func runResultTopic(id string) string { return fmt.Sprintf("run_result:%s", id) }
+
+// BroadcastRunResultsUpdated publishes result rows whose defect type failure analysis changed
+// (auto-apply or its reset) as a result_updated delta with full rows — the shape the runs
+// handlers send (run_id + run summary + results), so the grid merges it with applyResultDelta.
+func (b *RunAnalysisBroadcaster) BroadcastRunResultsUpdated(run *models.TestRun, rows []*models.RunResult) {
+	if run == nil || len(rows) == 0 {
+		return
+	}
+	b.Hub.Broadcast(NewEvent(EventResultUpdated, runTopic(run.ID), map[string]interface{}{
+		"run_id":  run.ID,
+		"run":     run,
+		"results": rows,
+	}))
+}
