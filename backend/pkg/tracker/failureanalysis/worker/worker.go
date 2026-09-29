@@ -488,6 +488,16 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		w.failJob(job.ID, "load failures: "+err.Error())
 		return err
 	}
+	// A scoped job (a split, spec Wave 4 §4) analyzes only its results that are still failing.
+	if scope := store.ScopeResultIDs(job); scope != nil {
+		kept := failures[:0]
+		for _, r := range failures {
+			if scope[r.ID] {
+				kept = append(kept, r)
+			}
+		}
+		failures = kept
+	}
 	total := len(failures)
 
 	var groups []*failureanalysis.FailureGroup
@@ -520,7 +530,16 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		default:
 			groups = merged
 			slog.Info("failure-analysis: semantic grouping", "job_id", job.ID, "blocks", rep.Blocks, "candidates", rep.Candidates,
-				"asked", rep.Asked, "requests", rep.Requests, "merged", rep.Merged, "skipped", rep.Skipped, "tokens", rep.InputTokens)
+				"asked", rep.Asked, "remembered", rep.Remembered, "human_blocked", rep.HumanBlocked, "requests", rep.Requests,
+				"merged", rep.Merged, "skipped", rep.Skipped, "tokens", rep.InputTokens)
+			// The pair record and the memory (spec Wave 4 §1): only a completed pass is recorded,
+			// because only its merges are used.
+			if err := w.store.SaveSemanticPairs(job.ID, job.TestRunID, sd.Model, rep.PolicyVersion, rep.Pairs); err != nil {
+				slog.Warn("failure-analysis: semantic pairs not recorded", "job_id", job.ID, "err", err)
+			}
+			if err := w.store.SetAnalysisJobSemanticReport(job.ID, rep.SummaryJSON()); err != nil {
+				slog.Warn("failure-analysis: semantic report not recorded", "job_id", job.ID, "err", err)
+			}
 		}
 		if err := w.store.SetAnalysisJobSemanticTokens(job.ID, rep.InputTokens); err != nil {
 			slog.Warn("failure-analysis: semantic token update failed", "err", err)
@@ -607,16 +626,20 @@ func (w *Worker) processOnce(ctx context.Context) error {
 			slog.Warn("failure-analysis: analysis attempt failed", "err", out.err, "result_id", g.Representative.ID)
 		}
 		repID, err := jw.writeDecided(g, out.res)
+		if err == nil {
+			// Counted before the ack releases the group to narrate, so progress never lags a
+			// decision whose explanation is already being written.
+			covered += len(g.Members)
+			done++
+			if err := w.store.UpdateAnalysisJobProgress(job.ID, done, unique, cap, total); err != nil {
+				slog.Warn("failure-analysis: progress update failed", "err", err)
+			}
+		}
 		out.ack <- decidedAck{repID: repID, err: err}
 		if err != nil {
 			continue
 		}
 		jw.autoApplyDecided(g, out.res, repID)
-		covered += len(g.Members)
-		done++
-		if err := w.store.UpdateAnalysisJobProgress(job.ID, done, unique, cap, total); err != nil {
-			slog.Warn("failure-analysis: progress update failed", "err", err)
-		}
 		if w.bc != nil {
 			if current, _ := w.store.GetAnalysisJob(job.ID); current != nil {
 				w.bc.BroadcastRunAnalysisProgress(current, covered)

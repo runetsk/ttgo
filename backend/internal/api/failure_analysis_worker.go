@@ -245,7 +245,9 @@ func resolveTypeSafe(st *store.Store, tsf *typesafe.ClientFactory, trigger strin
 	client := tsf.New(key, typesafe.Options{Timeout: time.Duration(ts.TimeoutSeconds) * time.Second})
 	deps.Pricing.TypeSafePerMTok = ts.PricePerMTok
 	if ts.SemanticDedupEnabled {
-		deps.Semantic = &failureanalysis.SemanticDeps{Client: client, Model: ts.Model}
+		// Remember: pair decisions of earlier jobs (spec Wave 4 §2), keyed on the configured model.
+		deps.Semantic = &failureanalysis.SemanticDeps{Client: client, Model: ts.Model,
+			Remember: st.SemanticMemory(ts.Model, failureanalysis.SemanticPolicyVersion, time.Now())}
 		// The narrative transfer check asks the same client about the semantic clones grouping
 		// creates; newAnalyzeDepsResolver drops it again when dedup is off.
 		deps.Transfer = &failureanalysis.TransferDeps{Client: client, Model: ts.Model}

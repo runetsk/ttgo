@@ -425,3 +425,14 @@ func TestResolver_TransferCheckFollowsSemanticGroupingAndDedup(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, d.Transfer, "no key, no check")
 }
+
+func TestResolver_SemanticGroupingRemembersEarlierPairs(t *testing.T) {
+	s := resolverStore(t)
+	enableTypeSafe(t, s, false)
+	d, err := newAnalyzeDepsResolver(s, nil)(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.NotNil(t, d.Semantic)
+	require.NotNil(t, d.Semantic.Remember, "wave 4: the semantic pass consults the pair record")
+	_, ok := d.Semantic.Remember("sig-a", "sig-b")
+	require.False(t, ok, "nothing recorded yet")
+}
