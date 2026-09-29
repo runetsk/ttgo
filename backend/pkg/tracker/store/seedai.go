@@ -447,11 +447,12 @@ var aiTemplates = []aiTemplate{
 		key: "payment-gateway-503-alt", failureType: "http",
 		verdict: models.VerdictInfrastructure, status: models.StatusError,
 		scenario: aiScenPersistent, cases: 3, startAge: 1, endAge: 0,
-		// The same authorize call failing the same way, reported by another HTTP client.
+		// The same authorize call failing the same way, from a shard that names itself in the
+		// message: an incidental detail the dedup normalizer keeps, so plain dedup splits them.
 		caseStem:    "Payments — authorize a saved card",
 		sameCauseAs: "payment-gateway-503",
 		message: func(rng *rand.Rand, _ string) string {
-			return fmt.Sprintf("AxiosError: Request failed with status code 503 (Service Unavailable) for POST /api/v1/payments/authorize; upstream sandbox-gateway.pay.example reports its circuit open, incident PAY-%04d", 1000+rng.IntN(9000))
+			return fmt.Sprintf("POST /api/v1/payments/authorize returned 503 Service Unavailable: upstream sandbox-gateway.pay.example circuit open (incident PAY-%04d) [sent by shard 3 of 4]", 1000+rng.IntN(9000))
 		},
 		stack: func(rng *rand.Rand, msg string) string {
 			return jsStack(msg, "PaymentsApi", "authorize", "payments.spec.js", rng)
