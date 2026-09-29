@@ -670,3 +670,17 @@ func (s *Store) UpdateDraftQuality(draftID, qualityJSON string) error {
 func (s *Store) AppendGenerationEvent(ev *models.AIGenerationEvent) error {
 	return createGenerationEventTx(s.db, ev)
 }
+
+// UpdateDraftDuplicates replaces a pending draft's duplicate candidates (TypeSafe draft review).
+func (s *Store) UpdateDraftDuplicates(draftID, duplicatesJSON string) error {
+	res := s.db.Model(&models.AIGeneratedDraft{}).
+		Where("id = ? AND status = ?", draftID, models.AIDraftStatusPending).
+		Update("duplicates_json", duplicatesJSON)
+	if res.Error != nil {
+		return res.Error
+	}
+	if res.RowsAffected == 0 {
+		return ErrDraftNotPending
+	}
+	return nil
+}

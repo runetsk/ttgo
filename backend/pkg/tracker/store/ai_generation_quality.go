@@ -38,6 +38,12 @@ type dupScored struct {
 // draft name using the test_cases_fts index, ranking requirement-linked
 // matches first (spec: "Duplicate detection" — FTS5 candidates, ranked).
 func (s *Store) SearchDuplicateCandidates(draftName, requirementID string, limit int) ([]aigen.DuplicateCandidate, error) {
+	return s.SearchDuplicateCandidatesAt(draftName, requirementID, limit, aigen.DupSimilarityThreshold)
+}
+
+// SearchDuplicateCandidatesAt is SearchDuplicateCandidates with its own name-similarity floor: TypeSafe
+// draft review asks about candidates below the display floor (spec Wave 5 §2).
+func (s *Store) SearchDuplicateCandidatesAt(draftName, requirementID string, limit int, floor float64) ([]aigen.DuplicateCandidate, error) {
 	if limit <= 0 {
 		limit = aigen.MaxDuplicateCandidates
 	}
@@ -68,7 +74,7 @@ func (s *Store) SearchDuplicateCandidates(draftName, requirementID string, limit
 			return nil, err
 		}
 		sim := aigen.TokenSimilarity(draftName, name)
-		if sim < aigen.DupSimilarityThreshold {
+		if sim < floor {
 			continue
 		}
 		reason := fmt.Sprintf("existing test %q shares %d%% of its name", name, int(sim*100+0.5))

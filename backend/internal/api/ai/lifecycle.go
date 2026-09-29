@@ -583,6 +583,13 @@ func (h *Handler) executeGeneration(r *http.Request, req createGenerationRequest
 			accumulateUsage(chatResp, criticResp)
 		}
 	}
+	// TypeSafe.ai reviews the drafts and their duplicate candidates (spec Wave 5 §2); best effort.
+	if warn := h.runTypeSafeDraftReview(ctx, rows, req.RequirementID); warn != "" {
+		if criticWarning != "" {
+			criticWarning += "; "
+		}
+		criticWarning += warn
+	}
 
 	now := time.Now()
 	run.Status = models.AIGenerationRunStatusCompleted
