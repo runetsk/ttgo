@@ -24,13 +24,16 @@ type SemanticReport struct {
 }
 
 // SemanticPairOutcome is one decided pair of a pass: the two group signatures (SigA < SigB), their
-// representative results in this job, the probability used (0 for a person's split), where it came
-// from, the model that answered (TypeSafe answers only) and whether the two groups ended merged.
+// representative results in this job, the probability used, where it came from (typesafe = asked
+// now; memory = reused, SourcePairID names the reused row — a TypeSafe answer, or a person's split,
+// in which case P is nil and the pair was kept apart), the model that answered and whether the two
+// groups ended merged. A pass never produces a human outcome: only a split writes those rows.
 type SemanticPairOutcome struct {
 	SigA, SigB       string
 	ResultA, ResultB string
 	P                *float64
 	Source           string
+	SourcePairID     string
 	AnsweredModel    string
 	Merged           bool
 }
@@ -75,24 +78,32 @@ func MergeGroupsSemantically(ctx context.Context, deps SemanticDeps, groups []*F
 
 	asked := map[[2]string]float64{} // (keyA,keyB) sorted -> noul
 	var outcomes []SemanticPairOutcome
-	decide := func(p semPair, v float64, source, model string) {
-		asked[pairKey(p.a.Key, p.b.Key)] = v
-		pv := v
-		outcomes = append(outcomes, SemanticPairOutcome{SigA: p.a.Key, SigB: p.b.Key,
-			ResultA: p.a.Representative.ID, ResultB: p.b.Representative.ID, P: &pv, Source: source, AnsweredModel: model})
+	decide := func(p semPair, v *float64, source, sourcePair, model string) {
+		if v != nil {
+			asked[pairKey(p.a.Key, p.b.Key)] = *v
+		} else {
+			asked[pairKey(p.a.Key, p.b.Key)] = 0 // kept apart by a person
+		}
+		outcomes = append(outcomes, SemanticPairOutcome{SigA: p.a.Key, SigB: p.b.Key, ResultA: p.a.Representative.ID,
+			ResultB: p.b.Representative.ID, P: v, Source: source, SourcePairID: sourcePair, AnsweredModel: model})
 	}
 	// Memory first (spec Wave 4 §2): a person's split pins the pair apart; a remembered TypeSafe
 	// answer is reused. Only the rest is asked.
 	toAsk := pairs[:0:0]
+	rememberedModel := ""
 	for _, p := range pairs {
 		if deps.Remember != nil {
 			if r, ok := deps.Remember(p.a.Key, p.b.Key); ok {
 				if r.Source == SemanticSourceHuman {
-					decide(p, 0, SemanticSourceHuman, "")
+					decide(p, nil, SemanticSourceMemory, r.ID, "")
 					rep.HumanBlocked++
 				} else {
-					decide(p, r.P, SemanticSourceMemory, "")
+					v := r.P
+					decide(p, &v, SemanticSourceMemory, r.ID, r.AnsweredModel)
 					rep.Remembered++
+					if rememberedModel == "" {
+						rememberedModel = r.AnsweredModel
+					}
 				}
 				continue
 			}
@@ -124,12 +135,16 @@ func MergeGroupsSemantically(ctx context.Context, deps SemanticDeps, groups []*F
 		}
 		for _, p := range ch.pairs {
 			if v, ok := answers[p.k]; ok {
-				decide(p, v, SemanticSourceTypeSafe, model)
+				pv := v
+				decide(p, &pv, SemanticSourceTypeSafe, "", model)
 				rep.Asked++
 			}
 		}
 	}
 
+	if rep.Model == "" {
+		rep.Model = rememberedModel // a pass answered from memory names the model that answered then
+	}
 	merged := clusterCompleteLinkage(groups, asked)
 	rep.Merged = len(groups) - len(merged)
 	// A pair is merged when both representatives ended in the same output group.

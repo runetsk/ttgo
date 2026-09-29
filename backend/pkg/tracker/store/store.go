@@ -243,6 +243,12 @@ func (s *Store) bootstrapDB() error {
 		return fmt.Errorf("failed to create run_analysis_jobs active-job index: %w", err)
 	}
 
+	// typesafe wave 4: a person's split of a signature pair is recorded once.
+	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_semantic_pairs_human
+		ON semantic_pairs (sig_a, sig_b) WHERE source = 'human'`).Error; err != nil {
+		return fmt.Errorf("failed to create semantic_pairs human index: %w", err)
+	}
+
 	// 007-req-traceability: one requirement per imported source, so concurrent
 	// imports of the same source key cannot create duplicates (F-054).
 	if err := db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uq_requirement_source

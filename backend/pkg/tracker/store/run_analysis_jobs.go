@@ -1,12 +1,14 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"time"
 	"ttgo/pkg/tracker/models"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // MaybeEnqueueForRun inserts a new queued RunAnalysisJob for runID, OR
@@ -59,6 +61,80 @@ func (s *Store) maybeEnqueue(runID, trigger, createdBy string, retryFailedOnly b
 		return nil, false, err
 	}
 	return job, true, nil
+}
+
+// EnqueueScopedAnalysis queues a manual job limited to resultIDs (spec Wave 4 §4) and, in the same
+// transaction, records humanPairs (a person's split). Like MaybeEnqueueForRun it returns the
+// already active job instead (created false), and then writes nothing.
+func (s *Store) EnqueueScopedAnalysis(runID, createdBy string, resultIDs []string, splitFrom string, humanPairs []*models.SemanticPair) (*models.RunAnalysisJob, bool, error) {
+	scope, err := json.Marshal(resultIDs)
+	if err != nil {
+		return nil, false, err
+	}
+	activeJob := func() (*models.RunAnalysisJob, error) {
+		var j models.RunAnalysisJob
+		err := s.db.Where(`test_run_id = ? AND status IN ?`, runID,
+			[]string{models.RunAnalysisJobStatusQueued, models.RunAnalysisJobStatusRunning}).
+			Order("created_at DESC").First(&j).Error
+		if err != nil {
+			return nil, err
+		}
+		return &j, nil
+	}
+	if existing, err := activeJob(); err == nil {
+		return existing, false, nil
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, false, err
+	}
+	job := &models.RunAnalysisJob{
+		ID: uuid.New().String(), TestRunID: runID, Trigger: models.RunAnalysisJobTriggerManual,
+		Status: models.RunAnalysisJobStatusQueued, CreatedAt: time.Now(), ScopeResultIDs: string(scope),
+	}
+	if createdBy != "" {
+		job.CreatedBy = &createdBy
+	}
+	if splitFrom != "" {
+		job.SplitFromAnalysisID = &splitFrom
+	}
+	err = s.db.Transaction(func(tx *gorm.DB) error {
+		now := time.Now().UTC()
+		for _, p := range humanPairs {
+			p.SigA, p.SigB = orderedSigs(p.SigA, p.SigB)
+			if p.ID == "" {
+				p.ID = uuid.New().String()
+			}
+			p.CreatedAt = now
+			// An earlier split already pinned this pair (uq_semantic_pairs_human): keep that row.
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(p).Error; err != nil {
+				return err
+			}
+		}
+		return tx.Create(job).Error
+	})
+	if err != nil {
+		// The one-active-job index: a concurrent enqueue won; nothing of this one was written.
+		if existing, e2 := activeJob(); e2 == nil {
+			return existing, false, nil
+		}
+		return nil, false, err
+	}
+	return job, true, nil
+}
+
+// ScopeResultIDs decodes a job's result scope; nil = the whole run.
+func ScopeResultIDs(job *models.RunAnalysisJob) map[string]bool {
+	if job == nil || job.ScopeResultIDs == "" {
+		return nil
+	}
+	var ids []string
+	if json.Unmarshal([]byte(job.ScopeResultIDs), &ids) != nil {
+		return nil
+	}
+	out := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		out[id] = true
+	}
+	return out
 }
 
 // GetAnalysisJob fetches a single job by ID.

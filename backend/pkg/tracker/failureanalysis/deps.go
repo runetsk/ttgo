@@ -48,9 +48,11 @@ type SemanticDeps struct {
 
 // Remembered is an earlier decision about a signature pair.
 type Remembered struct {
-	P         float64 // TypeSafe's probability; 0 for a person's split
-	Source    string  // SemanticSourceTypeSafe or SemanticSourceHuman
-	CreatedAt time.Time
+	ID            string  // the remembered row (semantic_pairs.id), recorded as source_pair_id
+	P             float64 // TypeSafe's probability; 0 for a person's split
+	Source        string  // SemanticSourceTypeSafe or SemanticSourceHuman
+	AnsweredModel string  // the model that gave a TypeSafe answer
+	CreatedAt     time.Time
 }
 
 // JobDeps is everything one analysis job needs, resolved per job from live settings.

@@ -52,7 +52,7 @@ func rememberFrom(m map[string]Remembered) func(a, b string) (Remembered, bool) 
 func TestSemanticMemory_RememberedPairsAreNotAskedButStillMerge(t *testing.T) {
 	fc := &fakeClient{fn: pairAnswerer(map[string]float64{"A|C": 0.9, "B|C": 0.9})}
 	deps := SemanticDeps{Client: fc, Model: "jev-latest", Remember: rememberFrom(map[string]Remembered{
-		"A|B": {P: 0.93, Source: SemanticSourceTypeSafe, CreatedAt: time.Now().Add(-48 * time.Hour)},
+		"A|B": {ID: "row-ab", P: 0.93, Source: SemanticSourceTypeSafe, AnsweredModel: "jev-1.12.0", CreatedAt: time.Now().Add(-48 * time.Hour)},
 	})}
 	out, rep, err := MergeGroupsSemantically(context.Background(), deps, memoryGroups(), func() bool { return false })
 	require.NoError(t, err)
@@ -72,7 +72,8 @@ func TestSemanticMemory_RememberedPairsAreNotAskedButStillMerge(t *testing.T) {
 		if p.SigA == "A" && p.SigB == "B" {
 			require.Equal(t, SemanticSourceMemory, p.Source)
 			require.InDelta(t, 0.93, *p.P, 1e-12)
-			require.Equal(t, "", p.AnsweredModel)
+			require.Equal(t, "jev-1.12.0", p.AnsweredModel)
+			require.Equal(t, "row-ab", p.SourcePairID)
 			require.Equal(t, "A-0", p.ResultA)
 			require.Equal(t, "B-0", p.ResultB)
 		} else {
@@ -85,7 +86,7 @@ func TestSemanticMemory_RememberedPairsAreNotAskedButStillMerge(t *testing.T) {
 func TestSemanticMemory_APersonsSplitKeepsThePairApart(t *testing.T) {
 	fc := &fakeClient{fn: pairAnswerer(map[string]float64{"A|B": 0.95, "A|C": 0.95, "B|C": 0.95})}
 	deps := SemanticDeps{Client: fc, Model: "jev-latest", Remember: rememberFrom(map[string]Remembered{
-		"A|C": {Source: SemanticSourceHuman, CreatedAt: time.Now().AddDate(-1, 0, 0)},
+		"A|C": {ID: "split-1", Source: SemanticSourceHuman, CreatedAt: time.Now().AddDate(-1, 0, 0)},
 	})}
 	out, rep, err := MergeGroupsSemantically(context.Background(), deps, memoryGroups(), func() bool { return false })
 	require.NoError(t, err)
@@ -102,9 +103,9 @@ func TestSemanticMemory_APersonsSplitKeepsThePairApart(t *testing.T) {
 	}
 	for _, p := range rep.Pairs {
 		if p.SigA == "A" && p.SigB == "C" {
-			require.Equal(t, SemanticSourceHuman, p.Source)
-			require.NotNil(t, p.P)
-			require.Zero(t, *p.P)
+			require.Equal(t, SemanticSourceMemory, p.Source, "a pass never writes a human row; it points at the split")
+			require.Equal(t, "split-1", p.SourcePairID)
+			require.Nil(t, p.P, "a person's split has no probability")
 			require.False(t, p.Merged)
 		}
 	}
@@ -117,7 +118,7 @@ func TestSemanticMemory_EverythingRememberedMakesNoRequest(t *testing.T) {
 	}}
 	old := time.Now().Add(-time.Hour)
 	deps := SemanticDeps{Client: fc, Model: "jev-latest", Remember: rememberFrom(map[string]Remembered{
-		"A|B": {P: 0.2, Source: SemanticSourceTypeSafe, CreatedAt: old},
+		"A|B": {P: 0.2, Source: SemanticSourceTypeSafe, AnsweredModel: "jev-1.12.0", CreatedAt: old},
 		"A|C": {P: 0.2, Source: SemanticSourceTypeSafe, CreatedAt: old},
 		"B|C": {P: 0.2, Source: SemanticSourceTypeSafe, CreatedAt: old},
 	})}
@@ -127,6 +128,7 @@ func TestSemanticMemory_EverythingRememberedMakesNoRequest(t *testing.T) {
 	require.Equal(t, 3, rep.Remembered)
 	require.Zero(t, rep.Requests)
 	require.Zero(t, rep.InputTokens)
+	require.Equal(t, "jev-1.12.0", rep.Model, "clones name the model that answered, even from memory")
 	require.Len(t, rep.Pairs, 3)
 	for _, p := range rep.Pairs {
 		require.False(t, p.Merged)

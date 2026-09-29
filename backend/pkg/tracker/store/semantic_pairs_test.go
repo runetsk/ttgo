@@ -17,7 +17,7 @@ func TestSaveSemanticPairs_StoresOrientedRows(t *testing.T) {
 		[]failureanalysis.SemanticPairOutcome{
 			{SigA: "zz", SigB: "aa", ResultA: "r-z", ResultB: "r-a", P: pf(0.91), Source: failureanalysis.SemanticSourceTypeSafe,
 				AnsweredModel: "jev-1.13", Merged: true},
-			{SigA: "aa", SigB: "bb", ResultA: "r-a", ResultB: "r-b", P: pf(0), Source: failureanalysis.SemanticSourceHuman},
+			{SigA: "aa", SigB: "bb", ResultA: "r-a", ResultB: "r-b", Source: failureanalysis.SemanticSourceMemory, SourcePairID: "split-1"},
 		}))
 	rows, err := s.ListSemanticPairsForJob("job-1")
 	require.NoError(t, err)
@@ -34,14 +34,12 @@ func TestSaveSemanticPairs_StoresOrientedRows(t *testing.T) {
 	require.True(t, z.Merged)
 	require.Equal(t, "jev-latest", z.Model)
 	require.Equal(t, "jev-1.13", z.AnsweredModel)
-	require.Nil(t, byB["bb"].PSame, "a person's split has no probability")
+	require.Nil(t, byB["bb"].PSame, "kept apart by a person: no probability")
+	require.Equal(t, "split-1", byB["bb"].SourcePairID)
 
 	got, err := s.SemanticPairFor("job-1", "zz", "aa")
 	require.NoError(t, err)
 	require.Equal(t, z.ID, got.ID)
-	none, err := s.SemanticPairFor("job-1", "aa", "bb")
-	require.NoError(t, err)
-	require.Nil(t, none, "human rows are not the job's decision")
 }
 
 func insertPair(t *testing.T, s *Store, a, b, source, model string, p *float64, at time.Time) *models.SemanticPair {
@@ -87,6 +85,8 @@ func TestRememberedSource(t *testing.T) {
 	now := time.Now().UTC()
 	src := insertPair(t, s, "a", "b", failureanalysis.SemanticSourceTypeSafe, "jev-latest", pf(0.9), now.Add(-time.Hour))
 	m := insertPair(t, s, "a", "b", failureanalysis.SemanticSourceMemory, "jev-latest", pf(0.9), now)
+	m.SourcePairID = src.ID
+	require.NoError(t, s.db.Save(m).Error)
 	got, err := s.RememberedSource(m)
 	require.NoError(t, err)
 	require.Equal(t, src.ID, got.ID)
@@ -105,4 +105,63 @@ func TestSetAnalysisJobSemanticReport(t *testing.T) {
 	got, err := s.GetAnalysisJob(job.ID)
 	require.NoError(t, err)
 	require.Equal(t, `{"asked":2}`, got.SemanticReport)
+}
+
+func humanPin(a, b string) *models.SemanticPair {
+	return &models.SemanticPair{JobID: "orig-job", RunID: "r", SigA: a, SigB: b, Source: failureanalysis.SemanticSourceHuman,
+		PolicyVersion: failureanalysis.SemanticPolicyVersion}
+}
+
+func TestEnqueueScopedAnalysis_RecordsThePinsWithTheJob(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	job, created, err := s.EnqueueScopedAnalysis(runID, "u1", []string{"rr-1", "rr-2"}, "an-9",
+		[]*models.SemanticPair{humanPin("zz", "aa"), humanPin("aa", "bb")})
+	require.NoError(t, err)
+	require.True(t, created)
+	require.Equal(t, `["rr-1","rr-2"]`, job.ScopeResultIDs)
+	require.Equal(t, "an-9", *job.SplitFromAnalysisID)
+	require.Equal(t, map[string]bool{"rr-1": true, "rr-2": true}, ScopeResultIDs(job))
+	rows, err := s.ListSemanticPairsForJob("orig-job")
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, "aa", rows[0].SigA, "stored oriented")
+
+	remember := s.SemanticMemory("jev-latest", failureanalysis.SemanticPolicyVersion, time.Now())
+	r, ok := remember("aa", "zz")
+	require.True(t, ok)
+	require.Equal(t, failureanalysis.SemanticSourceHuman, r.Source)
+}
+
+func TestEnqueueScopedAnalysis_AnActiveJobWinsAndNothingIsWritten(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	active, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	got, created, err := s.EnqueueScopedAnalysis(runID, "u1", []string{"rr-1"}, "an-9", []*models.SemanticPair{humanPin("aa", "bb")})
+	require.NoError(t, err)
+	require.False(t, created)
+	require.Equal(t, active.ID, got.ID)
+	rows, err := s.ListSemanticPairsForJob("orig-job")
+	require.NoError(t, err)
+	require.Empty(t, rows, "no pin without its job")
+}
+
+func TestEnqueueScopedAnalysis_ASecondSplitOfThePairKeepsTheFirstPin(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	first, _, err := s.EnqueueScopedAnalysis(runID, "", []string{"rr-1"}, "an-1", []*models.SemanticPair{humanPin("aa", "bb")})
+	require.NoError(t, err)
+	require.NoError(t, s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", first.ID).Update("status", models.RunAnalysisJobStatusCompleted).Error)
+	_, created, err := s.EnqueueScopedAnalysis(runID, "", []string{"rr-1"}, "an-2", []*models.SemanticPair{humanPin("bb", "aa")})
+	require.NoError(t, err)
+	require.True(t, created)
+	var n int64
+	require.NoError(t, s.db.Model(&models.SemanticPair{}).Where("source = ?", failureanalysis.SemanticSourceHuman).Count(&n).Error)
+	require.EqualValues(t, 1, n)
+}
+
+func TestScopeResultIDs_WholeRunWhenUnset(t *testing.T) {
+	require.Nil(t, ScopeResultIDs(&models.RunAnalysisJob{}))
+	require.Nil(t, ScopeResultIDs(nil))
 }

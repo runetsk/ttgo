@@ -33,13 +33,13 @@ func (s *Store) SaveSemanticPairs(jobID, runID, model, policy string, pairs []fa
 			ra, rb = rb, ra
 		}
 		var ps *float64
-		if p.P != nil && p.Source != failureanalysis.SemanticSourceHuman {
+		if p.P != nil {
 			v := *p.P
 			ps = &v
 		}
 		rows = append(rows, &models.SemanticPair{ID: uuid.New().String(), JobID: jobID, RunID: runID, SigA: a, SigB: b,
 			ResultAID: ra, ResultBID: rb, PSame: ps, Model: model, AnsweredModel: p.AnsweredModel, PolicyVersion: policy,
-			Source: p.Source, Merged: p.Merged, CreatedAt: now})
+			Source: p.Source, SourcePairID: p.SourcePairID, Merged: p.Merged, CreatedAt: now})
 	}
 	return s.db.CreateInBatches(rows, 200).Error
 }
@@ -57,7 +57,7 @@ func (s *Store) SemanticMemory(model, policy string, now time.Time) func(a, b st
 		err := s.db.Where("sig_a = ? AND sig_b = ? AND source = ?", a, b, failureanalysis.SemanticSourceHuman).
 			Order("created_at DESC").Take(&human).Error
 		if err == nil {
-			return failureanalysis.Remembered{Source: failureanalysis.SemanticSourceHuman, CreatedAt: human.CreatedAt}, true
+			return failureanalysis.Remembered{ID: human.ID, Source: failureanalysis.SemanticSourceHuman, CreatedAt: human.CreatedAt}, true
 		}
 		var row models.SemanticPair
 		err = s.db.Where("sig_a = ? AND sig_b = ? AND source = ? AND model = ? AND policy_version = ? AND p_same IS NOT NULL AND created_at >= ?",
@@ -66,7 +66,8 @@ func (s *Store) SemanticMemory(model, policy string, now time.Time) func(a, b st
 		if err != nil {
 			return failureanalysis.Remembered{}, false
 		}
-		return failureanalysis.Remembered{P: *row.PSame, Source: failureanalysis.SemanticSourceTypeSafe, CreatedAt: row.CreatedAt}, true
+		return failureanalysis.Remembered{ID: row.ID, P: *row.PSame, Source: failureanalysis.SemanticSourceTypeSafe,
+			AnsweredModel: row.AnsweredModel, CreatedAt: row.CreatedAt}, true
 	}
 }
 
@@ -97,16 +98,14 @@ func (s *Store) SemanticPairFor(jobID, x, y string) (*models.SemanticPair, error
 	return &row, nil
 }
 
-// RememberedSource returns the typesafe row a memory row reused: the newest one for the same pair,
-// model and policy created before it. nil when row is not a memory row or the source is gone.
+// RememberedSource returns the row a memory row reused (source_pair_id): a TypeSafe answer or a
+// person's split. nil when row is not a memory row or the source is gone.
 func (s *Store) RememberedSource(row *models.SemanticPair) (*models.SemanticPair, error) {
-	if row == nil || row.Source != failureanalysis.SemanticSourceMemory {
+	if row == nil || row.Source != failureanalysis.SemanticSourceMemory || row.SourcePairID == "" {
 		return nil, nil
 	}
 	var src models.SemanticPair
-	err := s.db.Where("sig_a = ? AND sig_b = ? AND source = ? AND model = ? AND policy_version = ? AND created_at <= ?",
-		row.SigA, row.SigB, failureanalysis.SemanticSourceTypeSafe, row.Model, row.PolicyVersion, row.CreatedAt).
-		Order("created_at DESC").Take(&src).Error
+	err := s.db.Where("id = ?", row.SourcePairID).Take(&src).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}

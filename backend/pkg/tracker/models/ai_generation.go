@@ -426,20 +426,23 @@ func (a *RunResultAnalysis) Failed() bool {
 // person's split (spec Wave 4 §1). SigA < SigB. It is both the audit record and the cross-run
 // memory: a later job reuses a recent TypeSafe row, and never merges a pair with a human row.
 type SemanticPair struct {
-	ID            string    `json:"id" gorm:"primaryKey"`
-	JobID         string    `json:"job_id" gorm:"index;not null"`
-	RunID         string    `json:"run_id" gorm:"not null"`
-	SigA          string    `json:"sig_a" gorm:"not null;index:idx_semantic_pairs_sigs,priority:1"`
-	SigB          string    `json:"sig_b" gorm:"not null;index:idx_semantic_pairs_sigs,priority:2"`
-	ResultAID     string    `json:"result_a_id" gorm:"column:result_a_id;not null;default:''"`
-	ResultBID     string    `json:"result_b_id" gorm:"column:result_b_id;not null;default:''"`
-	PSame         *float64  `json:"p_same"`
-	Model         string    `json:"model" gorm:"not null;default:''"` // the configured TypeSafe model (memory key)
-	AnsweredModel string    `json:"answered_model" gorm:"not null;default:''"`
-	PolicyVersion string    `json:"policy_version" gorm:"not null;default:''"`
-	Source        string    `json:"source" gorm:"not null"` // typesafe | memory | human
-	Merged        bool      `json:"merged" gorm:"not null;default:false"`
-	CreatedAt     time.Time `json:"created_at" gorm:"index:idx_semantic_pairs_sigs,priority:3"`
+	ID            string   `json:"id" gorm:"primaryKey"`
+	JobID         string   `json:"job_id" gorm:"index;not null"`
+	RunID         string   `json:"run_id" gorm:"not null"`
+	SigA          string   `json:"sig_a" gorm:"not null;index:idx_semantic_pairs_sigs,priority:1"`
+	SigB          string   `json:"sig_b" gorm:"not null;index:idx_semantic_pairs_sigs,priority:2"`
+	ResultAID     string   `json:"result_a_id" gorm:"column:result_a_id;not null;default:''"`
+	ResultBID     string   `json:"result_b_id" gorm:"column:result_b_id;not null;default:''"`
+	PSame         *float64 `json:"p_same"`
+	Model         string   `json:"model" gorm:"not null;default:''"` // the configured TypeSafe model (memory key)
+	AnsweredModel string   `json:"answered_model" gorm:"not null;default:''"`
+	PolicyVersion string   `json:"policy_version" gorm:"not null;default:''"`
+	Source        string   `json:"source" gorm:"not null"` // typesafe | memory | human
+	// SourcePairID is the row a memory row reused: a TypeSafe answer, or a person's split (then
+	// PSame is NULL and the pair was kept apart).
+	SourcePairID string    `json:"source_pair_id" gorm:"not null;default:''"`
+	Merged       bool      `json:"merged" gorm:"not null;default:false"`
+	CreatedAt    time.Time `json:"created_at" gorm:"index:idx_semantic_pairs_sigs,priority:3"`
 }
 
 // RunAnalysisJob tracks a batch/auto analysis of a TestRun.
