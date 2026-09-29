@@ -136,6 +136,31 @@ export const SETTING_HELP = {
         what: 'Below this confidence the default LLM decides instead of TypeSafe.ai, and the analysis notes what TypeSafe said. 0 never hands over.',
         example: 'At 90%: "flaky test, 72% sure" goes to the LLM, which decides and explains; "product bug, 96% sure" stays with TypeSafe. If the LLM cannot answer, TypeSafe\'s decision is kept.',
     },
+    'ts.import_structure_enabled': {
+        title: 'Structure unrecognized imports',
+        what: 'When pasted test cases match no known format, TypeSafe.ai names the role of each line (test case title, precondition, step, expected result or noise) and the cases are built from the lines themselves, so no step is invented. The LLM fallback runs only if this finds nothing.',
+        details: 'Up to 300 lines are classified, 100 per request, with redaction applied when Redact secrets is on. Each request is recorded as an "import" cost.',
+        example: '"Login works for a returning customer / Open the sign-in page / Enter a valid email / The dashboard should appear" → one case with two steps, the last one expecting the dashboard.',
+        off: 'Unrecognized content goes straight to the LLM fallback.',
+    },
+    'ts.draft_review_enabled': {
+        title: 'Review generated test cases',
+        what: 'After AI generation, TypeSafe.ai rates each draft for clear actions, checkable expected results and concrete test data, and judges whether it tests the same behaviour as a similar existing test case or another draft.',
+        details: 'A weak or poor rating at 60% confidence or more adds a finding under "TypeSafe.ai review". A duplicate at 80% or more is flagged even when the names differ; a name-alike TypeSafe says is different (under 30%) is no longer flagged. One request per 10 drafts, recorded as a "draft_review" cost.',
+        off: 'Drafts are checked by the built-in rules and the name-similarity duplicate check only.',
+    },
+    'ts.defect_assist_enabled': {
+        title: 'Defect assist',
+        what: 'When you write a defect, "Check with TypeSafe.ai" suggests its severity and lists open defects that may describe the same problem.',
+        details: 'The new defect is compared with up to 10 open defects: the test case\'s own first, then those whose titles share words. Duplicates are shown at 70% or more. Nothing is applied until you click. One request per check, recorded as a "defect_assist" cost.',
+        off: 'The defect forms have no TypeSafe check.',
+    },
+    'ts.search_rerank_enabled': {
+        title: 'Re-rank search results',
+        what: 'Test-case search can ask TypeSafe.ai to re-order the top 20 results by how well each matches what the query means, not only its words.',
+        details: 'Off by default because every re-ranked search is a request. Used by `ttgo search --rerank` and the API\'s rerank=true; recorded as a "search" cost.',
+        off: 'Search results are ordered by full-text relevance (BM25).',
+    },
     'provider.default': {
         title: 'Default LLM',
         what: 'The enabled default provider in LLM Providers; failure analysis always uses this one.',

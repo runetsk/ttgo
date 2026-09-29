@@ -621,3 +621,11 @@ export const backups = {
 };
 
 export default api;
+
+// Which uses of TypeSafe.ai outside failure analysis would run now (import_structure,
+// draft_review, defect_assist, search_rerank → bool). Silent: a control simply stays hidden.
+export const getTypeSafeUses = () =>
+    api.get('/ai/typesafe/features', { _silent: true }).then(r => r.data);
+
+// Defect assist: TypeSafe.ai suggests a severity and lists open defects the new one may duplicate.
+export const assistDefect = (body) => api.post('/defects/assist', body).then(r => r.data);

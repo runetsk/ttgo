@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { resultDefects } from '../api';
+import DefectAssistPanel from './DefectAssistPanel';
 
 const SEVERITIES = ['critical', 'major', 'minor', 'trivial'];
 
@@ -42,6 +43,8 @@ export default function CreateDefectModal({ runId, resultId, testName, errorMess
                     <select className="modern-input" style={{ width: '100%', marginBottom: 12 }} value={severity} onChange={e => setSeverity(e.target.value)} disabled={submitting}>
                         {SEVERITIES.map(s => <option key={s} value={s}>{s}</option>)}
                     </select>
+                    <DefectAssistPanel title={title} description={description} runResultId={resultId} errorMessage={errorMessage}
+                        severity={severity} onApplySeverity={setSeverity} disabled={submitting} />
                     <label style={labelStyle}>External link (optional)</label>
                     <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
                         <input className="modern-input" style={{ flex: '0 0 130px' }} placeholder="Key e.g. PROJ-1" value={externalKey} onChange={e => setExternalKey(e.target.value)} disabled={submitting} />

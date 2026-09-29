@@ -10,6 +10,7 @@ const FORMAT_LABELS = {
     markdown_table: 'Markdown Table',
     numbered_list: 'Numbered List',
     ai: 'AI-Parsed',
+    typesafe: 'Structured by TypeSafe.ai',
 };
 
 function DebugRow({ label, value, mono, strong, highlight }) {
@@ -127,7 +128,7 @@ export default function AIImportReview({ onAccepted, onBack }) {
                         <div style={styles.titleMeta}>
                             <span style={{
                                 ...styles.formatTag,
-                                ...(ai.importFormat === 'ai' ? styles.formatTagAI : {}),
+                                ...(ai.importFormat === 'ai' || ai.importFormat === 'typesafe' ? styles.formatTagAI : {}),
                             }}>
                                 {ai.importFormat === 'ai' && (
                                     <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

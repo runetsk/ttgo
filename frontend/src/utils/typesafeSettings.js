@@ -4,7 +4,8 @@
 export const TIMEOUT_MIN = 5;
 export const TIMEOUT_MAX = 300;
 
-const FIELDS = ['enabled', 'model', 'price_per_mtok', 'timeout_seconds', 'verdict_engine_enabled', 'narrative_enabled', 'escalate_below_pct', 'llm_fallback_enabled', 'semantic_dedup_enabled', 'allow_auto_failure_analysis'];
+const FIELDS = ['enabled', 'model', 'price_per_mtok', 'timeout_seconds', 'verdict_engine_enabled', 'narrative_enabled', 'escalate_below_pct', 'llm_fallback_enabled', 'semantic_dedup_enabled', 'allow_auto_failure_analysis',
+    'import_structure_enabled', 'draft_review_enabled', 'defect_assist_enabled', 'search_rerank_enabled'];
 
 // escalationValid: the "ask the LLM below N%" threshold is a whole percentage, 0 (never) to 100.
 export function escalationValid(pct) {

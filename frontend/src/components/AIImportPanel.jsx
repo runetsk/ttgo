@@ -18,6 +18,7 @@ const FORMAT_LABELS = {
     markdown_table: 'Markdown Table',
     numbered_list: 'Numbered List',
     ai: 'AI-Parsed',
+    typesafe: 'Structured by TypeSafe.ai',
 };
 
 export default function AIImportPanel({ onParsed }) {
@@ -97,7 +98,7 @@ export default function AIImportPanel({ onParsed }) {
                     {ai.importFormat && (
                         <span style={{
                             ...styles.detectedBadge,
-                            ...(ai.importFormat === 'ai' ? {
+                            ...(ai.importFormat === 'ai' || ai.importFormat === 'typesafe' ? {
                                 background: 'rgba(168,85,247,0.1)',
                                 color: '#a855f7',
                                 border: '1px solid rgba(168,85,247,0.2)',
@@ -106,7 +107,7 @@ export default function AIImportPanel({ onParsed }) {
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                                 <polyline points="20 6 9 17 4 12"/>
                             </svg>
-                            {ai.importFormat === 'ai' ? 'Parsed by AI' : `Detected: ${FORMAT_LABELS[ai.importFormat] || ai.importFormat}`}
+                            {ai.importFormat === 'ai' ? 'Parsed by AI' : ai.importFormat === 'typesafe' ? 'Structured by TypeSafe.ai' : `Detected: ${FORMAT_LABELS[ai.importFormat] || ai.importFormat}`}
                         </span>
                     )}
                 </div>

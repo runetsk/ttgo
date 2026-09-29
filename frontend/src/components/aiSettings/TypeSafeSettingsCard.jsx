@@ -24,6 +24,18 @@ const ICONS = {
     fallback: icon(<><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></>),
 };
 
+// TypeSafe used beyond failure analysis (Wave 5): one switch each.
+const OTHER_USES = [
+    { field: 'import_structure_enabled', icon: 'layers', color: '#a78bfa', label: 'Structure unrecognized imports',
+        desc: 'Name each line\'s role when pasted test cases match no format, before the LLM fallback. No step is invented.' },
+    { field: 'draft_review_enabled', icon: 'target', color: '#34d399', label: 'Review generated test cases',
+        desc: 'Rate AI drafts for clear actions, checkable results and concrete data, and judge their duplicates.' },
+    { field: 'defect_assist_enabled', icon: 'activity', color: '#f87171', label: 'Defect assist',
+        desc: 'Suggest a new defect\'s severity and list open defects it may duplicate, on request.' },
+    { field: 'search_rerank_enabled', icon: 'fallback', color: '#fbbf24', label: 'Re-rank search results',
+        desc: 'Re-order the top 20 search results by meaning. Off by default: each search is a request.' },
+];
+
 const TONES = {
     green: { color: 'var(--aig-tone-green-fg)', background: 'rgba(34,197,94,0.1)', border: 'rgba(34,197,94,0.25)' },
     amber: { color: 'var(--aig-tone-amber-fg)', background: 'rgba(234,179,8,0.1)', border: 'rgba(234,179,8,0.25)' },
@@ -257,6 +269,16 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
                     disabled={locked || !form.verdict_engine_enabled} data-testid="typesafe-escalate_below_pct"
                     onChange={(e) => update({ escalate_below_pct: e.target.value === '' ? NaN : Number(e.target.value) })} />
             </FieldRow>
+
+            <div style={cs.groupTitle}>Other uses of TypeSafe</div>
+            <div style={cs.togglesGrid}>
+                {OTHER_USES.map((u) => (
+                    <ToggleCard key={u.field} icon={ICONS[u.icon]} iconColor={u.color} label={u.label} desc={u.desc}
+                        checked={!!form[u.field]} disabled={locked} testId={`typesafe-${u.field}`}
+                        setting={`ts.${u.field}`} help={SETTING_HELP[`ts.${u.field}`]}
+                        onChange={(v) => update({ [u.field]: v })} />
+                ))}
+            </div>
         </section>
     );
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { defects as defectsApi, getAssignableUsers } from '../api';
 import useDialogFocus from '../hooks/useDialogFocus';
+import DefectAssistPanel from './DefectAssistPanel';
 import { assigneeOptions, buildDefectPayload, BULK_LOCK_MESSAGE } from '../utils/defectActions';
 import { DEFECT_STATUS_OPTIONS } from '../utils/defectQueue';
 
@@ -116,6 +117,12 @@ export default function DefectModal({ mode = 'create', defect = null, isSnapshot
                             </select>
                         </div>
                     </div>
+                    {mode === 'create' && (
+                        <div style={{ marginTop: 10 }}>
+                            <DefectAssistPanel title={title} description={description} severity={severity}
+                                onApplySeverity={setSeverity} disabled={submitting} />
+                        </div>
+                    )}
 
                     <label style={lbl} htmlFor="defect-assignee">Assignee</label>
                     <select
