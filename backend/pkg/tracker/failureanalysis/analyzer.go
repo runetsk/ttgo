@@ -26,6 +26,11 @@ type AnalyzeContext struct {
 	OS                    string
 	AppVersion            string
 	Categories            string
+	// RecentOutcomes is this test's last RecentOutcomesLimit results before the analyzed one,
+	// oldest first, one letter each (P pass, F fail, E error, S other), from
+	// ListRecentOutcomesByTestCase. It goes to the TypeSafe state only
+	// (history.recent_outcomes); the LLM prompt never carries it. "" when unknown.
+	RecentOutcomes string
 	// Examples are past human triage decisions (few-shot), best first; BuildEvidence caps and
 	// redacts them. Empty when few-shot examples are off or none qualify.
 	Examples []TriageExample

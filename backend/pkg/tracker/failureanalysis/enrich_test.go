@@ -29,6 +29,13 @@ type mockSource struct {
 	categories       []string
 	categoriesErr    error
 
+	outcomes          string
+	outcomesErr       error
+	outcomesCalls     int
+	gotOutcomesBefore time.Time
+	gotOutcomesExcl   string
+	gotOutcomesLimit  int
+
 	// captured call state
 	defectsCalls int
 	reqsCalls    int
@@ -383,4 +390,36 @@ func (m *mockSource) ListTriageExamples(f TriageExampleFilter) ([]TriageExample,
 
 func (m *mockSource) ListCategoryNamesByTestCase(string) ([]string, error) {
 	return m.categories, m.categoriesErr
+}
+
+func (m *mockSource) ListRecentOutcomesByTestCase(tcID string, before time.Time, excludeRunID string, limit int) (string, error) {
+	m.outcomesCalls++
+	m.gotOutcomesBefore, m.gotOutcomesExcl, m.gotOutcomesLimit = before, excludeRunID, limit
+	return m.outcomes, m.outcomesErr
+}
+
+func TestBuildContextRecentOutcomes(t *testing.T) {
+	eest := time.FixedZone("EEST", 3*3600)
+	ran := time.Date(2026, 9, 24, 10, 0, 0, 0, eest)
+	result := &models.RunResult{ID: "rr", TestRunID: "run-now", TestCaseID: strptr("tc1"), StartTime: ran}
+
+	src := &mockSource{outcomes: "PFPFE"}
+	ctx := BuildContext(src, result, time.Now(), 0)
+	require.Equal(t, "PFPFE", ctx.RecentOutcomes)
+	require.Equal(t, 1, src.outcomesCalls)
+	require.True(t, src.gotOutcomesBefore.Equal(ran), "the same anchor as the history window")
+	require.Equal(t, time.UTC, src.gotOutcomesBefore.Location(), "passed as UTC")
+	require.Equal(t, "run-now", src.gotOutcomesExcl, "the analyzed run is excluded")
+	require.Equal(t, RecentOutcomesLimit, src.gotOutcomesLimit)
+	require.Equal(t, 10, RecentOutcomesLimit)
+	require.False(t, ctx.HistoryAvailable(), "recent outcomes are not the history block history_available records")
+
+	failing := &mockSource{outcomesErr: errContext("db down")}
+	require.Empty(t, BuildContext(failing, result, time.Now(), 0).RecentOutcomes, "best effort: an error leaves it empty")
+
+	orphan := &mockSource{outcomes: "PPP"}
+	noCase := *result
+	noCase.TestCaseID = nil
+	require.Empty(t, BuildContext(orphan, &noCase, time.Now(), 0).RecentOutcomes)
+	require.Zero(t, orphan.outcomesCalls, "no test case, no query")
 }

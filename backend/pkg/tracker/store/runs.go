@@ -1360,6 +1360,47 @@ func (s *Store) ListRecentFailuresByTestCase(tcID string, since, before time.Tim
 	return results, nil
 }
 
+// ListRecentOutcomesByTestCase returns the test case's last `limit` results strictly before
+// `before` (the analyzed result's history anchor), excluding excludeRunID (the analyzed run),
+// oldest first, one letter per result: P = PASS, F = FAIL, E = ERROR, S = anything else (SKIP,
+// PENDING, RUNNING). A result recorded without a start time counts at the time its row was
+// written. Instants are compared, not text: start_time keeps the offset it was written with.
+// It feeds history.recent_outcomes in the TypeSafe state (spec Wave 3 §1.2, R7).
+//
+// Guards: an empty tcID or a non-positive limit returns ("", nil), like the history lookup.
+func (s *Store) ListRecentOutcomesByTestCase(tcID string, before time.Time, excludeRunID string, limit int) (string, error) {
+	if tcID == "" || limit <= 0 {
+		return "", nil
+	}
+	var statuses []string
+	err := s.db.Raw(`
+		SELECT status FROM (
+		  SELECT status, id, CASE WHEN start_time > '0002-01-01' THEN start_time ELSE created_at END AS t
+		    FROM run_results
+		   WHERE test_case_id = ? AND test_run_id != ?
+		     AND julianday(CASE WHEN start_time > '0002-01-01' THEN start_time ELSE created_at END) < julianday(?)
+		   ORDER BY julianday(t) DESC, id DESC
+		   LIMIT ?)
+		ORDER BY julianday(t) ASC, id ASC`, tcID, excludeRunID, before.UTC(), limit).Scan(&statuses).Error
+	if err != nil {
+		return "", err
+	}
+	out := make([]byte, 0, len(statuses))
+	for _, st := range statuses {
+		switch models.ExecutionStatus(st) {
+		case models.StatusPass:
+			out = append(out, 'P')
+		case models.StatusFail:
+			out = append(out, 'F')
+		case models.StatusError:
+			out = append(out, 'E')
+		default:
+			out = append(out, 'S')
+		}
+	}
+	return string(out), nil
+}
+
 // GetRunResultByID returns a single result by id, or (nil, nil) if not found.
 func (s *Store) GetRunResultByID(id string) (*models.RunResult, error) {
 	var r models.RunResult

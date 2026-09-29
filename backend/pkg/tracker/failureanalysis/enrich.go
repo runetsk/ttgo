@@ -26,12 +26,15 @@ type EnrichmentSource interface {
 	ListRecentFailuresByTestCase(string, time.Time, time.Time, int, string) ([]*models.RunResult, error)
 	ListTriageExamples(TriageExampleFilter) ([]TriageExample, error)
 	ListCategoryNamesByTestCase(string) ([]string, error)
+	ListRecentOutcomesByTestCase(string, time.Time, string, int) (string, error)
 }
 
 // Enrichment window/limits for the historical-failure lookup.
 const (
 	enrichHistoryDays  = 30
 	enrichHistoryLimit = SimilarFailuresMax
+	// RecentOutcomesLimit is how many earlier results history.recent_outcomes lists (spec Wave 3 §1.2).
+	RecentOutcomesLimit = 10
 )
 
 // timesGlyph is the multiplication sign used in the rollup ("automation_bug ×2").
@@ -120,6 +123,13 @@ func BuildContext(src EnrichmentSource, result *models.RunResult, now time.Time,
 	} else {
 		ctx.SimilarFailures = mapSimilarFailures(src, hist)
 		ctx.SimilarFailuresRollup = rollupDefectTypes(hist)
+	}
+
+	// Recent outcomes end at the same anchor as the history window and skip the analyzed run.
+	if outcomes, err := src.ListRecentOutcomesByTestCase(tcID, before.UTC(), result.TestRunID, RecentOutcomesLimit); err != nil {
+		slog.Warn("failure-analysis: enrich recent outcomes failed", "err", err, "test_case_id", tcID)
+	} else {
+		ctx.RecentOutcomes = outcomes
 	}
 
 	return ctx
