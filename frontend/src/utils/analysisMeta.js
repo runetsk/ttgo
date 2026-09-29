@@ -1,6 +1,7 @@
 // Pure text derivations for the AI analysis card and verdict badge. No React, no network.
-// Consumers: AIVerdictBadge.jsx, RunResultDetail.jsx, TestRunDetail.jsx
+// Consumers: AIVerdictBadge.jsx, RunResultDetail.jsx, TestRunDetail.jsx (signals: analysisSignals.js)
 import { suggestionLabel } from './defectSuggestion.js';
+import { signalChips, isInjectionFlagged, INJECTION_NOTICE } from './analysisSignals.js';
 
 const fmt = (n) => (Number.isFinite(n) ? n.toFixed(2) : null);
 
@@ -12,14 +13,19 @@ export function isPendingNarrative(analysis) {
     return analysis?.narrative_status === 'pending' && !isFailedAnalysis(analysis);
 }
 
+// badgeTitle is the verdict badge's tooltip: the engine, model and confidence of a TypeSafe
+// decision, then the chips its companion answers earned, then the pending note.
 export function badgeTitle(analysis) {
-    const pending = isPendingNarrative(analysis) ? PENDING_EXPLANATION : null;
-    if (analysis?.engine !== 'typesafe') return pending || undefined;
+    const extras = [
+        ...signalChips(analysis).map((c) => c.label),
+        ...(isPendingNarrative(analysis) ? [PENDING_EXPLANATION] : []),
+    ];
+    if (analysis?.engine !== 'typesafe') return extras.length ? extras.join(' · ') : undefined;
     const parts = ['TypeSafe'];
     if (analysis.model_name) parts.push(analysis.model_name);
     const c = fmt(analysis.confidence_score);
     const base = `${parts.join(' ')}${c ? ` · confidence ${c}` : ''}`;
-    return pending ? `${base} · ${pending}` : base;
+    return [base, ...extras].join(' · ');
 }
 
 export function analysisMetaParts(analysis) {
@@ -82,15 +88,20 @@ export function failureAdvice(analysis) {
 }
 
 // explainAction names the button that asks for the missing explanation of a stored TypeSafe
-// decision, or null when there is nothing to explain.
+// decision, or null when there is nothing to explain. A row flagged for possible prompt injection
+// reads "Explain anyway…": the click asks for confirmation first (analysisSignals.explainRequest).
+// A clone explained on its own (narrative_split) is retried from its fit note with scope=result,
+// never with a group-scope Explain, so it gets no action here.
 export function explainAction(analysis) {
-    if (analysis?.engine !== 'typesafe' || isFailedAnalysis(analysis)) return null;
+    if (analysis?.engine !== 'typesafe' || isFailedAnalysis(analysis) || analysis.narrative_split) return null;
+    let action;
     switch (analysis.narrative_status) {
-        case 'skipped': return 'Explain';
+        case 'skipped': action = 'Explain'; break;
         case 'unavailable':
-        case 'unparseable': return 'Retry explanation';
+        case 'unparseable': action = 'Retry explanation'; break;
         default: return null;
     }
+    return isInjectionFlagged(analysis) ? 'Explain anyway…' : action;
 }
 
 // mergeAnalysis decides which copy of a result's analysis to show when a live event or a REST
@@ -129,7 +140,10 @@ export function mergeAnalysisList(list, incoming) {
 
 // Fields of the shared `run_result_analysis.created` / `.updated` payload that older servers did
 // not send. They are copied only when present, so an event never blanks a field the row has.
-const EVENT_OPTIONAL = ['summary', 'next_action', 'rationale', 'narrative_revision', 'source_analysis_id', 'created_at', 'policy_version', 'history_available'];
+const EVENT_OPTIONAL = [
+    'summary', 'next_action', 'rationale', 'narrative_revision', 'source_analysis_id', 'created_at', 'policy_version', 'history_available',
+    'signals', 'narrative_fit', 'narrative_split',
+];
 
 // analysisFromEvent turns a live analysis event's data into the row shape the REST endpoints
 // return, or null when it names no result.
@@ -170,6 +184,7 @@ export function takeoverNote(analysis) {
 
 export function narrativeNotice(analysis) {
     if (isFailedAnalysis(analysis)) return null;
+    if (analysis?.narrative_status === 'unavailable' && isInjectionFlagged(analysis)) return INJECTION_NOTICE;
     switch (analysis?.narrative_status) {
         case 'pending': return PENDING_EXPLANATION;
         case 'unavailable': return 'The explanation could not be generated; the classification above still stands.';

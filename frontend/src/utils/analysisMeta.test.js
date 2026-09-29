@@ -5,6 +5,7 @@ import {
     failureAdvice, explainAction, takeoverNote, mergeAnalysis, mergeAnalysisList, analysisFromEvent,
     isPendingNarrative, PENDING_EXPLANATION,
 } from './analysisMeta.js';
+import { INJECTION_NOTICE } from './analysisSignals.js';
 
 const ts = {
     engine: 'typesafe', model_name: 'jev-1.13.0', confidence_score: 0.87, confidence: 'medium',
@@ -167,4 +168,46 @@ test('analysisFromEvent reads the shared payload and leaves out fields an older 
     assert.ok(!('summary' in old), 'an older payload does not blank the summary');
     assert.equal(analysisFromEvent({}), null);
     assert.equal(analysisFromEvent(undefined), null);
+});
+
+test('the badge tooltip lists the signal chips', () => {
+    const withSignals = { ...ts, signals: '{"flaky_history":0.91,"recurring":0.97,"outside_app":0.1}' };
+    assert.equal(badgeTitle(withSignals), 'TypeSafe jev-1.13.0 · confidence 0.87 · Flaky pattern in history · Seen before');
+    const flagged = { ...ts, narrative_status: 'unavailable', signals: '{"injection":0.9}' };
+    assert.equal(badgeTitle(flagged), 'TypeSafe jev-1.13.0 · confidence 0.87 · Possible prompt injection — review the raw failure');
+    const pending = { ...ts, narrative_status: 'pending', signals: '{"recurring":0.9}' };
+    assert.equal(badgeTitle(pending), 'TypeSafe jev-1.13.0 · confidence 0.87 · Seen before · Explanation being written…');
+    assert.equal(badgeTitle({ engine: 'generative', signals: '{"recurring":0.9}' }), 'Seen before');
+    assert.equal(badgeTitle({ ...ts, signals: '' }), 'TypeSafe jev-1.13.0 · confidence 0.87');
+});
+
+test('a row flagged for possible prompt injection says why it has no explanation, and Explain reads "Explain anyway…"', () => {
+    const flagged = {
+        ...ts, narrative_status: 'unavailable', signals: '{"injection":0.93}',
+        summary: 'AI narrative unavailable: possible prompt injection — review the raw failure',
+    };
+    assert.equal(narrativeNotice(flagged), INJECTION_NOTICE);
+    assert.match(INJECTION_NOTICE, /possible prompt injection/);
+    assert.equal(explainAction(flagged), 'Explain anyway…');
+    assert.equal(explainAction({ ...flagged, narrative_status: 'ok' }), null, 'explained after confirming: nothing to ask for');
+    assert.equal(narrativeNotice({ ...flagged, narrative_status: 'ok' }), null);
+    assert.equal(narrativeNotice({ ...flagged, signals: '' }), 'The explanation could not be generated; the classification above still stands.');
+    assert.equal(explainAction({ ...flagged, signals: '' }), 'Retry explanation');
+});
+
+test('a clone explained on its own gets no group-scope Explain; its fit note offers the retry', () => {
+    const splitFailed = { ...ts, narrative_status: 'unavailable', source_analysis_id: 'rep', narrative_fit: 0.3, narrative_split: true };
+    assert.equal(explainAction(splitFailed), null);
+    assert.equal(explainAction({ ...splitFailed, narrative_split: false }), 'Retry explanation');
+});
+
+test('analysisFromEvent carries signals and the transfer-check fields', () => {
+    const row = analysisFromEvent({
+        run_result_id: 'r1', analysis_id: 'a1', version: 1, signals: '{"recurring":0.9}', narrative_fit: 0.31, narrative_split: false,
+    });
+    assert.equal(row.signals, '{"recurring":0.9}');
+    assert.equal(row.narrative_fit, 0.31);
+    assert.equal(row.narrative_split, false);
+    const old = analysisFromEvent({ run_result_id: 'r1', analysis_id: 'a1', version: 1 });
+    assert.ok(!('signals' in old) && !('narrative_fit' in old) && !('narrative_split' in old), 'an older payload blanks nothing');
 });
