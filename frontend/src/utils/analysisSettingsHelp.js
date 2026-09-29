@@ -51,7 +51,7 @@ export const SETTING_HELP = {
     'fa.llm_call_timeout_seconds': {
         title: 'LLM call timeout',
         what: 'How long one request to the default LLM may take during failure analysis (10 to 120 s). A request cut off at this limit counts as a call timeout and is sent again once.',
-        details: 'It applies to every failure-analysis LLM call: deciding when the LLM decides, taking over, stepping in when TypeSafe is unavailable, explanations and Explain. Test generation keeps its own timeouts. The time one group may take grows with it: 3 × the TypeSafe timeout + 4 × this timeout + pauses, and never less than 5 minutes (7 minutes with the defaults).',
+        details: 'It applies to every failure-analysis LLM call: deciding when the LLM decides, taking over, stepping in when TypeSafe is unavailable, explanations and Explain. Test generation keeps its own timeouts. The time one group may take grows with it: 6 × the TypeSafe timeout (its decision, and the check that the group\'s explanation fits each semantically grouped result) + 4 × this timeout + pauses, and never less than 5 minutes (9½ minutes with the defaults).',
         example: 'At 45 s, a call that would hang for two minutes is cut at 45 s and sent again, instead of holding its group for the whole two minutes.',
     },
     'fa.hedge_after_seconds': {

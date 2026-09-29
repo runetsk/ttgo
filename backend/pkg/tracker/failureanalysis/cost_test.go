@@ -214,3 +214,45 @@ func TestNarrationCostEvents_KindAndNothingWhenUnbilled(t *testing.T) {
 	require.Empty(t, NarrationCostEvents(NarrationDelta{NarrativeStatus: models.NarrativeStatusUnavailable, Reason: "template error"},
 		deps, refs, models.AnalysisCostKindAnalysis), "a narration that made no call bills nothing")
 }
+
+func TestTransferCostEvents_OneTypeSafeEventWhenTheCheckBilled(t *testing.T) {
+	deps := JobDeps{Transfer: &TransferDeps{Model: "jev-1.13.0"}, Pricing: Pricing{TypeSafePerMTok: 0.042}}
+	jobID, an := "j", "rep-1"
+	refs := CostRefs{RunID: "r", JobID: &jobID, AnalysisID: &an}
+	evs := TransferCostEvents(900, "", deps, refs)
+	require.Len(t, evs, 1)
+	ev := evs[0]
+	require.Equal(t, models.AnalysisCostKindTransfer, ev.Kind)
+	require.Equal(t, models.AnalysisCostEngineTypeSafe, ev.Engine)
+	require.Equal(t, "jev-1.13.0", ev.Model, "falls back to the configured model")
+	require.Equal(t, 900, ev.TypeSafeInputTokens)
+	require.InDelta(t, 900*0.042/1e6, *ev.EstimatedCost, 1e-15)
+	require.Equal(t, "rep-1", *ev.AnalysisID)
+	require.Equal(t, "jev-1.13.1", TransferCostEvents(900, "jev-1.13.1", deps, refs)[0].Model, "the model TypeSafe answered with wins")
+	require.Nil(t, TransferCostEvents(0, "", deps, refs), "nothing billed, no event")
+}
+
+func TestEstimates_IncludeOneTransferCheck(t *testing.T) {
+	priced := Pricing{LLMPromptPerMTok: f64ptr(1), LLMCompletionPerMTok: f64ptr(4), TypeSafePerMTok: 0.042}
+	llmStage := 4 * (float64(PromptCharCap/4)*1 + float64(ReplyTokenCap)*4) / 1e6
+	tsCall := float64(TypeSafeStateCharCap/4) * 0.042 / 1e6
+	check := float64(TransferStateCharBound/4) * 0.042 / 1e6
+	require.Equal(t, 14000, TransferStateCharBound, "40 member lines at 300 characters plus the explanation")
+	decider := NewUnavailableDecider(errors.New("unused"))
+	transfer := &TransferDeps{Model: "jev"}
+
+	explained := JobDeps{Narrative: &stubProvider{}, Decider: decider, Transfer: transfer, Pricing: priced}
+	require.InDelta(t, tsCall+llmStage+check, *EstimateCallUSD(explained), 1e-12)
+
+	decisionsOnly := explained
+	decisionsOnly.NarrativeSkipped = true
+	require.InDelta(t, tsCall, *EstimateCallUSD(decisionsOnly), 1e-12, "no narration in the worker, so no check")
+
+	llmDecides := JobDeps{Narrative: &stubProvider{}, Transfer: transfer, Pricing: priced}
+	require.InDelta(t, llmStage, *EstimateCallUSD(llmDecides), 1e-12, "the check follows a TypeSafe decision's narration only")
+
+	require.InDelta(t, llmStage+check, *EstimateExplainUSD(explained), 1e-12, "Explain on a group runs the check too")
+	noCheck := explained
+	noCheck.Transfer = nil
+	require.InDelta(t, llmStage, *EstimateExplainUSD(noCheck), 1e-12)
+}

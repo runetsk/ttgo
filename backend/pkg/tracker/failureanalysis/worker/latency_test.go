@@ -25,7 +25,7 @@ func (p *stallsFirst) Chat(ctx context.Context, req llm.ChatRequest) (*llm.ChatR
 
 func TestJobGroupDeadline_FollowsTheJobTimeouts(t *testing.T) {
 	deps := failureanalysis.JobDeps{TypeSafeTimeout: 30 * time.Second, LLMCallTimeout: 45 * time.Second}
-	require.Equal(t, 7*time.Minute, jobGroupDeadline(deps))
+	require.Equal(t, 570*time.Second, jobGroupDeadline(deps))
 	require.Equal(t, failureanalysis.MinGroupDeadline, jobGroupDeadline(failureanalysis.JobDeps{}))
 
 	old := GroupDeadline

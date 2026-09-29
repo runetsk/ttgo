@@ -123,6 +123,37 @@ func SemanticCostEvents(rep SemanticReport, deps JobDeps, refs CostRefs) []*mode
 	return []*models.AIAnalysisCostEvent{ev}
 }
 
+// TransferCostEvents is the one TypeSafe event for a group's narrative transfer check, or none
+// when it billed nothing. It is recorded whether or not the narration's apply wins, and also when
+// the check failed after some requests were answered: those were billed. model "" = the
+// configured transfer model.
+func TransferCostEvents(tokens int, model string, deps JobDeps, refs CostRefs) []*models.AIAnalysisCostEvent {
+	if tokens <= 0 {
+		return nil
+	}
+	if model == "" && deps.Transfer != nil {
+		model = deps.Transfer.Model
+	}
+	ev := costEvent(models.AnalysisCostKindTransfer, models.AnalysisCostEngineTypeSafe, model, refs)
+	ev.TypeSafeInputTokens = tokens
+	ev.EstimatedCost = deps.Pricing.typesafeCost(tokens)
+	return []*models.AIAnalysisCostEvent{ev}
+}
+
+// TransferStateCharBound bounds one group's transfer-check state for the estimates (R1): every
+// checked clone's member line at GroupMemberMsgCap plus about 2,000 characters of explanation.
+const TransferStateCharBound = TransferChunk*TransferMaxChunks*GroupMemberMsgCap + 2000
+
+// transferOnPath: the worker narrates this job's TypeSafe decisions, so a check may follow.
+func transferOnPath(deps JobDeps) bool {
+	return deps.Transfer != nil && deps.Decider != nil && deps.Narrative != nil && !deps.NarrativeSkipped
+}
+
+// transferCheckUSD is one priced transfer check at its state bound.
+func transferCheckUSD(deps JobDeps) *float64 {
+	return deps.Pricing.typesafeCost(TransferStateCharBound / 4)
+}
+
 // HedgeCostEvents is one hedge event per fired hedge whose call had a winner, priced at the
 // winner's prompt tokens: the hedged request sent the same prompt, and the cancelled request's
 // usage is never reported, so the event is an estimate (no completion tokens). A hedge whose
@@ -172,7 +203,8 @@ func llmStageUSD(deps JobDeps) *float64 {
 
 // EstimateCallUSD is the worst-case cost of analyzing one group with these dependencies: one
 // LLM stage (llmStageUSD) when the LLM is on the normal path (an LLM that is only the fallback
-// does not count), plus the TypeSafe state bound / 4 at price_per_mtok when TypeSafe decides.
+// does not count), plus the TypeSafe state bound / 4 at price_per_mtok when TypeSafe decides, plus
+// one transfer check when the decision is narrated and the check is on (R1).
 // nil when nothing on the path is priced.
 func EstimateCallUSD(deps JobDeps) *float64 {
 	var total *float64
@@ -183,15 +215,23 @@ func EstimateCallUSD(deps JobDeps) *float64 {
 	if llmOnPath {
 		total = addCost(total, llmStageUSD(deps))
 	}
+	if transferOnPath(deps) {
+		total = addCost(total, transferCheckUSD(deps))
+	}
 	return total
 }
 
-// EstimateExplainUSD is the worst-case cost of one explanation: one LLM stage.
+// EstimateExplainUSD is the worst-case cost of one explanation: one LLM stage, plus one transfer
+// check when the check is on (a group's Explain runs it).
 func EstimateExplainUSD(deps JobDeps) *float64 {
 	if deps.Narrative == nil {
 		return nil
 	}
-	return llmStageUSD(deps)
+	total := llmStageUSD(deps)
+	if deps.Transfer != nil {
+		total = addCost(total, transferCheckUSD(deps))
+	}
+	return total
 }
 
 // EstimateJobUSD is groups × EstimateCallUSD; nil when unpriced.

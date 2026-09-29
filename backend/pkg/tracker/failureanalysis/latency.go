@@ -14,19 +14,24 @@ const MinGroupDeadline = 5 * time.Minute
 // Retry-After, so each backoff stays inside GroupDeadlineFor's budget.
 const LLMMaxRetryAfter = 30 * time.Second
 
-// GroupDeadlineFor bounds one group's whole analysis from the job's timeouts (spec §B): the
+// GroupDeadlineFor bounds one group's whole analysis from the job's timeouts (spec §B, R1): the
 // TypeSafe decision (3 attempts + 2 backoffs of at most 30 s), one LLM stage (the first call and
 // the JSON repair, each with its transient retry: 4 attempts + 2 backoffs of at most
-// LLMMaxRetryAfter), and 30 s for everything else — never below MinGroupDeadline.
-// Defaults (TypeSafe 30 s, LLM 45 s): 90 + 60 + 180 + 60 + 30 = 420 s.
+// LLMMaxRetryAfter), 30 s for everything else, and — when TypeSafe is attached — the narrative
+// transfer check (one request: 3 attempts + 2 backoffs, R10); never below MinGroupDeadline.
+// Defaults (TypeSafe 30 s, LLM 45 s): 90 + 60 + 180 + 60 + 30 + 150 = 570 s.
 func GroupDeadlineFor(tsTimeout, llmTimeout time.Duration) time.Duration {
 	const (
 		typeSafeAttempts = 3
+		transferAttempts = 3
 		llmAttempts      = 2 * TransportAttempts
 		backoff          = 30 * time.Second
 		slack            = 30 * time.Second
 	)
 	d := typeSafeAttempts*tsTimeout + 2*backoff + llmAttempts*llmTimeout + 2*LLMMaxRetryAfter + slack
+	if tsTimeout > 0 {
+		d += transferAttempts*tsTimeout + 2*backoff
+	}
 	if d < MinGroupDeadline {
 		return MinGroupDeadline
 	}

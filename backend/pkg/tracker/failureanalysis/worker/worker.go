@@ -16,7 +16,7 @@ import (
 
 // GroupDeadline is the floor of a group's deadline. Each job derives its own bound from its
 // timeouts (failureanalysis.GroupDeadlineFor: the TypeSafe call, one LLM stage with its retries
-// and JSON repair, backoffs); a group that runs past it is recorded as a failed attempt
+// and JSON repair, the narrative transfer check, backoffs); a group that runs past it is recorded as a failed attempt
 // (category "timeout") and the job moves on. Lowering GroupDeadline below
 // failureanalysis.MinGroupDeadline (tests) caps every group at that value instead.
 var GroupDeadline = failureanalysis.MinGroupDeadline

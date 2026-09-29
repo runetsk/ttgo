@@ -9,10 +9,11 @@ import (
 )
 
 func TestGroupDeadlineFor_SpecFormulaWithAFiveMinuteFloor(t *testing.T) {
-	// 3 × 30 s + 2 × 30 s + 4 × 45 s + 2 × 30 s + 30 s = 420 s: the defaults.
-	require.Equal(t, 7*time.Minute, GroupDeadlineFor(30*time.Second, 45*time.Second))
-	require.Equal(t, 12*time.Minute, GroupDeadlineFor(30*time.Second, 120*time.Second))
-	require.Equal(t, 330*time.Second, GroupDeadlineFor(0, 45*time.Second), "no TypeSafe: 60 + 180 + 60 + 30")
+	// 3 × 30 s + 2 × 30 s + 4 × 45 s + 2 × 30 s + 30 s + (3 × 30 s + 60 s) = 570 s: the defaults,
+	// the last term being the narrative transfer check (one request, 3 attempts, 2 backoffs; R10).
+	require.Equal(t, 570*time.Second, GroupDeadlineFor(30*time.Second, 45*time.Second))
+	require.Equal(t, 870*time.Second, GroupDeadlineFor(30*time.Second, 120*time.Second))
+	require.Equal(t, 330*time.Second, GroupDeadlineFor(0, 45*time.Second), "no TypeSafe, no check: 60 + 180 + 60 + 30")
 	require.Equal(t, MinGroupDeadline, GroupDeadlineFor(0, 10*time.Second), "190 s is under the floor")
 	require.Equal(t, MinGroupDeadline, GroupDeadlineFor(0, 0))
 	require.Equal(t, 5*time.Minute, MinGroupDeadline)
