@@ -14,6 +14,7 @@ import RunResultsToolbar from '../../components/RunResultsToolbar';
 import { useRunViewPreference } from '../../hooks/useRunViewPreference';
 import { groupResults, GROUP_DIMENSIONS } from '../../utils/runResultsGrouping';
 import { shouldShowSuggestion, suggestionLabel } from '../../utils/defectSuggestion';
+import { isAIApplied, aiBadgeTitle } from '../../utils/defectTypeSource';
 import { isFailureStatus } from '../../utils/resultStatus';
 import { BULK_DEFECT_TYPE_OPTIONS, buildBulkDefectTypePayload, summarizeBulkTriage } from '../../utils/bulkTriage';
 import { toast } from '../../toast';
@@ -73,6 +74,61 @@ function DefectSuggestionChip({ result, analysis, enabled, onAccept }) {
                 }}
             >
                 Accept
+            </button>
+        </div>
+    );
+}
+
+// AIAppliedBadge marks a defect type that auto-apply wrote (defect_type_source 'ai'). It shows a
+// label's provenance, not an AI action, so it stays visible with AI features off. Confirm is an
+// ordinary triage write of the same value: the server records the decision (decided_at and the
+// suggestion snapshot), sets the source to 'human' and marks it as a confirmation of an AI label
+// (suggested_auto_applied), which the auto-apply gate leaves out (R10).
+function AIAppliedBadge({ result, analysis, onConfirm }) {
+    const [saving, setSaving] = useState(false);
+    if (!isAIApplied(result)) return null;
+    return (
+        <div
+            data-testid={`defect-type-ai-${result.test_case_id}`}
+            title={aiBadgeTitle(result, analysis)}
+            style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                marginTop: 3, padding: '1px 4px',
+                background: 'var(--bg-secondary)',
+                border: '1px solid rgba(99,102,241,0.35)',
+                borderRadius: 6, fontSize: '0.68rem',
+                maxWidth: '100%', overflow: 'hidden',
+            }}
+        >
+            <span style={{ color: 'var(--aig-tone-indigo-fg)', fontWeight: 700 }}>AI</span>
+            <span style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                set this label
+            </span>
+            <button
+                type="button"
+                disabled={saving}
+                onClick={async () => {
+                    setSaving(true);
+                    try {
+                        await onConfirm(result.id, result.defect_type);
+                    } catch {
+                        // toasted by the API interceptor
+                    } finally {
+                        setSaving(false);
+                    }
+                }}
+                data-testid={`defect-type-ai-confirm-${result.test_case_id}`}
+                style={{
+                    marginLeft: 'auto', flexShrink: 0,
+                    padding: '0 5px', borderRadius: 5,
+                    border: '1px solid var(--border-color)',
+                    background: 'transparent',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.68rem', lineHeight: '15px',
+                    cursor: saving ? 'wait' : 'pointer',
+                }}
+            >
+                {saving ? 'Saving…' : 'Confirm'}
             </button>
         </div>
     );
@@ -834,6 +890,11 @@ export default function ResultsTab({
                                             analysis={currentAnalyses?.[result.id]}
                                             enabled={aiFeaturesEnabled}
                                             onAccept={handleUpdateDefectType}
+                                        />
+                                        <AIAppliedBadge
+                                            result={result}
+                                            analysis={currentAnalyses?.[result.id]}
+                                            onConfirm={handleUpdateDefectType}
                                         />
                                         </>
                                     ) : (
