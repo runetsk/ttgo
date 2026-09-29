@@ -193,10 +193,12 @@ type groupOutcome struct {
 	delta         failureanalysis.NarrationDelta
 }
 
-// groupFuncs are the two phases of one group's analysis.
+// groupFuncs are the phases of one group's analysis. transfer (nil = none) checks an ok
+// narration against the group's semantic clones before it is handed to the writer.
 type groupFuncs struct {
-	decide  func(context.Context, *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, failureanalysis.AnalyzeContext, error)
-	narrate func(context.Context, failureanalysis.AnalyzeContext, *failureanalysis.AnalyzeResult) (failureanalysis.NarrationDelta, bool)
+	decide   func(context.Context, *failureanalysis.FailureGroup) (*failureanalysis.AnalyzeResult, failureanalysis.AnalyzeContext, error)
+	narrate  func(context.Context, failureanalysis.AnalyzeContext, *failureanalysis.AnalyzeResult) (failureanalysis.NarrationDelta, bool)
+	transfer func(context.Context, *failureanalysis.FailureGroup, failureanalysis.NarrationDelta) failureanalysis.NarrationDelta
 }
 
 // errAbandoned acks a decided outcome the writer dropped because the job was cancelled.
@@ -223,7 +225,8 @@ func cancelledDelta(spent failureanalysis.NarrationDelta) failureanalysis.Narrat
 
 // analyzeGroups runs up to parallel groups at once, each under its own deadline, in two phases:
 // decide, hand the decision to the writer, and — when it is pending an explanation and the
-// writer acked the stored representative — narrate and hand the explanation over too. No group
+// writer acked the stored representative — narrate, check a written explanation against the
+// group's semantic clones, and hand the explanation over too. No group
 // starts after the job is cancelled. The channel holds two outcomes per group and every send
 // also watches the job context, so no goroutine blocks after the writer stops; it is closed
 // once every started group has ended.
@@ -297,6 +300,12 @@ func (w *Worker) analyzeGroups(jobCtx context.Context, cancelJob context.CancelF
 				if delta.Reason == narrationCancelled || (gctx.Err() != nil && delta.NarrativeStatus != models.NarrativeStatusOK) {
 					delta = cancelledDelta(delta)
 				}
+				// The transfer check runs only on a written explanation, before it is handed over, so
+				// the fits land in the same group apply. It never withholds the explanation: a check
+				// cut off by the group deadline or a cancel leaves the fits unset (TransferFailed).
+				if delta.NarrativeStatus == models.NarrativeStatusOK && fns.transfer != nil {
+					delta = fns.transfer(gctx, g, delta)
+				}
 				send(groupOutcome{phase: phaseNarrated, group: g, repAnalysisID: reply.repID, delta: delta})
 			}(g)
 		}
@@ -367,12 +376,21 @@ func (jw *jobWriter) writeDecided(g *failureanalysis.FailureGroup, res *failurea
 }
 
 // writeNarrated applies a group's explanation to the representative and its clones in one
-// transaction and republishes every changed row. The call's cost is recorded whether or not
-// the apply wins: it was billed.
+// transaction and republishes every changed row. The call's cost — and the transfer check's —
+// is recorded whether or not the apply wins: it was billed.
 func (jw *jobWriter) writeNarrated(repID string, d failureanalysis.NarrationDelta) {
 	jobID := jw.jobID
-	jw.w.recordCosts(failureanalysis.NarrationCostEvents(d, jw.deps,
-		failureanalysis.CostRefs{RunID: jw.runID, JobID: &jobID, AnalysisID: &repID}, models.AnalysisCostKindAnalysis))
+	refs := failureanalysis.CostRefs{RunID: jw.runID, JobID: &jobID, AnalysisID: &repID}
+	jw.w.recordCosts(failureanalysis.NarrationCostEvents(d, jw.deps, refs, models.AnalysisCostKindAnalysis))
+	// The transfer check was billed whether or not its fits are applied below.
+	jw.w.recordCosts(failureanalysis.TransferCostEvents(d.TransferTokens, d.TransferModel, jw.deps, refs))
+	failed := 0
+	if d.TransferFailed {
+		failed = 1
+	}
+	if err := jw.w.store.AddAnalysisJobTransferStats(jobID, failed, d.TransferUnchecked); err != nil {
+		slog.Warn("failure-analysis: transfer-check counts not recorded", "job_id", jobID, "err", err)
+	}
 	changed, err := jw.w.store.ApplyNarration(repID, d)
 	if err != nil {
 		slog.Warn("failure-analysis: explanation not stored", "analysis_id", repID, "err", err)
@@ -544,6 +562,17 @@ func (w *Worker) processOnce(ctx context.Context) error {
 		},
 		narrate: func(gctx context.Context, actx failureanalysis.AnalyzeContext, decided *failureanalysis.AnalyzeResult) (failureanalysis.NarrationDelta, bool) {
 			return failureanalysis.Narrate(gctx, analyzeDeps, actx, decided)
+		},
+		transfer: func(gctx context.Context, g *failureanalysis.FailureGroup, d failureanalysis.NarrationDelta) failureanalysis.NarrationDelta {
+			if deps.Transfer == nil {
+				return d
+			}
+			clones := failureanalysis.SemanticClones(g)
+			if len(clones) == 0 {
+				return d // signature clones share the error by construction
+			}
+			in := failureanalysis.TransferInputFor(d, g.Representative, clones, settings.RedactionEnabled)
+			return failureanalysis.RunTransferCheck(gctx, *deps.Transfer, in, d)
 		},
 	})
 
