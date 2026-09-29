@@ -200,6 +200,7 @@ func (s *Store) bootstrapDB() error {
 		&models.Comment{},                   // comments on runs and results
 		&models.RunResultAnalysis{},         // ai-failure-analysis: versioned analysis records
 		&models.RunAnalysisJob{},            // ai-failure-analysis: batch/auto job tracking
+		&models.SemanticPair{},              // typesafe wave 4: semantic pair record and memory
 		&models.AIFailureAnalysisSettings{}, // ai-failure-analysis: admin config singleton
 		&models.AIFeatureSettings{},         // ai-features-toggle: global AI master switch
 		&models.AIGenerationRun{},           // ai-generation-improvements: durable runs

@@ -422,6 +422,26 @@ func (a *RunResultAnalysis) Failed() bool {
 	return a != nil && a.DecisionStatus == DecisionStatusFailed
 }
 
+// SemanticPair is one decided pair of failure-group signatures in a job's semantic pass, or a
+// person's split (spec Wave 4 §1). SigA < SigB. It is both the audit record and the cross-run
+// memory: a later job reuses a recent TypeSafe row, and never merges a pair with a human row.
+type SemanticPair struct {
+	ID            string    `json:"id" gorm:"primaryKey"`
+	JobID         string    `json:"job_id" gorm:"index;not null"`
+	RunID         string    `json:"run_id" gorm:"not null"`
+	SigA          string    `json:"sig_a" gorm:"not null;index:idx_semantic_pairs_sigs,priority:1"`
+	SigB          string    `json:"sig_b" gorm:"not null;index:idx_semantic_pairs_sigs,priority:2"`
+	ResultAID     string    `json:"result_a_id" gorm:"column:result_a_id;not null;default:''"`
+	ResultBID     string    `json:"result_b_id" gorm:"column:result_b_id;not null;default:''"`
+	PSame         *float64  `json:"p_same"`
+	Model         string    `json:"model" gorm:"not null;default:''"` // the configured TypeSafe model (memory key)
+	AnsweredModel string    `json:"answered_model" gorm:"not null;default:''"`
+	PolicyVersion string    `json:"policy_version" gorm:"not null;default:''"`
+	Source        string    `json:"source" gorm:"not null"` // typesafe | memory | human
+	Merged        bool      `json:"merged" gorm:"not null;default:false"`
+	CreatedAt     time.Time `json:"created_at" gorm:"index:idx_semantic_pairs_sigs,priority:3"`
+}
+
 // RunAnalysisJob tracks a batch/auto analysis of a TestRun.
 type RunAnalysisJob struct {
 	ID            string     `json:"id"               gorm:"primaryKey"`
@@ -441,6 +461,13 @@ type RunAnalysisJob struct {
 	CompletedAt   *time.Time `json:"completed_at,omitempty"`
 
 	SemanticInputTokens int `json:"semantic_input_tokens" gorm:"default:0"` // TypeSafe tokens used by semantic grouping
+	// SemanticReport is the semantic pass's counts as JSON text (blocks, candidates, asked,
+	// remembered, human_blocked, merged, skipped, requests); '' when no pass completed.
+	SemanticReport string `json:"semantic_report" gorm:"type:text;not null;default:''"`
+	// ScopeResultIDs (JSON array, '' = the whole run) limits the job to these failing results; a
+	// split sets it to the results taken out of a semantic merge (SplitFromAnalysisID).
+	ScopeResultIDs      string  `json:"scope_result_ids,omitempty" gorm:"type:text;not null;default:''"`
+	SplitFromAnalysisID *string `json:"split_from_analysis_id,omitempty"`
 
 	// Pipeline is a JSON snapshot of the route the job ran with (decider, narrator,
 	// explanations, takeover threshold, fallback, reply cap), PipelineLabel its short name.
