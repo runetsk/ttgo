@@ -238,3 +238,18 @@ func (s *Store) AddAnalysisJobTransferStats(id string, failed, unchecked int) er
 		"transfer_unchecked":    gorm.Expr("transfer_unchecked + ?", unchecked),
 	}).Error
 }
+
+// SetAnalysisJobAutoApplyState records whether the job may label results by itself, as resolved
+// when it started (models.AutoApplyStateOff, On or Paused).
+func (s *Store) SetAnalysisJobAutoApplyState(id, state string) error {
+	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).Update("auto_apply_state", state).Error
+}
+
+// AddAnalysisJobAutoApplied adds n results labelled by auto-apply to the job's count.
+func (s *Store) AddAnalysisJobAutoApplied(id string, n int64) error {
+	if n <= 0 {
+		return nil
+	}
+	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).
+		Update("auto_applied", gorm.Expr("auto_applied + ?", n)).Error
+}

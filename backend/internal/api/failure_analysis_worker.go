@@ -65,6 +65,9 @@ const llmKeyUnreadableReason = "the default LLM provider's stored key can't be d
 //     rate limiter (nil = unlimited, for tests);
 //   - the narrative transfer check (JobDeps.Transfer) shares semantic grouping's client and is on
 //     only with semantic grouping and dedup;
+//   - auto-apply (spec §3.4) is resolved once per job (and per Explain): on only with the setting on,
+//     a usable TypeSafe client deciding and the accuracy gate open at the configured threshold;
+//     paused when the gate is closed;
 //   - an attached LLM is wrapped with the per-call timeout and optional hedge (applyLLMLatency);
 //   - the settings page draws these rules (frontend/src/utils/analysisFlow.js); change both together.
 func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failureanalysis.DepsResolver {
@@ -137,15 +140,19 @@ func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failur
 		}
 		// Few-shot examples go to both engines. They are optional context, so a settings read
 		// failure leaves them off instead of failing the job. The transfer check only has
-		// semantic clones to look at when dedup is on.
+		// semantic clones to look at when dedup is on. Auto-apply is resolved for every trigger,
+		// Explain included: a group Explain maintains the semantic clones' labels from the fits it
+		// computes (R10).
+		deps.AutoApplyState = models.AutoApplyStateOff
 		if fa, err := st.GetFailureAnalysisSettings(); err != nil {
-			slog.Warn("failure-analysis: settings could not be loaded; no few-shot examples and no transfer check", "err", err)
+			slog.Warn("failure-analysis: settings could not be loaded; no few-shot examples, no transfer check and no auto-apply", "err", err)
 			deps.Transfer = nil
 		} else {
 			deps.FewShotExamples = fa.FewShotExamples
 			if !fa.DedupEnabled {
 				deps.Transfer = nil
 			}
+			resolveAutoApply(st, fa, &deps)
 		}
 		return deps, nil
 	}
@@ -253,4 +260,35 @@ func resolveTypeSafe(st *store.Store, tsf *typesafe.ClientFactory, trigger strin
 	deps.Decider = failureanalysis.NewTypeSafeDecider(client, ts.Model)
 	deps.DeciderModel = ts.Model
 	return ts
+}
+
+// resolveAutoApply decides, once per job, whether results may be labelled by auto-apply
+// (spec §3.4): the setting is on, a usable TypeSafe client decides, and the accuracy gate is open
+// at the configured threshold. "Usable" is TypeSafeTimeout > 0: resolveTypeSafe sets it only on
+// the path that built a real client, so a missing or undecryptable key (NewUnavailableDecider)
+// records off, not on or paused. A gate that cannot be read pauses auto-apply rather than failing
+// the job.
+func resolveAutoApply(st *store.Store, fa *models.AIFailureAnalysisSettings, deps *failureanalysis.JobDeps) {
+	deps.AutoApply = nil
+	deps.AutoApplyState = models.AutoApplyStateOff
+	if !fa.AutoApplyDefectType || deps.Decider == nil || deps.TypeSafeTimeout <= 0 {
+		return
+	}
+	pct := fa.AutoApplyMinConfidence
+	if models.ValidateAutoApplyMinConfidence(pct) != nil {
+		pct = models.DefaultAutoApplyMinConfidence
+	}
+	minConfidence := float64(pct) / 100
+	gate, err := st.AutoApplyGate(minConfidence)
+	if err != nil {
+		slog.Warn("failure-analysis: accuracy gate unavailable; auto-apply paused", "err", err)
+		deps.AutoApplyState = models.AutoApplyStatePaused
+		return
+	}
+	if !gate.Open {
+		deps.AutoApplyState = models.AutoApplyStatePaused
+		return
+	}
+	deps.AutoApply = &failureanalysis.AutoApplyDeps{MinConfidence: minConfidence}
+	deps.AutoApplyState = models.AutoApplyStateOn
 }

@@ -468,6 +468,11 @@ type RunAnalysisJob struct {
 	// semantic clones left unchecked past the per-group cap. Added to per narrated group.
 	TransferCheckFailed int `json:"transfer_check_failed" gorm:"column:transfer_check_failed;not null;default:0"`
 	TransferUnchecked   int `json:"transfer_unchecked"    gorm:"column:transfer_unchecked;not null;default:0"`
+	// Auto-apply (spec §3.4): the state the job resolved when it started (off, on, or paused while
+	// the accuracy gate was closed; "" = not started yet or from before auto-apply) and how many
+	// results it labelled by itself.
+	AutoApplyState string `json:"auto_apply_state" gorm:"column:auto_apply_state;not null;default:''"`
+	AutoApplied    int    `json:"auto_applied"     gorm:"column:auto_applied;not null;default:0"`
 }
 
 // RunAnalysisJobOutcomes summarises what a job's representative analyses produced.
@@ -489,19 +494,21 @@ type RunAnalysisJobOutcomes struct {
 
 	// Stage timing over the job's representatives, counting only analyses where the stage ran
 	// (non-zero): the TypeSafe decision and the LLM calls, in milliseconds; p50 is nearest-rank.
-	DecisionMsAvg       int `json:"decision_ms_avg"`
-	DecisionMsP50       int `json:"decision_ms_p50"`
-	DecisionMsMax       int `json:"decision_ms_max"`
-	LLMMsAvg            int `json:"llm_ms_avg"`
-	LLMMsP50            int `json:"llm_ms_p50"`
-	LLMMsMax            int `json:"llm_ms_max"`
-	RateLimitHits       int `json:"rate_limit_hits"`       // copied from the job
-	CallTimeouts        int `json:"call_timeouts"`         // copied from the job
-	HedgesFired         int `json:"hedges_fired"`          // copied from the job
-	HedgesWon           int `json:"hedges_won"`            // copied from the job
-	TransferCheckFailed int `json:"transfer_check_failed"` // groups whose narrative transfer check failed (copied from the job)
-	TransferUnchecked   int `json:"transfer_unchecked"`    // semantic clones past the check's cap (copied from the job)
-	TransferMismatch    int `json:"transfer_mismatch"`     // semantic clones whose fit is below failureanalysis.TransferFitMin
+	DecisionMsAvg       int    `json:"decision_ms_avg"`
+	DecisionMsP50       int    `json:"decision_ms_p50"`
+	DecisionMsMax       int    `json:"decision_ms_max"`
+	LLMMsAvg            int    `json:"llm_ms_avg"`
+	LLMMsP50            int    `json:"llm_ms_p50"`
+	LLMMsMax            int    `json:"llm_ms_max"`
+	RateLimitHits       int    `json:"rate_limit_hits"`       // copied from the job
+	CallTimeouts        int    `json:"call_timeouts"`         // copied from the job
+	HedgesFired         int    `json:"hedges_fired"`          // copied from the job
+	HedgesWon           int    `json:"hedges_won"`            // copied from the job
+	TransferCheckFailed int    `json:"transfer_check_failed"` // groups whose narrative transfer check failed (copied from the job)
+	TransferUnchecked   int    `json:"transfer_unchecked"`    // semantic clones past the check's cap (copied from the job)
+	TransferMismatch    int    `json:"transfer_mismatch"`     // semantic clones whose fit is below failureanalysis.TransferFitMin
+	AutoApplied         int    `json:"auto_applied"`          // results labelled by auto-apply in this job (copied from the job)
+	AutoApplyState      string `json:"auto_apply_state"`      // off | on | paused (copied from the job; "" before it started)
 }
 
 // GeneratedStep is a single step in a generated test case draft.

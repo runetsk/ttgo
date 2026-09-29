@@ -213,7 +213,20 @@ func (s *Store) AnalysisJobOutcomes(jobID string) (models.RunAnalysisJobOutcomes
 	o.TransferCheckFailed, o.TransferUnchecked = transfer.TransferCheckFailed, transfer.TransferUnchecked
 	err = s.db.Raw(`SELECT COUNT(*) FROM run_result_analyses WHERE job_id = ? AND source_analysis_id IS NOT NULL
 		AND narrative_fit IS NOT NULL AND narrative_fit < ?`, jobID, failureanalysis.TransferFitMin).Scan(&o.TransferMismatch).Error
-	return o, err
+	if err != nil {
+		return o, err
+	}
+	var auto struct {
+		AutoApplied    int
+		AutoApplyState string
+	}
+	if err := s.db.Raw(`SELECT COALESCE(MAX(auto_applied), 0) AS auto_applied,
+			COALESCE(MAX(auto_apply_state), '') AS auto_apply_state
+		FROM run_analysis_jobs WHERE id = ?`, jobID).Scan(&auto).Error; err != nil {
+		return o, err
+	}
+	o.AutoApplied, o.AutoApplyState = auto.AutoApplied, auto.AutoApplyState
+	return o, nil
 }
 
 // msStats is the rounded mean, nearest-rank median and maximum of millisecond samples.
