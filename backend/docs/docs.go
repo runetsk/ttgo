@@ -4870,7 +4870,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true, and when TypeSafe flagged the failure as a possible prompt injection (signals.injection at or above 0.80) and override_injection is not true. A failed LLM call leaves the explanation unavailable with its reason (200).",
+                "description": "Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true, and when TypeSafe flagged the failure as a possible prompt injection (signals.injection at or above 0.80) and override_injection is not true. A failed LLM call leaves the explanation unavailable with its reason (200). With scope=result on a semantically grouped result whose narrative_fit is below 0.5 (the group's explanation may not apply to it), or whose own explanation failed, only that result is explained, from its own evidence and without the group's members: TypeSafe.ai first checks that evidence for prompt injection (409 on a hit, or when TypeSafe.ai cannot check it, unless override_injection=true), and only the checked evidence is sent to the LLM. The row gets narrative_split=true, keeps its narrative_fit and its decision, and later group explanations leave it alone. 409 when the row is not such a result, is already being explained or already has its own explanation. After a group is explained, TypeSafe.ai checks the explanation against each semantic clone and stores narrative_fit on it.",
                 "produces": [
                     "application/json"
                 ],
@@ -4901,8 +4901,14 @@ const docTemplate = `{
                     },
                     {
                         "type": "boolean",
-                        "description": "Send a failure flagged as a possible prompt injection to the LLM anyway",
+                        "description": "Send the failure to the LLM although prompt injection is suspected or could not be checked",
                         "name": "override_injection",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "result: explain only this grouped result, from its own evidence",
+                        "name": "scope",
                         "in": "query"
                     }
                 ],
@@ -10429,6 +10435,13 @@ const docTemplate = `{
                 "total_failures": {
                     "type": "integer"
                 },
+                "transfer_check_failed": {
+                    "description": "Narrative transfer check (spec §2, R1): groups whose check failed or was cut off, and\nsemantic clones left unchecked past the per-group cap. Added to per narrated group.",
+                    "type": "integer"
+                },
+                "transfer_unchecked": {
+                    "type": "integer"
+                },
                 "trigger": {
                     "type": "string"
                 },
@@ -10744,9 +10757,17 @@ const docTemplate = `{
                 "model_name": {
                     "type": "string"
                 },
+                "narrative_fit": {
+                    "description": "NarrativeFit is TypeSafe's P(the group's explanation describes this result's failure), on\nsemantic clones whose group narration was checked (spec §2). NULL on representatives,\nsignature clones, unchecked clones and when the check failed. Below\nfailureanalysis.TransferFitMin the result may be explained on its own (Explain ?scope=result).",
+                    "type": "number"
+                },
                 "narrative_revision": {
                     "description": "NarrativeRevision counts writes to this row's explanation (worker narration, Explain\nclaims and applies, sweeps). Live updates of the same version replace the shown row only\nwhen their revision is not older, so a stale \"pending\" never hides a written explanation.",
                     "type": "integer"
+                },
+                "narrative_split": {
+                    "description": "NarrativeSplit: this clone's explanation is its own (Explain ?scope=result); group\nnarrations leave the row alone from the claim on.",
+                    "type": "boolean"
                 },
                 "narrative_status": {
                     "type": "string"
