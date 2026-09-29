@@ -315,3 +315,159 @@ func transferQuestion(j int) typesafe.Question {
 		},
 	}
 }
+
+// ---- Beyond failure analysis (spec Wave 5) -------------------------------------------------
+// Questions TypeSafe answers for other parts of ttgo. They live here with the rest so every
+// TypeSafe question and threshold has one home.
+
+// Policy versions of the uses beyond failure analysis.
+const (
+	ImportPolicyVersion       = "import-lines-v1"
+	DraftReviewPolicyVersion  = "draft-review-v1"
+	DefectAssistPolicyVersion = "defect-assist-v1"
+	SearchRerankPolicyVersion = "search-rerank-v1"
+)
+
+// Thresholds of the uses beyond failure analysis.
+const (
+	ImportLinesPerRequest  = 100  // line questions per request
+	ImportMaxLines         = 300  // lines classified per import
+	ImportLineChars        = 400  // characters kept per line
+	DraftReviewPerRequest  = 10   // drafts per request
+	DraftReviewMinConf     = 0.60 // a weak/poor rating becomes a finding at this confidence
+	DraftDupAskFloor       = 0.30 // Jaccard at which a duplicate candidate is asked about
+	DraftDupSameMin        = 0.80 // noul >= → the draft duplicates the candidate
+	DraftDupDifferentMax   = 0.30 // noul < → a Jaccard-only candidate is dropped
+	DraftDupPerDraft       = 3    // candidates asked about per draft
+	DefectDupCandidates    = 10   // open defects compared with a new one
+	DefectDupTitleFloor    = 0.20 // title token Jaccard for a candidate beyond the test case's own
+	DefectDupReportMin     = 0.70 // noul >= → reported as a possible duplicate
+	SearchRerankCandidates = 20   // BM25 results re-ranked
+)
+
+// Import line roles.
+const (
+	ImportRoleTitle        = "title"
+	ImportRolePrecondition = "precondition"
+	ImportRoleStep         = "step"
+	ImportRoleExpected     = "expected"
+	ImportRoleNoise        = "noise"
+)
+
+// ImportLineQuestion asks for the role of `lines[i]` in a test-case document.
+func ImportLineQuestion(i int) typesafe.Question {
+	return typesafe.Question{
+		Type: "choice",
+		Instructions: map[string]any{
+			"question": fmt.Sprintf("What role does `lines[%d]` play in the manual test case document that `lines` holds, read in order? Use the neighbouring lines for context.", i),
+			"line":     i,
+		},
+		Criteria: map[string]any{
+			ImportRoleTitle:        "The line names a test case: a heading or a short name that a following set of steps belongs to, such as \"Login with valid credentials\" or \"TC-12: Checkout applies a discount\".",
+			ImportRolePrecondition: "The line states something that must be true or prepared before the steps start: a logged-in user, existing data, a setting, an environment.",
+			ImportRoleStep:         "The line tells the tester to do something: an action such as open, click, enter, submit, navigate, call, upload. A line holding both an action and its expected outcome is a step.",
+			ImportRoleExpected:     "The line states an outcome the tester checks after a step: what should be displayed, returned, saved or changed.",
+			ImportRoleNoise:        "The line is none of these: a column header, a separator, a page number, a document title for the whole file, a comment, an author or date, or text unrelated to a test case.",
+		},
+	}
+}
+
+// Draft review ratings.
+const (
+	DraftRatingGood = "good"
+	DraftRatingWeak = "weak"
+	DraftRatingPoor = "poor"
+)
+
+func draftRating(question, good, weak, poor string) typesafe.Question {
+	return typesafe.Question{Type: "choice", Instructions: question,
+		Criteria: map[string]any{DraftRatingGood: good, DraftRatingWeak: weak, DraftRatingPoor: poor}}
+}
+
+// DraftClarityQuestion rates how concrete `drafts[d]`'s step actions are.
+func DraftClarityQuestion(d int) typesafe.Question {
+	return draftRating(fmt.Sprintf("How concrete and unambiguous are the actions in the steps of `drafts[%d]`?", d),
+		"Every action names what to do and on which element, page, field or endpoint, so two testers would perform the same thing.",
+		"Most actions are concrete, but at least one is vague (\"check the page\", \"verify it works\") or leaves out what to act on.",
+		"Most actions are vague or generic, or the steps are missing.")
+}
+
+// DraftObservableQuestion rates whether `drafts[d]`'s expected results can be checked.
+func DraftObservableQuestion(d int) typesafe.Question {
+	return draftRating(fmt.Sprintf("Can a tester check the expected results in the steps of `drafts[%d]` by observing the application?", d),
+		"Every expected result names something observable: a message, a value, a page, a state, a response code.",
+		"Some expected results are observable, but at least one is vague (\"works correctly\", \"as expected\") or missing.",
+		"Most expected results are vague or missing.")
+}
+
+// DraftSpecificQuestion rates whether `drafts[d]` uses concrete test data.
+func DraftSpecificQuestion(d int) typesafe.Question {
+	return draftRating(fmt.Sprintf("Does `drafts[%d]` use concrete test data where its steps need data?", d),
+		"Where data is needed the draft gives concrete values (a name, an amount, a date, a code), or its steps need no data.",
+		"Some data is concrete, but at least one step relies on a placeholder (\"valid data\", \"some user\") where a value matters.",
+		"The steps need data and use placeholders throughout.")
+}
+
+// DraftDuplicateQuestion asks whether `drafts[d]` and `candidates[k]` test the same behaviour.
+func DraftDuplicateQuestion(d, k int) typesafe.Question {
+	return typesafe.Question{Type: "noul",
+		Instructions: map[string]any{
+			"question": fmt.Sprintf("Do `drafts[%d]` and `candidates[%d]` verify the same behaviour of the application, so that keeping both adds no coverage?", d, k),
+			"compare":  []any{d, k},
+		},
+		Criteria: map[string]any{
+			"true":  "Both check the same feature, the same scenario and the same outcome; differences are only wording, step granularity or data values that do not change what is verified.",
+			"false": "They check a different scenario, a different input class (for example valid vs invalid), a different outcome, or a different feature, or one does not contain enough to tell.",
+		},
+	}
+}
+
+// Defect severities as ttgo stores them.
+const (
+	SeverityCritical = "critical"
+	SeverityMajor    = "major"
+	SeverityMinor    = "minor"
+	SeverityTrivial  = "trivial"
+)
+
+// DefectSeverityQuestion asks for a new defect's severity.
+func DefectSeverityQuestion() typesafe.Question {
+	return typesafe.Question{
+		Type:         "choice",
+		Instructions: "How severe is the defect described in `defect` (its title, description and the failure it was found from)?",
+		Criteria: map[string]any{
+			SeverityCritical: "It blocks a core flow for users (sign-in, checkout, payment, saving work) with no workaround, loses or corrupts data, or exposes a security problem.",
+			SeverityMajor:    "A main feature is broken or gives wrong results, but a workaround exists or only part of the users or cases are affected.",
+			SeverityMinor:    "Limited impact: a secondary feature, an edge case, or wrong behaviour users can easily work around.",
+			SeverityTrivial:  "Cosmetic or wording only: layout, spelling, colours, with no effect on what users can do.",
+		},
+	}
+}
+
+// DefectDuplicateQuestion asks whether `defect` and `candidates[k]` describe the same problem.
+func DefectDuplicateQuestion(k int) typesafe.Question {
+	return typesafe.Question{Type: "noul",
+		Instructions: map[string]any{
+			"question": fmt.Sprintf("Do `defect` and `candidates[%d]` describe the same problem in the application, so the new defect duplicates the existing one?", k),
+			"compare":  k,
+		},
+		Criteria: map[string]any{
+			"true":  "Both describe the same faulty behaviour of the same feature or component; they may differ in wording, detail, or the test that found it.",
+			"false": "They describe different behaviour, a different feature or component, or a different error, or one does not contain enough to tell.",
+		},
+	}
+}
+
+// SearchRelevanceQuestion asks whether `cases[j]` is what a search for `query` looks for.
+func SearchRelevanceQuestion(j int) typesafe.Question {
+	return typesafe.Question{Type: "noul",
+		Instructions: map[string]any{
+			"question": fmt.Sprintf("Is `cases[%d]` a test case that someone searching the test library for `query` is looking for?", j),
+			"case":     j,
+		},
+		Criteria: map[string]any{
+			"true":  "The test case's name or description is about what the query names: the feature, behaviour, component or scenario, even in other words.",
+			"false": "The test case only shares a word with the query but is about something else, or it has nothing to do with the query.",
+		},
+	}
+}

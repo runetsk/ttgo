@@ -9,6 +9,11 @@ const (
 	AnalysisCostKindSemantic = "semantic" // one job's semantic grouping pass
 	AnalysisCostKindHedge    = "hedge"    // a hedged second LLM request, priced at the winner's prompt (an estimate)
 	AnalysisCostKindTransfer = "transfer" // TypeSafe checking a group's explanation against its semantic clones
+	// TypeSafe used beyond failure analysis (Wave 5); these rows carry no run (run_id '').
+	AnalysisCostKindImport       = "import"        // classifying the lines of an unrecognized import
+	AnalysisCostKindDraftReview  = "draft_review"  // rating AI-generated drafts and their duplicates
+	AnalysisCostKindDefectAssist = "defect_assist" // a new defect's severity and duplicates
+	AnalysisCostKindSearch       = "search"        // re-ranking a search's first page
 
 	AnalysisCostEngineTypeSafe = "typesafe"
 	AnalysisCostEngineLLM      = "llm"

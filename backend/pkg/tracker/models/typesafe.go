@@ -55,6 +55,15 @@ type TypeSafeSettings struct {
 	SemanticDedupEnabled bool `json:"semantic_dedup_enabled" gorm:"not null;default:true"`
 	// AllowAutoFailureAnalysis is the per-vendor data-transmission consent for jobs
 	// triggered automatically on run completion. Manual jobs need only Enabled.
+	// Beyond failure analysis (Wave 5): each use of TypeSafe elsewhere in ttgo has its own switch.
+	// ImportStructureEnabled: classify the lines of an unrecognized import before the LLM fallback.
+	// DraftReviewEnabled: rate AI-generated drafts and check their duplicates.
+	// DefectAssistEnabled: suggest a new defect's severity and find duplicate defects.
+	// SearchRerankEnabled: re-rank the first page of test-case search (one request per search).
+	ImportStructureEnabled   bool      `json:"import_structure_enabled" gorm:"not null;default:true"`
+	DraftReviewEnabled       bool      `json:"draft_review_enabled" gorm:"not null;default:true"`
+	DefectAssistEnabled      bool      `json:"defect_assist_enabled" gorm:"not null;default:true"`
+	SearchRerankEnabled      bool      `json:"search_rerank_enabled" gorm:"not null;default:false"`
 	AllowAutoFailureAnalysis bool      `json:"allow_auto_failure_analysis" gorm:"not null;default:false"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`
@@ -75,6 +84,10 @@ type TypeSafeSettingsResponse struct {
 	EscalateBelowPct         int       `json:"escalate_below_pct"`
 	SemanticDedupEnabled     bool      `json:"semantic_dedup_enabled"`
 	AllowAutoFailureAnalysis bool      `json:"allow_auto_failure_analysis"`
+	ImportStructureEnabled   bool      `json:"import_structure_enabled"`
+	DraftReviewEnabled       bool      `json:"draft_review_enabled"`
+	DefectAssistEnabled      bool      `json:"defect_assist_enabled"`
+	SearchRerankEnabled      bool      `json:"search_rerank_enabled"`
 	CreatedAt                time.Time `json:"created_at"`
 	UpdatedAt                time.Time `json:"updated_at"`
 }
@@ -94,4 +107,8 @@ type TypeSafeSettingsPatch struct {
 	EscalateBelowPct         *int     `json:"escalate_below_pct"`
 	SemanticDedupEnabled     *bool    `json:"semantic_dedup_enabled"`
 	AllowAutoFailureAnalysis *bool    `json:"allow_auto_failure_analysis"`
+	ImportStructureEnabled   *bool    `json:"import_structure_enabled"`
+	DraftReviewEnabled       *bool    `json:"draft_review_enabled"`
+	DefectAssistEnabled      *bool    `json:"defect_assist_enabled"`
+	SearchRerankEnabled      *bool    `json:"search_rerank_enabled"`
 }

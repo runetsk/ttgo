@@ -62,6 +62,7 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("PUT /settings/ai-failure-analysis", requireAdmin(h.UpdateFailureAnalysisSettings))
 	api.HandleFunc("POST /settings/ai-failure-analysis/prompt/reset", requireAdmin(h.ResetFailureAnalysisPrompt))
 	api.HandleFunc("GET /settings/typesafe", requireAuth("read", h.GetTypeSafeSettings))
+	api.HandleFunc("GET /ai/typesafe/features", requireAuth("read", h.GetTypeSafeUses))
 	api.HandleFunc("PUT /settings/typesafe", requireAdmin(h.UpdateTypeSafeSettings))
 	api.HandleFunc("POST /settings/typesafe/test", requireAdmin(h.TestTypeSafeConnection))
 }

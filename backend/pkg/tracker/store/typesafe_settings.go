@@ -19,7 +19,8 @@ func (s *Store) seedTypeSafeSettings() error {
 		row = models.TypeSafeSettings{
 			ID: models.TypeSafeSettingsID, Enabled: false, Model: models.TypeSafeDefaultModel, PricePerMTok: models.TypeSafeDefaultPricePerMTok,
 			TimeoutSeconds: 30, VerdictEngineEnabled: true, NarrativeEnabled: true, LLMFallbackEnabled: true, SemanticDedupEnabled: true,
-			AllowAutoFailureAnalysis: false, CreatedAt: now, UpdatedAt: now,
+			AllowAutoFailureAnalysis: false, ImportStructureEnabled: true, DraftReviewEnabled: true, DefectAssistEnabled: true,
+			SearchRerankEnabled: false, CreatedAt: now, UpdatedAt: now,
 		}
 		return s.db.Create(&row).Error
 	}
@@ -56,7 +57,9 @@ func (s *Store) TypeSafeSettingsResponse() (models.TypeSafeSettingsResponse, err
 		ID: row.ID, Enabled: row.Enabled, Model: row.Model, TimeoutSeconds: row.TimeoutSeconds, PricePerMTok: row.PricePerMTok,
 		VerdictEngineEnabled: row.VerdictEngineEnabled, NarrativeEnabled: row.NarrativeEnabled, LLMFallbackEnabled: row.LLMFallbackEnabled,
 		EscalateBelowPct: row.EscalateBelowPct, SemanticDedupEnabled: row.SemanticDedupEnabled,
-		AllowAutoFailureAnalysis: row.AllowAutoFailureAnalysis, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		AllowAutoFailureAnalysis: row.AllowAutoFailureAnalysis, ImportStructureEnabled: row.ImportStructureEnabled,
+		DraftReviewEnabled: row.DraftReviewEnabled, DefectAssistEnabled: row.DefectAssistEnabled, SearchRerankEnabled: row.SearchRerankEnabled,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 		APIKeyStatus: models.TypeSafeKeyStatusMissing,
 	}
 	if row.APIKey == "" {
@@ -109,6 +112,12 @@ func (s *Store) UpdateTypeSafeSettings(p models.TypeSafeSettingsPatch) (*models.
 	}
 	if p.SemanticDedupEnabled != nil {
 		updates["semantic_dedup_enabled"] = *p.SemanticDedupEnabled
+	}
+	for col, v := range map[string]*bool{"import_structure_enabled": p.ImportStructureEnabled, "draft_review_enabled": p.DraftReviewEnabled,
+		"defect_assist_enabled": p.DefectAssistEnabled, "search_rerank_enabled": p.SearchRerankEnabled} {
+		if v != nil {
+			updates[col] = *v
+		}
 	}
 	if p.AllowAutoFailureAnalysis != nil {
 		updates["allow_auto_failure_analysis"] = *p.AllowAutoFailureAnalysis
