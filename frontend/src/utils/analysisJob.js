@@ -41,7 +41,8 @@ export function jobSummary(job) {
     if (o.explanation_skipped) parts.push(`${o.explanation_skipped} with explanations off`);
     const head = job.status === 'cancelled'
         ? `AI analysis was cancelled after ${job.analyzed_count || 0} of ${job.capped_at || 0} groups`
-        : job.retry_failed_only ? 'Retry of failed groups finished' : 'AI analysis finished';
+        : job.split_from_analysis_id ? 'Split re-analysis finished'
+            : job.retry_failed_only ? 'Retry of failed groups finished' : 'AI analysis finished';
     let text = `${head}: ${parts.join(', ')}.`;
     if (retryable) text += ` ${plural(failedRows, 'failed result has', 'failed results have')} no decision yet.`;
     // Groups held back from the LLM, or auto-apply paused by its gate, need a look: the banner

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { getRunAnalysisJob, cancelRunAnalysisJob, retryFailedRunAnalysis, analyzeRunFailures } from '../api';
 import { useSubscription } from '../hooks/useSubscription';
 import { jobSummary, showEndedJob, jobTelemetry, runningNote, newerJobState, jobNotes } from '../utils/analysisJob.js';
+import { semanticReportLine, ANALYSIS_QUEUED_EVENT } from '../utils/semanticPanel.js';
 
 const dismissKey = (runId) => `ttgo.analysisBanner.dismissed.${runId}`;
 
@@ -33,6 +34,21 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
             if (j && (j.status === 'queued' || j.status === 'running')) setWatched(true);
         }).catch(() => setJob(null));
     }, [runId, refreshKey]);
+
+    // A split on a result's AI card queues a job for this run: fetch it so the banner shows it.
+    useEffect(() => {
+        if (!runId) return undefined;
+        const onQueued = (e) => {
+            if (e.detail?.runId !== runId) return;
+            getRunAnalysisJob(runId).then((j) => {
+                if (!j) return;
+                setJob((prev) => newerJobState(prev, j));
+                if (j.status === 'queued' || j.status === 'running') setWatched(true);
+            }).catch(() => {});
+        };
+        window.addEventListener(ANALYSIS_QUEUED_EVENT, onQueued);
+        return () => window.removeEventListener(ANALYSIS_QUEUED_EVENT, onQueued);
+    }, [runId]);
 
     useSubscription(runId ? `run:${runId}` : null, useCallback((event) => {
         if (event.type !== 'run_analysis.progress' && event.type !== 'run_analysis.completed') return;
@@ -98,6 +114,7 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
         };
         const telemetry = jobTelemetry(job);
         const notes = jobNotes(job);
+        const semanticLine = semanticReportLine(job);
         return (
             <div style={{
                 padding: '8px 14px', background: tone.bg, border: `1px solid ${tone.border}`, borderRadius: 8,
@@ -114,6 +131,11 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
                     {telemetry && (
                         <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 12 }} data-testid="run-analysis-telemetry">
                             {telemetry}
+                        </span>
+                    )}
+                    {semanticLine && (
+                        <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 12 }} data-testid="run-analysis-semantic">
+                            {semanticLine}
                         </span>
                     )}
                     {notes.map((n) => (

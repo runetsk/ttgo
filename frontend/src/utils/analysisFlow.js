@@ -26,6 +26,8 @@ const COMPANION_NOTE = 'In the same request TypeSafe also answers companion ques
 const GUARD_NOTE = 'Injection guard: TypeSafe checks the failure text and the related failures of its group for instructions aimed at an AI. At 80% or more its decision is kept, but nothing from that group is sent to the LLM. Nothing is checked when TypeSafe is unavailable and the LLM steps in.';
 const NO_GUARD_NOTE = 'With the LLM deciding, nothing checks the failure text for prompt injection before it is sent.';
 const GUARD_EXPLAIN_NOTE = 'A group flagged for possible prompt injection gets no explanation; Explain on it asks before sending the failure to the LLM.';
+// Wave 4: the semantic pass remembers its answers, and a person's split keeps a pair apart.
+const MEMORY_NOTE = "TypeSafe's same-cause answers are remembered for 30 days, so a pair of errors seen again is not asked again; \"Not the same failure — split\" on a grouped result keeps the two apart for good and analyzes the split-off results on their own.";
 const TRANSFER_NOTE = 'After a group is explained, TypeSafe checks that the explanation fits each semantically grouped result (up to 40 per group). A result below 50% reads "This explanation may not apply to this result" and offers Explain this result.';
 const RETRY_NOTE = 'Retry failed groups is a manual action using the current settings, even for a run first analyzed automatically, so TypeSafe.ai is used whenever it is enabled.';
 const IDLE_STEPS = [
@@ -182,7 +184,10 @@ export function buildAnalysisFlow({ aiEnabled, typesafe: ts, failureAnalysis: fa
         detail: dedup
             ? 'Failures with the same failure type and error text form one group; one result per group is analyzed and its answer is copied to the rest.'
             : 'Each failing result is analyzed on its own.',
-        notes: ['Retry failed groups regroups all failures first, semantic calls included, then analyzes only the groups with a failed attempt, up to the cap.'],
+        notes: [
+            'Retry failed groups regroups all failures first, semantic calls included, then analyzes only the groups with a failed attempt, up to the cap.',
+            ...(semanticSkip ? [] : [MEMORY_NOTE]),
+        ],
         chips: [
             chip('fa.dedup_enabled', 'Deduplicate similar failures', onOff(dedup)),
             chip('ts.semantic_dedup_enabled', 'Semantic failure grouping', onOff(ts?.semantic_dedup_enabled)),

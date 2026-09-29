@@ -558,6 +558,15 @@ export const retryFailedRunAnalysis = (runId) =>
     withBudgetConfirm((ack) => api.post(`/runs/${runId}/analysis-job/retry-failed`, undefined, budgetConfig(ack)), confirmBudget)
         .then(r => r.data);
 
+// Why a result was grouped semantically with its representative, and whether it can be split.
+export const getSemanticMerge = (runResultId, analysisId) =>
+    api.get(`/run-results/${runResultId}/analyses/${analysisId}/semantic`).then(r => r.data);
+
+// Split the results sharing this error out of their semantic group; resolves with the queued job.
+export const splitSemanticMerge = (runResultId, analysisId) =>
+    withBudgetConfirm((ack) => api.post(`/run-results/${runResultId}/analyses/${analysisId}/split`, undefined, budgetConfig(ack)), confirmBudget)
+        .then(r => r.data);
+
 export const getFailureAnalysisSettings = () =>
     api.get('/settings/ai-failure-analysis').then(r => r.data);
 

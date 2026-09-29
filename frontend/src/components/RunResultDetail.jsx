@@ -1,9 +1,9 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import DefectLinkPanel from './DefectLinkPanel';
 import CommentsPanel from './CommentsPanel';
 import ScreenshotGallery from './ScreenshotGallery';
 import AIVerdictBadge from './AIVerdictBadge';
-import { analyzeRunResult, explainAnalysis, listRunResultAnalyses, uploadScreenshots } from '../api';
+import { analyzeRunResult, explainAnalysis, listRunResultAnalyses, uploadScreenshots, getSemanticMerge, splitSemanticMerge } from '../api';
 import { useAIGeneration } from '../contexts/AIGenerationContext';
 import { useSubscription } from '../hooks/useSubscription';
 import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
@@ -11,6 +11,7 @@ import { isManualStepResults } from '../utils/stepResults';
 import { isFailureStatus } from '../utils/resultStatus';
 import { analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, failureAdvice, explainAction, takeoverNote, isPendingNarrative, analysisFromEvent, mergeAnalysisList } from '../utils/analysisMeta.js';
 import { signalChips, isInjectionFlagged, fitNote, explainRequest } from '../utils/analysisSignals.js';
+import { semanticPanelText, splitConfirmText, ANALYSIS_QUEUED_EVENT } from '../utils/semanticPanel.js';
 import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
@@ -302,6 +303,7 @@ const RunResultDetail = ({ result, attempts }) => {
                                         }
                                     }}
                                     explaining={explaining}
+                                    runId={activeResult.test_run_id}
                                     versions={analyses}
                                     selectedVersion={selectedVersion ?? analyses[0]?.version}
                                     onSelectVersion={setSelectedVersion}
@@ -569,9 +571,95 @@ const SIGNAL_TONES = {
     info: { color: 'var(--aig-tone-indigo-fg)', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)' },
 };
 
-function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explaining, versions, selectedVersion, onSelectVersion }) {
+// The semantic grouping note as a toggle, and the merge panel it opens (Wave 4).
+const groupingToggle = {
+    color: 'var(--aig-tone-indigo-fg)', fontSize: 11, background: 'transparent', border: 'none', padding: 0,
+    cursor: 'pointer', textDecoration: 'underline dotted', textUnderlineOffset: 3,
+};
+const semanticPanelBox = {
+    background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.22)', borderRadius: 6,
+    padding: '10px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)',
+    display: 'flex', flexDirection: 'column', gap: 8,
+};
+const semanticErrorLine = {
+    fontFamily: 'var(--font-mono, monospace)', fontSize: '0.76rem', color: 'var(--text-primary)',
+    background: 'var(--bg-secondary)', border: '1px solid var(--border-color)', borderRadius: 4, padding: '4px 6px',
+    whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 64, overflow: 'hidden',
+};
+
+// SemanticMergePanel shows why a result was merged with its group's representative and lets a
+// person split the results with this error out, which queues an analysis of them alone.
+function SemanticMergePanel({ analysis, runId }) {
+    const [view, setView] = useState(null);
+    const [loadError, setLoadError] = useState(false);
+    const [splitting, setSplitting] = useState(false);
+    const [splitDone, setSplitDone] = useState(false);
+    useEffect(() => {
+        let alive = true;
+        getSemanticMerge(analysis.run_result_id, analysis.id)
+            .then((v) => { if (alive) setView(v); })
+            .catch(() => { if (alive) setLoadError(true); });
+        return () => { alive = false; };
+    }, [analysis.run_result_id, analysis.id]);
+
+    if (loadError) return <div style={semanticPanelBox} data-testid="analysis-semantic-panel">Could not load the grouping details.</div>;
+    if (!view) return <div style={semanticPanelBox} data-testid="analysis-semantic-panel">Loading the grouping details…</div>;
+    const text = semanticPanelText(view);
+    const split = async () => {
+        if (!window.confirm(splitConfirmText(view))) return;
+        setSplitting(true);
+        try {
+            await splitSemanticMerge(analysis.run_result_id, analysis.id);
+            setSplitDone(true);
+            window.dispatchEvent(new CustomEvent(ANALYSIS_QUEUED_EVENT, { detail: { runId } }));
+        } catch {
+            // toasted by the API interceptor (409: an analysis already running, nothing to split)
+        } finally {
+            setSplitting(false);
+        }
+    };
+    return (
+        <div style={semanticPanelBox} data-testid="analysis-semantic-panel">
+            {view.representative && (
+                <div>
+                    <div style={{ marginBottom: 4 }}>Grouped with <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{view.representative.test_name}</span>:</div>
+                    <div style={semanticErrorLine} data-testid="analysis-semantic-representative">{view.representative.error_message}</div>
+                </div>
+            )}
+            <div>
+                <div style={{ marginBottom: 4 }}>This result:</div>
+                <div style={semanticErrorLine}>{view.result.error_message}</div>
+            </div>
+            <div data-testid="analysis-semantic-pair">
+                <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{text.probability}</span> {text.provenance}
+                {text.model && <span style={{ opacity: 0.8 }}> ({text.model})</span>}
+            </div>
+            {splitDone ? (
+                <div style={{ color: 'var(--text-primary)', fontWeight: 600 }} data-testid="analysis-semantic-split-done">
+                    Split from its group — a new analysis of {view.split_group_size === 1 ? 'this result' : 'these results'} is running.
+                </div>
+            ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+                    {text.splitSummary && <div>{text.splitSummary}</div>}
+                    <button type="button" onClick={split} disabled={!view.can_split || splitting}
+                        title={view.can_split ? undefined : view.split_blocked_reason} data-testid="analysis-semantic-split"
+                        style={{ ...cardActionBtn, cursor: !view.can_split ? 'not-allowed' : splitting ? 'wait' : 'pointer', opacity: !view.can_split || splitting ? 0.6 : 1 }}>
+                        {splitting ? 'Splitting…' : 'Not the same failure — split'}
+                    </button>
+                    {!view.can_split && view.split_blocked_reason && (
+                        <div style={{ fontSize: '0.76rem' }} data-testid="analysis-semantic-split-blocked">{view.split_blocked_reason}</div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function AIAnalysisCard({ analysis, runId, onReAnalyze, reAnalyzing, onExplain, explaining, versions, selectedVersion, onSelectVersion }) {
     const [showRationale, setShowRationale] = useState(false);
+    const [showSemantic, setShowSemantic] = useState(false);
     if (!analysis) return null;
+    const semanticClone = analysis.dedup_method === 'semantic' && !!analysis.source_analysis_id;
 
     const failed = isFailedAnalysis(analysis);
     const action = explainAction(analysis);
@@ -602,11 +690,18 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
                     <AIVerdictBadge verdict={analysis.verdict} confidence={analysis.confidence} dedupGroup={!!analysis.dedup_group_key}
                         engine={analysis.engine} modelName={analysis.model_name} confidenceScore={analysis.confidence_score}
                         failed={failed} errorCategory={analysis.error_category} narrativeStatus={analysis.narrative_status} signals={analysis.signals} />
-                    {groupingNote(analysis) && (
+                    {groupingNote(analysis) && (semanticClone ? (
+                        // A semantic merge can be inspected and, if wrong, split (Wave 4).
+                        <button type="button" onClick={() => setShowSemantic((v) => !v)} aria-expanded={showSemantic}
+                            title="Why was this grouped? Inspect or split the merge"
+                            style={groupingToggle} data-testid="analysis-grouping-note">
+                            ↳ {groupingNote(analysis)} {showSemantic ? '▴' : '▾'}
+                        </button>
+                    ) : (
                         <span title={groupingNote(analysis)} style={{ color: 'var(--text-secondary)', fontSize: 11 }} data-testid="analysis-grouping-note">
                             ↳ {groupingNote(analysis)}
                         </span>
-                    )}
+                    ))}
                 </div>
                 <div style={{ color: 'var(--text-secondary)', fontSize: 11, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }} data-testid="analysis-meta">
                     {analysisMetaParts(analysis).map((p, i) => (
@@ -618,6 +713,10 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
                     {analysis.created_at && <><span style={{ opacity: 0.5 }}>•</span><span>{new Date(analysis.created_at).toLocaleString()}</span></>}
                 </div>
             </div>
+
+            {semanticClone && showSemantic && (
+                <SemanticMergePanel key={analysis.id} analysis={analysis} runId={runId} />
+            )}
 
             {chips.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} data-testid="analysis-signals">

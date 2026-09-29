@@ -290,3 +290,9 @@ test('the store step shows auto-apply', () => {
     assert.ok(step(llmOnly, 'store').notes.some((n) => /^Auto-apply needs TypeSafe\.ai deciding/.test(n)));
     assert.equal(chipOf(flow({ invalid: ['fa.auto_apply_defect_type'] }), 'fa.auto_apply_defect_type').invalid, true);
 });
+
+test('the group step says semantic answers are remembered and splits are kept, only when the merge runs', () => {
+    assert.ok(step(flow(), 'group').notes.some((n) => /remembered for 30 days/.test(n) && /split/.test(n)));
+    const off = flow({ typesafe: { ...TS, semantic_dedup_enabled: false } });
+    assert.ok(!step(off, 'group').notes.some((n) => /remembered for 30 days/.test(n)));
+});

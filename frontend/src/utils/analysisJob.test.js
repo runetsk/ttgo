@@ -133,3 +133,8 @@ test('jobSummary: a flagged group or a paused auto-apply keeps the banner up unt
     assert.equal(jobSummary({ status: 'completed', auto_apply_state: 'paused', outcomes: { decided: 2 } }).tone, 'warn');
     assert.equal(jobSummary({ status: 'completed', outcomes: { decided: 2, auto_apply_state: 'on', auto_applied: 3 } }).tone, 'ok');
 });
+
+test('a split job reads as the re-analysis of the split-off group, not of the whole run', () => {
+    const s = jobSummary({ status: 'completed', split_from_analysis_id: 'an-1', outcomes: { decided: 1 } });
+    assert.equal(s.text, 'Split re-analysis finished: 1 group decided.');
+});
