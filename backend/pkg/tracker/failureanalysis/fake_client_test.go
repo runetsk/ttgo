@@ -2,6 +2,7 @@ package failureanalysis
 
 import (
 	"context"
+	"ttgo/pkg/tracker/models"
 	"ttgo/pkg/tracker/typesafe"
 )
 
@@ -42,4 +43,36 @@ func decisionResponse(verdict string, verdictConf, verdictP float64, defect stri
 		},
 		Usage: typesafe.Usage{InputTokens: 777, OutputTokens: 9},
 	}
+}
+
+// companionResponse answers a verdict request: a confident product_bug decision plus every
+// companion question that was asked. noul answers come from noul (0.05 when absent);
+// known_defect chooses pick at pickConf (pick "" = none at 0.9).
+func companionResponse(req typesafe.Request, noul map[string]float64, pick string, pickConf float64) *typesafe.Response {
+	resp := decisionResponse(models.VerdictProductBug, 0.95, 0.9, "product_bug", 0.9, 0.9)
+	if pick == "" {
+		pick, pickConf = KnownDefectNone, 0.9
+	}
+	for id, q := range req.Questions {
+		if id == "verdict" || id == "defect_type" {
+			continue
+		}
+		switch q.Type {
+		case "noul":
+			p, ok := noul[id]
+			if !ok {
+				p = 0.05
+			}
+			resp.Answers[id] = typesafe.Answer{Type: "noul", Noul: p}
+		case "choice":
+			opts := q.Criteria.(map[string]any)
+			probs := make(map[string]float64, len(opts))
+			for k := range opts {
+				probs[k] = (1 - pickConf) / float64(len(opts)-1)
+			}
+			probs[pick] = pickConf
+			resp.Answers[id] = typesafe.Answer{Type: "choice", Choice: pick, Confidence: pickConf, Probabilities: probs}
+		}
+	}
+	return resp
 }

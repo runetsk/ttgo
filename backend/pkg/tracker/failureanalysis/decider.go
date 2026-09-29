@@ -21,6 +21,9 @@ type Decision struct {
 	Model                   string // versioned id from the response
 	InputTokens             int
 	PolicyVersion           string
+	// Signals are the companion answers of the same request (spec Wave 3 §1): the injection
+	// guard, flaky_history, recurring, outside_app and known_defect. Zero when none came back.
+	Signals Signals
 }
 
 // Decider produces a Decision from evidence. The analyzer treats nil as "not permitted".
@@ -45,13 +48,13 @@ type typesafeDecider struct {
 	model  string
 }
 
-// NewTypeSafeDecider asks the verdict and defect_type questions in ONE request.
+// NewTypeSafeDecider asks the verdict, defect_type and companion questions in ONE request.
 func NewTypeSafeDecider(c typesafe.Client, model string) Decider {
 	return &typesafeDecider{client: c, model: model}
 }
 
 func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, error) {
-	resp, meta, err := d.evaluate(ctx, ev)
+	e, err := d.evaluate(ctx, ev)
 	var te *typesafe.Error
 	if errors.As(err, &te) && te.Oversized {
 		// The budget is sized in characters against a token limit; when the
@@ -63,11 +66,12 @@ func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, e
 		}
 		ev.StateCap = bound / 2
 		slog.Warn("failure-analysis: TypeSafe rejected the state as oversized; retrying at half the bound", "bound", ev.StateCap)
-		resp, meta, err = d.evaluate(ctx, ev)
+		e, err = d.evaluate(ctx, ev)
 	}
 	if err != nil {
 		return nil, err
 	}
+	resp := e.resp
 	v := resp.Answers["verdict"]
 	if !models.ValidVerdicts[v.Choice] { // impossible after client validation, checked anyway
 		return nil, &typesafe.Error{Category: typesafe.CategoryParse, Message: fmt.Sprintf("verdict %q is not a known verdict", v.Choice)}
@@ -78,12 +82,13 @@ func (d *typesafeDecider) Decide(ctx context.Context, ev Evidence) (*Decision, e
 		Verdict: v.Choice, VerdictConfidence: v.Confidence, VerdictProbabilities: v.Probabilities,
 		SuggestedDefectType: suggested, DefectTypeConfidence: suggestedConf, DefectTypeProbabilities: dt.Probabilities,
 		SuggestionSource: source,
-		Model:            resp.Model, InputTokens: resp.Usage.InputTokens, PolicyVersion: PolicyVersionFor(meta.ExamplesSent),
+		Model:            resp.Model, InputTokens: resp.Usage.InputTokens, PolicyVersion: PolicyVersionFor(e.meta.ExamplesSent),
+		Signals: signalsFrom(e),
 	}, nil
 }
 
 // suggestion turns the two answers into the stored defect-type suggestion (policies
-// fa-verdict-v5 and v6). The verdict wins where it is sure:
+// fa-verdict-v5 to v8). The verdict wins where it is sure:
 //
 //   - A verdict at VerdictDecidesSuggestionMin or above, other than unknown, decides the
 //     suggestion through the same mapping the generative path uses, whether the defect-type
@@ -116,16 +121,62 @@ func suggestion(v, dt typesafe.Answer) (defectType, source string, confidence fl
 	return answered, "", dt.Confidence
 }
 
-// evaluate renders the state and asks both questions in one request. The meta says what the
-// state carried after its drop ladder (the policy is stamped from its ExamplesSent).
-func (d *typesafeDecider) evaluate(ctx context.Context, ev Evidence) (*typesafe.Response, PromptMeta, error) {
-	state, meta := RenderState(ev)
+// evaluation is one verdict request: the response, the evidence it was built from and what the
+// state carried after its drop ladder (the policy is stamped from meta.ExamplesSent; the
+// conditional companions, the known_defect mapping and the checked blocks use sent), and the
+// questions that were asked.
+type evaluation struct {
+	resp      *typesafe.Response
+	meta      PromptMeta
+	built     Evidence
+	sent      Evidence
+	questions map[string]typesafe.Question
+}
+
+// evaluate renders the state and asks the verdict, defect_type and companion questions in one
+// request. Conditional companions are chosen from what the state carries, not from what was built.
+func (d *typesafeDecider) evaluate(ctx context.Context, ev Evidence) (evaluation, error) {
+	state, meta, sent := renderState(ev)
 	if meta.TruncationPrefix != "" {
 		slog.Debug("failure-analysis: TypeSafe state trimmed", "prefix", meta.TruncationPrefix)
 	}
-	resp, err := d.client.Evaluate(ctx, typesafe.Request{
-		State: state, Model: d.model,
-		Questions: map[string]typesafe.Question{"verdict": verdictQuestion(), "defect_type": defectTypeQuestion()},
-	})
-	return resp, meta, err
+	questions := decisionQuestions(sent)
+	resp, err := d.client.Evaluate(ctx, typesafe.Request{State: state, Model: d.model, Questions: questions})
+	return evaluation{resp: resp, meta: meta, built: ev, sent: sent, questions: questions}, err
+}
+
+// signalsFrom maps the companion answers of one request. A signal is set only for a question
+// that was asked and answered with the expected type. known_defect maps its option id back to
+// the key that was in the state (spec R5) and names nothing for `none`. When the injection
+// question was answered the decision is guarded, and the blocks it covered — those the sent
+// state carried as built — are recorded with their hashes (spec R8); MembersChecked follows.
+func signalsFrom(e evaluation) Signals {
+	noul := func(key string) *float64 {
+		if _, asked := e.questions[key]; !asked {
+			return nil
+		}
+		a, ok := e.resp.Answers[key]
+		if !ok || a.Type != "noul" {
+			return nil
+		}
+		v := a.Noul
+		return &v
+	}
+	s := Signals{
+		Injection:    noul(questionInjection),
+		FlakyHistory: noul(questionFlakyHistory),
+		Recurring:    noul(questionRecurring),
+		OutsideApp:   noul(questionOutsideApp),
+	}
+	if _, asked := e.questions[questionKnownDefect]; asked {
+		if a, ok := e.resp.Answers[questionKnownDefect]; ok && a.Type == "choice" {
+			if i, ok := knownDefectIndex(a.Choice); ok && i < len(e.sent.LinkedDefects) {
+				s.KnownDefect = &KnownDefectSignal{Key: e.sent.LinkedDefects[i].Key, Confidence: a.Confidence}
+			}
+		}
+	}
+	if s.Guarded() {
+		s.RecordChecked(e.built, e.sent)
+	}
+	return s
 }

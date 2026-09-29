@@ -53,5 +53,5 @@ test('hints state the numbers the server uses', () => {
     assert.match(SETTING_HELP['fa.hedge_after_seconds'].what, /from 3 s/);
     assert.match(SETTING_HELP['fa.few_shot_examples'].what, /0 to 8/);
     assert.match(SETTING_HELP['fa.few_shot_examples'].details, /90 days/);
-    assert.match(SETTING_HELP['fa.few_shot_examples'].details, /fa-verdict-v6/);
+    assert.match(SETTING_HELP['fa.few_shot_examples'].details, /fa-verdict-v8/);
 });

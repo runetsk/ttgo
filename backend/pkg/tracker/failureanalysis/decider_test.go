@@ -175,8 +175,8 @@ func TestSuggestion_VerdictDecidesWhereItIsSure(t *testing.T) {
 		})
 	}
 	require.Less(t, VerdictDecidesSuggestionMin, VerdictHighMin, "v5 lets a verdict below the high bucket decide")
-	require.Equal(t, "fa-verdict-v5", PolicyVersionNoExamples, "a rule change is a new policy, so calibration can be read per policy")
-	require.Equal(t, "fa-verdict-v6", PolicyVersionWithExamples, "examples in the state are a different input, so a different policy")
+	require.Equal(t, "fa-verdict-v7", PolicyVersionNoExamples, "Wave 3's companion questions and state keys are a new policy")
+	require.Equal(t, "fa-verdict-v8", PolicyVersionWithExamples, "examples in the state are a different input, so a different policy")
 	require.Equal(t, PolicyVersionNoExamples, PolicyVersionFor(0))
 	require.Equal(t, PolicyVersionWithExamples, PolicyVersionFor(1))
 }
@@ -201,7 +201,7 @@ func TestDecider_StampsThePolicyFromTheExamplesSent(t *testing.T) {
 	require.Equal(t, PolicyVersionWithExamples, d.PolicyVersion)
 	require.Len(t, states[1]["examples"], 1)
 
-	// The ladder dropped every example: the decision was made without them, so it is v5.
+	// The ladder dropped every example: the decision was made without them, so it carries the no-examples policy.
 	ev := BuildEvidenceWithBudget(in, TypeSafeBudget())
 	noExamples := ev
 	noExamples.Examples = nil

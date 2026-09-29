@@ -240,6 +240,7 @@ func TestAnalyze_ParityWithGolden(t *testing.T) {
 	for name, g := range got {
 		w, ok := want[name]
 		require.True(t, ok, "case %s missing from the golden", name)
+		parityPolicyBump(w.Result)
 		if fix := parityIntended[name]; fix != nil {
 			fix(w.Result)
 		}
@@ -248,5 +249,17 @@ func TestAnalyze_ParityWithGolden(t *testing.T) {
 		gb, err := json.Marshal(g)
 		require.NoError(t, err)
 		require.JSONEq(t, string(wb), string(gb), name)
+	}
+}
+
+// parityPolicyBump is the one difference spec Wave 3 §1.5 asks of every route: TypeSafe
+// decisions (and TypeSafe-unavailable attempts) are stamped with the bumped policy. The golden
+// predates the bump and is never re-recorded.
+func parityPolicyBump(r *AnalyzeResult) {
+	switch r.PolicyVersion {
+	case "fa-verdict-v5":
+		r.PolicyVersion = PolicyVersionNoExamples
+	case "fa-verdict-v6":
+		r.PolicyVersion = PolicyVersionWithExamples
 	}
 }

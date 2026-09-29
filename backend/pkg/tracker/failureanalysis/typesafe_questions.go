@@ -14,12 +14,15 @@ import (
 // optional v5 slots and do not change the policy.
 const (
 	// PolicyVersionNoExamples: verdict + defect_type questions, thresholds and the suggestion rule
-	// (v5: a confident verdict decides the suggestion), with no past triage examples in the state.
-	PolicyVersionNoExamples = "fa-verdict-v5"
-	// PolicyVersionWithExamples: the same questions, thresholds and rule, with at least one past
-	// triage example in the state's `examples` array. Stamped per decision from the examples
+	// (a confident verdict decides the suggestion), the Wave 3 guard and companion questions
+	// (injection, outside_app, flaky_history, recurring, known_defect) and the state's
+	// history.recent_outcomes and group.related_failures, with no past triage examples in the
+	// state. fa-verdict-v5 is the same without the Wave 3 additions.
+	PolicyVersionNoExamples = "fa-verdict-v7"
+	// PolicyVersionWithExamples: the same, with at least one past triage example in the state's
+	// `examples` array (fa-verdict-v6 before Wave 3). Stamped per decision from the examples
 	// actually sent after the state's drop ladder, never from the setting.
-	PolicyVersionWithExamples = "fa-verdict-v6"
+	PolicyVersionWithExamples = "fa-verdict-v8"
 	SemanticPolicyVersion     = "fa-semantic-v1" // same-cause question and grouping thresholds
 )
 

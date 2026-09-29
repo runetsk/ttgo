@@ -133,3 +133,20 @@ func TestDecide_GenerativeDecisionPromptCarriesRelatedFailures(t *testing.T) {
 		require.Contains(t, prov.lastPrompt, "<<<DATA socket hang up DATA>>>", name)
 	}
 }
+
+// Policy v7 (spec Wave 3 R6) reverses Wave 2's §A4 rule: the member lines the narrator will
+// receive are in the TypeSafe state, and the injection question covers them.
+func TestDecide_TypeSafeStateCarriesGroupMembers(t *testing.T) {
+	fc := &fakeClient{fn: func(req typesafe.Request) (*typesafe.Response, error) { return companionResponse(req, nil, "", 0), nil }}
+	in := baseContext()
+	_, err := Decide(context.Background(), AnalyzeDeps{Decider: NewTypeSafeDecider(fc, "jev")}, in)
+	require.NoError(t, err)
+	require.NotContains(t, fc.calls[0].State.(map[string]any), "group", "a group of one has no related failures")
+
+	in.GroupMembers = []string{"socket hang up", "connection reset by peer"}
+	_, err = Decide(context.Background(), AnalyzeDeps{Decider: NewTypeSafeDecider(fc, "jev")}, in)
+	require.NoError(t, err)
+	state := fc.calls[1].State.(map[string]any)
+	require.Equal(t, []string{"socket hang up", "connection reset by peer"}, state["group"].(map[string]any)["related_failures"])
+	require.Contains(t, fc.calls[1].Questions, "injection")
+}
