@@ -376,6 +376,14 @@ type RunResultAnalysis struct {
 	// claims and applies, sweeps). Live updates of the same version replace the shown row only
 	// when their revision is not older, so a stale "pending" never hides a written explanation.
 	NarrativeRevision int `json:"narrative_revision" gorm:"column:narrative_revision;not null;default:0"`
+	// NarrativeFit is TypeSafe's P(the group's explanation describes this result's failure), on
+	// semantic clones whose group narration was checked (spec §2). NULL on representatives,
+	// signature clones, unchecked clones and when the check failed. Below
+	// failureanalysis.TransferFitMin the result may be explained on its own (Explain ?scope=result).
+	NarrativeFit *float64 `json:"narrative_fit" gorm:"column:narrative_fit"`
+	// NarrativeSplit: this clone's explanation is its own (Explain ?scope=result); group
+	// narrations leave the row alone from the claim on.
+	NarrativeSplit bool `json:"narrative_split" gorm:"column:narrative_split;not null;default:false"`
 }
 
 // Failed reports whether the analysis attempt produced no decision.
@@ -425,6 +433,10 @@ type RunAnalysisJob struct {
 	CallTimeouts int `json:"call_timeouts" gorm:"column:call_timeouts;not null;default:0"`
 	HedgesFired  int `json:"hedges_fired"  gorm:"column:hedges_fired;not null;default:0"`
 	HedgesWon    int `json:"hedges_won"    gorm:"column:hedges_won;not null;default:0"`
+	// Narrative transfer check (spec §2, R1): groups whose check failed or was cut off, and
+	// semantic clones left unchecked past the per-group cap. Added to per narrated group.
+	TransferCheckFailed int `json:"transfer_check_failed" gorm:"column:transfer_check_failed;not null;default:0"`
+	TransferUnchecked   int `json:"transfer_unchecked"    gorm:"column:transfer_unchecked;not null;default:0"`
 }
 
 // RunAnalysisJobOutcomes summarises what a job's representative analyses produced.
@@ -446,16 +458,19 @@ type RunAnalysisJobOutcomes struct {
 
 	// Stage timing over the job's representatives, counting only analyses where the stage ran
 	// (non-zero): the TypeSafe decision and the LLM calls, in milliseconds; p50 is nearest-rank.
-	DecisionMsAvg int `json:"decision_ms_avg"`
-	DecisionMsP50 int `json:"decision_ms_p50"`
-	DecisionMsMax int `json:"decision_ms_max"`
-	LLMMsAvg      int `json:"llm_ms_avg"`
-	LLMMsP50      int `json:"llm_ms_p50"`
-	LLMMsMax      int `json:"llm_ms_max"`
-	RateLimitHits int `json:"rate_limit_hits"` // copied from the job
-	CallTimeouts  int `json:"call_timeouts"`   // copied from the job
-	HedgesFired   int `json:"hedges_fired"`    // copied from the job
-	HedgesWon     int `json:"hedges_won"`      // copied from the job
+	DecisionMsAvg       int `json:"decision_ms_avg"`
+	DecisionMsP50       int `json:"decision_ms_p50"`
+	DecisionMsMax       int `json:"decision_ms_max"`
+	LLMMsAvg            int `json:"llm_ms_avg"`
+	LLMMsP50            int `json:"llm_ms_p50"`
+	LLMMsMax            int `json:"llm_ms_max"`
+	RateLimitHits       int `json:"rate_limit_hits"`       // copied from the job
+	CallTimeouts        int `json:"call_timeouts"`         // copied from the job
+	HedgesFired         int `json:"hedges_fired"`          // copied from the job
+	HedgesWon           int `json:"hedges_won"`            // copied from the job
+	TransferCheckFailed int `json:"transfer_check_failed"` // groups whose narrative transfer check failed (copied from the job)
+	TransferUnchecked   int `json:"transfer_unchecked"`    // semantic clones past the check's cap (copied from the job)
+	TransferMismatch    int `json:"transfer_mismatch"`     // semantic clones whose fit is below failureanalysis.TransferFitMin
 }
 
 // GeneratedStep is a single step in a generated test case draft.

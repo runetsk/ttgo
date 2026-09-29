@@ -58,6 +58,8 @@ func analysisPayload(a *models.RunResultAnalysis) map[string]interface{} {
 		"model_name":                       a.ModelName,
 		"narrative_status":                 a.NarrativeStatus,
 		"narrative_revision":               a.NarrativeRevision,
+		"narrative_fit":                    a.NarrativeFit,
+		"narrative_split":                  a.NarrativeSplit,
 		"summary":                          a.Summary,
 		"next_action":                      a.NextAction,
 		"rationale":                        a.Rationale,

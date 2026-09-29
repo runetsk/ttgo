@@ -187,3 +187,15 @@ func TestBroadcastRunResultAnalysisUpdated_SamePayloadAsCreated(t *testing.T) {
 	require.Equal(t, float64(1), updatedData["narrative_revision"])
 	require.Equal(t, createdData, updatedData, "one builder for both events")
 }
+
+func TestAnalysisPayload_CarriesTheTransferFit(t *testing.T) {
+	fit := 0.31
+	p := analysisPayload(&models.RunResultAnalysis{ID: "an-9", NarrativeFit: &fit, NarrativeSplit: true})
+	require.Equal(t, &fit, p["narrative_fit"])
+	require.Equal(t, true, p["narrative_split"])
+
+	p = analysisPayload(&models.RunResultAnalysis{ID: "an-10"})
+	require.Contains(t, p, "narrative_fit", "an unchecked row says so explicitly (null), so a live merge clears an old fit")
+	require.Nil(t, p["narrative_fit"].(*float64))
+	require.Equal(t, false, p["narrative_split"])
+}

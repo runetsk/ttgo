@@ -8,6 +8,7 @@ const (
 	AnalysisCostKindExplain  = "explain"  // an explanation written later for a stored decision
 	AnalysisCostKindSemantic = "semantic" // one job's semantic grouping pass
 	AnalysisCostKindHedge    = "hedge"    // a hedged second LLM request, priced at the winner's prompt (an estimate)
+	AnalysisCostKindTransfer = "transfer" // TypeSafe checking a group's explanation against its semantic clones
 
 	AnalysisCostEngineTypeSafe = "typesafe"
 	AnalysisCostEngineLLM      = "llm"

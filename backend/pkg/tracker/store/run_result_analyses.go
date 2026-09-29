@@ -201,6 +201,18 @@ func (s *Store) AnalysisJobOutcomes(jobID string) (models.RunAnalysisJobOutcomes
 		FROM run_analysis_jobs WHERE id = ?`, jobID).Scan(&calls).Error
 	o.RateLimitHits, o.CallTimeouts, o.HedgesFired, o.HedgesWon =
 		calls.RateLimitHits, calls.CallTimeouts, calls.HedgesFired, calls.HedgesWon
+	if err != nil {
+		return o, err
+	}
+	var transfer struct{ TransferCheckFailed, TransferUnchecked int }
+	if err := s.db.Raw(`SELECT COALESCE(MAX(transfer_check_failed), 0) AS transfer_check_failed,
+			COALESCE(MAX(transfer_unchecked), 0) AS transfer_unchecked
+		FROM run_analysis_jobs WHERE id = ?`, jobID).Scan(&transfer).Error; err != nil {
+		return o, err
+	}
+	o.TransferCheckFailed, o.TransferUnchecked = transfer.TransferCheckFailed, transfer.TransferUnchecked
+	err = s.db.Raw(`SELECT COUNT(*) FROM run_result_analyses WHERE job_id = ? AND source_analysis_id IS NOT NULL
+		AND narrative_fit IS NOT NULL AND narrative_fit < ?`, jobID, failureanalysis.TransferFitMin).Scan(&o.TransferMismatch).Error
 	return o, err
 }
 

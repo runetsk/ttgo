@@ -225,3 +225,16 @@ func (s *Store) SetAnalysisJobCallStats(id string, rateLimits, callTimeouts, hed
 		"hedges_won":      hedgesWon,
 	}).Error
 }
+
+// AddAnalysisJobTransferStats adds one narrated group's transfer-check outcome to its job: 1 when
+// the check failed, and the semantic clones it left unchecked. Increments, because the job's
+// groups report one at a time; zero changes write nothing.
+func (s *Store) AddAnalysisJobTransferStats(id string, failed, unchecked int) error {
+	if failed == 0 && unchecked == 0 {
+		return nil
+	}
+	return s.db.Model(&models.RunAnalysisJob{}).Where("id = ?", id).Updates(map[string]interface{}{
+		"transfer_check_failed": gorm.Expr("transfer_check_failed + ?", failed),
+		"transfer_unchecked":    gorm.Expr("transfer_unchecked + ?", unchecked),
+	}).Error
+}
