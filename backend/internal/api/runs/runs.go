@@ -292,19 +292,19 @@ func (h *Handler) UpdateRunResult(w http.ResponseWriter, r *http.Request) {
 			// Nothing to triage on a non-failure, whatever the caller sent. The snapshot columns go
 			// with it: leaving a previous decision's suggestion behind on a row whose defect_type
 			// was just blanked is the stale-pairing this codebase clears everywhere else.
-			updateMap["defect_type"] = ""
+			setDefectType(updateMap, "", false)
 			clearAISuggestion(updateMap)
 		case req.DefectType != nil:
 			// An explicitly supplied defect_type is a human triage decision — snapshot what the AI
 			// suggested at this exact moment. `known` is false only when the row is genuinely
 			// absent (the errored read returned above), so the write below matches nothing anyway.
-			updateMap["defect_type"] = *req.DefectType
+			setDefectType(updateMap, *req.DefectType, true)
 			h.snapshotAISuggestion(r.Context(), resultID, updateMap, effStatus, known)
 			guardedTriage = req.Status == nil
 		case req.Status != nil:
 			// A failure with no explicit decision starts at the "nobody has looked at this yet"
 			// default. Deliberately NOT snapshotted: it is not a decision.
-			updateMap["defect_type"] = "to_investigate"
+			setDefectType(updateMap, "to_investigate", false)
 		}
 	}
 	if req.ErrorMessage != nil {
@@ -419,6 +419,17 @@ func clearAISuggestion(updateMap map[string]interface{}) {
 	updateMap["suggested_policy_version"] = ""
 	updateMap["suggested_is_clone"] = nil // unknown, not false: false would claim a direct prediction
 	updateMap["decided_at"] = nil
+}
+
+// setDefectType writes a non-auto defect_type into updateMap through the one R2 helper.
+// explicit = a person chose the value (triage, Confirm): the label is marked "human" and auto-apply
+// never overwrites it. Otherwise (the status-change default, a non-failure clear) it is nobody's
+// choice and the source is "". Either way the write drops an AI label's badge and records whether
+// it replaced one (R10).
+func setDefectType(updateMap map[string]interface{}, value string, explicit bool) {
+	for k, v := range store.HumanDefectTypeFields(value, explicit) {
+		updateMap[k] = v
+	}
 }
 
 // snapshotBucket mirrors failureanalysis.confidenceBucket for the snapshot (kept local so the
@@ -1301,7 +1312,7 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		// from this map — targetIDs was already narrowed to the stored failures above, so there is
 		// nothing to correct here, and a status key would silently rewrite rows the caller never
 		// asked to change.
-		updateMap["defect_type"] = req.DefectType
+		setDefectType(updateMap, req.DefectType, isTriage)
 	case models.IsFailureStatus(models.ExecutionStatus(req.Status)):
 		// FAIL and ERROR are both failures and both triageable, exactly as the single-result path
 		// treats them — gating on FAIL alone here would force defect_type="" on an ERROR that the
@@ -1309,9 +1320,9 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		// depending on which endpoint received it.
 		updateMap["status"] = req.Status
 		if req.DefectType != "" {
-			updateMap["defect_type"] = req.DefectType
+			setDefectType(updateMap, req.DefectType, isTriage)
 		} else {
-			updateMap["defect_type"] = "to_investigate"
+			setDefectType(updateMap, "to_investigate", isTriage) // isTriage is false here: the default
 		}
 	default:
 		// PASS/SKIP/PENDING/RUNNING have nothing to triage. Blanking defect_type without also
@@ -1319,7 +1330,7 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 		// so the clear is folded in here for the same reason isTriage folds it in below — this
 		// branch is simply the other way a row's defect_type gets rewritten.
 		updateMap["status"] = req.Status
-		updateMap["defect_type"] = ""
+		setDefectType(updateMap, "", isTriage) // isTriage is false for a non-failure status
 		clearAISuggestion(updateMap)
 	}
 	if isTriage {
@@ -1383,10 +1394,10 @@ func (h *Handler) BulkUpdateRunResults(w http.ResponseWriter, r *http.Request) {
 	// Neither costs anything: no frontend view reads result.suggested_*/decided_at at all (the
 	// suggestion chip reads analysis.suggested_defect_type), so a stale local copy is invisible and
 	// corrects itself on the next fetch regardless.
-	patch := map[string]any{
-		"defect_type": updateMap["defect_type"],
-		"updated_at":  now,
-	}
+	// The source rides along ("human" for a triage mode, "" for the default and clears), so a row
+	// that showed an AI badge loses it; the R10 flag is a SQL expression and stays off the wire.
+	patch := store.DefectTypePatch(updateMap["defect_type"].(string), isTriage)
+	patch["updated_at"] = now
 	if req.Status != "" {
 		patch["status"] = req.Status
 	}
