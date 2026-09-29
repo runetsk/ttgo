@@ -44,7 +44,10 @@ export function jobSummary(job) {
         : job.retry_failed_only ? 'Retry of failed groups finished' : 'AI analysis finished';
     let text = `${head}: ${parts.join(', ')}.`;
     if (retryable) text += ` ${plural(failedRows, 'failed result has', 'failed results have')} no decision yet.`;
-    const tone = job.status === 'cancelled' || o.failed ? 'warn' : 'ok';
+    // Groups held back from the LLM, or auto-apply paused by its gate, need a look: the banner
+    // stays until dismissed, like failures.
+    const paused = (o.auto_apply_state ?? job.auto_apply_state) === 'paused';
+    const tone = job.status === 'cancelled' || o.failed || o.injection_flagged > 0 || paused ? 'warn' : 'ok';
     return { tone, retryable, retryHint, text };
 }
 
@@ -87,4 +90,31 @@ export function newerJobState(prev, next) {
     if (!next) return prev;
     if (prev && prev.id === next.id && isTerminalJob(prev) && !isTerminalJob(next)) return prev;
     return next;
+}
+
+// jobNotes: extra lines for an ended job, about what the TypeSafe checks found and what auto-apply
+// did. It covers groups held back from the LLM for possible prompt injection, grouped results their
+// group's explanation may not fit (and checks that failed or were skipped over the per-group limit),
+// labels written by auto-apply, and auto-apply paused because its accuracy gate was closed.
+export function jobNotes(job) {
+    const o = job?.outcomes || {};
+    const notes = [];
+    if (o.injection_flagged > 0) {
+        notes.push({ key: 'injection', text: `${plural(o.injection_flagged, 'group was', 'groups were')} flagged for possible prompt injection: no explanation was written. Review the raw failure.` });
+    }
+    if (o.transfer_mismatch > 0) {
+        const one = o.transfer_mismatch === 1;
+        notes.push({ key: 'transfer', text: `${plural(o.transfer_mismatch, 'grouped result', 'grouped results')} may not match ${one ? 'its' : 'their'} group's explanation; open ${one ? 'it' : 'them'} to explain ${one ? 'it' : 'them'} on ${one ? 'its' : 'their'} own.` });
+    }
+    if (o.transfer_check_failed > 0) {
+        notes.push({ key: 'transfer-failed', text: `The explanation check failed for ${plural(o.transfer_check_failed, 'group', 'groups')}.` });
+    }
+    if (o.transfer_unchecked > 0) {
+        notes.push({ key: 'transfer-unchecked', text: `${plural(o.transfer_unchecked, 'grouped result was', 'grouped results were')} not checked against the explanation (40 per group at most).` });
+    }
+    if (o.auto_applied > 0) notes.push({ key: 'auto-applied', text: `${plural(o.auto_applied, 'label', 'labels')} set by AI` });
+    if ((o.auto_apply_state ?? job?.auto_apply_state) === 'paused') {
+        notes.push({ key: 'auto-apply-paused', text: 'Auto-apply paused: accuracy gate closed' });
+    }
+    return notes;
 }

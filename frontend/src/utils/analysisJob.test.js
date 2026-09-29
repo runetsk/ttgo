@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isTerminalJob, jobSummary, showEndedJob, jobTelemetry, runningNote, newerJobState } from './analysisJob.js';
+import { isTerminalJob, jobSummary, showEndedJob, jobTelemetry, runningNote, newerJobState, jobNotes } from './analysisJob.js';
 
 test('isTerminalJob', () => {
     for (const s of ['completed', 'failed', 'cancelled']) assert.equal(isTerminalJob({ status: s }), true, s);
@@ -101,4 +101,35 @@ test('newerJobState never rolls an ended job back to running', () => {
     assert.equal(newerJobState(ended, { id: 'j2', status: 'queued' }).id, 'j2', 'a new job replaces an ended one');
     assert.equal(newerJobState(running, null), running);
     assert.equal(newerJobState(null, running), running);
+});
+
+test('jobNotes: injection flags, transfer checks, labels set by AI and a paused auto-apply', () => {
+    assert.deepEqual(jobNotes({ status: 'completed', outcomes: {} }), []);
+    assert.deepEqual(jobNotes(null), []);
+    const notes = jobNotes({ status: 'completed', outcomes: {
+        injection_flagged: 1, transfer_mismatch: 2, transfer_check_failed: 1, transfer_unchecked: 3, auto_applied: 4, auto_apply_state: 'paused',
+    } });
+    assert.deepEqual(notes.map((n) => n.key), ['injection', 'transfer', 'transfer-failed', 'transfer-unchecked', 'auto-applied', 'auto-apply-paused']);
+    assert.deepEqual(notes.map((n) => n.text), [
+        '1 group was flagged for possible prompt injection: no explanation was written. Review the raw failure.',
+        "2 grouped results may not match their group's explanation; open them to explain them on their own.",
+        'The explanation check failed for 1 group.',
+        '3 grouped results were not checked against the explanation (40 per group at most).',
+        '4 labels set by AI',
+        'Auto-apply paused: accuracy gate closed',
+    ]);
+    assert.equal(jobNotes({ outcomes: { transfer_mismatch: 1, auto_applied: 1, injection_flagged: 2 } }).map((n) => n.text).join(' | '),
+        "2 groups were flagged for possible prompt injection: no explanation was written. Review the raw failure. | 1 grouped result may not match its group's explanation; open it to explain it on its own. | 1 label set by AI");
+    assert.deepEqual(jobNotes({ auto_apply_state: 'paused', outcomes: {} }).map((n) => n.key), ['auto-apply-paused'], 'falls back to the job column');
+    assert.deepEqual(jobNotes({ outcomes: { auto_apply_state: 'on', auto_applied: 0 } }), []);
+});
+
+test('jobSummary: a flagged group or a paused auto-apply keeps the banner up until dismissed', () => {
+    const flagged = jobSummary({ status: 'completed', outcomes: { decided: 2, injection_flagged: 1 } });
+    assert.equal(flagged.tone, 'warn');
+    assert.equal(flagged.text, 'AI analysis finished: 2 groups decided.');
+    assert.equal(showEndedJob(flagged, false, false), true);
+    assert.equal(jobSummary({ status: 'completed', outcomes: { decided: 2, auto_apply_state: 'paused' } }).tone, 'warn');
+    assert.equal(jobSummary({ status: 'completed', auto_apply_state: 'paused', outcomes: { decided: 2 } }).tone, 'warn');
+    assert.equal(jobSummary({ status: 'completed', outcomes: { decided: 2, auto_apply_state: 'on', auto_applied: 3 } }).tone, 'ok');
 });

@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { getRunAnalysisJob, cancelRunAnalysisJob, retryFailedRunAnalysis, analyzeRunFailures } from '../api';
 import { useSubscription } from '../hooks/useSubscription';
-import { jobSummary, showEndedJob, jobTelemetry, runningNote, newerJobState } from '../utils/analysisJob.js';
+import { jobSummary, showEndedJob, jobTelemetry, runningNote, newerJobState, jobNotes } from '../utils/analysisJob.js';
 
 const dismissKey = (runId) => `ttgo.analysisBanner.dismissed.${runId}`;
 
@@ -97,6 +97,7 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
             }
         };
         const telemetry = jobTelemetry(job);
+        const notes = jobNotes(job);
         return (
             <div style={{
                 padding: '8px 14px', background: tone.bg, border: `1px solid ${tone.border}`, borderRadius: 8,
@@ -115,6 +116,12 @@ export default function RunAnalysisBanner({ runId, refreshKey = 0 }) {
                             {telemetry}
                         </span>
                     )}
+                    {notes.map((n) => (
+                        <span key={n.key} data-testid={`run-analysis-note-${n.key}`}
+                            style={{ display: 'block', color: n.key === 'injection' ? 'var(--aig-tone-red-fg)' : 'var(--text-secondary)', fontSize: 12 }}>
+                            {n.text}
+                        </span>
+                    ))}
                     {summary.retryHint && (
                         <span style={{ display: 'block', color: 'var(--text-secondary)', fontSize: 12 }} data-testid="run-analysis-retry-hint">
                             {summary.retryHint}
