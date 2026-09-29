@@ -218,11 +218,20 @@ func mapSimilarFailures(src EnrichmentSource, hist []*models.RunResult) []Simila
 			RunStartedAt: r.StartTime,
 			Status:       string(r.Status),
 			ErrorMessage: r.ErrorMessage,
-			DefectType:   r.DefectType,
+			DefectType:   humanLabel(r),
 			DefectKey:    resultDefectKey(src, r.ID),
 		})
 	}
 	return out
+}
+
+// humanLabel is the label a person gave a historical result: "" when auto-apply set it
+// (spec §3.1), so neither engine ever reads an AI label as a human's.
+func humanLabel(r *models.RunResult) string {
+	if r.DefectTypeSource == models.DefectTypeSourceAI {
+		return ""
+	}
+	return r.DefectType
 }
 
 // resultDefectKey names the defect a person linked to that specific historical result: the first
@@ -246,15 +255,17 @@ func resultDefectKey(src EnrichmentSource, resultID string) string {
 
 // rollupDefectTypes renders a one-line distribution of the human triage labels
 // across the historical rows, e.g. "automation_bug ×2, product_bug ×1". Rows
-// without a label are ignored; returns "" when no row carries one. Ordering is
-// deterministic: highest count first, ties broken alphabetically.
+// without a label, or whose label auto-apply set, are ignored; returns "" when no row carries a
+// person's label. Ordering is deterministic: highest count first, ties broken alphabetically.
 func rollupDefectTypes(hist []*models.RunResult) string {
 	counts := map[string]int{}
 	for _, r := range hist {
-		if r == nil || r.DefectType == "" {
+		if r == nil {
 			continue
 		}
-		counts[r.DefectType]++
+		if label := humanLabel(r); label != "" {
+			counts[label]++
+		}
 	}
 	if len(counts) == 0 {
 		return ""
