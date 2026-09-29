@@ -237,3 +237,28 @@ func TestAnalysisJobOutcomes_CountsExplanationsInProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 0, got.NarrativeRevision, "a new row starts at revision 0")
 }
+
+func TestAnalysisJobOutcomes_CountsInjectionFlaggedRepresentatives(t *testing.T) {
+	s := newTestStore(t)
+	runID := seedRun(t, s)
+	job, _, err := s.MaybeEnqueueForRun(runID, models.RunAnalysisJobTriggerManual, "")
+	require.NoError(t, err)
+	mk := func(signals string, source *string) *models.RunResultAnalysis {
+		out, err := s.CreateAnalysis(&models.RunResultAnalysis{RunResultID: addFailingResult(t, s, runID).ID, JobID: &job.ID,
+			Engine: models.AnalysisEngineTypeSafe, Verdict: models.VerdictProductBug, Confidence: models.ConfidenceHigh,
+			NarrativeStatus: models.NarrativeStatusUnavailable, Signals: signals, SourceAnalysisID: source})
+		require.NoError(t, err)
+		return out
+	}
+	flagged := mk(`{"injection":0.93}`, nil)
+	mk(`{"injection":0.93}`, &flagged.ID) // a clone follows its representative
+	mk(`{"injection":0.8}`, nil)          // at the threshold
+	mk(`{"injection":0.79,"members_checked":true}`, nil)
+	mk(``, nil)         // not asked: before policy v7, or an LLM route
+	mk(`not json`, nil) // unreadable: not flagged, and no SQL error
+
+	o, err := s.AnalysisJobOutcomes(job.ID)
+	require.NoError(t, err)
+	require.Equal(t, 2, o.InjectionFlagged)
+	require.Equal(t, 5, o.NoExplanation, "a flagged decision has no explanation either")
+}

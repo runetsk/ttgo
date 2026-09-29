@@ -127,7 +127,7 @@ func TestAnalysisPayload_CarriesTheFullUIRow(t *testing.T) {
 		Confidence: models.ConfidenceHigh, Engine: models.AnalysisEngineTypeSafe, Summary: "S", NextAction: "N",
 		Rationale: "[Grouped from representative analysis] R", NarrativeStatus: models.NarrativeStatusOK,
 		NarrativeRevision: 3, SourceAnalysisID: &src, CreatedAt: created, PolicyVersion: "fa-verdict-v5",
-		HistoryAvailable: true, JobID: &job}
+		HistoryAvailable: true, JobID: &job, Signals: `{"injection":0.03}`}
 	p := analysisPayload(a)
 	for _, key := range []string{
 		"id", "analysis_id", "run_result_id", "version", "verdict", "confidence", "confidence_score", "engine", "model_name",
@@ -135,7 +135,7 @@ func TestAnalysisPayload_CarriesTheFullUIRow(t *testing.T) {
 		"dedup_group_key", "dedup_method", "dedup_p_same", "decision_status", "error_category",
 		"takeover_from_verdict", "takeover_from_confidence", "job_id",
 		"summary", "next_action", "rationale", "narrative_revision", "source_analysis_id", "created_at",
-		"policy_version", "history_available",
+		"policy_version", "history_available", "signals",
 	} {
 		require.Contains(t, p, key)
 	}
@@ -148,6 +148,7 @@ func TestAnalysisPayload_CarriesTheFullUIRow(t *testing.T) {
 	require.Equal(t, created, p["created_at"])
 	require.Equal(t, "fa-verdict-v5", p["policy_version"])
 	require.Equal(t, true, p["history_available"])
+	require.Equal(t, `{"injection":0.03}`, p["signals"], "the stored JSON string, as REST rows carry it")
 }
 
 func TestBroadcastRunResultAnalysisUpdated_SamePayloadAsCreated(t *testing.T) {

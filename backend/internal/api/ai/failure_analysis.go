@@ -447,12 +447,13 @@ func (h *Handler) RetryFailedRunAnalysis(w http.ResponseWriter, r *http.Request)
 // explained once, through its representative, and every clone receives the same explanation.
 //
 // @Summary      Explain a stored TypeSafe decision
-// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true. A failed LLM call leaves the explanation unavailable with its reason (200).
+// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true, and when TypeSafe flagged the failure as a possible prompt injection (signals.injection at or above 0.80) and override_injection is not true. A failed LLM call leaves the explanation unavailable with its reason (200).
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        id          path      string  true  "Run result ID"
 // @Param        analysisId  path      string  true  "Analysis ID"
 // @Param        acknowledge_budget  query  bool  false  "Proceed although a soft AI budget would be exceeded"
+// @Param        override_injection  query  bool  false  "Send a failure flagged as a possible prompt injection to the LLM anyway"
 // @Success      200  {object}  models.RunResultAnalysis
 // @Failure      404  {object}  map[string]interface{}
 // @Failure      409  {object}  map[string]interface{}
@@ -505,6 +506,13 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 	if rep.NarrativeStatus == models.NarrativeStatusOK {
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "this analysis already has an explanation"})
+		return
+	}
+	// Injection guard (spec Wave 3 §1.4): a flagged failure goes to the LLM only on an explicit
+	// confirmation. Checked before anything is claimed or spent; clones carry the group's flag.
+	if override, _ := strconv.ParseBool(r.URL.Query().Get("override_injection")); !override &&
+		failureanalysis.ParseSignals(rep.Signals).InjectionFlagged() {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": failureanalysis.ErrInjectionOverrideRequired.Error()})
 		return
 	}
 	if h.resolveDeps == nil {

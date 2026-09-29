@@ -437,6 +437,7 @@ type RunAnalysisJobOutcomes struct {
 	ExplanationSkipped int `json:"explanation_skipped"` // decided, explanations switched off
 	ExplanationPending int `json:"explanation_pending"` // decided, explanation still being written (non-zero only while the job runs)
 	TakenOver          int `json:"taken_over"`          // decided by the LLM below the TypeSafe threshold
+	InjectionFlagged   int `json:"injection_flagged"`   // decided, evidence flagged as a possible prompt injection (also counted in no_explanation)
 	FailedRows         int `json:"failed_rows"`         // failing results left without a decision
 
 	// FailedConfiguration counts representatives that failed on a settings problem (missing

@@ -74,6 +74,7 @@ func analysisPayload(a *models.RunResultAnalysis) map[string]interface{} {
 		"takeover_from_defect_type":        a.TakeoverFromDefectType,
 		"policy_version":                   a.PolicyVersion,
 		"history_available":                a.HistoryAvailable,
+		"signals":                          a.Signals,
 		"created_at":                       a.CreatedAt,
 		"job_id":                           a.JobID,
 	}

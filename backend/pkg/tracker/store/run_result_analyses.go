@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"time"
+	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/models"
 
 	"github.com/google/uuid"
@@ -158,8 +159,11 @@ func (s *Store) AnalysisJobOutcomes(jobID string) (models.RunAnalysisJobOutcomes
 		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND narrative_status IN ('unavailable', 'unparseable') THEN 1 ELSE 0 END), 0) AS no_explanation,
 		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND narrative_status = 'skipped' THEN 1 ELSE 0 END), 0) AS explanation_skipped,
 		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND narrative_status = 'pending' THEN 1 ELSE 0 END), 0) AS explanation_pending,
-		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND takeover_from_verdict != '' THEN 1 ELSE 0 END), 0) AS taken_over
-		FROM run_result_analyses WHERE job_id = ? AND source_analysis_id IS NULL`, jobID).Scan(&o).Error
+		  COALESCE(SUM(CASE WHEN decision_status = 'ok' AND takeover_from_verdict != '' THEN 1 ELSE 0 END), 0) AS taken_over,
+		  COALESCE(SUM(CASE WHEN decision_status = 'ok'
+		    AND json_extract(CASE WHEN json_valid(signals) THEN signals ELSE '{}' END, '$.injection') >= ?
+		    THEN 1 ELSE 0 END), 0) AS injection_flagged
+		FROM run_result_analyses WHERE job_id = ? AND source_analysis_id IS NULL`, failureanalysis.InjectionMin, jobID).Scan(&o).Error
 	if err != nil {
 		return o, err
 	}
