@@ -43,8 +43,13 @@ type Evidence struct {
 	LinkedDefects                                      []LinkedDefect
 	LinkedRequirements                                 []LinkedRequirement
 	Examples                                           []TriageExample // few-shot, redacted and capped, best first
-	GroupMembers                                       []string        // other members' error lines, redacted and capped; LLM prompts only
-	StateCap                                           int             // bound on the rendered JSON state; 0 = StateCharCap
+	// GroupMembers are other members' error lines, redacted and capped: the LLM prompts'
+	// "Related failures" block and, since policy v7 (spec Wave 3 R6), group.related_failures in
+	// the TypeSafe state, where the injection question covers them.
+	GroupMembers []string
+	// RecentOutcomes is history.recent_outcomes (TypeSafe state only): P/F/E/S, oldest first.
+	RecentOutcomes string
+	StateCap       int // bound on the rendered JSON state; 0 = StateCharCap
 }
 
 // Budget is an engine's allowance for the three large text fields (runes) and
@@ -137,6 +142,7 @@ func BuildEvidenceWithBudget(in AnalyzeContext, b Budget) Evidence {
 		LogText:               tailRunes(red(r.LogText), b.LogTail),
 		StateCap:              b.StateChars,
 		SimilarFailuresRollup: headRunes(in.SimilarFailuresRollup, RollupCap),
+		RecentOutcomes:        headRunes(in.RecentOutcomes, RecentOutcomesLimit),
 	}
 	steps := in.Steps
 	if len(steps) > MaxSteps {
@@ -225,17 +231,23 @@ func (ev Evidence) PromptInput(template string) PromptInput {
 	}
 }
 
-// dropNext removes the next optional block in the shared drop order and names it.
+// dropNext removes the next optional block in the TypeSafe state's drop order and names it:
+// the group's related failures first (spec Wave 3 R6), then few-shot examples one at a time,
+// then the shared order. The history block takes history.recent_outcomes with it (R7), even
+// when no similar failure is listed.
 func dropNext(ev *Evidence) (string, bool) {
 	switch {
+	case len(ev.GroupMembers) > 0:
+		ev.GroupMembers = nil
+		return "no related failures", true
 	case len(ev.Examples) > 0:
 		ev.Examples = ev.Examples[:len(ev.Examples)-1] // lowest ranked first, one at a time
 		return "fewer examples", true
 	case ev.LogText != "":
 		ev.LogText = ""
 		return "no logs", true
-	case len(ev.SimilarFailures) > 0:
-		ev.SimilarFailures, ev.SimilarFailuresRollup = nil, ""
+	case len(ev.SimilarFailures) > 0 || ev.RecentOutcomes != "":
+		ev.SimilarFailures, ev.SimilarFailuresRollup, ev.RecentOutcomes = nil, "", ""
 		return "no similar failures", true
 	case len(ev.Steps) > 0:
 		ev.Steps = nil
@@ -256,11 +268,20 @@ func applyHardCap(ev *Evidence) {
 }
 
 // RenderState builds the JSON state for TypeSafe (spec §6 shape). Linked requirements are
-// never included. The drop ladder runs against the evidence's bound: few-shot examples go first,
-// one at a time, then the shared order; if the ladder is exhausted the hard cap truncates stack
-// then error, so the result is always within the bound. PromptMeta.ExamplesSent is how many
-// examples the returned state carries; the decider stamps the policy version from it.
+// never included. The drop ladder runs against the evidence's bound: the group's related
+// failures go first, then few-shot examples one at a time, then the shared order (logs, the
+// history block with recent_outcomes, steps, defects, requirements); if the ladder is exhausted
+// the hard cap truncates stack then error, so the result is always within the bound.
+// PromptMeta.ExamplesSent is how many examples the returned state carries; the decider stamps
+// the policy version from it.
 func RenderState(ev Evidence) (map[string]any, PromptMeta) {
+	state, meta, _ := renderState(ev)
+	return state, meta
+}
+
+// renderState is RenderState that also returns the evidence the state carries after the drop
+// ladder and any hard cap, so the decider asks its conditional questions about what was sent.
+func renderState(ev Evidence) (map[string]any, PromptMeta, Evidence) {
 	bound := ev.StateCap
 	if bound <= 0 {
 		bound = StateCharCap
@@ -270,7 +291,7 @@ func RenderState(ev Evidence) (map[string]any, PromptMeta) {
 		state := stateObject(ev)
 		b, _ := json.Marshal(state)
 		if len(b) <= bound {
-			return state, PromptMeta{TruncationPrefix: makePrefix(dropped), ExamplesSent: len(ev.Examples)}
+			return state, PromptMeta{TruncationPrefix: makePrefix(dropped), ExamplesSent: len(ev.Examples)}, ev
 		}
 		name, ok := dropNext(&ev)
 		if !ok {
@@ -278,7 +299,7 @@ func RenderState(ev Evidence) (map[string]any, PromptMeta) {
 			state = stateObject(ev)
 			b, _ = json.Marshal(state)
 			slog.Debug("failure-analysis: state hard-capped", "bytes", len(b))
-			return state, PromptMeta{TruncationPrefix: makePrefix(append(dropped, "hard cap")), ExamplesSent: len(ev.Examples)}
+			return state, PromptMeta{TruncationPrefix: makePrefix(append(dropped, "hard cap")), ExamplesSent: len(ev.Examples)}, ev
 		}
 		slog.Debug("failure-analysis: TypeSafe state field dropped", "field", name, "bytes", len(b))
 		dropped = appendOnce(dropped, name)
@@ -312,13 +333,23 @@ func stateObject(ev Evidence) map[string]any {
 	for _, d := range ev.LinkedDefects {
 		defects = append(defects, map[string]any{"key": d.Key, "status": d.Status, "summary": d.Summary})
 	}
+	history := map[string]any{"note": HistoryNote, "human_label_rollup": ev.SimilarFailuresRollup, "similar_failures": sims}
+	// Policy v7: the test's recent outcomes. Absent, not empty, when there are none.
+	if ev.RecentOutcomes != "" {
+		history["recent_outcomes"] = ev.RecentOutcomes
+	}
 	state := map[string]any{
 		"test": map[string]any{"name": ev.TestName, "categories": ev.Categories, "environment": ev.Env,
 			"browser": ev.Browser, "os": ev.OS, "app_version": ev.AppVersion, "steps": steps},
 		"failure": map[string]any{"failure_type": ev.FailureType, "error_message": ev.ErrorMessage,
 			"stack_trace_head": ev.StackTrace, "log_tail": ev.LogText},
-		"history":        map[string]any{"note": HistoryNote, "human_label_rollup": ev.SimilarFailuresRollup, "similar_failures": sims},
+		"history":        history,
 		"linked_defects": defects,
+	}
+	// Policy v7 (R6): the group's related failures, the lines the narrator will receive, so the
+	// injection question covers them. Absent for a group of one or a signature group.
+	if len(ev.GroupMembers) > 0 {
+		state["group"] = map[string]any{"related_failures": append([]string(nil), ev.GroupMembers...)}
 	}
 	// Past triage decisions (policy fa-verdict-v6). Absent, not empty, without examples, so a
 	// state with none is exactly the v5 state.

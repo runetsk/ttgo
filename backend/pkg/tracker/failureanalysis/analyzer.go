@@ -36,7 +36,8 @@ type AnalyzeContext struct {
 	Examples []TriageExample
 	// GroupMembers are the raw error messages of the other failures analyzed with this one as
 	// one group (the worker fills it). BuildEvidence redacts, caps and filters them for the
-	// "Related failures in this group" prompt block; the TypeSafe decision never sees them.
+	// "Related failures in this group" prompt block and the TypeSafe state's
+	// group.related_failures (policy v7, spec Wave 3 R6).
 	GroupMembers []string
 
 	PromptTemplate   string

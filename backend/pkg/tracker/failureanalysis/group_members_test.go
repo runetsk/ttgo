@@ -2,7 +2,6 @@ package failureanalysis
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"ttgo/pkg/tracker/llm"
@@ -133,22 +132,4 @@ func TestDecide_GenerativeDecisionPromptCarriesRelatedFailures(t *testing.T) {
 		require.Contains(t, prov.lastPrompt, "### Related failures in this group", name)
 		require.Contains(t, prov.lastPrompt, "<<<DATA socket hang up DATA>>>", name)
 	}
-}
-
-func TestDecide_TypeSafeInputIgnoresGroupMembers(t *testing.T) {
-	answer := func(typesafe.Request) (*typesafe.Response, error) {
-		return decisionResponse("product_bug", 0.95, 0.9, "product_bug", 0.9, 0.9), nil
-	}
-	plain, grouped := &fakeClient{fn: answer}, &fakeClient{fn: answer}
-	in := baseContext()
-	_, err := Decide(context.Background(), AnalyzeDeps{Decider: NewTypeSafeDecider(plain, "jev")}, in)
-	require.NoError(t, err)
-	in.GroupMembers = []string{"socket hang up", "connection reset by peer"}
-	_, err = Decide(context.Background(), AnalyzeDeps{Decider: NewTypeSafeDecider(grouped, "jev")}, in)
-	require.NoError(t, err)
-	a, err := json.Marshal(plain.calls[0].State)
-	require.NoError(t, err)
-	b, err := json.Marshal(grouped.calls[0].State)
-	require.NoError(t, err)
-	require.JSONEq(t, string(a), string(b), "the TypeSafe decision input is unchanged (spec §A4)")
 }
