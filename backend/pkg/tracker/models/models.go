@@ -162,6 +162,12 @@ func IsValidDefectType(s string) bool {
 	return s == "" || ValidDefectTypes[s]
 }
 
+// Who set a RunResult.DefectType (RunResult.DefectTypeSource); "" is the automatic default.
+const (
+	DefectTypeSourceAI    = "ai"    // failure-analysis auto-apply
+	DefectTypeSourceHuman = "human" // a person's explicit triage choice
+)
+
 // TestStep represents a single step in a test case.
 type TestStep struct {
 	ID             string `json:"id" gorm:"primaryKey"`
@@ -316,6 +322,13 @@ type RunResult struct {
 	// IsFailureStatus. Every other status forces "" (there is nothing to triage).
 	// Values: "to_investigate" | "product_bug" | "automation_bug" | "system_issue" | "" (not applicable)
 	DefectType string `json:"defect_type" gorm:"default:''"`
+	// DefectTypeSource says who set DefectType: DefectTypeSourceHuman = a person's explicit choice
+	// (single or bulk triage, Confirm); "" = the automatic "to_investigate" default, a non-failure
+	// clear, or a label from before the column existed; DefectTypeSourceAI = failure-analysis
+	// auto-apply. Every writer other than auto-apply sets it in the same update
+	// (store.HumanDefectTypeFields). An AI label never writes DecidedAt or the snapshot columns, so
+	// accuracy, few-shot examples and history labels never count it as a person's decision.
+	DefectTypeSource string `json:"defect_type_source" gorm:"column:defect_type_source;not null;default:''"`
 
 	// Snapshot of what the AI failure analysis suggested at the moment a human explicitly set
 	// DefectType. Written only on an explicit triage decision on a FAILING result (FAIL or ERROR)
@@ -355,6 +368,11 @@ type RunResult struct {
 	// the other snapshot columns.
 	SuggestedPolicyVersion string `json:"suggested_policy_version" gorm:"default:''"`
 	SuggestedIsClone       *bool  `json:"suggested_is_clone"`
+	// SuggestedAutoApplied records whether the triage write that produced the current decision
+	// replaced a label auto-apply had set (a Confirm, or a correction of an AI label). The
+	// auto-apply accuracy gate excludes those rows, so auto-apply is never graded on labels it
+	// showed people first. Written by every defect_type write (store.HumanDefectTypeFields).
+	SuggestedAutoApplied bool `json:"suggested_auto_applied" gorm:"column:suggested_auto_applied;not null;default:false"`
 
 	// DecidedAt is the instant the human triage decision above was recorded, written in UTC
 	// alongside the snapshot columns and NULL until a real decision lands.

@@ -651,7 +651,7 @@ func (s *Store) MarkRunRunningIfPending(runID string) (bool, error) {
 func (s *Store) UpdateRunResult(runID string, resultID string, updates interface{}) error {
 	return s.db.Model(&models.RunResult{}).
 		Where("id = ? AND test_run_id = ?", resultID, runID).
-		Updates(updates).Error
+		Updates(withDefectTypeSource(updates)).Error
 }
 
 // TriageRunResult is UpdateRunResult narrowed to a row that is STILL a failure, for the
@@ -670,7 +670,7 @@ func (s *Store) UpdateRunResult(runID string, resultID string, updates interface
 func (s *Store) TriageRunResult(runID string, resultID string, updates interface{}) (int64, error) {
 	res := s.db.Model(&models.RunResult{}).
 		Where("id = ? AND test_run_id = ? AND status IN ?", resultID, runID, models.FailureStatuses).
-		Updates(updates)
+		Updates(withDefectTypeSource(updates))
 	return res.RowsAffected, res.Error
 }
 
@@ -681,7 +681,7 @@ func (s *Store) TriageRunResult(runID string, resultID string, updates interface
 func (s *Store) BulkUpdateRunResults(runID string, resultIDs []string, updates map[string]interface{}) (int64, error) {
 	res := s.db.Model(&models.RunResult{}).
 		Where("id IN ? AND test_run_id = ?", resultIDs, runID).
-		Updates(updates)
+		Updates(withDefectTypeSource(updates))
 	return res.RowsAffected, res.Error
 }
 
@@ -697,7 +697,7 @@ func (s *Store) BulkUpdateRunResults(runID string, resultIDs []string, updates m
 func (s *Store) BulkTriageRunResults(runID string, resultIDs []string, updates map[string]interface{}) (int64, error) {
 	res := s.db.Model(&models.RunResult{}).
 		Where("id IN ? AND test_run_id = ? AND status IN ?", resultIDs, runID, models.FailureStatuses).
-		Updates(updates)
+		Updates(withDefectTypeSource(updates))
 	return res.RowsAffected, res.Error
 }
 
