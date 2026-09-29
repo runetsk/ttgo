@@ -46,9 +46,9 @@ func TestAssembleClassified_BuildsCasesFromRolesWithoutInventingSteps(t *testing
 	roles := []string{tN, tT, tP, tS, tS, tE, tE, tT, tS, tS, tE, tN}
 	got := AssembleClassified(lines, roles)
 	require.Equal(t, []models.GeneratedTestCase{
-		{Name: "Pay with a saved card", Description: "Preconditions: Precondition: user has a saved Visa", Steps: []models.GeneratedStep{
+		{Name: "Pay with a saved card", Description: "Preconditions: user has a saved Visa", Steps: []models.GeneratedStep{
 			{Action: "Open the checkout page"},
-			{Action: "Click Pay", ExpectedResult: "Payment form opens\nExpected: the order is confirmed\nAlso a receipt email arrives"},
+			{Action: "Click Pay", ExpectedResult: "Payment form opens\nthe order is confirmed\nAlso a receipt email arrives"},
 		}},
 		{Name: "Refund an order", Steps: []models.GeneratedStep{
 			{Action: "Open the order"},
@@ -63,7 +63,7 @@ func TestAssembleClassified_UntitledAndEmptyCases(t *testing.T) {
 		[]string{tE, tS, tT, tT})
 	require.Len(t, got, 1, "a title with neither steps nor preconditions is dropped")
 	require.Equal(t, "Imported test case 1", got[0].Name)
-	require.Equal(t, []models.GeneratedStep{{ExpectedResult: "Expected: a banner shows"}, {Action: "Click Save"}}, got[0].Steps)
+	require.Equal(t, []models.GeneratedStep{{ExpectedResult: "a banner shows"}, {Action: "Click Save"}}, got[0].Steps)
 
 	require.Empty(t, AssembleClassified([]string{"a", "b"}, []string{tN, tN}))
 	require.Empty(t, AssembleClassified([]string{"a"}, nil), "a line without a role is noise")

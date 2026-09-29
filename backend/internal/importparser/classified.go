@@ -32,6 +32,10 @@ func ImportLines(content string) (lines []string, truncated bool) {
 var (
 	leadMarker = regexp.MustCompile(`(?i)^\s*(?:#{1,6}\s*|\*\*|(?:step|test\s*case|tc)\s*[-#]?\d*\s*[:.)-]\s*|\d+[.)]\s*|[-*•]\s+)`)
 	trailBold  = regexp.MustCompile(`\*\*\s*$`)
+	// The role's own label, which the assembly already expresses ("Preconditions: …", the
+	// expected-result field).
+	preLabel = regexp.MustCompile(`(?i)^(?:pre-?conditions?|setup|given)\s*[:\-–]\s*`)
+	expLabel = regexp.MustCompile(`(?i)^(?:expected(?:\s+results?)?|then|result)\s*[:\-–]\s*`)
 )
 
 // stripMarkers removes a line's list, numbering and heading markers ("1.", "-", "Step 3:", "##").
@@ -93,7 +97,7 @@ func AssembleClassified(lines, roles []string) []models.GeneratedTestCase {
 			if cur == nil {
 				open("")
 			}
-			pre = append(pre, text)
+			pre = append(pre, preLabel.ReplaceAllString(text, ""))
 		case failureanalysis.ImportRoleStep:
 			if cur == nil {
 				open("")
@@ -103,6 +107,7 @@ func AssembleClassified(lines, roles []string) []models.GeneratedTestCase {
 			if cur == nil {
 				open("")
 			}
+			text = expLabel.ReplaceAllString(text, "")
 			if n := len(cur.Steps); n > 0 {
 				if cur.Steps[n-1].ExpectedResult == "" {
 					cur.Steps[n-1].ExpectedResult = text
