@@ -378,3 +378,50 @@ func TestResolver_CarriesFewShotExamples(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, d.FewShotExamples, "read live, like every other setting")
 }
+
+func TestResolver_TransferCheckFollowsSemanticGroupingAndDedup(t *testing.T) {
+	s := resolverStore(t)
+	enableTypeSafe(t, s, false)
+	r := newAnalyzeDepsResolver(s, nil)
+
+	d, err := r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.NotNil(t, d.Transfer)
+	require.NotNil(t, d.Semantic)
+	require.Equal(t, d.Semantic.Client, d.Transfer.Client, "the same client, so the same rate limiter")
+	require.Equal(t, d.Semantic.Model, d.Transfer.Model)
+
+	explain, err := r(failureanalysis.TriggerExplain)
+	require.NoError(t, err)
+	require.NotNil(t, explain.Transfer, "Explain on a group runs the check too")
+
+	auto, err := r(models.RunAnalysisJobTriggerAutoOnDone)
+	require.NoError(t, err)
+	require.Nil(t, auto.Transfer, "automatic jobs need the per-vendor consent flag")
+
+	cur, err := s.GetFailureAnalysisSettings()
+	require.NoError(t, err)
+	cur.DedupEnabled = false
+	_, err = s.UpdateFailureAnalysisSettings(cur)
+	require.NoError(t, err)
+	d, err = r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Nil(t, d.Transfer, "no dedup, no clones to check")
+
+	cur.DedupEnabled = true
+	_, err = s.UpdateFailureAnalysisSettings(cur)
+	require.NoError(t, err)
+	off := false
+	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{SemanticDedupEnabled: &off})
+	require.NoError(t, err)
+	d, err = r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Nil(t, d.Semantic)
+	require.Nil(t, d.Transfer, "only semantic grouping creates the clones the check is about")
+
+	_, err = s.UpdateTypeSafeSettings(models.TypeSafeSettingsPatch{SemanticDedupEnabled: new(bool), ClearAPIKey: true})
+	require.NoError(t, err)
+	d, err = r(models.RunAnalysisJobTriggerManual)
+	require.NoError(t, err)
+	require.Nil(t, d.Transfer, "no key, no check")
+}

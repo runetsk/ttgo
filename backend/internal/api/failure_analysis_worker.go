@@ -63,6 +63,8 @@ const llmKeyUnreadableReason = "the default LLM provider's stored key can't be d
 //     to decide fails resolution with the key error;
 //   - every TypeSafe client is built through tsf, the process-wide factory with the shared
 //     rate limiter (nil = unlimited, for tests);
+//   - the narrative transfer check (JobDeps.Transfer) shares semantic grouping's client and is on
+//     only with semantic grouping and dedup;
 //   - an attached LLM is wrapped with the per-call timeout and optional hedge (applyLLMLatency);
 //   - the settings page draws these rules (frontend/src/utils/analysisFlow.js); change both together.
 func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failureanalysis.DepsResolver {
@@ -134,11 +136,16 @@ func newAnalyzeDepsResolver(st *store.Store, tsf *typesafe.ClientFactory) failur
 			applyLLMLatency(st, &deps)
 		}
 		// Few-shot examples go to both engines. They are optional context, so a settings read
-		// failure leaves them off instead of failing the job.
+		// failure leaves them off instead of failing the job. The transfer check only has
+		// semantic clones to look at when dedup is on.
 		if fa, err := st.GetFailureAnalysisSettings(); err != nil {
-			slog.Warn("failure-analysis: settings could not be loaded; no few-shot examples", "err", err)
+			slog.Warn("failure-analysis: settings could not be loaded; no few-shot examples and no transfer check", "err", err)
+			deps.Transfer = nil
 		} else {
 			deps.FewShotExamples = fa.FewShotExamples
+			if !fa.DedupEnabled {
+				deps.Transfer = nil
+			}
 		}
 		return deps, nil
 	}
@@ -232,6 +239,9 @@ func resolveTypeSafe(st *store.Store, tsf *typesafe.ClientFactory, trigger strin
 	deps.Pricing.TypeSafePerMTok = ts.PricePerMTok
 	if ts.SemanticDedupEnabled {
 		deps.Semantic = &failureanalysis.SemanticDeps{Client: client, Model: ts.Model}
+		// The narrative transfer check asks the same client about the semantic clones grouping
+		// creates; newAnalyzeDepsResolver drops it again when dedup is off.
+		deps.Transfer = &failureanalysis.TransferDeps{Client: client, Model: ts.Model}
 	}
 	if !ts.VerdictEngineEnabled {
 		return nil
