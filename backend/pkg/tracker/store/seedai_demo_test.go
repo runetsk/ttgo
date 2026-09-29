@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"ttgo/pkg/tracker/failureanalysis"
 	"ttgo/pkg/tracker/models"
 )
 
@@ -305,7 +306,7 @@ func TestAIDemoGroundTruth_CoversTheNewTemplates(t *testing.T) {
 		assert.Equal(t, exp[1], g.ExpectedDefect, key)
 		assert.NotEmpty(t, g.SampleMessage, key)
 	}
-	assert.Len(t, gt, 26, "14 original + 12 new templates")
+	assert.Len(t, gt, 29, "14 original + 12 new + 3 wave-4 near-duplicate templates")
 }
 
 func TestAIDataset_LogWordsPlantsRealisticLogsOnFailures(t *testing.T) {
@@ -339,4 +340,36 @@ func TestAIDataset_LogWordsPlantsRealisticLogsOnFailures(t *testing.T) {
 			break
 		}
 	}
+}
+
+// Wave 4: the near-duplicate templates reach the semantic pass as candidate pairs — a different
+// signature (plain dedup does not merge them), the same failure_type block, and enough shared
+// words to clear the lexical prefilter — and they fail in the latest run.
+func TestAIDemo_NearDuplicatesAreSemanticCandidates(t *testing.T) {
+	gt, err := AIDemoGroundTruth()
+	require.NoError(t, err)
+	byKey := map[string]AISeedGroundTruth{}
+	for _, g := range gt {
+		byKey[g.TemplateKey] = g
+	}
+	for _, pair := range [][2]string{
+		{"payment-gateway-503-alt", "payment-gateway-503"},
+		{"order-summary-null-alt", "order-summary-null-typeerror"},
+		{"refund-service-503", "payment-gateway-503"},     // the lookalike with another cause
+		{"refund-service-503", "payment-gateway-503-alt"}, // ...and against the alt
+	} {
+		a, b := byKey[pair[0]], byKey[pair[1]]
+		require.NotEmpty(t, a.TemplateKey, pair[0])
+		require.NotEmpty(t, b.TemplateKey, pair[1])
+		require.Equal(t, a.FailureType, b.FailureType, "%v: one block", pair)
+		require.NotEqual(t, failureanalysis.Signature(a.FailureType, a.SampleMessage),
+			failureanalysis.Signature(b.FailureType, b.SampleMessage), "%v: separate signature groups", pair)
+		require.GreaterOrEqual(t, failureanalysis.LexicalSimilarity(a.SampleMessage, b.SampleMessage), failureanalysis.LexicalMin,
+			"%v: a candidate pair", pair)
+		require.Positive(t, a.LatestRunRows, "%s fails in the latest run", pair[0])
+	}
+	require.Equal(t, "payment-gateway-503", byKey["payment-gateway-503-alt"].SameCauseAs)
+	require.Equal(t, "order-summary-null-typeerror", byKey["order-summary-null-alt"].SameCauseAs)
+	require.Equal(t, "", byKey["refund-service-503"].SameCauseAs)
+	require.NotEqual(t, byKey["refund-service-503"].ExpectedVerdict, byKey["payment-gateway-503"].ExpectedVerdict)
 }

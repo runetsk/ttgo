@@ -535,3 +535,9 @@ func clusterCompleteLinkage(groups []*FailureGroup, asked map[[2]string]float64)
 	})
 	return out
 }
+
+// LexicalSimilarity is the prefilter score of two error messages: the token Jaccard of their
+// normalized forms. Pairs below LexicalMin are never asked (seed tests use it).
+func LexicalSimilarity(a, b string) float64 {
+	return tokenJaccard(normalize(a), normalize(b))
+}

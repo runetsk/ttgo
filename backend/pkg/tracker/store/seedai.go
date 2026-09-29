@@ -77,8 +77,11 @@ type AISeedGroundTruth struct {
 	ExpectedVerdict string `json:"expected_verdict"`
 	ExpectedDefect  string `json:"expected_defect_type"`
 	Scenario        string `json:"scenario"`
-	TotalRows       int    `json:"total_rows"`
-	LatestRunRows   int    `json:"latest_run_rows"`
+	// SameCauseAs names the template this one shares a cause with ("" = none): semantic grouping
+	// is right to merge the two, and wrong to merge it with anything else.
+	SameCauseAs   string `json:"same_cause_as"`
+	TotalRows     int    `json:"total_rows"`
+	LatestRunRows int    `json:"latest_run_rows"`
 }
 
 // AISeedResult reports what SeedAIFailureDataset created.
@@ -109,6 +112,7 @@ type aiTemplate struct {
 	endAge          int
 	caseStem        string // test-case display name stem for dedicated cases
 	verdictUnscored bool   // no verdict in the vocabulary fits this failure; the answer key grades its defect type only
+	sameCauseAs     string // another template with the same cause in other words: semantic grouping should merge them
 	message         func(rng *rand.Rand, ts string) string
 	stack           func(rng *rand.Rand, msg string) string
 }
@@ -436,6 +440,45 @@ var aiTemplates = []aiTemplate{
 			return jsStack(msg, "PaymentsApi", "authorize", "payments.spec.js", rng)
 		},
 	},
+	// Wave 4: near-duplicates for semantic grouping. Each "-alt" describes its original's cause in
+	// other words (a different signature, the same failure_type block, enough shared words to be a
+	// candidate pair); refund-service-503 looks like the gateway 503 but has another cause.
+	{
+		key: "payment-gateway-503-alt", failureType: "http",
+		verdict: models.VerdictInfrastructure, status: models.StatusError,
+		scenario: aiScenPersistent, cases: 3, startAge: 1, endAge: 0,
+		caseStem:    "Payments — capture a pre-authorized card",
+		sameCauseAs: "payment-gateway-503",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("Payment capture failed: sandbox-gateway.pay.example unavailable (HTTP 503), circuit breaker open for incident PAY-%04d", 1000+rng.IntN(9000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "PaymentsApi", "capture", "payments.spec.js", rng)
+		},
+	},
+	{
+		key: "order-summary-null-alt", failureType: "exception",
+		verdict: models.VerdictProductBug, status: models.StatusFail,
+		scenario: aiScenPersistent, cases: 3, startAge: 6, endAge: 0,
+		caseStem:    "Orders — summary lists the order status",
+		sameCauseAs: "order-summary-null-typeerror",
+		message: func(_ *rand.Rand, _ string) string {
+			return "TypeError: order summary is null, so OrderSummary.render could not read the order status (static/js/OrderSummary.4f2c1a.js:88:21) in the browser console"
+		},
+		stack: func(rng *rand.Rand, msg string) string { return appStack(msg, "OrderSummary", "render", rng) },
+	},
+	{
+		key: "refund-service-503", failureType: "http",
+		verdict: models.VerdictEnvironment, status: models.StatusError,
+		scenario: aiScenPersistent, cases: 2, startAge: 1, endAge: 0,
+		caseStem: "Payments — refund a captured card",
+		message: func(rng *rand.Rand, _ string) string {
+			return fmt.Sprintf("POST /api/v1/payments/refund returned 503 Service Unavailable: refund-service.pay.example is in a scheduled maintenance window (change OPS-%04d)", 1000+rng.IntN(9000))
+		},
+		stack: func(rng *rand.Rand, msg string) string {
+			return jsStack(msg, "PaymentsApi", "refund", "payments.spec.js", rng)
+		},
+	},
 }
 
 var aiAreas = [...]string{"Checkout", "Payments", "Profile", "Search", "Inventory", "Reports", "Auth", "Notifications"}
@@ -590,6 +633,7 @@ func buildAIFailureDataset(cfg AISeedConfig) (aiDataset, AISeedResult, error) {
 			TemplateKey: t.key, FailureType: t.failureType,
 			SampleMessage:   t.message(rand.New(rand.NewPCG(cfg.Seed, 7)), now.UTC().Format("2006-01-02T15:04:05Z")),
 			ExpectedVerdict: t.scoredVerdict(), ExpectedDefect: t.expectedDefect(), Scenario: t.scenario,
+			SameCauseAs: t.sameCauseAs,
 		}
 	}
 
