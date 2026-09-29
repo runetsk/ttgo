@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { toast } from './toast';
 import { isBudgetConflict, withBudgetConfirm } from './utils/aiCost.js';
+import { explainParams, isInjectionConflict, withInjectionConfirm } from './utils/analysisSignals.js';
 
 const api = axios.create({
     baseURL: '/api',
@@ -23,9 +24,11 @@ api.interceptors.response.use(
             return Promise.reject(error);
         }
 
-        // A soft-budget 409 on a budget-aware call becomes a confirmation, not a toast.
+        // A soft-budget 409 on a budget-aware call, and the prompt-injection 409 on an
+        // injection-aware Explain, become confirmations, not toasts.
         const budgetQuestion = error.config?._budgetAware && isBudgetConflict(error);
-        if (!error.config?._silent && !budgetQuestion) {
+        const injectionQuestion = error.config?._injectionAware && isInjectionConflict(error);
+        if (!error.config?._silent && !budgetQuestion && !injectionQuestion) {
             const message =
                 error?.response?.data?.error ||
                 error?.message ||
@@ -521,10 +524,18 @@ export const analyzeRunResult = (runResultId) =>
         });
 
 // Explain asks the default LLM for the explanation a stored TypeSafe decision lacks; it
-// resolves with the same analysis, its decision unchanged.
-export const explainAnalysis = (runResultId, analysisId) =>
-    withBudgetConfirm((ack) => api.post(`/run-results/${runResultId}/analyses/${analysisId}/explain`, undefined, budgetConfig(ack)), confirmBudget)
-        .then(r => r.data);
+// resolves with the same analysis, its decision unchanged. opts.scope 'result' explains a grouped
+// result on its own evidence (its copied explanation may not fit it). opts.overrideInjection sends
+// a failure flagged for possible prompt injection after the user confirmed. When the server asks
+// for that override itself (409; Explain this result checks the clone's own evidence first), the
+// same question is asked here and the request resent once.
+const confirmInjection = (message) => window.confirm(message);
+export const explainAnalysis = (runResultId, analysisId, opts = {}) =>
+    withInjectionConfirm((o) => withBudgetConfirm((ack) => {
+        const cfg = budgetConfig(ack);
+        return api.post(`/run-results/${runResultId}/analyses/${analysisId}/explain`, undefined,
+            { ...cfg, _injectionAware: true, params: { ...(cfg.params || {}), ...explainParams(o) } });
+    }, confirmBudget), opts, confirmInjection).then(r => r.data);
 
 export const listRunResultAnalyses = (runResultId) =>
     api.get(`/run-results/${runResultId}/analyses`).then(r => r.data);

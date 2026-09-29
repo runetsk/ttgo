@@ -10,6 +10,7 @@ import { STATUS_COLORS as STATUS_DOT_COLORS } from '../utils/statusColors';
 import { isManualStepResults } from '../utils/stepResults';
 import { isFailureStatus } from '../utils/resultStatus';
 import { analysisMetaParts, narrativeNotice, groupingNote, isFailedAnalysis, failureHeading, failureMessage, failureAdvice, explainAction, takeoverNote, isPendingNarrative, analysisFromEvent, mergeAnalysisList } from '../utils/analysisMeta.js';
+import { signalChips, isInjectionFlagged, fitNote, explainRequest } from '../utils/analysisSignals.js';
 import SafeHTML from './shared/SafeHTML';
 import { toast } from '../toast';
 
@@ -199,7 +200,7 @@ const RunResultDetail = ({ result, attempts }) => {
                                         <span style={{ marginLeft: 6, verticalAlign: 'middle' }}>
                                             <AIVerdictBadge verdict={analyses[0].verdict} confidence={analyses[0].confidence} dedupGroup={!!analyses[0].dedup_group_key}
                                                 engine={analyses[0].engine} modelName={analyses[0].model_name} confidenceScore={analyses[0].confidence_score}
-                                                failed={isFailedAnalysis(analyses[0])} errorCategory={analyses[0].error_category} narrativeStatus={analyses[0].narrative_status} />
+                                                failed={isFailedAnalysis(analyses[0])} errorCategory={analyses[0].error_category} narrativeStatus={analyses[0].narrative_status} signals={analyses[0].signals} />
                                         </span>
                                     )}
                                 </button>
@@ -284,13 +285,18 @@ const RunResultDetail = ({ result, attempts }) => {
                                         }
                                     }}
                                     reAnalyzing={analyzing}
-                                    onExplain={async (a) => {
+                                    onExplain={async (a, { scope = '' } = {}) => {
+                                        // A failure flagged for possible prompt injection goes to the
+                                        // LLM only after the user confirms (override_injection=true).
+                                        const req = explainRequest(a, { scope }, (message) => window.confirm(message));
+                                        if (!req) return;
                                         setExplaining(true);
                                         try {
-                                            const row = await explainAnalysis(activeResult.id, a.id);
+                                            const row = await explainAnalysis(activeResult.id, a.id, req);
                                             setAnalyses((prev) => mergeAnalysisList(prev, row));
                                         } catch {
-                                            // toasted by the API interceptor (409: already being explained)
+                                            // toasted by the API interceptor (409: already being explained, or not a
+                                            // mismatched clone); a declined injection question stays quiet
                                         } finally {
                                             setExplaining(false);
                                         }
@@ -555,6 +561,14 @@ const cardActionBtn = {
     display: 'inline-flex', alignItems: 'center', gap: 6,
 };
 
+// Signal chips on the analysis card. --aig-tone-*-fg are defined for both themes.
+const signalChipBase = { padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' };
+const SIGNAL_TONES = {
+    danger: { color: 'var(--aig-tone-red-fg)', background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.35)' },
+    warn: { color: 'var(--aig-tone-amber-fg)', background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)' },
+    info: { color: 'var(--aig-tone-indigo-fg)', background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.25)' },
+};
+
 function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explaining, versions, selectedVersion, onSelectVersion }) {
     const [showRationale, setShowRationale] = useState(false);
     if (!analysis) return null;
@@ -562,14 +576,20 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
     const failed = isFailedAnalysis(analysis);
     const action = explainAction(analysis);
     const pending = isPendingNarrative(analysis);
+    const flagged = isInjectionFlagged(analysis);
+    const chips = signalChips(analysis);
+    const fit = fitNote(analysis);
     // A decision without an explanation, or one whose explanation is still being written: one
     // notice instead of empty Summary and Next-action boxes. An unreadable explanation keeps its
     // raw text under Rationale.
     const compact = pending || (!!action && analysis.narrative_status !== 'unparseable');
     const noticeTone = pending
         ? { background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.22)' }
-        : { background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)' };
-    const reason = analysis.narrative_status === 'unavailable' ? analysis.summary : null;
+        : flagged
+            ? { background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.3)' }
+            : { background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)' };
+    // A flagged row's stored summary repeats the notice, so it is not shown again as the reason.
+    const reason = analysis.narrative_status === 'unavailable' && !flagged ? analysis.summary : null;
     const takeover = takeoverNote(analysis);
     const hasNextAction = !!(analysis.next_action && analysis.next_action.trim() && analysis.next_action.trim() !== '—');
     const hasRationale = !!(analysis.rationale && analysis.rationale.trim() && analysis.rationale.trim() !== '—');
@@ -581,7 +601,7 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                     <AIVerdictBadge verdict={analysis.verdict} confidence={analysis.confidence} dedupGroup={!!analysis.dedup_group_key}
                         engine={analysis.engine} modelName={analysis.model_name} confidenceScore={analysis.confidence_score}
-                        failed={failed} errorCategory={analysis.error_category} narrativeStatus={analysis.narrative_status} />
+                        failed={failed} errorCategory={analysis.error_category} narrativeStatus={analysis.narrative_status} signals={analysis.signals} />
                     {groupingNote(analysis) && (
                         <span title={groupingNote(analysis)} style={{ color: 'var(--text-secondary)', fontSize: 11 }} data-testid="analysis-grouping-note">
                             ↳ {groupingNote(analysis)}
@@ -599,16 +619,50 @@ function AIAnalysisCard({ analysis, onReAnalyze, reAnalyzing, onExplain, explain
                 </div>
             </div>
 
+            {chips.length > 0 && (
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} data-testid="analysis-signals">
+                    {chips.map((c) => (
+                        <span key={c.key} title={c.title} data-testid={`analysis-signal-${c.key}`} data-tone={c.tone}
+                            style={{ ...signalChipBase, ...SIGNAL_TONES[c.tone] }}>
+                            {c.tone === 'danger' ? '⚠ ' : ''}{c.label}
+                        </span>
+                    ))}
+                </div>
+            )}
+
             {takeover && (
                 <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }} data-testid="analysis-takeover-note">
                     ↳ {takeover}
                 </div>
             )}
 
+            {fit && (
+                // A grouped result whose copied explanation TypeSafe rated below 50% for it, or one
+                // already explained on its own evidence.
+                <div data-testid="analysis-fit-note" data-state={fit.state} style={{
+                    ...(fit.state === 'mismatch'
+                        ? { background: 'rgba(234,179,8,0.08)', border: '1px solid rgba(234,179,8,0.3)' }
+                        : { background: 'rgba(99,102,241,0.06)', border: '1px solid rgba(99,102,241,0.22)' }),
+                    borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)',
+                    display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8,
+                }}>
+                    <div>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{fit.text}</span>
+                        {fit.detail && <div style={{ marginTop: 4, fontSize: '0.78rem' }}>{fit.detail}</div>}
+                    </div>
+                    {fit.canExplain && onExplain && (
+                        <button onClick={() => onExplain(analysis, { scope: 'result' })} disabled={explaining} data-testid="analysis-explain-result"
+                            style={{ ...cardActionBtn, cursor: explaining ? 'wait' : 'pointer', opacity: explaining ? 0.6 : 1 }}>
+                            {explaining ? 'Explaining…' : fit.action}
+                        </button>
+                    )}
+                </div>
+            )}
+
             {narrativeNotice(analysis) && (
                 // The button sits under the text, not at the far end of the row: the detail panel is as
                 // wide as the results grid, which can run well past the viewport.
-                <div style={{ ...noticeTone, borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }} data-testid="analysis-narrative-notice" data-status={pending ? 'pending' : analysis.narrative_status}>
+                <div style={{ ...noticeTone, borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 8 }} data-testid="analysis-narrative-notice" data-status={pending ? 'pending' : flagged ? 'injection' : analysis.narrative_status}>
                     <div>
                         {narrativeNotice(analysis)}
                         {reason && <div style={{ marginTop: 4, fontSize: '0.78rem' }} data-testid="analysis-narrative-reason">{reason}</div>}

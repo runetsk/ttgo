@@ -1,5 +1,6 @@
 import React from 'react';
 import { badgeTitle, failureHeading } from '../utils/analysisMeta.js';
+import { isInjectionFlagged } from '../utils/analysisSignals.js';
 
 const COLORS = {
     product_bug:    { bg: '#3d2020', fg: '#ff9d9d' },
@@ -23,7 +24,7 @@ const CONF_SHORT = { low: 'low', medium: 'med', high: 'high' };
 
 // failed: the attempt made no decision, so there is no verdict to show (its stored "unknown" is
 // a placeholder, not TypeSafe's or the LLM's answer).
-export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine, modelName, confidenceScore, failed, errorCategory, narrativeStatus, style }) {
+export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine, modelName, confidenceScore, failed, errorCategory, narrativeStatus, signals, style }) {
     if (failed) {
         return (
             <span title={failureHeading({ error_category: errorCategory })} data-testid="ai-verdict-failed" style={{
@@ -35,7 +36,8 @@ export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine
         );
     }
     const color = COLORS[verdict] || COLORS.unknown;
-    const title = badgeTitle({ engine, model_name: modelName, confidence_score: confidenceScore, narrative_status: narrativeStatus });
+    const title = badgeTitle({ engine, model_name: modelName, confidence_score: confidenceScore, narrative_status: narrativeStatus, signals });
+    const flagged = isInjectionFlagged({ signals });
     return (
         <span title={title} style={{
             background: color.bg, color: color.fg,
@@ -45,6 +47,7 @@ export default function AIVerdictBadge({ verdict, confidence, dedupGroup, engine
             {LABELS[verdict] || verdict}
             {confidence ? ` · ${CONF_SHORT[confidence] || confidence}` : ''}
             {dedupGroup ? <span style={{ marginLeft: 6, opacity: 0.7 }}>↳</span> : null}
+            {flagged ? <span data-testid="ai-verdict-injection" aria-label="Possible prompt injection" style={{ marginLeft: 6, color: '#fca5a5', fontWeight: 700 }}>⚠</span> : null}
         </span>
     );
 }

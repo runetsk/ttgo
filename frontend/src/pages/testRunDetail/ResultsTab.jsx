@@ -1113,6 +1113,7 @@ function AIVerdictCell({ result, analysis, onAnalyze }) {
             failed={isFailedAnalysis(analysis)}
             errorCategory={analysis.error_category}
             narrativeStatus={analysis.narrative_status}
+            signals={analysis.signals}
         />
     );
 }
