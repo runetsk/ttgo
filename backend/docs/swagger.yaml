@@ -1,5 +1,53 @@
 basePath: /api
 definitions:
+  internal_api_ai.DefectAssistRequest:
+    properties:
+      description:
+        type: string
+      error_message:
+        type: string
+      run_result_id:
+        type: string
+      test_case_id:
+        type: string
+      title:
+        type: string
+    type: object
+  internal_api_ai.DefectAssistResponse:
+    properties:
+      duplicates:
+        items:
+          $ref: '#/definitions/internal_api_ai.DefectDuplicate'
+        type: array
+      severity:
+        $ref: '#/definitions/internal_api_ai.DefectSeveritySuggestion'
+    type: object
+  internal_api_ai.DefectDuplicate:
+    properties:
+      defect_id:
+        type: string
+      external_key:
+        type: string
+      p_same:
+        type: number
+      severity:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  internal_api_ai.DefectSeveritySuggestion:
+    properties:
+      confidence:
+        type: number
+      probabilities:
+        additionalProperties:
+          type: number
+        type: object
+      value:
+        type: string
+    type: object
   internal_api_ai.SemanticMergeView:
     properties:
       can_split:
@@ -45,6 +93,54 @@ definitions:
       remembered_from:
         type: string
       source:
+        type: string
+    type: object
+  ttgo_internal_api_ai.DefectAssistRequest:
+    properties:
+      description:
+        type: string
+      error_message:
+        type: string
+      run_result_id:
+        type: string
+      test_case_id:
+        type: string
+      title:
+        type: string
+    type: object
+  ttgo_internal_api_ai.DefectAssistResponse:
+    properties:
+      duplicates:
+        items:
+          $ref: '#/definitions/ttgo_internal_api_ai.DefectDuplicate'
+        type: array
+      severity:
+        $ref: '#/definitions/ttgo_internal_api_ai.DefectSeveritySuggestion'
+    type: object
+  ttgo_internal_api_ai.DefectDuplicate:
+    properties:
+      defect_id:
+        type: string
+      external_key:
+        type: string
+      p_same:
+        type: number
+      severity:
+        type: string
+      status:
+        type: string
+      title:
+        type: string
+    type: object
+  ttgo_internal_api_ai.DefectSeveritySuggestion:
+    properties:
+      confidence:
+        type: number
+      probabilities:
+        additionalProperties:
+          type: number
+        type: object
+      value:
         type: string
     type: object
   ttgo_internal_api_ai.SemanticMergeView:
@@ -1283,10 +1379,16 @@ definitions:
         type: string
       clear_api_key:
         type: boolean
+      defect_assist_enabled:
+        type: boolean
+      draft_review_enabled:
+        type: boolean
       enabled:
         type: boolean
       escalate_below_pct:
         type: integer
+      import_structure_enabled:
+        type: boolean
       llm_fallback_enabled:
         type: boolean
       model:
@@ -1295,6 +1397,8 @@ definitions:
         type: boolean
       price_per_mtok:
         type: number
+      search_rerank_enabled:
+        type: boolean
       semantic_dedup_enabled:
         type: boolean
       timeout_seconds:
@@ -1313,12 +1417,18 @@ definitions:
         type: string
       created_at:
         type: string
+      defect_assist_enabled:
+        type: boolean
+      draft_review_enabled:
+        type: boolean
       enabled:
         type: boolean
       escalate_below_pct:
         type: integer
       id:
         type: string
+      import_structure_enabled:
+        type: boolean
       llm_fallback_enabled:
         type: boolean
       model:
@@ -1327,6 +1437,8 @@ definitions:
         type: boolean
       price_per_mtok:
         type: number
+      search_rerank_enabled:
+        type: boolean
       semantic_dedup_enabled:
         type: boolean
       timeout_seconds:
@@ -2134,6 +2246,26 @@ paths:
       summary: AI failure-analysis accuracy
       tags:
       - ai-failure-analysis
+  /ai/typesafe/features:
+    get:
+      description: 'For each use of TypeSafe.ai outside failure analysis (import structure
+        recovery, AI-draft review, defect assist, search re-ranking): whether it would
+        run now — AI features on, TypeSafe.ai enabled with a usable key, and the use''s
+        own switch on. The UI shows a TypeSafe control only when its use is available.'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            additionalProperties:
+              type: boolean
+            type: object
+      security:
+      - BearerAuth: []
+      summary: TypeSafe.ai uses available now
+      tags:
+      - ai
   /analytics/flaky:
     get:
       description: Returns tests ranked by status-switch percentage
@@ -3439,6 +3571,50 @@ paths:
       security:
       - BearerAuth: []
       summary: List a defect's affected test cases
+      tags:
+      - defects
+  /defects/assist:
+    post:
+      consumes:
+      - application/json
+      description: 'For a defect being written: TypeSafe.ai suggests its severity
+        (critical, major, minor, trivial, with probabilities) and compares it with
+        up to 10 open defects — the test case''s own, then those whose titles share
+        words — returning the ones at least 70% likely to describe the same problem,
+        most likely first. Nothing is saved. 409 when defect assist is unavailable
+        (AI or TypeSafe.ai off, no key, or its switch off), 400 without a title.'
+      parameters:
+      - description: The defect being written
+        in: body
+        name: body
+        required: true
+        schema:
+          $ref: '#/definitions/ttgo_internal_api_ai.DefectAssistRequest'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/ttgo_internal_api_ai.DefectAssistResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Conflict
+          schema:
+            additionalProperties: true
+            type: object
+        "502":
+          description: Bad Gateway
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Defect assist (TypeSafe.ai)
       tags:
       - defects
   /defects/bulk-update:
@@ -6497,6 +6673,11 @@ paths:
         in: query
         name: offset
         type: integer
+      - description: Re-rank the first page with TypeSafe.ai when its search re-ranking
+          is on (results then carry relevance; the response says reranked)
+        in: query
+        name: rerank
+        type: boolean
       produces:
       - application/json
       responses:

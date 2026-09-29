@@ -847,6 +847,34 @@ const docTemplate = `{
                 }
             }
         },
+        "/ai/typesafe/features": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "For each use of TypeSafe.ai outside failure analysis (import structure recovery, AI-draft review, defect assist, search re-ranking): whether it would run now — AI features on, TypeSafe.ai enabled with a usable key, and the use's own switch on. The UI shows a TypeSafe control only when its use is available.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai"
+                ],
+                "summary": "TypeSafe.ai uses available now",
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "boolean"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/analytics/flaky": {
             "get": {
                 "description": "Returns tests ranked by status-switch percentage",
@@ -2681,6 +2709,66 @@ const docTemplate = `{
                                     "type": "string"
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        },
+        "/defects/assist": {
+            "post": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "For a defect being written: TypeSafe.ai suggests its severity (critical, major, minor, trivial, with probabilities) and compares it with up to 10 open defects — the test case's own, then those whose titles share words — returning the ones at least 70% likely to describe the same problem, most likely first. Nothing is saved. 409 when defect assist is unavailable (AI or TypeSafe.ai off, no key, or its switch off), 400 without a title.",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "defects"
+                ],
+                "summary": "Defect assist (TypeSafe.ai)",
+                "parameters": [
+                    {
+                        "description": "The defect being written",
+                        "name": "body",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_internal_api_ai.DefectAssistRequest"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_internal_api_ai.DefectAssistResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "502": {
+                        "description": "Bad Gateway",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
                         }
                     }
                 }
@@ -7396,6 +7484,12 @@ const docTemplate = `{
                         "description": "Number of results to skip",
                         "name": "offset",
                         "in": "query"
+                    },
+                    {
+                        "type": "boolean",
+                        "description": "Re-rank the first page with TypeSafe.ai when its search re-ranking is on (results then carry relevance; the response says reranked)",
+                        "name": "rerank",
+                        "in": "query"
                     }
                 ],
                 "responses": {
@@ -9733,6 +9827,80 @@ const docTemplate = `{
         }
     },
     "definitions": {
+        "internal_api_ai.DefectAssistRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "run_result_id": {
+                    "type": "string"
+                },
+                "test_case_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_ai.DefectAssistResponse": {
+            "type": "object",
+            "properties": {
+                "duplicates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/internal_api_ai.DefectDuplicate"
+                    }
+                },
+                "severity": {
+                    "$ref": "#/definitions/internal_api_ai.DefectSeveritySuggestion"
+                }
+            }
+        },
+        "internal_api_ai.DefectDuplicate": {
+            "type": "object",
+            "properties": {
+                "defect_id": {
+                    "type": "string"
+                },
+                "external_key": {
+                    "type": "string"
+                },
+                "p_same": {
+                    "type": "number"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_api_ai.DefectSeveritySuggestion": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "number"
+                },
+                "probabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "value": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_api_ai.SemanticMergeView": {
             "type": "object",
             "properties": {
@@ -9801,6 +9969,80 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "source": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_internal_api_ai.DefectAssistRequest": {
+            "type": "object",
+            "properties": {
+                "description": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "run_result_id": {
+                    "type": "string"
+                },
+                "test_case_id": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_internal_api_ai.DefectAssistResponse": {
+            "type": "object",
+            "properties": {
+                "duplicates": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/ttgo_internal_api_ai.DefectDuplicate"
+                    }
+                },
+                "severity": {
+                    "$ref": "#/definitions/ttgo_internal_api_ai.DefectSeveritySuggestion"
+                }
+            }
+        },
+        "ttgo_internal_api_ai.DefectDuplicate": {
+            "type": "object",
+            "properties": {
+                "defect_id": {
+                    "type": "string"
+                },
+                "external_key": {
+                    "type": "string"
+                },
+                "p_same": {
+                    "type": "number"
+                },
+                "severity": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "title": {
+                    "type": "string"
+                }
+            }
+        },
+        "ttgo_internal_api_ai.DefectSeveritySuggestion": {
+            "type": "object",
+            "properties": {
+                "confidence": {
+                    "type": "number"
+                },
+                "probabilities": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "number"
+                    }
+                },
+                "value": {
                     "type": "string"
                 }
             }
@@ -11407,11 +11649,20 @@ const docTemplate = `{
                 "clear_api_key": {
                     "type": "boolean"
                 },
+                "defect_assist_enabled": {
+                    "type": "boolean"
+                },
+                "draft_review_enabled": {
+                    "type": "boolean"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
                 "escalate_below_pct": {
                     "type": "integer"
+                },
+                "import_structure_enabled": {
+                    "type": "boolean"
                 },
                 "llm_fallback_enabled": {
                     "type": "boolean"
@@ -11424,6 +11675,9 @@ const docTemplate = `{
                 },
                 "price_per_mtok": {
                     "type": "number"
+                },
+                "search_rerank_enabled": {
+                    "type": "boolean"
                 },
                 "semantic_dedup_enabled": {
                     "type": "boolean"
@@ -11452,6 +11706,12 @@ const docTemplate = `{
                 "created_at": {
                     "type": "string"
                 },
+                "defect_assist_enabled": {
+                    "type": "boolean"
+                },
+                "draft_review_enabled": {
+                    "type": "boolean"
+                },
                 "enabled": {
                     "type": "boolean"
                 },
@@ -11460,6 +11720,9 @@ const docTemplate = `{
                 },
                 "id": {
                     "type": "string"
+                },
+                "import_structure_enabled": {
+                    "type": "boolean"
                 },
                 "llm_fallback_enabled": {
                     "type": "boolean"
@@ -11472,6 +11735,9 @@ const docTemplate = `{
                 },
                 "price_per_mtok": {
                     "type": "number"
+                },
+                "search_rerank_enabled": {
+                    "type": "boolean"
                 },
                 "semantic_dedup_enabled": {
                     "type": "boolean"
