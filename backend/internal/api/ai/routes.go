@@ -54,6 +54,8 @@ func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddlewar
 	api.HandleFunc("POST /runs/{id}/analysis-job/retry-failed", requireAuth("write", h.RetryFailedRunAnalysis))
 	api.HandleFunc("GET /runs/{id}/analysis-jobs", requireAuth("read", h.ListRunAnalysisJobs))
 	api.HandleFunc("POST /run-results/{id}/analyses/{analysisId}/explain", requireAuth("write", h.ExplainAnalysis))
+	api.HandleFunc("GET /run-results/{id}/analyses/{analysisId}/semantic", requireAuth("read", h.GetSemanticMerge))
+	api.HandleFunc("POST /run-results/{id}/analyses/{analysisId}/split", requireAuth("write", h.SplitSemanticMerge))
 	api.HandleFunc("GET /ai/failure-analysis/accuracy", requireAuth("read", h.GetFailureAnalysisAccuracy))
 	api.HandleFunc("GET /settings/ai-failure-analysis", requireAuth("read", h.GetFailureAnalysisSettings))
 	api.HandleFunc("GET /settings/ai-failure-analysis/auto-apply-gate", requireAuth("read", h.GetAutoApplyGate))
