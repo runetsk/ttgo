@@ -447,13 +447,14 @@ func (h *Handler) RetryFailedRunAnalysis(w http.ResponseWriter, r *http.Request)
 // explained once, through its representative, and every clone receives the same explanation.
 //
 // @Summary      Explain a stored TypeSafe decision
-// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true, and when TypeSafe flagged the failure as a possible prompt injection (signals.injection at or above 0.80) and override_injection is not true. A failed LLM call leaves the explanation unavailable with its reason (200).
+// @Description  Asks the default LLM to explain a TypeSafe decision whose explanation was skipped, unavailable or unreadable, and stores the explanation on the same analysis and on every analysis grouped with it. On a grouped (clone) analysis the group's representative is explained, from the representative's evidence, and the clicked analysis is returned refreshed. The verdict, confidence and suggestion do not change. 409 when the analysis is not an unexplained TypeSafe decision, when its group is already being explained or explained, when AI is switched off, or no LLM provider is available. 409 also when the explanation's estimated cost exceeds a soft AI budget and acknowledge_budget is not true, and when TypeSafe flagged the failure as a possible prompt injection (signals.injection at or above 0.80) and override_injection is not true. A failed LLM call leaves the explanation unavailable with its reason (200). With scope=result on a semantically grouped result whose narrative_fit is below 0.5 (the group's explanation may not apply to it), or whose own explanation failed, only that result is explained, from its own evidence and without the group's members: TypeSafe.ai first checks that evidence for prompt injection (409 on a hit, or when TypeSafe.ai cannot check it, unless override_injection=true), and only the checked evidence is sent to the LLM. The row gets narrative_split=true, keeps its narrative_fit and its decision, and later group explanations leave it alone. 409 when the row is not such a result, is already being explained or already has its own explanation. After a group is explained, TypeSafe.ai checks the explanation against each semantic clone and stores narrative_fit on it.
 // @Tags         ai-failure-analysis
 // @Produce      json
 // @Param        id          path      string  true  "Run result ID"
 // @Param        analysisId  path      string  true  "Analysis ID"
 // @Param        acknowledge_budget  query  bool  false  "Proceed although a soft AI budget would be exceeded"
-// @Param        override_injection  query  bool  false  "Send a failure flagged as a possible prompt injection to the LLM anyway"
+// @Param        override_injection  query  bool  false  "Send the failure to the LLM although prompt injection is suspected or could not be checked"
+// @Param        scope  query  string  false  "result: explain only this grouped result, from its own evidence"
 // @Success      200  {object}  models.RunResultAnalysis
 // @Failure      404  {object}  map[string]interface{}
 // @Failure      409  {object}  map[string]interface{}
@@ -480,6 +481,11 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 	}
 	if a.Engine != models.AnalysisEngineTypeSafe || a.Failed() {
 		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "only a stored TypeSafe decision can be explained; re-analyze instead"})
+		return
+	}
+	// Before the group's injection guard: the clone's own evidence is checked on that path.
+	if r.URL.Query().Get("scope") == "result" {
+		h.explainOwnResult(w, r, result, a)
 		return
 	}
 	// A clone carries its group's decision: the group is explained through its representative —
@@ -584,11 +590,23 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 		const why = "the request was cancelled before the explanation was written"
 		delta.NarrativeStatus, delta.Reason, delta.Summary, delta.NextAction = models.NarrativeStatusUnavailable, why, "AI narrative unavailable: "+why, ""
 	}
+	// The narrative transfer check (spec §2): does this explanation also describe each semantic
+	// clone's failure? On the request's context, so a dropped request leaves the fits unset.
+	if delta.NarrativeStatus == models.NarrativeStatusOK && deps.Transfer != nil {
+		clones, lerr := h.store.ListSemanticCloneResults(rep.ID)
+		if lerr != nil {
+			slog.Warn("failure-analysis: semantic clones not loaded; no transfer check", "analysis_id", rep.ID, "err", lerr)
+		} else if len(clones) > 0 {
+			in := failureanalysis.TransferInputFor(delta, repResult, clones, settings.RedactionEnabled)
+			delta = failureanalysis.RunTransferCheck(callCtx, *deps.Transfer, in, delta)
+		}
+	}
 	// Dated now, not on the analysis: explaining an old decision is this month's spend. Recorded
 	// whether or not the apply below wins: the call was billed.
 	refs := failureanalysis.RefsFor(repResult.TestRunID, rep.JobID, rep)
 	h.recordCosts(failureanalysis.NarrationCostEvents(delta, deps, refs, models.AnalysisCostKindExplain))
 	h.recordCosts(failureanalysis.HedgeCostEvents(calls.HedgePromptTokens(), deps, refs))
+	h.recordCosts(failureanalysis.TransferCostEvents(delta.TransferTokens, delta.TransferModel, deps, refs))
 	changed, err := h.store.ApplyNarration(rep.ID, delta)
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
@@ -609,6 +627,146 @@ func (h *Handler) ExplainAnalysis(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpx.JSON(w, http.StatusOK, clicked)
+}
+
+// ownConflict is why a row cannot be explained on its own now, or "".
+func ownConflict(a *models.RunResultAnalysis) string {
+	mismatched := a.SourceAnalysisID != nil && a.NarrativeFit != nil && *a.NarrativeFit < failureanalysis.TransferFitMin
+	switch {
+	case !mismatched:
+		return "only a grouped result whose group explanation may not apply can be explained on its own"
+	case a.NarrativeStatus == models.NarrativeStatusPending:
+		return "this result is already being explained"
+	case a.NarrativeSplit && a.NarrativeStatus == models.NarrativeStatusOK:
+		return "this result already has its own explanation"
+	}
+	return ""
+}
+
+// explainOwnResult writes an explanation for one semantic clone from its own evidence, when the
+// group's explanation may not apply to it (narrative_fit below failureanalysis.TransferFitMin), or
+// retries a failed own explanation (spec §2.1, R9). TypeSafe first checks the clone's own evidence
+// for prompt injection; a hit, a failed check or no TypeSafe needs override_injection=true. Then the
+// row alone is claimed, narrated without group members from the checked blocks, and applied.
+func (h *Handler) explainOwnResult(w http.ResponseWriter, r *http.Request, result *models.RunResult, a *models.RunResultAnalysis) {
+	override := false
+	if v := r.URL.Query().Get("override_injection"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			httpx.Error(w, http.StatusBadRequest, fmt.Errorf("override_injection must be true or false"))
+			return
+		}
+		override = b
+	}
+	if msg := ownConflict(a); msg != "" {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": msg})
+		return
+	}
+	if h.resolveDeps == nil {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "failure analysis is not configured"})
+		return
+	}
+	deps, err := h.resolveDeps(failureanalysis.TriggerExplain)
+	if errors.Is(err, failureanalysis.ErrAIDisabled) {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "AI features are switched off"})
+		return
+	}
+	if err != nil {
+		httpx.Error(w, http.StatusBadGateway, err)
+		return
+	}
+	if deps.Narrative == nil {
+		reason := deps.LLMUnavailableReason
+		if reason == "" {
+			reason = "no default LLM provider is configured"
+		}
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "cannot explain: " + reason})
+		return
+	}
+	if warn := h.checkAnalysisBudget(failureanalysis.EstimateOwnExplainUSD(deps), 1, acknowledgedBudget(r)); warn != nil {
+		httpx.JSON(w, http.StatusConflict, warn)
+		return
+	}
+	settings, err := h.store.GetFailureAnalysisSettings()
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	actx := failureanalysis.BuildContext(h.store, result, time.Now(), deps.FewShotExamples)
+	actx.RedactionEnabled = settings.RedactionEnabled
+	actx.PromptTemplate = settings.PromptTemplate
+	actx.ProviderModel = deps.NarrativeModel
+
+	// R9: the clone's own evidence was never checked (the group's decision checked the
+	// representative's). Ask TypeSafe first; it is billed to this row whatever happens next.
+	refs := failureanalysis.RefsFor(result.TestRunID, a.JobID, a)
+	check, cerr := failureanalysis.OwnEvidenceCheck{}, failureanalysis.ErrOwnCheckUnavailable
+	if deps.Transfer != nil {
+		check, cerr = failureanalysis.CheckOwnEvidence(r.Context(), *deps.Transfer, actx)
+	}
+	h.recordCosts(failureanalysis.OwnCheckCostEvents(check, deps, refs))
+	switch {
+	case cerr != nil && !override:
+		slog.Info("failure-analysis: own evidence not checked for prompt injection", "analysis_id", a.ID, "err", cerr)
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "TypeSafe.ai could not check this result's evidence for prompt injection: confirm to send it to the LLM unchecked"})
+		return
+	case cerr == nil && check.Signals.InjectionFlagged() && !override:
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "possible prompt injection: confirm to send this failure to the LLM"})
+		return
+	}
+
+	claimed, err := h.store.ClaimOwnExplanation(a.ID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !claimed {
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": "this result is already being explained"})
+		return
+	}
+	if pending, _ := h.store.GetAnalysisByID(a.ID); pending != nil {
+		h.broadcastAnalysisUpdated([]*models.RunResultAnalysis{pending}, result.TestRunID)
+	}
+
+	decided := failureanalysis.DecidedFromRow(a)
+	// Narrate sends only the blocks the check covered (R8 filter on decided.Signals). With an
+	// override and no check there are no signals: the clone's own evidence goes unfiltered, and
+	// this path never sends group members.
+	decided.Signals = ""
+	if cerr == nil {
+		decided.Signals = failureanalysis.SignalsJSON(check.Signals)
+	}
+	callCtx, calls := callstats.WithCounter(r.Context())
+	delta, ok := failureanalysis.Narrate(callCtx, deps.Analyze(), actx, decided)
+	if !ok { // cannot happen for a claimed decision; never leave the claim pending
+		delta = failureanalysis.NarrationDelta{NarrativeStatus: models.NarrativeStatusUnavailable, Reason: "nothing to explain",
+			Summary: "AI narrative unavailable: nothing to explain"}
+	}
+	if delta.Reason == "cancelled" {
+		const why = "the request was cancelled before the explanation was written"
+		delta.NarrativeStatus, delta.Reason, delta.Summary, delta.NextAction = models.NarrativeStatusUnavailable, why, "AI narrative unavailable: "+why, ""
+	}
+	h.recordCosts(failureanalysis.NarrationCostEvents(delta, deps, refs, models.AnalysisCostKindExplain))
+	h.recordCosts(failureanalysis.HedgeCostEvents(calls.HedgePromptTokens(), deps, refs))
+	row, err := h.store.ApplyOwnNarration(a.ID, delta)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	if row == nil {
+		slog.Info("failure-analysis: own explanation not applied; the row was settled while it was written", "analysis_id", a.ID)
+		if row, err = h.store.GetAnalysisByID(a.ID); err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		if row == nil {
+			httpx.Error(w, http.StatusNotFound, fmt.Errorf("analysis not found"))
+			return
+		}
+	} else {
+		h.broadcastAnalysisUpdated([]*models.RunResultAnalysis{row}, result.TestRunID)
+	}
+	httpx.JSON(w, http.StatusOK, row)
 }
 
 // broadcastAnalysisUpdated republishes analyses whose explanation changed.
