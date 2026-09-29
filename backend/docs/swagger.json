@@ -7608,7 +7608,7 @@
                         "BearerAuth": []
                     }
                 ],
-                "description": "parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). few_shot_examples (0..8, 0 = off: how many past human triage decisions accompany each analyzed failure) also keeps its stored value when omitted. 400 with the reason when a value is out of range.",
+                "description": "parallel_groups, llm_call_timeout_seconds and hedge_after_seconds may be omitted to keep their stored values. llm_call_timeout_seconds bounds each LLM request (10–120 s; a call cut by it is retried once); hedge_after_seconds sends an identical second request after that many seconds without an answer (0 = off, else at least 3 and below the call timeout). few_shot_examples (0..8, 0 = off: how many past human triage decisions accompany each analyzed failure) also keeps its stored value when omitted. 400 with the reason when a value is out of range. auto_apply_defect_type (default false) lets a direct TypeSafe decision at or above auto_apply_min_confidence (percent, 80–99, default 95) label its failing results itself; both keep their stored values when omitted. Switching auto_apply_defect_type on is refused with 409 {error, gate} while the accuracy gate is closed.",
                 "consumes": [
                     "application/json"
                 ],
@@ -7621,7 +7621,7 @@
                 "summary": "Update failure-analysis settings",
                 "parameters": [
                     {
-                        "description": "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds, few_shot_examples",
+                        "description": "enabled_on_completion, max_analyses_per_run (1–500), parallel_groups, dedup_enabled, redaction_enabled, prompt_template, llm_call_timeout_seconds, hedge_after_seconds, few_shot_examples, auto_apply_defect_type, auto_apply_min_confidence",
                         "name": "body",
                         "in": "body",
                         "required": true,
@@ -7635,6 +7635,53 @@
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/ttgo_pkg_tracker_models.AIFailureAnalysisSettings"
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "409": {
+                        "description": "Conflict",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
+        "/settings/ai-failure-analysis/auto-apply-gate": {
+            "get": {
+                "security": [
+                    {
+                        "BearerAuth": []
+                    }
+                ],
+                "description": "How TypeSafe's direct defect-type suggestions at or above a confidence fared against human triage over the last 90 days (decision time), counting only decisions made under the current question policies (policies): graded, agreed, accuracy and open (at least min_graded graded and min_accuracy agreement). min_confidence (percent, 80–99) defaults to the stored auto_apply_min_confidence.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "ai-failure-analysis"
+                ],
+                "summary": "Auto-apply accuracy gate",
+                "parameters": [
+                    {
+                        "type": "integer",
+                        "description": "Confidence threshold in percent (80-99)",
+                        "name": "min_confidence",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/ttgo_pkg_tracker_failureanalysis.GateStatus"
                         }
                     },
                     "400": {
@@ -9564,6 +9611,41 @@
         }
     },
     "definitions": {
+        "ttgo_pkg_tracker_failureanalysis.GateStatus": {
+            "type": "object",
+            "properties": {
+                "accuracy": {
+                    "type": "number"
+                },
+                "agreed": {
+                    "type": "integer"
+                },
+                "graded": {
+                    "type": "integer"
+                },
+                "min_accuracy": {
+                    "type": "number"
+                },
+                "min_confidence": {
+                    "type": "number"
+                },
+                "min_graded": {
+                    "type": "integer"
+                },
+                "open": {
+                    "type": "boolean"
+                },
+                "policies": {
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "window_days": {
+                    "type": "integer"
+                }
+            }
+        },
         "ttgo_pkg_tracker_models.AIBudgetSettings": {
             "type": "object",
             "properties": {
@@ -9588,6 +9670,13 @@
         "ttgo_pkg_tracker_models.AIFailureAnalysisSettings": {
             "type": "object",
             "properties": {
+                "auto_apply_defect_type": {
+                    "description": "AutoApplyDefectType lets a qualifying TypeSafe decision label its failing results by itself\n(spec §3); AutoApplyMinConfidence is the defect-type confidence it needs, in percent\n(MinAutoApplyMinConfidence..MaxAutoApplyMinConfidence). Switching it on is refused while\nthe accuracy gate is closed; a job that finds the gate closed pauses instead.",
+                    "type": "boolean"
+                },
+                "auto_apply_min_confidence": {
+                    "type": "integer"
+                },
                 "created_at": {
                     "type": "string"
                 },
@@ -10351,6 +10440,13 @@
                 "analyzed_count": {
                     "type": "integer"
                 },
+                "auto_applied": {
+                    "type": "integer"
+                },
+                "auto_apply_state": {
+                    "description": "Auto-apply (spec §3.4): the state the job resolved when it started (off, on, or paused while\nthe accuracy gate was closed; \"\" = not started yet or from before auto-apply) and how many\nresults it labelled by itself.",
+                    "type": "string"
+                },
                 "call_timeouts": {
                     "description": "LLM tail latency (spec §B): calls cut by the per-call timeout, hedged second requests\nsent, and hedges that answered first.",
                     "type": "integer"
@@ -10567,6 +10663,10 @@
                     "description": "DefectType classifies the failure reason for failing results — FAIL and ERROR alike, per\nIsFailureStatus. Every other status forces \"\" (there is nothing to triage).\nValues: \"to_investigate\" | \"product_bug\" | \"automation_bug\" | \"system_issue\" | \"\" (not applicable)",
                     "type": "string"
                 },
+                "defect_type_source": {
+                    "description": "DefectTypeSource says who set DefectType: DefectTypeSourceHuman = a person's explicit choice\n(single or bulk triage, Confirm); \"\" = the automatic \"to_investigate\" default, a non-failure\nclear, or a label from before the column existed; DefectTypeSourceAI = failure-analysis\nauto-apply. Every writer other than auto-apply sets it in the same update\n(store.HumanDefectTypeFields). An AI label never writes DecidedAt or the snapshot columns, so\naccuracy, few-shot examples and history labels never count it as a person's decision.",
+                    "type": "string"
+                },
                 "duration_ms": {
                     "description": "Timing",
                     "type": "integer"
@@ -10622,6 +10722,10 @@
                     "items": {
                         "type": "integer"
                     }
+                },
+                "suggested_auto_applied": {
+                    "description": "SuggestedAutoApplied records whether the triage write that produced the current decision\nreplaced a label auto-apply had set (a Confirm, or a correction of an AI label). The\nauto-apply accuracy gate excludes those rows, so auto-apply is never graded on labels it\nshowed people first. Written by every defect_type write (store.HumanDefectTypeFields).",
+                    "type": "boolean"
                 },
                 "suggested_confidence": {
                     "type": "string"
