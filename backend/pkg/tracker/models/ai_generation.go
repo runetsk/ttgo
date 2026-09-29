@@ -156,6 +156,31 @@ func ValidateLLMLatency(callTimeoutSeconds, hedgeAfterSeconds int) error {
 	return nil
 }
 
+// Auto-apply of the suggested defect type (spec §3.2): off by default; the threshold is the
+// defect-type confidence, in percent, a TypeSafe decision needs before it labels results itself.
+const (
+	DefaultAutoApplyMinConfidence = 95
+	MinAutoApplyMinConfidence     = 80
+	MaxAutoApplyMinConfidence     = 99
+)
+
+// ValidateAutoApplyMinConfidence checks the auto-apply threshold; the error text is the settings
+// API's 400 message.
+func ValidateAutoApplyMinConfidence(pct int) error {
+	if pct < MinAutoApplyMinConfidence || pct > MaxAutoApplyMinConfidence {
+		return fmt.Errorf("auto_apply_min_confidence must be between %d and %d", MinAutoApplyMinConfidence, MaxAutoApplyMinConfidence)
+	}
+	return nil
+}
+
+// What an analysis job recorded about auto-apply when it started: off (the setting is off or
+// nothing TypeSafe could decide), on, or paused (the setting is on but the accuracy gate is closed).
+const (
+	AutoApplyStateOff    = "off"
+	AutoApplyStateOn     = "on"
+	AutoApplyStatePaused = "paused"
+)
+
 // AIFailureAnalysisSettings stores admin configuration for the AI failure-analysis feature.
 // Singleton pattern — single row with fixed ID "singleton".
 type AIFailureAnalysisSettings struct {

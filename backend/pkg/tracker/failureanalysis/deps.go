@@ -70,6 +70,12 @@ type JobDeps struct {
 	// HedgingOn: Narrative sends a hedged second request when the first is slow, so the
 	// worst-case estimate doubles its LLM part.
 	HedgingOn bool
+	// AutoApply is set when this job may label results with the suggested defect type by itself
+	// (spec §3.4): the setting is on, TypeSafe decides, and the accuracy gate was open when the
+	// job was resolved. nil = no AI labels (every stored analysis still resets earlier ones).
+	AutoApply *AutoApplyDeps
+	// AutoApplyState is what the job records: models.AutoApplyStateOff, On or Paused.
+	AutoApplyState string
 }
 
 // Analyze returns the analyzer-facing subset.
