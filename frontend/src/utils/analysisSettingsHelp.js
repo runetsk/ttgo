@@ -1,7 +1,7 @@
 // Plain-language explanations of the failure-analysis settings and steps, written from the server
-// code. One source for the cards' "What this does" toggles and the process diagram (a chip's
-// tooltip is `what`; "How this step works" uses STEP_HELP). Keys are the data-setting anchors:
-// ai.* (master switch), fa.* (AI Failure Analysis card), ts.* (TypeSafe.ai card), provider.default.
+// code. One source for each setting's ⓘ explanation and the process diagram (a chip's tooltip is
+// `what`; "How this step works" uses STEP_HELP). Keys are the data-setting anchors: ai.* (master
+// switch), fa.* (AI Failure Analysis card), ts.* (TypeSafe.ai card, on its own tab), provider.default.
 // When server behaviour changes (dedup normalization, redaction patterns, thresholds), update here.
 
 export const SETTING_HELP = {
@@ -85,7 +85,7 @@ export const SETTING_HELP = {
     },
     'ts.enabled': {
         title: 'Enable TypeSafe.ai',
-        what: 'Turns TypeSafe.ai on for the features switched on in its card.',
+        what: 'Turns TypeSafe.ai on for the features switched on below it, on the TypeSafe.ai tab.',
         off: 'Nothing is sent to TypeSafe.ai; its settings are kept.',
     },
     'ts.api_key': {

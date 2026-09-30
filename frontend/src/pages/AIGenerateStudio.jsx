@@ -250,7 +250,7 @@ export default function AIGenerateStudio() {
             )}
             {ai.providers.length === 0 && (
                 <StudioBanner tone="amber" icon={Icon.alert(13)}>
-                    No LLM providers configured. Add one in <Link to="/settings" style={{ color: AIC.indigoSoft, textDecoration: 'none', fontWeight: 500 }}>Settings → AI Test Generation</Link>.
+                    No LLM providers configured. Add one in <Link to="/settings#ai-test-generation" style={{ color: AIC.indigoSoft, textDecoration: 'none', fontWeight: 500 }}>Settings → AI → Providers</Link>.
                 </StudioBanner>
             )}
 

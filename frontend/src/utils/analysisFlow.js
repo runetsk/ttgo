@@ -1,4 +1,4 @@
-// Pure model of the failure-analysis process drawn on Settings → AI Generation. No React, no network.
+// Pure model of the failure-analysis process drawn on Settings → AI → Failure analysis. No React, no network.
 // Consumers: components/aiSettings/FailureAnalysisSection.jsx and AnalysisFlowDiagram.jsx.
 //
 // It ports the server's routing and must change with it:
