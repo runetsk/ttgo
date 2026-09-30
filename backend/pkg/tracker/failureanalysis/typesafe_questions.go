@@ -310,7 +310,7 @@ func transferQuestion(j int) typesafe.Question {
 			"failure":  j,
 		},
 		Criteria: map[string]any{
-			"true":  "The named failure shows the same failing operation and the same error condition that `explanation` describes, and the specifics the explanation states (endpoint, selector, component, asserted or observed value, error type) match what the named failure shows. Run identifiers, timestamps, and wording are incidental; a duration or identifier is not incidental when it is the asserted value or identifies the failing resource.",
+			"true":  "The named failure shows the same failing operation and the same error condition that `explanation` describes, and the specifics the explanation states (endpoint, selector, component, asserted or observed value, error type) match what the named failure shows. Run identifiers, timestamps, and wording are incidental; a duration or identifier is not incidental when it is the asserted value or identifies the failing resource. In `explanation` and the failures, `<N>` stands for any number of four or more digits (run, order, incident or request numbers), `<T>` for a timestamp and `<H>` for a memory address: values that differ between executions of the same failure, so they are incidental.",
 			"false": "The named failure shows a different operation, endpoint, selector, or component, a different error type or asserted value, contradicts a specific the explanation states, or does not show enough to tell. A redaction placeholder carries no information: it neither confirms nor contradicts a specific.",
 		},
 	}

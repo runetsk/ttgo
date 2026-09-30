@@ -86,11 +86,14 @@ func CheckTransfer(ctx context.Context, deps TransferDeps, in TransferInput) (Tr
 // the chunk's clones after it, each error one line capped at GroupMemberMsgCap and redacted when
 // redaction is on (as the narrator's member lines are).
 func transferRequest(model string, in TransferInput, chunk []TransferMember) typesafe.Request {
+	// Execution values (run, order, incident numbers, timestamps, addresses) read as <N>/<T>/<H> on
+	// both sides, so an explanation quoting the representative's incident number is not judged a
+	// mismatch for a clone with its own (backlog #33).
 	red := func(s string) string {
 		if in.Redact {
-			return Redact(s)
+			s = Redact(s)
 		}
-		return s
+		return normalizeValues(s)
 	}
 	member := func(i int, m TransferMember) map[string]any {
 		return map[string]any{

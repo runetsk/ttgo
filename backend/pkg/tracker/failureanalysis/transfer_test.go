@@ -211,3 +211,15 @@ func TestSemanticClonesAndTransferInputFor(t *testing.T) {
 		Representative: TransferMember{ResultID: "r0", TestName: "rep", ErrorMessage: "e0"},
 		Clones:         []TransferMember{{ResultID: "r2", TestName: "sem", ErrorMessage: "e2"}}, Redact: true}, in)
 }
+
+// Backlog #33: execution values read as placeholders on both sides of the transfer check.
+func TestTransferRequest_NormalizesExecutionValues(t *testing.T) {
+	in := TransferInput{Summary: "The gateway circuit is open (incident PAY-7200).",
+		Representative: TransferMember{ErrorMessage: "POST /api/pay returned 503 (incident PAY-7200)"}}
+	req := transferRequest("m", in, []TransferMember{{ErrorMessage: "POST /api/pay returned 503 (incident PAY-3549)"}})
+	st := req.State.(map[string]any)
+	require.Equal(t, "The gateway circuit is open (incident PAY-<N>).", st["explanation"].(map[string]any)["summary"])
+	fs := st["failures"].([]map[string]any)
+	require.Equal(t, fs[0]["error"], fs[1]["error"], "the two errors read the same")
+	require.Equal(t, "POST /api/pay returned 503 (incident PAY-<N>)", fs[1]["error"])
+}
