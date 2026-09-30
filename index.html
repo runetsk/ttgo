@@ -50,7 +50,8 @@
       "Analytics with flaky-test detection and run comparison",
       "Requirements traceability matrix",
       "AI test generation with your own LLM provider",
-      "AI failure analysis that classifies failing results, suggests a defect type and measures its own accuracy",
+      "AI failure triage that classifies failing results, suggests a defect type and measures its own accuracy",
+      "TypeSafe.ai decision engine for calibrated verdicts, semantic grouping of related failures and accuracy-gated automatic labels",
       "First-class CLI and documented REST API",
       "Real-time collaboration over WebSocket"
     ],
@@ -103,7 +104,7 @@
         "name": "Can TTGO triage test failures automatically?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. TTGO can classify each failing result with your own LLM — product bug, flaky test, environment, test data or infrastructure — grounded in that test's own recent failure history, its linked defects and how your team triaged it before. The verdict is offered as a suggested defect type you accept with one click or override; nothing is written automatically. TTGO then reports how often its suggestions matched your actual decisions, broken down by confidence, so you can judge whether to trust it."
+          "text": "Yes. TTGO classifies each failing result — product bug, flaky test, environment, test data or infrastructure — grounded in that test's own recent failure history, its linked defects and how your team triaged it before, and offers a suggested defect type you accept with one click or override. With TypeSafe.ai enabled, a calibrated decision model makes the call with a real confidence score in well under a second, merges failures that share a cause even when the error text differs, and flags failures that read like prompt injection; your own LLM writes the explanation, or decides when TypeSafe.ai is unsure. Without TypeSafe.ai, your LLM decides alone. TTGO reports how often its suggestions matched your actual decisions, by confidence and by engine, and it can set defect types automatically, an opt-in that stays closed until that measured accuracy reaches 95% over 50 triaged results."
         }
       }
     ]
@@ -207,7 +208,7 @@
         <div class="feature feature--rev reveal">
           <div class="feature__text">
             <h3>Run execution</h3>
-            <p>Snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. AI classifies each failure and suggests the defect type for one-click acceptance — never writing it for you — then reports how often its suggestions matched your decisions. Group results live by status, AI verdict or error signature.</p>
+            <p>Snapshot-based runs with per-result pass/fail, defect classification (product / automation / system), defect links, durations and comments. Group results live by status, AI verdict or error signature, and let AI triage the failures for you.</p>
           </div>
           <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/03-test-run-execution.png" alt="TTGO run execution — per-result pass/fail, defect classification and durations" loading="lazy" /></div></div>
         </div>
@@ -237,6 +238,15 @@
         </div>
 
         <div class="feature feature--rev reveal">
+          <div class="feature__text">
+            <h3>AI failure triage</h3>
+            <p>Every failing result gets a verdict — product bug, flaky test, environment, test data or infrastructure — and a defect type to accept in one click. With <strong>TypeSafe.ai</strong>, a calibrated decision model makes the call in well under a second, with a real confidence score; your own LLM writes the explanation, or steps in when it is unsure.</p>
+            <p>Failures that share a cause are merged even when the wording differs, repeats and known defects are recognized, prompt-injection attempts are flagged, and secrets are redacted before anything is sent. Once its measured accuracy on your own triage clears the bar, it can label new failures for you. TypeSafe.ai also structures messy imports, reviews AI drafts, assists with defects and re-ranks search.</p>
+          </div>
+          <div class="feature__shot"><div class="browser"><div class="browser__bar"><span></span><span></span><span></span></div><img src="images/08-ai-triage.png" alt="TTGO AI failure triage — a TypeSafe.ai verdict with confidence, 'Seen before' and known-defect signals, summary and next action" loading="lazy" /></div></div>
+        </div>
+
+        <div class="feature reveal">
           <div class="feature__text">
             <h3>AI test generation</h3>
             <p>Pick a requirement for context, describe what you want, and let your configured model draft test cases for review. Nothing is saved until you approve it — your key, your data.</p>
@@ -306,6 +316,7 @@
               <tr><th scope="row">Source-available / open source</th><td class="y c">✓</td><td class="n">✕</td><td class="n">✕</td><td class="n">✕</td><td class="y">✓</td><td class="n">✕</td></tr>
               <tr><th scope="row">Free to self-host (no per-seat license)</th><td class="y c">✓</td><td class="n">✕</td><td class="n">✕</td><td class="n">✕</td><td class="y">✓</td><td class="n">✕</td></tr>
               <tr><th scope="row">Built-in AI test generation</th><td class="y c">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="n">✕</td><td class="y">✓</td></tr>
+              <tr><th scope="row">Built-in AI failure triage</th><td class="y c">✓</td><td class="n">✕</td><td class="n">✕</td><td class="p">~</td><td class="n">✕</td><td class="p">~</td></tr>
               <tr><th scope="row">First-class CLI</th><td class="y c">✓</td><td class="y">✓</td><td class="n">✕</td><td class="n">✕</td><td class="p">~</td><td class="y">✓</td></tr>
               <tr><th scope="row">REST API</th><td class="y c">✓</td><td class="y">✓</td><td class="y">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td></tr>
               <tr><th scope="row">Webhooks / push notifications</th><td class="y c">✓</td><td class="y">✓</td><td class="p">~</td><td class="y">✓</td><td class="p">~</td><td class="p">~</td></tr>
@@ -315,7 +326,7 @@
           </table>
         </div>
         <p class="compare__legend"><span class="y">✓</span> yes &nbsp;·&nbsp; <span class="p">~</span> partial, paid-tier-only or caveated &nbsp;·&nbsp; <span class="n">✕</span> no</p>
-        <p class="compare__note">Competitor capabilities are summarized from public documentation as of mid-2026 and change frequently — verify current details with each vendor.</p>
+        <p class="compare__note">Competitor capabilities are summarized from public documentation as of 2026 and change frequently — verify current details with each vendor.</p>
       </div>
     </section>
 
