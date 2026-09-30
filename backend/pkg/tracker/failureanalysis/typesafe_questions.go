@@ -23,7 +23,7 @@ const (
 	// `examples` array (fa-verdict-v6 before Wave 3). Stamped per decision from the examples
 	// actually sent after the state's drop ladder, never from the setting.
 	PolicyVersionWithExamples = "fa-verdict-v8"
-	SemanticPolicyVersion     = "fa-semantic-v1" // same-cause question and grouping thresholds
+	SemanticPolicyVersion     = "fa-semantic-v2" // same-cause question and grouping thresholds; v2: normalized excerpts (backlog #33)
 )
 
 // PolicyVersionFor is the policy a decision is made under, given how many few-shot examples its
@@ -137,8 +137,8 @@ func sameCauseQuestion(a, b int) typesafe.Question {
 			"compare":  []int{a, b},
 		},
 		Criteria: map[string]any{
-			"true":  "Both excerpts name the same operation, endpoint, or component and the same error condition or assertion meaning. A difference is incidental only when it does not change the operation, the resource, the assertion, or the error condition: run identifiers, timestamps, memory addresses, and sentence wording are incidental; durations and identifiers are not incidental when they are the asserted value or identify the failing resource.",
-			"false": "The excerpts differ in something that carries the failure's meaning: a different asserted value, a different operation, endpoint, or component, a different error type, a different resource path when the path identifies what was being operated on, or one excerpt does not contain enough to tell. A redaction placeholder carries no information: two placeholders in the same position do not show that the underlying values match.",
+			"true":  "Both excerpts name the same operation, endpoint, or component and the same error condition or assertion meaning. A difference is incidental only when it does not change the operation, the resource, the assertion, or the error condition: run identifiers, timestamps, memory addresses, and sentence wording are incidental; durations and identifiers are not incidental when they are the asserted value or identify the failing resource. `error_message` and `stack_head` are normalized: `<N>` stands for any number of four or more digits (run, order, incident or request numbers), `<T>` for a timestamp and `<H>` for a memory address, so these placeholders mark values that differ between executions of the same failure and are incidental. The two failures may come from different tests: a different `test_name` alone does not make the failures different.",
+			"false": "The excerpts differ in something that carries the failure's meaning: a different asserted value, a different operation, endpoint, or component, a different error type, a different resource path when the path identifies what was being operated on, or one excerpt does not contain enough to tell. A redaction placeholder such as `<REDACTED>` carries no information: two in the same position do not show that the underlying values match.",
 		},
 	}
 }

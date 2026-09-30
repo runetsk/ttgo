@@ -154,3 +154,14 @@ func TestSemanticReport_SummaryJSON(t *testing.T) {
 	require.Equal(t, map[string]int{"blocks": 2, "candidates": 5, "asked": 3, "remembered": 1, "human_blocked": 1,
 		"merged": 2, "skipped": 0, "requests": 1}, got, "the pairs are stored as rows, not in the summary")
 }
+
+// Backlog #33 (fa-semantic-v2): the same-cause question reads the error as the signature does, so
+// execution-specific numbers do not make one failure look like two.
+func TestSemanticExcerpt_SendsTheNormalizedError(t *testing.T) {
+	g := grp("A", "http", "POST /api/pay returned 503 (incident PAY-5953) at 2026-09-29T10:00:00Z", time.Now(), 1)
+	g.Representative.StackTrace = "at pay (/home/ci/app/src/pay.js:12:3) 0x7ffe12"
+	ex := excerpt(g, false)
+	require.Equal(t, "POST /api/pay returned 503 (incident PAY-<N>) at <T>", ex["error_message"])
+	require.Equal(t, "at pay (/home/ci/app/src/pay.js:12:3) <H>", ex["stack_head"], "paths stay: they can name the endpoint or file")
+	require.Equal(t, "fa-semantic-v2", SemanticPolicyVersion)
+}

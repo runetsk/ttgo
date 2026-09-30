@@ -21,11 +21,16 @@ var (
 // that cosmetically-different but structurally-identical errors produce the
 // same Signature.
 func normalize(s string) string {
+	return strings.TrimSpace(rePathNonBase.ReplaceAllString(normalizeValues(s), "$1"))
+}
+
+// normalizeValues replaces only the values that identify one execution — timestamps, memory
+// addresses and numbers of four or more digits — and keeps paths, which can name the failing
+// endpoint or file. The semantic same-cause excerpt uses it (policy fa-semantic-v2).
+func normalizeValues(s string) string {
 	s = reTimestamp.ReplaceAllString(s, "<T>")
 	s = reHexAddr.ReplaceAllString(s, "<H>")
-	s = reNumericID.ReplaceAllString(s, "<N>")
-	s = rePathNonBase.ReplaceAllString(s, "$1")
-	return strings.TrimSpace(s)
+	return reNumericID.ReplaceAllString(s, "<N>")
 }
 
 // Signature is a deterministic hash of (failure_type, normalized error_message).

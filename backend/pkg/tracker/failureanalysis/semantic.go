@@ -288,12 +288,15 @@ func excerpt(g *FailureGroup, redact bool) map[string]any {
 		// The id is the group signature, a SHA-1 hash, and carries no failure text.
 		msg, stack, name, ftype = Redact(msg), Redact(stack), Redact(name), Redact(ftype)
 	}
+	// The error and stack go with execution values normalized (policy fa-semantic-v2, backlog
+	// #33): run, order and incident numbers, timestamps and addresses read as <N>/<T>/<H>, so two
+	// executions of one failure are not told apart by the values that identify an execution.
 	return map[string]any{
 		"id":            g.Key,
 		"test_name":     headRunes(name, TestNameCap),
 		"failure_type":  headRunes(ftype, EnvFieldCap),
-		"error_message": headRunes(msg, ExcerptErrorChars),
-		"stack_head":    headRunes(stack, ExcerptStackChars),
+		"error_message": headRunes(normalizeValues(msg), ExcerptErrorChars),
+		"stack_head":    headRunes(normalizeValues(stack), ExcerptStackChars),
 	}
 }
 
