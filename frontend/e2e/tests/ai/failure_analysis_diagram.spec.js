@@ -48,7 +48,10 @@ test.describe('Settings — failure-analysis process diagram', () => {
         await expect(explained).toContainText('Fake LLM (fake-1) writes the explanation.');
         await expect(page.getByTestId('analysis-flow-unsaved')).toHaveCount(0);
 
+        // The switch lives on the TypeSafe.ai tab; its draft reaches the diagram on this one.
+        await settingsPage.selectAITab('TypeSafe.ai');
         await page.getByTestId('typesafe-narrative_enabled').uncheck();
+        await settingsPage.selectAITab('Failure analysis');
         await expect(explained).toHaveAttribute('data-status', 'skip');
         await expect(explained).toContainText('No explanation; Explain on a result writes one on demand.');
         await expect(page.getByTestId('analysis-flow-unsaved')).toBeVisible();
@@ -70,7 +73,9 @@ test.describe('Settings — failure-analysis process diagram', () => {
         await page.getByTestId('fa-enabled_on_completion').check();
         await expect(settingsPage.flowDetail).toContainText('Nothing can analyze: the default LLM provider is not approved for automatic analysis, and TypeSafe.ai is not allowed on automatic analysis.');
 
+        await settingsPage.selectAITab('TypeSafe.ai');
         await page.getByTestId('typesafe-allow_auto_failure_analysis').check();
+        await settingsPage.selectAITab('Failure analysis');
         await expect(start).toHaveAttribute('data-status', 'run');
         await settingsPage.selectFlowStep('group');
         await expect(settingsPage.flowPart('group', 'semantic')).toHaveAttribute('data-status', 'run');
@@ -82,7 +87,9 @@ test.describe('Settings — failure-analysis process diagram', () => {
         await settingsPage.open();
         await settingsPage.openFailureAnalysis();
 
+        await settingsPage.selectAITab('TypeSafe.ai');
         await page.getByTestId('typesafe-clear-key').check();
+        await settingsPage.selectAITab('Failure analysis');
         await expect(settingsPage.flowStep('decide')).toHaveAttribute('data-status', 'warn');
         await expect(settingsPage.flowPart('decide', 'answers')).toHaveAttribute('data-status', 'skip');
         await expect(settingsPage.flowPart('decide', 'unavailable')).toContainText('Fake LLM (fake-1) decides and explains');

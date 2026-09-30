@@ -66,15 +66,20 @@ export class SettingsPage extends BasePage {
         await this.page.getByRole('button', { name: 'Save Configuration' }).click();
     }
 
-    // ── Settings → AI (header + tabs Providers / Prompts / Limits & budget / Failure analysis) ──
+    // ── Settings → AI (header + tabs Providers / Prompts / Limits & budget / Failure analysis / TypeSafe.ai) ──
     async openAISettings(tabLabel) {
         await this.page.getByRole('button', { name: 'AI', exact: true }).click();
-        if (tabLabel) await this.page.getByRole('tab', { name: tabLabel }).click();
+        if (tabLabel) await this.selectAITab(tabLabel);
     }
 
-    // ── TypeSafe.ai card (AI → Failure analysis) ────────────────────────────
+    // Switches tab on an AI settings page that is already open; drafts on every tab survive it.
+    async selectAITab(tabLabel) {
+        await this.page.getByRole('tab', { name: tabLabel }).click();
+    }
+
+    // ── TypeSafe.ai card (AI → TypeSafe.ai) ─────────────────────────────────
     async openTypeSafeCard() {
-        await this.openAISettings('Failure analysis');
+        await this.openAISettings('TypeSafe.ai');
         await this.page.getByTestId('typesafe-settings').scrollIntoViewIfNeeded();
     }
 

@@ -10,7 +10,7 @@ import {
     summarizeAccuracy, confidenceRows, verdictRows, engineRows,
     AGREEMENT_LABEL, AGREEMENT_TOOLTIP, ALL_VERSIONS, splitLabel, unknownNote, coverageRows, policyOptions,
 } from './aiSettings/accuracyFormat';
-import { ToggleCard, FieldRow, HelpToggle, SuffixInput } from './aiSettings/SettingsControls';
+import { ToggleCard, FieldGrid, CompactField, HelpLabel, SuffixInput } from './aiSettings/SettingsControls';
 import { cs } from './aiSettings/settingsControlStyles';
 import { SETTING_HELP } from '../utils/analysisSettingsHelp';
 import {
@@ -39,6 +39,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
     const [original, setOriginal] = useState(null);
     const [loadError, setLoadError] = useState(false);
     const [resetting, setResetting] = useState(false);
+    const [promptOpen, setPromptOpen] = useState(false);
 
     useEffect(() => {
         getFailureAnalysisSettings().then((s) => {
@@ -135,6 +136,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
     }
 
     const update = (patch) => setSettings((prev) => ({ ...prev, ...patch }));
+    const promptDirty = settings.prompt_template !== original?.prompt_template;
 
     const reset = async () => {
         setResetting(true);
@@ -166,7 +168,7 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
 
             <AccuracyPanel />
 
-            <div style={s.togglesGrid}>
+            <div style={cs.togglesGrid}>
                 <ToggleCard
                     icon={svgIcon(<polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />)}
                     iconColor="#14b8a6"
@@ -202,143 +204,152 @@ export default function AIFailureAnalysisSettings({ isAdmin, onStateChange }) {
                 />
             </div>
 
-            <FieldRow label="Max analyses per run" htmlFor="fa-max-analyses"
-                setting="fa.max_analyses_per_run" help={SETTING_HELP['fa.max_analyses_per_run']}
-                hint={errors.max_analyses_per_run
-                    ? <span style={cs.fieldError}>{errors.max_analyses_per_run}</span>
-                    : 'Cap on failure groups analyzed per run, largest first. Keeps cost bounded.'}>
-                <input id="fa-max-analyses" data-testid="fa-max-analyses" className="modern-input" type="number"
-                    min={MAX_ANALYSES_MIN} max={MAX_ANALYSES_MAX} disabled={locked}
-                    value={numberValue(settings.max_analyses_per_run)}
-                    onChange={(e) => update({ max_analyses_per_run: parseWholeNumber(e.target.value) })}
-                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
-            </FieldRow>
+            <div style={cs.groupTitle}>Limits</div>
+            <FieldGrid testId="fa-limits-grid">
+                <CompactField label="Max analyses per run" htmlFor="fa-max-analyses"
+                    setting="fa.max_analyses_per_run" help={SETTING_HELP['fa.max_analyses_per_run']}
+                    hint={errors.max_analyses_per_run
+                        ? <span style={cs.fieldError}>{errors.max_analyses_per_run}</span>
+                        : 'Cap on failure groups analyzed per run, largest first. Keeps cost bounded.'}>
+                    <SuffixInput id="fa-max-analyses" data-testid="fa-max-analyses"
+                        min={MAX_ANALYSES_MIN} max={MAX_ANALYSES_MAX} disabled={locked}
+                        value={numberValue(settings.max_analyses_per_run)}
+                        onChange={(e) => update({ max_analyses_per_run: parseWholeNumber(e.target.value) })} />
+                </CompactField>
 
-            <FieldRow label="Groups analyzed at once" htmlFor="fa-parallel-groups"
-                setting="fa.parallel_groups" help={SETTING_HELP['fa.parallel_groups']}
-                hint={errors.parallel_groups
-                    ? <span style={cs.fieldError}>{errors.parallel_groups}</span>
-                    : 'How many failure groups are analyzed side by side. Lower it if your LLM provider answers with rate-limit errors.'}>
-                <input id="fa-parallel-groups" data-testid="fa-parallel-groups" className="modern-input" type="number"
-                    min={PARALLEL_MIN} max={PARALLEL_MAX} disabled={locked}
-                    value={numberValue(settings.parallel_groups)}
-                    onChange={(e) => update({ parallel_groups: parseWholeNumber(e.target.value) })}
-                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
-            </FieldRow>
+                <CompactField label="Groups analyzed at once" htmlFor="fa-parallel-groups"
+                    setting="fa.parallel_groups" help={SETTING_HELP['fa.parallel_groups']}
+                    hint={errors.parallel_groups
+                        ? <span style={cs.fieldError}>{errors.parallel_groups}</span>
+                        : 'How many failure groups are analyzed side by side. Lower it if your LLM provider answers with rate-limit errors.'}>
+                    <SuffixInput id="fa-parallel-groups" data-testid="fa-parallel-groups"
+                        min={PARALLEL_MIN} max={PARALLEL_MAX} disabled={locked}
+                        value={numberValue(settings.parallel_groups)}
+                        onChange={(e) => update({ parallel_groups: parseWholeNumber(e.target.value) })} />
+                </CompactField>
 
-            <FieldRow label="LLM call timeout (s)" htmlFor="fa-llm-timeout"
-                setting="fa.llm_call_timeout_seconds" help={SETTING_HELP['fa.llm_call_timeout_seconds']}
-                hint={errors.llm_call_timeout_seconds
-                    ? <span style={cs.fieldError}>{errors.llm_call_timeout_seconds}</span>
-                    : 'How long one LLM request may take before it is cut off and sent again.'}>
-                <input id="fa-llm-timeout" data-testid="fa-llm-timeout" className="modern-input" type="number"
-                    min={LLM_TIMEOUT_MIN} max={LLM_TIMEOUT_MAX} disabled={locked}
-                    value={numberValue(settings.llm_call_timeout_seconds)}
-                    onChange={(e) => update({ llm_call_timeout_seconds: parseWholeNumber(e.target.value) })}
-                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
-            </FieldRow>
+                <CompactField label="Past triage examples" htmlFor="fa-few-shot"
+                    setting="fa.few_shot_examples" help={SETTING_HELP['fa.few_shot_examples']}
+                    hint={errors.few_shot_examples
+                        ? <span style={cs.fieldError}>{errors.few_shot_examples}</span>
+                        : 'Past failures people triaged, sent with each group as examples. 0 = off.'}>
+                    <SuffixInput id="fa-few-shot" data-testid="fa-few-shot"
+                        min={FEW_SHOT_MIN} max={FEW_SHOT_MAX} disabled={locked}
+                        value={numberValue(settings.few_shot_examples)}
+                        onChange={(e) => update({ few_shot_examples: parseWholeNumber(e.target.value) })} />
+                </CompactField>
 
-            <FieldRow label="Hedge slow LLM calls after (s)" htmlFor="fa-hedge-after"
-                setting="fa.hedge_after_seconds" help={SETTING_HELP['fa.hedge_after_seconds']}
-                hint={errors.hedge_after_seconds
-                    ? <span style={cs.fieldError}>{errors.hedge_after_seconds}</span>
-                    : '0 = off. After this long without an answer the same request is sent again and the first answer is used.'}>
-                <input id="fa-hedge-after" data-testid="fa-hedge-after" className="modern-input" type="number"
-                    min={0} max={hedgeMax(settings.llm_call_timeout_seconds)} disabled={locked}
-                    value={numberValue(settings.hedge_after_seconds)}
-                    onChange={(e) => update({ hedge_after_seconds: parseWholeNumber(e.target.value) })}
-                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
-            </FieldRow>
+                <CompactField label="LLM call timeout" htmlFor="fa-llm-timeout"
+                    setting="fa.llm_call_timeout_seconds" help={SETTING_HELP['fa.llm_call_timeout_seconds']}
+                    hint={errors.llm_call_timeout_seconds
+                        ? <span style={cs.fieldError}>{errors.llm_call_timeout_seconds}</span>
+                        : 'How long one LLM request may take before it is cut off and sent again.'}>
+                    <SuffixInput suffix="s" id="fa-llm-timeout" data-testid="fa-llm-timeout"
+                        min={LLM_TIMEOUT_MIN} max={LLM_TIMEOUT_MAX} disabled={locked}
+                        value={numberValue(settings.llm_call_timeout_seconds)}
+                        onChange={(e) => update({ llm_call_timeout_seconds: parseWholeNumber(e.target.value) })} />
+                </CompactField>
 
-            <FieldRow label="Past triage examples" htmlFor="fa-few-shot"
-                setting="fa.few_shot_examples" help={SETTING_HELP['fa.few_shot_examples']}
-                hint={errors.few_shot_examples
-                    ? <span style={cs.fieldError}>{errors.few_shot_examples}</span>
-                    : 'Past failures people triaged, sent with each group as examples. 0 = off.'}>
-                <input id="fa-few-shot" data-testid="fa-few-shot" className="modern-input" type="number"
-                    min={FEW_SHOT_MIN} max={FEW_SHOT_MAX} disabled={locked}
-                    value={numberValue(settings.few_shot_examples)}
-                    onChange={(e) => update({ few_shot_examples: parseWholeNumber(e.target.value) })}
-                    style={{ width: 110, padding: '8px 10px', fontSize: '0.85rem' }} />
-            </FieldRow>
+                <CompactField label="Hedge slow LLM calls after" htmlFor="fa-hedge-after"
+                    setting="fa.hedge_after_seconds" help={SETTING_HELP['fa.hedge_after_seconds']}
+                    hint={errors.hedge_after_seconds
+                        ? <span style={cs.fieldError}>{errors.hedge_after_seconds}</span>
+                        : '0 = off. After this long without an answer the same request is sent again and the first answer is used.'}>
+                    <SuffixInput suffix="s" id="fa-hedge-after" data-testid="fa-hedge-after"
+                        min={0} max={hedgeMax(settings.llm_call_timeout_seconds)} disabled={locked}
+                        value={numberValue(settings.hedge_after_seconds)}
+                        onChange={(e) => update({ hedge_after_seconds: parseWholeNumber(e.target.value) })} />
+                </CompactField>
+            </FieldGrid>
 
             <div style={s.autoApplyBlock} data-testid="fa-auto-apply-block">
-                <ToggleCard
-                    icon={svgIcon(<><path d="M20 6 9 17l-5-5" /></>)}
-                    iconColor="#22c55e"
-                    label="Set the defect type automatically"
-                    desc="Write TypeSafe.ai's suggested defect type to untriaged failures when it is at least as sure as the minimum below. The run grid marks these labels AI."
-                    checked={settings.auto_apply_defect_type}
-                    disabled={locked || autoApplyToggleLocked(settings, original, gate)}
-                    onChange={(v) => update({ auto_apply_defect_type: v })}
-                    testId="fa-auto-apply"
-                    setting="fa.auto_apply_defect_type" help={SETTING_HELP['fa.auto_apply_defect_type']}
-                />
+                <div style={cs.togglesGrid2}>
+                    <ToggleCard
+                        icon={svgIcon(<><path d="M20 6 9 17l-5-5" /></>)}
+                        iconColor="#22c55e"
+                        label="Set the defect type automatically"
+                        desc="Write TypeSafe.ai's suggested defect type to untriaged failures when it is at least as sure as the minimum confidence. The run grid marks these labels AI."
+                        checked={settings.auto_apply_defect_type}
+                        disabled={locked || autoApplyToggleLocked(settings, original, gate)}
+                        onChange={(v) => update({ auto_apply_defect_type: v })}
+                        testId="fa-auto-apply"
+                        setting="fa.auto_apply_defect_type" help={SETTING_HELP['fa.auto_apply_defect_type']}
+                    />
+                    <FieldGrid>
+                        <CompactField label="Minimum confidence for automatic labels" htmlFor="fa-auto-apply-min"
+                            setting="fa.auto_apply_min_confidence" help={SETTING_HELP['fa.auto_apply_min_confidence']}
+                            hint={errors.auto_apply_min_confidence
+                                ? <span style={cs.fieldError}>{errors.auto_apply_min_confidence}</span>
+                                : "TypeSafe.ai's defect-type confidence needed before a label is written. The gate below is measured at this threshold."}>
+                            <SuffixInput suffix="%" id="fa-auto-apply-min" data-testid="fa-auto-apply-min"
+                                min={AUTO_APPLY_MIN_CONFIDENCE_MIN} max={AUTO_APPLY_MIN_CONFIDENCE_MAX} disabled={locked}
+                                value={numberValue(settings.auto_apply_min_confidence)}
+                                onChange={(e) => update({ auto_apply_min_confidence: parseWholeNumber(e.target.value) })} />
+                        </CompactField>
+                    </FieldGrid>
+                </div>
                 <div style={s.gateLine} data-testid="fa-auto-apply-gate" data-open={gate ? String(!!gate.open) : 'unknown'}>
                     <span style={{ ...s.gateDot, background: gate?.open ? 'var(--accent-green, #22c55e)' : gate ? '#eab308' : 'var(--border-color)' }} />
                     <span style={{ color: gate?.open ? 'var(--aig-tone-green-fg)' : 'var(--text-primary)', fontWeight: 600 }}>
                         {gateError ? 'Accuracy gate unavailable' : gateText(gate)}
                     </span>
                 </div>
-                {gateScope(gate) && <div style={s.fieldHint} data-testid="fa-auto-apply-gate-scope">{gateScope(gate)}</div>}
+                {gateScope(gate) && <div style={s.gateScope} data-testid="fa-auto-apply-gate-scope">{gateScope(gate)}</div>}
                 {errors.auto_apply_defect_type && <div style={cs.fieldError} data-testid="fa-auto-apply-error">{errors.auto_apply_defect_type}</div>}
             </div>
 
-            <FieldRow label="Minimum confidence for automatic labels" htmlFor="fa-auto-apply-min"
-                setting="fa.auto_apply_min_confidence" help={SETTING_HELP['fa.auto_apply_min_confidence']}
-                hint={errors.auto_apply_min_confidence
-                    ? <span style={cs.fieldError}>{errors.auto_apply_min_confidence}</span>
-                    : "TypeSafe.ai's defect-type confidence needed before a label is written. The gate above is measured at this threshold."}>
-                <SuffixInput suffix="%" id="fa-auto-apply-min" data-testid="fa-auto-apply-min"
-                    min={AUTO_APPLY_MIN_CONFIDENCE_MIN} max={AUTO_APPLY_MIN_CONFIDENCE_MAX} disabled={locked}
-                    value={numberValue(settings.auto_apply_min_confidence)}
-                    onChange={(e) => update({ auto_apply_min_confidence: parseWholeNumber(e.target.value) })} />
-            </FieldRow>
-
-            {/* Prompt template */}
-            <div data-setting="fa.prompt_template" tabIndex={-1} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                    <div>
-                        <div style={s.subTitle}>Prompt template</div>
-                        <p style={s.fieldHint}>
-                            Sent to the LLM for each failure. Must return JSON with verdict, confidence, summary, next_action, rationale.
-                        </p>
-                        <HelpToggle help={SETTING_HELP['fa.prompt_template']} setting="fa.prompt_template" />
-                    </div>
-                    {isAdmin && (
-                        <button onClick={reset} disabled={resetting || saving} style={s.resetBtn} title="Reset to default prompt">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="1 4 1 10 7 10"/>
-                                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
-                            </svg>
-                            {resetting ? 'Resetting…' : 'Reset to default'}
-                        </button>
-                    )}
-                </div>
-
-                <div style={s.editorWrap}>
-                    {!isAdmin && (
-                        <div style={s.readOnlyBanner}>
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                            </svg>
-                            View only — admin required to edit
-                        </div>
-                    )}
-                    <textarea
-                        className="modern-input"
-                        style={{ ...s.editor, opacity: isAdmin ? 1 : 0.7 }}
-                        value={settings.prompt_template}
-                        onChange={(e) => update({ prompt_template: e.target.value })}
-                        disabled={locked}
-                        spellCheck={false}
-                        placeholder="Loading template…"
-                    />
-                    <div style={s.editorFooter}>
+            {/* Prompt template: one summary row; the editor opens on demand, or when a chip or the save
+                bar jumps here (the row itself takes focus then, as there is no editor to focus). */}
+            <div data-setting="fa.prompt_template" tabIndex={-1} style={s.promptTile} data-testid="fa-prompt"
+                onFocus={(e) => { if (e.target === e.currentTarget) setPromptOpen(true); }}>
+                <div style={s.promptHead}>
+                    <HelpLabel label="Prompt template" help={SETTING_HELP['fa.prompt_template']} setting="fa.prompt_template" labelStyle={s.subTitle}>
                         <span style={s.charCount}>{(settings.prompt_template || '').length} chars</span>
+                        {promptDirty && <span style={s.modifiedBadge}>Unsaved changes</span>}
+                    </HelpLabel>
+                    <div style={s.promptActions}>
+                        {isAdmin && (
+                            <button onClick={reset} disabled={resetting || saving} style={s.resetBtn} title="Reset to default prompt">
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="1 4 1 10 7 10"/>
+                                    <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+                                </svg>
+                                {resetting ? 'Resetting…' : 'Reset to default'}
+                            </button>
+                        )}
+                        <button type="button" style={s.resetBtn} aria-expanded={promptOpen} aria-controls="fa-prompt-editor"
+                            data-testid="fa-prompt-toggle" onClick={() => setPromptOpen((v) => !v)}>
+                            {promptOpen ? 'Hide' : isAdmin ? 'Edit' : 'View'}
+                        </button>
                     </div>
                 </div>
+                <p style={s.fieldHint}>
+                    Sent to the LLM for each failure. Must return JSON with verdict, confidence, summary, next_action, rationale.
+                </p>
+
+                {promptOpen && (
+                    <div style={s.editorWrap} id="fa-prompt-editor">
+                        {!isAdmin && (
+                            <div style={s.readOnlyBanner}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                                </svg>
+                                View only — admin required to edit
+                            </div>
+                        )}
+                        <textarea
+                            className="modern-input"
+                            style={{ ...s.editor, opacity: isAdmin ? 1 : 0.7 }}
+                            value={settings.prompt_template}
+                            onChange={(e) => update({ prompt_template: e.target.value })}
+                            disabled={locked}
+                            spellCheck={false}
+                            placeholder="Loading template…"
+                            data-testid="fa-prompt-editor"
+                        />
+                    </div>
+                )}
                 {errors.prompt_template && <div style={cs.fieldError} data-testid="fa-prompt-error">{errors.prompt_template}</div>}
             </div>
         </section>
@@ -503,7 +514,6 @@ const s = {
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        marginTop: 32,
     },
     sectionHead: {
         display: 'flex',
@@ -542,17 +552,19 @@ const s = {
         fontSize: '0.845rem',
         color: 'var(--text-secondary)',
         lineHeight: 1.6,
-    },
-    togglesGrid: {
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-        gap: 10,
+        maxWidth: 760,
     },
     fieldHint: {
         margin: 0,
         fontSize: '0.76rem',
         color: 'var(--text-secondary)',
         lineHeight: 1.5,
+    },
+    gateScope: {
+        fontSize: '0.76rem',
+        color: 'var(--text-secondary)',
+        lineHeight: 1.5,
+        maxWidth: 760,
     },
     subTitle: {
         fontSize: '0.86rem',
@@ -698,11 +710,33 @@ const s = {
         cursor: 'pointer',
         transition: 'all 0.15s',
     },
+    promptTile: {
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 8,
+        padding: '12px 14px',
+        borderRadius: 10,
+        border: '1px solid var(--border-color)',
+        background: 'var(--bg-tertiary)',
+    },
+    promptHead: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 12,
+        flexWrap: 'wrap',
+    },
+    promptActions: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+    },
     editorWrap: {
         borderRadius: 10,
         border: '1px solid var(--border-color)',
         overflow: 'hidden',
         background: 'var(--bg-primary)',
+        marginTop: 4,
     },
     readOnlyBanner: {
         display: 'flex',
@@ -727,18 +761,11 @@ const s = {
         padding: '14px',
         boxSizing: 'border-box',
     },
-    editorFooter: {
-        display: 'flex',
-        justifyContent: 'flex-end',
-        padding: '6px 12px',
-        borderTop: '1px solid var(--border-color)',
-        background: 'rgba(255,255,255,0.02)',
-    },
     charCount: {
         fontSize: '0.72rem',
         color: 'var(--text-secondary)',
         fontFamily: 'monospace',
-        opacity: 0.6,
+        opacity: 0.75,
     },
     loadingState: {
         display: 'flex',

@@ -1,8 +1,17 @@
 import React from 'react';
 
 // SaveBar is the sticky Save / Discard bar of Settings → AI. It places what saveBarModel
-// (utils/saveBar.js) derives; AISettingsPage decides when it shows.
-export default function SaveBar({ model, result, saving, onSave, onDiscard, onReveal }) {
+// (utils/saveBar.js) derives; AISettingsPage decides when it shows. With `savedNote` it is the
+// brief confirmation after a full save: the note and no buttons.
+export default function SaveBar({ model, result, saving, savedNote, onSave, onDiscard, onReveal }) {
+    if (savedNote) {
+        return (
+            <div role="region" aria-label="Saved" data-testid="ai-savebar" style={bs.bar}>
+                <span aria-hidden="true" style={{ ...bs.dot, background: 'var(--aig-tone-green-fg)' }} />
+                <div aria-live="polite" data-testid="ai-savebar-message" style={{ ...bs.message, ...bs.messageOk }}>{savedNote}</div>
+            </div>
+        );
+    }
     const failed = !!result && model.problems.length === 0 && !saving;
     let body;
     if (saving) body = 'Saving…';
@@ -45,6 +54,7 @@ const bs = {
     dot: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
     message: { flex: 1, minWidth: 0, fontSize: '0.84rem', color: 'var(--text-primary)', lineHeight: 1.45 },
     messageBad: { color: 'var(--aig-tone-red-fg)', fontWeight: 600 },
+    messageOk: { color: 'var(--aig-tone-green-fg)', fontWeight: 600 },
     link: {
         padding: 0, border: 'none', background: 'none', color: 'var(--aig-tone-indigo-fg)', fontFamily: 'inherit',
         fontSize: 'inherit', fontWeight: 600, textDecoration: 'underline', cursor: 'pointer',

@@ -84,18 +84,36 @@ test.describe('Settings — AI save bar', () => {
         await expect(settingsPage.saveBar).toHaveCount(0);
 
         await page.getByTestId('template-editor').fill(EDITED);
-        await page.getByTestId('ai-tab-analysis').click();
+        await page.getByTestId('ai-tab-typesafe').click();
         await page.getByTestId('typesafe-timeout').fill('45');
-        await expect(settingsPage.saveBarMessage).toHaveText('Unsaved changes in Prompts and Failure analysis');
+        await expect(settingsPage.saveBarMessage).toHaveText('Unsaved changes in Prompts and TypeSafe.ai');
 
         await settingsPage.saveBarSave.click();
+        // The bar confirms in place, then goes; no corner toast is left over the page.
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
+        await expect(settingsPage.saveBarSave).toHaveCount(0);
         await expect(settingsPage.saveBar).toHaveCount(0);
+        await expect(page.getByText('AI settings saved')).toHaveCount(0);
         expect([...mock.puts].sort()).toEqual(['template', 'typesafe']);
         expect(mock.state.template.content).toBe(EDITED);
         expect(mock.state.typesafe.timeout_seconds).toBe(45);
         await expect(page.getByTestId('ai-tab-dirty-prompts')).toHaveCount(0);
-        await expect(page.getByText('AI settings saved')).toBeVisible();
         expect(mock.refused).toEqual([]);
+    });
+
+    test('an edit right after a save can be saved at once', async ({ page, settingsPage }) => {
+        const mock = await mockSettings(page);
+        await settingsPage.open();
+        await settingsPage.openAISettings('TypeSafe.ai');
+        await page.getByTestId('typesafe-timeout').fill('45');
+        await settingsPage.saveBarSave.click();
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
+
+        // Nothing covers the bar's Save button (a success toast in the corner used to).
+        await page.getByTestId('typesafe-timeout').fill('50');
+        await settingsPage.saveBarSave.click({ timeout: 1000 });
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
+        expect(mock.state.typesafe.timeout_seconds).toBe(50);
     });
 
     test('a failed section stays unsaved and Save retries only it', async ({ page, settingsPage }) => {
@@ -104,18 +122,18 @@ test.describe('Settings — AI save bar', () => {
         await settingsPage.open();
         await settingsPage.openAISettings('Prompts');
         await page.getByTestId('template-editor').fill(EDITED);
-        await page.getByTestId('ai-tab-analysis').click();
+        await page.getByTestId('ai-tab-typesafe').click();
         await page.getByTestId('typesafe-timeout').fill('45');
 
         await settingsPage.saveBarSave.click();
         await expect(settingsPage.saveBarMessage).toHaveText("Saved Standard prompt template. Couldn't save TypeSafe.ai: typesafe refused");
         await expect(page.getByTestId('ai-tab-dirty-prompts')).toHaveCount(0);
-        await expect(page.getByTestId('ai-tab-dirty-analysis')).toBeVisible();
+        await expect(page.getByTestId('ai-tab-dirty-typesafe')).toBeVisible();
 
         mock.fail = [];
         const before = mock.puts.length;
         await settingsPage.saveBarSave.click();
-        await expect(settingsPage.saveBar).toHaveCount(0);
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
         expect(mock.puts.slice(before)).toEqual(['typesafe']);
     });
 
@@ -192,14 +210,14 @@ test.describe('Settings — AI save bar', () => {
         await settingsPage.openAISettings('Prompts');
         await page.getByTestId('template-editor').fill(EDITED);
         await page.keyboard.press('Control+s');
-        await expect(settingsPage.saveBar).toHaveCount(0);
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
         expect(mock.puts).toEqual(['template']);
 
         await page.getByTestId('ai-tab-limits').click();
         await page.getByTestId('coverage-essential_max_tokens').fill('2048');
         await page.getByRole('button', { name: 'AI', exact: true }).click();
         await page.keyboard.press('Control+s');
-        await expect(settingsPage.saveBar).toHaveCount(0);
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
         expect(mock.puts).toEqual(['template', 'coverage']);
     });
 
@@ -216,7 +234,7 @@ test.describe('Settings — AI save bar', () => {
         await editor.fill('New parent {{COVERAGE}} {{TITLE}} {{CHILDREN}}');
 
         await settingsPage.saveBarSave.click();
-        await expect(settingsPage.saveBar).toHaveCount(0);
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
         expect([...mock.puts].sort()).toEqual(['parent', 'template']);
         await expect(page.getByTestId('ai-tab-dirty-prompts')).toHaveCount(0);
         await expect(page.getByTestId('template-unsaved')).toHaveCount(0);
@@ -227,7 +245,7 @@ test.describe('Settings — AI save bar', () => {
         const mock = await mockSettings(page);
         mock.delay = { typesafe: 1500 };
         await settingsPage.open();
-        await settingsPage.openAISettings('Failure analysis');
+        await settingsPage.openAISettings('TypeSafe.ai');
         const timeout = page.getByTestId('typesafe-timeout');
         await timeout.fill('45');
 
@@ -235,7 +253,7 @@ test.describe('Settings — AI save bar', () => {
         await expect(settingsPage.saveBarMessage).toHaveText('Saving…');
         await expect(timeout).toBeDisabled();
         await expect(page.getByTestId('fa-max-analyses')).toBeDisabled();
-        await expect(settingsPage.saveBar).toHaveCount(0);
+        await expect(settingsPage.saveBarMessage).toHaveText('AI settings saved');
         await expect(timeout).toBeEnabled();
     });
 });
@@ -315,7 +333,7 @@ const FAILURES = [
     { name: 'template', tab: 'Prompts', tabId: 'prompts', label: 'Standard prompt template', edit: (page) => page.getByTestId('template-editor').fill(EDITED) },
     { name: 'coverage', tab: 'Limits & budget', tabId: 'limits', label: 'Output tokens per coverage level', edit: (page) => page.getByTestId('coverage-essential_max_tokens').fill('2048') },
     { name: 'budgets', tab: 'Limits & budget', tabId: 'limits', label: 'Soft cost budgets', edit: (page) => page.getByTestId('budget-monthly').fill('9') },
-    { name: 'typesafe', tab: 'Failure analysis', tabId: 'analysis', label: 'TypeSafe.ai', edit: (page) => page.getByTestId('typesafe-timeout').fill('45') },
+    { name: 'typesafe', tab: 'TypeSafe.ai', tabId: 'typesafe', label: 'TypeSafe.ai', edit: (page) => page.getByTestId('typesafe-timeout').fill('45') },
     { name: 'fa', tab: 'Failure analysis', tabId: 'analysis', label: 'AI Failure Analysis', edit: (page) => page.getByTestId('fa-max-analyses').fill('30') },
 ];
 

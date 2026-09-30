@@ -237,6 +237,7 @@ export const s = {
         fontSize: '0.845rem',
         color: 'var(--text-secondary)',
         lineHeight: 1.6,
+        maxWidth: 760,
     },
 };
 

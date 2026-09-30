@@ -4,7 +4,7 @@ import { toast } from '../../toast';
 import { errorDescriptors, saveError } from '../../utils/saveBar';
 import { useSaveSection } from './saveBarContext';
 import { s } from './styles';
-import { ToggleCard, InlineSwitch, FieldRow, SuffixInput, UnsavedBadge } from './SettingsControls';
+import { ToggleCard, InlineSwitch, FieldRow, FieldGrid, CompactField, SuffixInput, UnsavedBadge } from './SettingsControls';
 import { cs } from './settingsControlStyles';
 import { SETTING_HELP } from '../../utils/analysisSettingsHelp';
 import {
@@ -53,7 +53,7 @@ function StatusPill({ status }) {
     );
 }
 
-/* ── TypeSafe.ai Section: one hosted decision API used by failure analysis ── */
+/* ── TypeSafe.ai Section (its own tab): one hosted decision API used by failure analysis and more ── */
 export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
     const [settings, setSettings] = useState(null);
     const [form, setForm] = useState(null);
@@ -100,7 +100,7 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
     };
     const discardDraft = () => { if (settings) setForm(formFromSettings(settings)); };
     const saving = useSaveSection('typesafe', {
-        label: 'TypeSafe.ai', tab: 'analysis', dirty: !!patch, errors: errorList, save: saveSettings, discard: discardDraft,
+        label: 'TypeSafe.ai', tab: 'typesafe', dirty: !!patch, errors: errorList, save: saveSettings, discard: discardDraft,
     });
 
     if (loadError) {
@@ -206,22 +206,24 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
                     </button>
                 )}
             </FieldRow>
-            <FieldRow label="Model" htmlFor="typesafe-model" setting="ts.model" help={SETTING_HELP['ts.model']}
-                hint={errors.model ? errorHint(errors.model) : 'Pinned by default (jev-1.13.0). Confidence thresholds are tuned per version, so change it deliberately.'}>
-                <input id="typesafe-model" className="modern-input" type="text" value={form.model} disabled={locked} data-testid="typesafe-model"
-                    onChange={(e) => update({ model: e.target.value })} style={{ width: 200, padding: '8px 12px', fontSize: '0.85rem' }} />
-            </FieldRow>
-            <FieldRow label="Price" htmlFor="typesafe-price" setting="ts.price_per_mtok" help={SETTING_HELP['ts.price_per_mtok']}
-                hint={errors.price_per_mtok ? errorHint(errors.price_per_mtok) : 'USD per million input tokens. Prices each TypeSafe call for the AI budgets; 0 = free.'}>
-                <SuffixInput id="typesafe-price" suffix="$ / M tokens" width={120} min={0} step="0.001" value={Number.isFinite(form.price_per_mtok) ? form.price_per_mtok : ''}
-                    disabled={locked} data-testid="typesafe-price"
-                    onChange={(e) => update({ price_per_mtok: e.target.value === '' ? NaN : Number(e.target.value) })} />
-            </FieldRow>
-            <FieldRow label="Timeout" htmlFor="typesafe-timeout" setting="ts.timeout_seconds" help={SETTING_HELP['ts.timeout_seconds']}
-                hint={errors.timeout_seconds ? errorHint(errors.timeout_seconds) : 'How long one request to TypeSafe may take before the decision counts as unavailable.'}>
-                <SuffixInput id="typesafe-timeout" suffix="s" min={TIMEOUT_MIN} max={TIMEOUT_MAX} value={form.timeout_seconds} disabled={locked}
-                    data-testid="typesafe-timeout" onChange={(e) => update({ timeout_seconds: Number(e.target.value) })} />
-            </FieldRow>
+            <FieldGrid testId="typesafe-connection-grid">
+                <CompactField label="Model" htmlFor="typesafe-model" setting="ts.model" help={SETTING_HELP['ts.model']}
+                    hint={errors.model ? errorHint(errors.model) : 'Pinned by default (jev-1.13.0). Confidence thresholds are tuned per version, so change it deliberately.'}>
+                    <input id="typesafe-model" className="modern-input" type="text" value={form.model} disabled={locked} data-testid="typesafe-model"
+                        onChange={(e) => update({ model: e.target.value })} style={{ width: 200, padding: '8px 12px', fontSize: '0.85rem' }} />
+                </CompactField>
+                <CompactField label="Price" htmlFor="typesafe-price" setting="ts.price_per_mtok" help={SETTING_HELP['ts.price_per_mtok']}
+                    hint={errors.price_per_mtok ? errorHint(errors.price_per_mtok) : 'USD per million input tokens. Prices each TypeSafe call for the AI budgets; 0 = free.'}>
+                    <SuffixInput id="typesafe-price" suffix="$ / M tokens" width={120} min={0} step="0.001" value={Number.isFinite(form.price_per_mtok) ? form.price_per_mtok : ''}
+                        disabled={locked} data-testid="typesafe-price"
+                        onChange={(e) => update({ price_per_mtok: e.target.value === '' ? NaN : Number(e.target.value) })} />
+                </CompactField>
+                <CompactField label="Timeout" htmlFor="typesafe-timeout" setting="ts.timeout_seconds" help={SETTING_HELP['ts.timeout_seconds']}
+                    hint={errors.timeout_seconds ? errorHint(errors.timeout_seconds) : 'How long one request to TypeSafe may take before the decision counts as unavailable.'}>
+                    <SuffixInput id="typesafe-timeout" suffix="s" min={TIMEOUT_MIN} max={TIMEOUT_MAX} value={form.timeout_seconds} disabled={locked}
+                        data-testid="typesafe-timeout" onChange={(e) => update({ timeout_seconds: Number(e.target.value) })} />
+                </CompactField>
+            </FieldGrid>
 
             <div style={cs.groupTitle}>What TypeSafe does</div>
             <div style={cs.togglesGrid}>
@@ -259,19 +261,21 @@ export default function TypeSafeSettingsCard({ isAdmin, onStateChange }) {
                     checked={form.llm_fallback_enabled} disabled={locked || !form.verdict_engine_enabled} note={verdictNote}
                     setting="ts.llm_fallback_enabled" help={SETTING_HELP['ts.llm_fallback_enabled']}
                     testId="typesafe-llm_fallback_enabled" onChange={(v) => update({ llm_fallback_enabled: v })} />
+                <FieldGrid>
+                    <CompactField label="Ask the LLM when TypeSafe's confidence is below" htmlFor="typesafe-escalate" disabled={!form.verdict_engine_enabled}
+                        setting="ts.escalate_below_pct" help={SETTING_HELP['ts.escalate_below_pct']}
+                        hint={<span data-testid="typesafe-escalate-note" style={form.verdict_engine_enabled && errors.escalate_below_pct ? cs.fieldError : undefined}>
+                            {form.verdict_engine_enabled ? escalationNote(form.escalate_below_pct ?? 0) : verdictNote}
+                        </span>}>
+                        <SuffixInput id="typesafe-escalate" suffix="%" min={0} max={100} step={1} value={form.escalate_below_pct ?? 0}
+                            disabled={locked || !form.verdict_engine_enabled} data-testid="typesafe-escalate_below_pct"
+                            onChange={(e) => update({ escalate_below_pct: e.target.value === '' ? NaN : Number(e.target.value) })} />
+                    </CompactField>
+                </FieldGrid>
             </div>
-            <FieldRow label="Ask the LLM when TypeSafe's confidence is below" htmlFor="typesafe-escalate" disabled={!form.verdict_engine_enabled}
-                setting="ts.escalate_below_pct" help={SETTING_HELP['ts.escalate_below_pct']}
-                hint={<span data-testid="typesafe-escalate-note" style={form.verdict_engine_enabled && errors.escalate_below_pct ? cs.fieldError : undefined}>
-                    {form.verdict_engine_enabled ? escalationNote(form.escalate_below_pct ?? 0) : verdictNote}
-                </span>}>
-                <SuffixInput id="typesafe-escalate" suffix="%" min={0} max={100} step={1} value={form.escalate_below_pct ?? 0}
-                    disabled={locked || !form.verdict_engine_enabled} data-testid="typesafe-escalate_below_pct"
-                    onChange={(e) => update({ escalate_below_pct: e.target.value === '' ? NaN : Number(e.target.value) })} />
-            </FieldRow>
 
             <div style={cs.groupTitle}>Other uses of TypeSafe</div>
-            <div style={cs.togglesGrid}>
+            <div style={cs.togglesGrid2}>
                 {OTHER_USES.map((u) => (
                     <ToggleCard key={u.field} icon={ICONS[u.icon]} iconColor={u.color} label={u.label} desc={u.desc}
                         checked={!!form[u.field]} disabled={locked} testId={`typesafe-${u.field}`}

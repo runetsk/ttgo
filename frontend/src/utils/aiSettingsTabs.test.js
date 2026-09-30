@@ -4,14 +4,16 @@ import {
     AI_TABS, tabForSetting, nextTabId, placeholderStatus, insertText, monthMeter, summaryTiles,
 } from './aiSettingsTabs.js';
 
-test('AI_TABS lists the four tabs in order', () => {
-    assert.deepEqual(AI_TABS.map((t) => t.id), ['providers', 'prompts', 'limits', 'analysis']);
+test('AI_TABS lists the five tabs in order', () => {
+    assert.deepEqual(AI_TABS.map((t) => t.id), ['providers', 'prompts', 'limits', 'analysis', 'typesafe']);
 });
 
 test('tabForSetting routes data-setting keys to their tab', () => {
     assert.equal(tabForSetting('provider.default'), 'providers');
     assert.equal(tabForSetting('fa.dedup_enabled'), 'analysis');
-    assert.equal(tabForSetting('ts.api_key'), 'analysis');
+    assert.equal(tabForSetting('fa.prompt_template'), 'analysis');
+    assert.equal(tabForSetting('ts.api_key'), 'typesafe');
+    assert.equal(tabForSetting('ts.verdict_engine_enabled'), 'typesafe');
     assert.equal(tabForSetting('ai.enabled'), null);
     assert.equal(tabForSetting(''), null);
 });

@@ -72,9 +72,59 @@ test.describe('Settings — AI tabs', () => {
         await expect(page.getByTestId('ai-tab-prompts')).toBeFocused();
         await expect(page.getByTestId('ai-panel-prompts')).toBeVisible();
         await page.keyboard.press('End');
-        await expect(page.getByTestId('ai-tab-analysis')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByTestId('ai-tab-typesafe')).toHaveAttribute('aria-selected', 'true');
         await page.keyboard.press('ArrowRight');
         await expect(page.getByTestId('ai-tab-providers')).toHaveAttribute('aria-selected', 'true');
+    });
+
+    test('a diagram chip for a TypeSafe setting opens the TypeSafe.ai tab', async ({ page, settingsPage }) => {
+        await mockSettings(page);
+        await settingsPage.open();
+        await settingsPage.openFailureAnalysis();
+        await expect(page.getByTestId('typesafe-settings')).toBeHidden();
+
+        await settingsPage.selectFlowStep('decide');
+        await settingsPage.flowChip('ts.timeout_seconds').click();
+        await expect(page.getByTestId('ai-tab-typesafe')).toHaveAttribute('aria-selected', 'true');
+        await expect(page.getByTestId('typesafe-timeout')).toBeFocused();
+    });
+
+    test('the failure-analysis prompt stays folded until opened, and the save bar unfolds it', async ({ page, settingsPage }) => {
+        const writes = await mockSettings(page);
+        await settingsPage.open();
+        await settingsPage.openFailureAnalysis();
+
+        const prompt = page.getByTestId('fa-prompt');
+        const editor = page.getByTestId('fa-prompt-editor');
+        await expect(prompt).toContainText(`${FA.prompt_template.length} chars`);
+        await expect(editor).toHaveCount(0);
+
+        await page.getByTestId('fa-prompt-toggle').click();
+        await expect(editor).toHaveValue(FA.prompt_template);
+        await editor.fill('');
+        await page.getByTestId('fa-prompt-toggle').click();
+        await expect(editor).toHaveCount(0);
+        await expect(prompt).toContainText('Unsaved changes');
+        await expect(page.getByTestId('fa-prompt-error')).toBeVisible();
+
+        await page.getByTestId('ai-tab-providers').click();
+        await page.getByTestId('ai-savebar-fix-fa.prompt_template').click();
+        await expect(page.getByTestId('ai-tab-analysis')).toHaveAttribute('aria-selected', 'true');
+        await expect(editor).toBeVisible();
+        await expect(editor).toHaveValue('');
+        expect(writes).toEqual([]);
+    });
+
+    test('a compact field explains itself from its ⓘ', async ({ page, settingsPage }) => {
+        await mockSettings(page);
+        await settingsPage.open();
+        await settingsPage.openFailureAnalysis();
+
+        const help = page.getByTestId('help-fa.max_analyses_per_run');
+        await expect(help).toHaveAttribute('aria-expanded', 'false');
+        await help.click();
+        await expect(help).toHaveAttribute('aria-expanded', 'true');
+        await expect(page.locator('[data-setting="fa.max_analyses_per_run"]')).toContainText('largest groups first');
     });
 
     test('an unsaved template survives a tab switch and marks its tab', async ({ page, settingsPage }) => {

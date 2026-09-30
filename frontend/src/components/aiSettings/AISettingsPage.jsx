@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAIGeneration } from '../../contexts/AIGenerationContext';
-import { toast } from '../../toast';
 import { defaultProvider } from '../../utils/typesafeSettings';
 import { AI_TABS, nextTabId, summaryTiles, tabForSetting } from '../../utils/aiSettingsTabs';
 import { saveBarModel, runSaves, saveResultMessage, sameSummary } from '../../utils/saveBar';
@@ -11,14 +10,16 @@ import TemplateEditor from './TemplateEditor';
 import GenerationDefaults from './GenerationDefaults';
 import BudgetSettings from './BudgetSettings';
 import FailureAnalysisSection from './FailureAnalysisSection';
+import TypeSafeSettingsCard from './TypeSafeSettingsCard';
 import SaveBar from './SaveBar';
 import { SaveBarContext } from './saveBarContext';
 import { jumpToSetting, RevealSettingContext } from './jumpToSetting';
 import { ps } from './aiSettingsPageStyles';
 
 const TAB_IDS = AI_TABS.map((t) => t.id);
+const SAVED_NOTE_MS = 2500;
 
-// AISettingsPage is Settings → AI: the AI switch, three summary tiles, four tabs and one Save
+// AISettingsPage is Settings → AI: the AI switch, three summary tiles, five tabs and one Save
 // bar. Every tab's sections stay mounted (inactive panels are hidden), so unsaved drafts survive
 // a tab switch. Sections keep their own drafts and API calls and register save/discard handles
 // here (saveBarContext.js); the bar saves every dirty section at once and keeps what succeeded.
@@ -27,10 +28,14 @@ export default function AISettingsPage({ isAdmin, onDirtyChange }) {
     const [tab, setTab] = useState('providers');
     const [templateStatus, setTemplateStatus] = useState(null); // { standardCustom, parentCustom }
     const [budgets, setBudgets] = useState(null); // { monthlyUsd, spentUsd }
+    // The TypeSafe card's saved/draft state, for the Failure analysis tab's process diagram.
+    const [typesafeCard, setTypesafeCard] = useState({ status: 'loading' });
     const [pendingJump, setPendingJump] = useState(null);
     const [sections, setSections] = useState({});
     const [saving, setSaving] = useState(false);
     const [result, setResult] = useState(null); // the message after a partial failure
+    // The confirmation after a full save; a new object per save, so a second save restarts its timer.
+    const [savedNote, setSavedNote] = useState(null); // { message }
     const handles = useRef({});
 
     const registry = useMemo(() => ({
@@ -62,9 +67,18 @@ export default function AISettingsPage({ isAdmin, onDirtyChange }) {
         setResult(null);
         const outcome = await runSaves(list.map((s) => ({ ...s, save: handles.current[s.key]?.save })));
         setSaving(false);
-        if (outcome.failed.length === 0) toast.success(saveResultMessage(outcome));
+        if (outcome.failed.length === 0) setSavedNote({ message: saveResultMessage(outcome) });
         else setResult(saveResultMessage(outcome));
     }, [saving, model.canSave, list]);
+
+    // A full save is confirmed in the bar for a moment, not by a toast: the toast corner would sit
+    // over the bar's Save button on the wide page. Editing again brings the buttons straight back.
+    useEffect(() => {
+        if (!savedNote) return undefined;
+        const timer = setTimeout(() => setSavedNote(null), SAVED_NOTE_MS);
+        return () => clearTimeout(timer);
+    }, [savedNote]);
+    const confirming = !!savedNote && !dirtyAny;
 
     const discard = () => {
         if (model.dirtyTabs.length > 1 && !window.confirm(`Discard unsaved changes on ${model.dirtyTabs.length} tabs?`)) return;
@@ -178,10 +192,12 @@ export default function AISettingsPage({ isAdmin, onDirtyChange }) {
                         <GenerationDefaults isAdmin={isAdmin} />
                         <BudgetSettings isAdmin={isAdmin} onStatusChange={setBudgets} />
                     </div>
-                    <div {...panel('analysis')}><FailureAnalysisSection isAdmin={isAdmin} /></div>
+                    <div {...panel('analysis')}><FailureAnalysisSection isAdmin={isAdmin} typesafeCard={typesafeCard} /></div>
+                    <div {...panel('typesafe')}><TypeSafeSettingsCard isAdmin={isAdmin} onStateChange={setTypesafeCard} /></div>
 
-                    {dirtyAny && (
-                        <SaveBar model={model} result={result} saving={saving} onSave={save} onDiscard={discard} onReveal={reveal} />
+                    {(dirtyAny || confirming) && (
+                        <SaveBar model={model} result={result} saving={saving} savedNote={confirming ? savedNote.message : null}
+                            onSave={save} onDiscard={discard} onReveal={reveal} />
                     )}
 
                     <style>{`

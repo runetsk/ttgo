@@ -6,13 +6,16 @@ export const AI_TABS = [
     { id: 'prompts', label: 'Prompts' },
     { id: 'limits', label: 'Limits & budget' },
     { id: 'analysis', label: 'Failure analysis' },
+    // TypeSafe has its own tab: it also serves imports, draft review, defects and search.
+    { id: 'typesafe', label: 'TypeSafe.ai' },
 ];
 
 // tabForSetting names the tab holding a data-setting key, or null when the control sits in the
-// page header, which is always visible (ai.enabled). ts.* and fa.* live on Failure analysis.
+// page header, which is always visible (ai.enabled). fa.* live on Failure analysis, ts.* on TypeSafe.ai.
 export function tabForSetting(key) {
     if (!key || key.startsWith('ai.')) return null;
     if (key.startsWith('provider.')) return 'providers';
+    if (key.startsWith('ts.')) return 'typesafe';
     return 'analysis';
 }
 

@@ -61,7 +61,7 @@ export default function GenerationDefaults({ isAdmin }) {
             <p style={s.templateDesc}>
                 The most the model may write for one generation. Higher limits allow more test cases and cost more.
             </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginTop: 8, maxWidth: 760 }}>
                 {LEVELS.map(({ key, label, defaultVal }) => (
                     <div key={key} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                         <label htmlFor={`coverage-${key}`} style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 500 }}>

@@ -177,7 +177,8 @@ export default function SettingsPage() {
             </nav>
 
             {/* Content area */}
-            <div style={{ flex: 1, minWidth: 0, maxWidth: 800, padding: '8px 0' }}>
+            {/* Settings → AI is wider: its tabs lay tiles and fields out in columns. */}
+            <div style={{ flex: 1, minWidth: 0, maxWidth: activeTab === 'ai-test-generation' ? 1280 : 800, padding: '8px 0' }}>
                 <style>{`
                     .settings-tab:hover {
                         background: rgba(255,255,255,0.05) !important;

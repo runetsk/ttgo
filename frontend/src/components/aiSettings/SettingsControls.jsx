@@ -2,16 +2,67 @@ import React, { useId, useState } from 'react';
 import { cs } from './settingsControlStyles';
 
 // Shared building blocks for the AI settings cards (AI Failure Analysis, TypeSafe.ai), so the
-// cards on the AI Generation tab look and behave alike: toggle tiles with a switch, rows with the
-// label and hint on the left and a compact control on the right, and the unsaved-changes badge.
-// Every control can carry `setting`, a data-setting anchor the process diagram's chips jump to,
-// and `help`, an entry from utils/analysisSettingsHelp.js shown by a "What this does" toggle.
+// cards on Settings → AI look and behave alike: toggle tiles with a switch, rows with the label
+// and hint on the left and a compact control on the right, compact fields laid out in a grid,
+// and the unsaved-changes badge. Every control can carry `setting`, a data-setting anchor the
+// process diagram's chips jump to, and `help`, an entry from utils/analysisSettingsHelp.js shown
+// by an ⓘ button beside the label.
 
-// ToggleCard is a switch tile. The real checkbox covers the tile's label area, transparent, so a
+function useHelp() {
+    const [open, setOpen] = useState(false);
+    const id = useId();
+    return { open, id, toggle: () => setOpen((v) => !v) };
+}
+
+// HelpButton is the ⓘ beside a setting's label; it opens the explanation HelpPanel shows.
+// It sits above a ToggleCard's transparent checkbox, so a click lands on it, not on the switch.
+function HelpButton({ help, setting, label, state }) {
+    if (!help) return null;
+    return (
+        <button type="button" style={{ ...cs.helpBtn, ...(state.open ? cs.helpBtnOn : null) }}
+            aria-expanded={state.open} aria-controls={state.id} aria-label={`What this does: ${label}`}
+            title={state.open ? 'Hide the explanation' : 'What this does'}
+            data-testid={setting ? `help-${setting}` : undefined} onClick={state.toggle}>
+            i
+        </button>
+    );
+}
+
+function HelpPanel({ help, state, style }) {
+    if (!help) return null;
+    return (
+        <div id={state.id} style={{ ...cs.helpText, ...style, display: state.open ? 'flex' : 'none' }}>
+            <p style={cs.helpPara}>{help.what}</p>
+            {help.details && <p style={cs.helpPara}>{help.details}</p>}
+            {help.example && <p style={cs.helpPara}><strong>Example: </strong>{help.example}</p>}
+            {help.off && <p style={cs.helpPara}><strong>Off: </strong>{help.off}</p>}
+        </div>
+    );
+}
+
+// HelpLabel is a heading with its ⓘ, and the explanation it opens, for a setting that is not
+// one of the controls below (the failure-analysis prompt template).
+export function HelpLabel({ label, help, setting, labelStyle, children }) {
+    const helpState = useHelp();
+    return (
+        <>
+            <div style={cs.labelRow}>
+                <span style={labelStyle}>
+                    {label}
+                    <HelpButton help={help} setting={setting} label={label} state={helpState} />
+                </span>
+                {children}
+            </div>
+            <HelpPanel help={help} state={helpState} />
+        </>
+    );
+}
+
+// ToggleCard is a switch tile. The real checkbox covers the tile's main area, transparent, so a
 // click there lands on it, the keyboard can reach it, and tests can check or uncheck it by testId.
-// The help toggle sits below that area, outside the <label>, so opening it never flips the switch.
 export function ToggleCard({ icon, iconColor = '#818cf8', label, desc, checked, disabled, onChange, testId, note, help, setting }) {
     const [focused, setFocused] = useState(false);
+    const helpState = useHelp();
     return (
         <div
             data-setting={setting}
@@ -24,14 +75,17 @@ export function ToggleCard({ icon, iconColor = '#818cf8', label, desc, checked, 
                 boxShadow: focused ? '0 0 0 2px rgba(99,102,241,0.35)' : 'none',
             }}
         >
-            <label style={{ ...cs.toggleMain, cursor: disabled ? 'not-allowed' : 'pointer' }}>
+            <div style={{ ...cs.toggleMain, cursor: disabled ? 'not-allowed' : 'pointer' }}>
                 {icon && (
                     <div style={{ ...cs.toggleIcon, color: iconColor, borderColor: `${iconColor}33`, background: `${iconColor}14` }}>
                         {icon}
                     </div>
                 )}
                 <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={cs.toggleLabel}>{label}</div>
+                    <div style={cs.toggleLabel}>
+                        {label}
+                        <HelpButton help={help} setting={setting} label={label} state={helpState} />
+                    </div>
                     {desc && <div style={cs.toggleDesc}>{desc}</div>}
                     {note && <div style={cs.toggleNote}>{note}</div>}
                 </div>
@@ -47,30 +101,8 @@ export function ToggleCard({ icon, iconColor = '#818cf8', label, desc, checked, 
                     onBlur={() => setFocused(false)}
                     style={cs.overlayInput}
                 />
-            </label>
-            <HelpToggle help={help} setting={setting} />
-        </div>
-    );
-}
-
-// HelpToggle is the "What this does" link under a setting and the explanation it expands.
-export function HelpToggle({ help, setting }) {
-    const [open, setOpen] = useState(false);
-    const id = useId();
-    if (!help) return null;
-    return (
-        <div style={cs.help}>
-            <button type="button" style={cs.helpBtn} aria-expanded={open} aria-controls={id}
-                data-testid={setting ? `help-${setting}` : undefined} onClick={() => setOpen((v) => !v)}>
-                <span aria-hidden="true" style={cs.helpIcon}>i</span>
-                {open ? 'Hide' : 'What this does'}
-            </button>
-            <div id={id} style={{ ...cs.helpText, display: open ? 'flex' : 'none' }}>
-                <p style={cs.helpPara}>{help.what}</p>
-                {help.details && <p style={cs.helpPara}>{help.details}</p>}
-                {help.example && <p style={cs.helpPara}><strong>Example: </strong>{help.example}</p>}
-                {help.off && <p style={cs.helpPara}><strong>Off: </strong>{help.off}</p>}
             </div>
+            <HelpPanel help={help} state={helpState} />
         </div>
     );
 }
@@ -104,16 +136,43 @@ function Switch({ checked, small }) {
     );
 }
 
-// FieldRow puts a label, hint and help toggle on the left and the control on the right.
+// FieldRow puts a label and hint on the left and the control on the right: for a setting whose
+// control or hint needs the room (the API key with its test button, thresholds with live notes).
 export function FieldRow({ label, htmlFor, hint, children, testId, disabled, help, setting }) {
+    const helpState = useHelp();
     return (
         <div style={{ ...cs.fieldRow, opacity: disabled ? 0.6 : 1 }} data-testid={testId} data-setting={setting} tabIndex={setting ? -1 : undefined}>
             <div style={cs.fieldLabelCol}>
-                <label style={cs.fieldLabel} htmlFor={htmlFor}>{label}</label>
+                <div>
+                    <label style={cs.fieldLabel} htmlFor={htmlFor}>{label}</label>
+                    <HelpButton help={help} setting={setting} label={label} state={helpState} />
+                </div>
                 {hint && <div style={cs.fieldHint}>{hint}</div>}
-                <HelpToggle help={help} setting={setting} />
             </div>
             <div style={cs.fieldControl}>{children}</div>
+            <HelpPanel help={help} state={helpState} style={cs.helpTextFull} />
+        </div>
+    );
+}
+
+// FieldGrid lays CompactFields out in up to three columns inside one tile. Holding a single
+// field, it is a tile that can sit in a row of ToggleCards beside the switch it qualifies.
+export function FieldGrid({ children, testId }) {
+    return <div style={cs.fieldGrid} data-testid={testId}>{children}</div>;
+}
+
+// CompactField stacks a label, a small control and a short hint, for one cell of a FieldGrid.
+export function CompactField({ label, htmlFor, hint, children, testId, disabled, help, setting }) {
+    const helpState = useHelp();
+    return (
+        <div style={{ ...cs.compactField, opacity: disabled ? 0.6 : 1 }} data-testid={testId} data-setting={setting} tabIndex={setting ? -1 : undefined}>
+            <div>
+                <label style={cs.fieldLabel} htmlFor={htmlFor}>{label}</label>
+                <HelpButton help={help} setting={setting} label={label} state={helpState} />
+            </div>
+            <div style={cs.compactControl}>{children}</div>
+            {hint && <div style={cs.fieldHint}>{hint}</div>}
+            <HelpPanel help={help} state={helpState} />
         </div>
     );
 }
@@ -123,7 +182,7 @@ export function SuffixInput({ suffix, width = 110, ...inputProps }) {
     return (
         <span style={cs.suffixWrap}>
             <input className="modern-input" type="number" {...inputProps} style={{ width, padding: '8px 10px', fontSize: '0.85rem' }} />
-            <span style={cs.suffix}>{suffix}</span>
+            {suffix && <span style={cs.suffix}>{suffix}</span>}
         </span>
     );
 }
