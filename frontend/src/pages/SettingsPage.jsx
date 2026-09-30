@@ -125,7 +125,9 @@ export default function SettingsPage() {
     ];
 
     return (
-        <div style={{ display: 'flex', gap: 0, width: '100%', padding: '24px 24px 24px 0', minHeight: '100%' }}>
+        // flexShrink 0: in the column-flex .content-area the explicit minHeight would otherwise let
+        // this box shrink to the window, and a long section would overflow past its bottom padding.
+        <div style={{ display: 'flex', gap: 0, width: '100%', padding: '24px 24px 24px 0', minHeight: '100%', flexShrink: 0 }}>
             {/* Sidebar nav */}
             <nav style={{
                 width: 200, flexShrink: 0,

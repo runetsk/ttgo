@@ -115,6 +115,21 @@ test.describe('Settings — AI tabs', () => {
         expect(writes).toEqual([]);
     });
 
+    test('scrolled to the end, the last setting keeps a gap above the window edge', async ({ page, settingsPage }) => {
+        await mockSettings(page);
+        await page.setViewportSize({ width: 1280, height: 720 });
+        await settingsPage.open();
+        await settingsPage.openFailureAnalysis();
+        await expect(page.getByTestId('fa-prompt')).toBeVisible();
+
+        const gap = await page.evaluate(() => {
+            const scroller = document.querySelector('.content-area');
+            scroller.scrollTop = scroller.scrollHeight;
+            return scroller.getBoundingClientRect().bottom - document.querySelector('[data-testid="fa-prompt"]').getBoundingClientRect().bottom;
+        });
+        expect(gap).toBeGreaterThanOrEqual(40);
+    });
+
     test('a compact field explains itself from its ⓘ', async ({ page, settingsPage }) => {
         await mockSettings(page);
         await settingsPage.open();
