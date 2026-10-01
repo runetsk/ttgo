@@ -109,10 +109,24 @@ func gormLogger(w io.Writer) logger.Interface {
 	)
 }
 
+// createBatchSize caps the rows one INSERT writes when a slice is created. Unbatched, GORM writes
+// the whole slice as one multi-row INSERT binding a variable per column per row, and SQLite
+// refuses a statement past 32766 variables ("too many SQL variables"): copying a run of ~1,000
+// results, or creating a run from a category that large, failed. 200 rows of the widest table
+// (run_result_analyses, 46 columns) bind ~9,200; TestCreateBatchFitsWidestTable keeps that true.
+// Inside a transaction GORM writes the batches under a savepoint, so a slice still lands whole or
+// not at all.
+const createBatchSize = 200
+
+// gormConfig is the GORM configuration every store connection opens with.
+func gormConfig() *gorm.Config {
+	return &gorm.Config{Logger: gormLogger(os.Stdout), CreateBatchSize: createBatchSize}
+}
+
 func New(dsn string) (*Store, error) {
 	// Add busy timeout, WAL mode, and foreign keys for performance and integrity
 	dsnWithParams := fmt.Sprintf("%s?_busy_timeout=5000&_journal_mode=wal&_foreign_keys=on", dsn)
-	db, err := gorm.Open(sqlite.Open(dsnWithParams), &gorm.Config{Logger: gormLogger(os.Stdout)})
+	db, err := gorm.Open(sqlite.Open(dsnWithParams), gormConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -439,7 +453,7 @@ func (s *Store) ReopenDB(dsn string) error {
 
 	// Reopen with the same parameters
 	dsnWithParams := fmt.Sprintf("%s?_busy_timeout=5000&_journal_mode=wal&_foreign_keys=on", dsn)
-	db, err := gorm.Open(sqlite.Open(dsnWithParams), &gorm.Config{Logger: gormLogger(os.Stdout)})
+	db, err := gorm.Open(sqlite.Open(dsnWithParams), gormConfig())
 	if err != nil {
 		return fmt.Errorf("failed to reopen database: %w", err)
 	}

@@ -37,22 +37,67 @@ func lowerBindLimit(t *testing.T, s *Store) {
 	sqlDB, err := s.db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	conn, err := sqlDB.Conn(context.Background())
-	require.NoError(t, err)
-	require.NoError(t, conn.Raw(func(dc any) error {
-		l, ok := dc.(interface{ SetLimit(id, newVal int) int })
-		if !ok {
-			return fmt.Errorf("driver connection %T cannot set limits", dc)
-		}
-		l.SetLimit(sqliteLimitVariableNumber, testBindLimit)
-		return nil
-	}))
-	require.NoError(t, conn.Close())
+	withDriverConn(t, s, func(l sqliteLimits) { l.SetLimit(sqliteLimitVariableNumber, testBindLimit) })
 
 	var n int
 	quiet := s.db.Session(&gorm.Session{Logger: logger.Discard})
 	err = quiet.Raw("SELECT COUNT(*) WHERE 1 IN ?", make([]int, testBindLimit+1)).Scan(&n).Error
 	require.ErrorContains(t, err, "too many SQL variables", "the lowered limit must govern the store's connection")
+}
+
+// sqliteLimits is the part of mattn/go-sqlite3's *SQLiteConn the tests use, asserted on the raw
+// driver connection so the test needn't import the driver.
+type sqliteLimits interface {
+	GetLimit(id int) int
+	SetLimit(id, newVal int) int
+}
+
+// withDriverConn runs fn on the store's underlying SQLite connection.
+func withDriverConn(t *testing.T, s *Store, fn func(sqliteLimits)) {
+	t.Helper()
+	sqlDB, err := s.db.DB()
+	require.NoError(t, err)
+	conn, err := sqlDB.Conn(context.Background())
+	require.NoError(t, err)
+	require.NoError(t, conn.Raw(func(dc any) error {
+		l, ok := dc.(sqliteLimits)
+		if !ok {
+			return fmt.Errorf("driver connection %T cannot read or set limits", dc)
+		}
+		fn(l)
+		return nil
+	}))
+	require.NoError(t, conn.Close())
+}
+
+// liveBindLimit is the variable cap the store's connection enforces (the compiled-in 32766 unless
+// a test lowered it).
+func liveBindLimit(t *testing.T, s *Store) int {
+	t.Helper()
+	var limit int
+	withDriverConn(t, s, func(l sqliteLimits) { limit = l.GetLimit(sqliteLimitVariableNumber) })
+	require.Positive(t, limit)
+	return limit
+}
+
+// columnCount is how many columns table has: the most variables one row of a multi-row INSERT
+// into it can bind.
+func columnCount(t *testing.T, s *Store, table string) int {
+	t.Helper()
+	var n int
+	require.NoError(t, s.db.Raw(`SELECT COUNT(*) FROM pragma_table_info(?)`, table).Scan(&n).Error)
+	require.Positive(t, n, "no table %q", table)
+	return n
+}
+
+// rowsOverflowingOneInsert is a row count of table that one multi-row INSERT cannot bind under
+// the live limit. It is twice the limit over the column count because GORM leaves default-valued
+// columns it was not given out of the INSERT, so a row binds somewhat fewer variables than the
+// table has columns. Derived rather than hard-coded, so the tests keep reproducing the overflow as
+// the table gains or loses columns.
+func rowsOverflowingOneInsert(t *testing.T, s *Store, table string) int {
+	t.Helper()
+	return 2 * liveBindLimit(t, s) / columnCount(t, s, table)
 }
 
 // runFixture is a set of runs whose results carry everything a run delete must clean up:
@@ -273,4 +318,96 @@ func TestDeleteRequirementsWithMoreDescendantsThanBindLimit(t *testing.T) {
 	}
 	assert.EqualValues(t, 1, countWhere(t, s, &models.Requirement{}, "id = 'kept'"))
 	assert.EqualValues(t, 1, countWhere(t, s, &models.RequirementTestCaseLink{}, "requirement_id = 'kept'"))
+}
+
+// seqCTE numbers rows 1..? for the INSERT ... SELECT fixtures below, so a fixture of a thousand
+// rows is one statement binding a handful of variables rather than a thousand round-trips.
+const seqCTE = `WITH RECURSIVE seq(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM seq WHERE i < ?) `
+
+// seedCases creates test cases <prefix>-tc1..n.
+func seedCases(t *testing.T, s *Store, prefix string, n int) {
+	t.Helper()
+	require.NoError(t, s.db.Exec(seqCTE+`INSERT INTO test_cases (id,name,created_at,updated_at)
+		SELECT ? || '-tc' || i, ? || ' case ' || i, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP FROM seq`,
+		n, prefix, prefix).Error)
+}
+
+// seedRunOfCases creates run runID holding one FAIL result on each of the test cases <prefix>-tc1..n.
+func seedRunOfCases(t *testing.T, s *Store, runID, prefix string, folderID *string, n int) {
+	t.Helper()
+	require.NoError(t, s.db.Exec(`INSERT INTO test_runs (id,name,run_folder_id) VALUES (?,?,?)`, runID, runID, folderID).Error)
+	require.NoError(t, s.db.Exec(seqCTE+`INSERT INTO run_results (id,test_run_id,test_case_id,test_name_snapshot,status)
+		SELECT ? || '-rr' || i, ?, ? || '-tc' || i, ? || ' case ' || i, 'FAIL' FROM seq`,
+		n, runID, runID, prefix, prefix).Error)
+}
+
+// TestCopyTestRunWithMoreResultsThanOneInsertBinds: a copy inserted all of the run's results in
+// one multi-row INSERT at a variable per column per row, so a run of ~940 results or more (the AI
+// demo's hold ~1,500) failed to copy with "too many SQL variables".
+func TestCopyTestRunWithMoreResultsThanOneInsertBinds(t *testing.T) {
+	s := newTestStore(t)
+	n := rowsOverflowingOneInsert(t, s, "run_results")
+	seedCases(t, s, "src", n)
+	seedRunOfCases(t, s, "src", "src", nil, n)
+
+	cp, err := s.CopyTestRun("src", "", nil)
+
+	require.NoError(t, err)
+	assert.EqualValues(t, n, countWhere(t, s, &models.RunResult{}, "test_run_id = ? AND status = ?", cp.ID, models.StatusPending))
+}
+
+// TestCopyRunFolderWithMoreResultsThanOneInsertBinds is the folder copy, which inserts each run's
+// results the same way.
+func TestCopyRunFolderWithMoreResultsThanOneInsertBinds(t *testing.T) {
+	s := newTestStore(t)
+	n := rowsOverflowingOneInsert(t, s, "run_results")
+	folder := &models.RunFolder{Name: "Nightly"}
+	require.NoError(t, s.CreateRunFolder(folder))
+	seedCases(t, s, "src", n)
+	seedRunOfCases(t, s, "src", "src", &folder.ID, n)
+
+	cp, err := s.CopyRunFolder(folder.ID, "", nil)
+
+	require.NoError(t, err)
+	assert.EqualValues(t, n, countWhere(t, s, &models.RunResult{},
+		"test_run_id IN (SELECT id FROM test_runs WHERE run_folder_id = ?)", cp.ID))
+}
+
+// TestCreateRunFromCategoryWithMoreCasesThanOneInsertBinds: a run created from a category snapshots
+// one result per test case in the category, all in one INSERT, so a category of ~940 test cases or
+// more could not be run. (A run from explicit test-case ids is capped at 500 by the API.)
+func TestCreateRunFromCategoryWithMoreCasesThanOneInsertBinds(t *testing.T) {
+	s := newTestStore(t)
+	n := rowsOverflowingOneInsert(t, s, "run_results")
+	cat, err := s.CreateCategory("Regression", "")
+	require.NoError(t, err)
+	seedCases(t, s, "cat", n)
+	require.NoError(t, s.db.Exec(seqCTE+`INSERT INTO suite_test_cases (suite_id,test_case_id)
+		SELECT ?, 'cat-tc' || i FROM seq`, n, cat.ID).Error)
+
+	run := &models.TestRun{CategoryID: &cat.ID}
+	require.NoError(t, s.CreateTestRunWithCases(run, nil))
+
+	assert.EqualValues(t, n, countWhere(t, s, &models.RunResult{}, "test_run_id = ?", run.ID))
+}
+
+// TestCreateBatchFitsWidestTable guards createBatchSize, which the store's GORM config uses to
+// split every slice insert: a full batch of the widest table's rows must bind no more variables
+// than SQLite allows, or batching only moves the overflow.
+func TestCreateBatchFitsWidestTable(t *testing.T) {
+	s := newTestStore(t)
+	var tables []string
+	require.NoError(t, s.db.Raw(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`).
+		Scan(&tables).Error)
+	require.NotEmpty(t, tables)
+	widest, widestTable := 0, ""
+	for _, table := range tables {
+		if n := columnCount(t, s, table); n > widest {
+			widest, widestTable = n, table
+		}
+	}
+
+	assert.Equal(t, createBatchSize, s.db.CreateBatchSize, "the store's GORM config must batch slice inserts")
+	assert.LessOrEqual(t, createBatchSize*widest, liveBindLimit(t, s),
+		"a batch of %d %s rows (%d columns) binds more variables than SQLite allows", createBatchSize, widestTable, widest)
 }
