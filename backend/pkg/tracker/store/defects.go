@@ -518,9 +518,11 @@ func affectedTestCaseIDs(tx *gorm.DB, defectIDs ...string) ([]string, error) {
 // Grouped, not per test case: bulk-closing 500 defects runs this inside ONE SQLite write
 // transaction, and three statements per affected test case meant holding the database's single
 // write lock for 3N round-trips while every other writer queued behind it. It is now three
-// statements total, whatever N is. A test case with no linked defects left (the delete and
-// unlink paths reach here with exactly that) simply misses the grouped count and lands in
-// `cleared`, which is what the per-row loop's total == 0 case did.
+// statements per idChunkSize test cases: chunked because the list is derived from the links being
+// changed, and a run delete can reach here with more test cases than SQLite binds in one
+// statement. A test case with no linked defects left (the delete and unlink paths reach here with
+// exactly that) simply misses the grouped count and lands in `cleared`, which is what the per-row
+// loop's total == 0 case did.
 func recomputeReverification(tx *gorm.DB, testCaseIDs []string) error {
 	ids := make([]string, 0, len(testCaseIDs))
 	seen := make(map[string]bool, len(testCaseIDs))
@@ -531,10 +533,17 @@ func recomputeReverification(tx *gorm.DB, testCaseIDs []string) error {
 		seen[id] = true
 		ids = append(ids, id)
 	}
-	if len(ids) == 0 {
-		return nil
+	for _, chunk := range idChunks(ids) {
+		if err := recomputeReverificationChunk(tx, chunk); err != nil {
+			return err
+		}
 	}
+	return nil
+}
 
+// recomputeReverificationChunk is recomputeReverification for distinct, non-empty ids that fit in
+// one statement.
+func recomputeReverificationChunk(tx *gorm.DB, ids []string) error {
 	type tally struct {
 		TestCaseID string
 		Unresolved int64

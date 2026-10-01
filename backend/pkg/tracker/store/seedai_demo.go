@@ -109,30 +109,6 @@ func (s *Store) seedAIDemoTx(cfg AISeedConfig) (AISeedDemoResult, error) {
 	}, nil
 }
 
-// idChunks yields ids in slices small enough to stay clear of SQLite's bound
-// parameter limit even with room for other placeholders in the query.
-func idChunks(ids []string) [][]string {
-	const size = 5000
-	var out [][]string
-	for len(ids) > size {
-		out = append(out, ids[:size])
-		ids = ids[size:]
-	}
-	if len(ids) > 0 {
-		out = append(out, ids)
-	}
-	return out
-}
-
-func chunkedDelete(tx *gorm.DB, model interface{}, column string, ids []string) error {
-	for _, chunk := range idChunks(ids) {
-		if err := tx.Where(column+" IN ?", chunk).Delete(model).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // purgeAIDemoEntities hard-deletes every row a previous AI demo load (or a
 // same-seed perfseed run) created, plus anything the app attached to those
 // rows since (analyses, jobs, comments, result-scoped defect links) — so a

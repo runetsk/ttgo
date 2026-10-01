@@ -128,10 +128,16 @@ func (s *Store) DeleteRequirements(ids []string) error {
 				frontier = append(frontier, id)
 			}
 		}
+		// Frontier and closure are chunked: a wide tree can hold more requirements than
+		// SQLite binds in one statement.
 		for len(frontier) > 0 {
 			var kids []string
-			if err := tx.Model(&models.Requirement{}).Where("parent_id IN ?", frontier).Pluck("id", &kids).Error; err != nil {
-				return err
+			for _, chunk := range idChunks(frontier) {
+				var chunkKids []string
+				if err := tx.Model(&models.Requirement{}).Where("parent_id IN ?", chunk).Pluck("id", &chunkKids).Error; err != nil {
+					return err
+				}
+				kids = append(kids, chunkKids...)
 			}
 			frontier = frontier[:0]
 			for _, k := range kids {
@@ -145,10 +151,10 @@ func (s *Store) DeleteRequirements(ids []string) error {
 		for id := range seen {
 			allIDs = append(allIDs, id)
 		}
-		if err := tx.Delete(&models.RequirementTestCaseLink{}, "requirement_id IN ?", allIDs).Error; err != nil {
+		if err := chunkedDelete(tx, &models.RequirementTestCaseLink{}, "requirement_id", allIDs); err != nil {
 			return err
 		}
-		return tx.Delete(&models.Requirement{}, "id IN ?", allIDs).Error
+		return chunkedDelete(tx, &models.Requirement{}, "id", allIDs)
 	})
 	if err != nil {
 		return err

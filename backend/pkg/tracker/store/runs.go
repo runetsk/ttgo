@@ -738,22 +738,37 @@ func removeScreenshotDir(resultID string) {
 
 // DeleteTestRun deletes a test run, its result-level comments, defect links, and run-level comments.
 func (s *Store) DeleteTestRun(id string) error {
+	return s.DeleteTestRuns([]string{id})
+}
+
+// resultsOfRuns selects the ids of every result in the runs bound to its one placeholder. Cleanup
+// matches results through it rather than through a plucked id slice: runs can hold tens of
+// thousands of results between them, and binding one variable per result overflowed SQLite's
+// per-statement limit ("too many SQL variables"), failing the whole delete.
+const resultsOfRuns = "SELECT id FROM run_results WHERE test_run_id IN ?"
+
+// DeleteTestRuns deletes multiple test runs, their comments, and defect links. Statements bind
+// only the run ids (the API caps a bulk delete at httpx.MaxBulkIDs), never the runs' results.
+func (s *Store) DeleteTestRuns(ids []string) error {
 	var resultIDs []string
 	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Delete result-level comments and defect links for all results in this run
-		tx.Model(&models.RunResult{}).Where("test_run_id = ?", id).Pluck("id", &resultIDs)
+		// Kept for the screenshot cleanup after commit; the deletes below select results by run.
+		if err := tx.Model(&models.RunResult{}).Where("test_run_id IN ?", ids).Pluck("id", &resultIDs).Error; err != nil {
+			return err
+		}
+		// Delete result-level comments and defect links for all results in these runs
 		if len(resultIDs) > 0 {
-			if err := tx.Where("target_type = ? AND target_id IN ?", "result", resultIDs).
+			if err := tx.Where("target_type = ? AND target_id IN ("+resultsOfRuns+")", "result", ids).
 				Delete(&models.Comment{}).Error; err != nil {
 				return err
 			}
 			// Collect affected test cases before deleting links, for reverification.
 			var affectedTCs []string
-			if err := tx.Model(&models.DefectLink{}).Where("run_result_id IN ? AND test_case_id IS NOT NULL", resultIDs).
+			if err := tx.Model(&models.DefectLink{}).Where("run_result_id IN ("+resultsOfRuns+") AND test_case_id IS NOT NULL", ids).
 				Distinct().Pluck("test_case_id", &affectedTCs).Error; err != nil {
 				return err
 			}
-			if err := tx.Where("run_result_id IN ?", resultIDs).
+			if err := tx.Where("run_result_id IN ("+resultsOfRuns+")", ids).
 				Delete(&models.DefectLink{}).Error; err != nil {
 				return err
 			}
@@ -762,57 +777,7 @@ func (s *Store) DeleteTestRun(id string) error {
 			}
 			// AI failure-analysis rows have no DB FK to results; delete them here
 			// so they are not orphaned when the results vanish (F-047).
-			if err := tx.Where("run_result_id IN ?", resultIDs).
-				Delete(&models.RunResultAnalysis{}).Error; err != nil {
-				return err
-			}
-		}
-		// Delete run-level comments
-		if err := tx.Where("target_type = ? AND target_id = ?", "run", id).
-			Delete(&models.Comment{}).Error; err != nil {
-			return err
-		}
-		// Delete analysis jobs for this run (no DB FK to runs) (F-047).
-		if err := tx.Where("test_run_id = ?", id).Delete(&models.RunAnalysisJob{}).Error; err != nil {
-			return err
-		}
-		// Delete the run (cascades to run_results via FK constraint)
-		return tx.Delete(&models.TestRun{}, "id = ?", id).Error
-	})
-	if err == nil {
-		for _, rid := range resultIDs {
-			removeScreenshotDir(rid)
-		}
-	}
-	return err
-}
-
-// DeleteTestRuns deletes multiple test runs, their comments, and defect links.
-func (s *Store) DeleteTestRuns(ids []string) error {
-	var resultIDs []string
-	err := s.db.Transaction(func(tx *gorm.DB) error {
-		// Delete result-level comments and defect links for all results in these runs
-		tx.Model(&models.RunResult{}).Where("test_run_id IN ?", ids).Pluck("id", &resultIDs)
-		if len(resultIDs) > 0 {
-			if err := tx.Where("target_type = ? AND target_id IN ?", "result", resultIDs).
-				Delete(&models.Comment{}).Error; err != nil {
-				return err
-			}
-			// Collect affected test cases before deleting links, for reverification.
-			var affectedTCs []string
-			if err := tx.Model(&models.DefectLink{}).Where("run_result_id IN ? AND test_case_id IS NOT NULL", resultIDs).
-				Distinct().Pluck("test_case_id", &affectedTCs).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("run_result_id IN ?", resultIDs).
-				Delete(&models.DefectLink{}).Error; err != nil {
-				return err
-			}
-			if err := recomputeReverification(tx, affectedTCs); err != nil {
-				return err
-			}
-			// AI failure-analysis rows have no DB FK to results (F-047).
-			if err := tx.Where("run_result_id IN ?", resultIDs).
+			if err := tx.Where("run_result_id IN ("+resultsOfRuns+")", ids).
 				Delete(&models.RunResultAnalysis{}).Error; err != nil {
 				return err
 			}

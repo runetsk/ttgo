@@ -340,10 +340,19 @@ func (s *Store) DeleteTestCases(ids []string) error {
 
 // deleteTestCasesTx performs the test-case deletion cascade within an existing
 // transaction, so callers (e.g. folder deletion) can compose it atomically (F-015).
+// The ids are chunked: a folder subtree can hold more test cases than SQLite binds
+// in one statement.
 func deleteTestCasesTx(tx *gorm.DB, ids []string) error {
-	if len(ids) == 0 {
-		return nil
+	for _, chunk := range idChunks(ids) {
+		if err := deleteTestCaseChunkTx(tx, chunk); err != nil {
+			return err
+		}
 	}
+	return nil
+}
+
+// deleteTestCaseChunkTx is deleteTestCasesTx for ids that fit in one statement.
+func deleteTestCaseChunkTx(tx *gorm.DB, ids []string) error {
 	// Preserve run history: NULL out the FK so RunResults are kept with their name snapshot.
 	if err := tx.Model(&models.RunResult{}).Where("test_case_id IN ?", ids).Update("test_case_id", nil).Error; err != nil {
 		return err
