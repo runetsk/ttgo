@@ -462,13 +462,16 @@ func (s *Store) GetTestRuns(f RunFilter) ([]models.TestRun, int64, error) {
 // Defect counts (open/closed) are populated on TestCase for FR-015 indicator display.
 func (s *Store) GetTestRun(id string) (*models.TestRun, error) {
 	var run models.TestRun
-	if err := s.db.
-		Preload("RunResults").
-		Preload("RunResults.TestCase.Categories").
-		First(&run, "id = ?", id).Error; err != nil {
+	if err := s.db.First(&run, "id = ?", id).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil // Return nil if not found, let handler handle 404
 		}
+		return nil, err
+	}
+	if err := s.db.Where("test_run_id = ?", id).Find(&run.RunResults).Error; err != nil {
+		return nil, err
+	}
+	if err := s.attachTestCases(run.RunResults); err != nil {
 		return nil, err
 	}
 
@@ -1383,15 +1386,17 @@ func (s *Store) GetRunResultByID(id string) (*models.RunResult, error) {
 // shape GetTestRun produces, for WS delta broadcasts. IDs not belonging to
 // the run are silently dropped.
 func (s *Store) GetRunResultsByIDs(runID string, ids []string) ([]*models.RunResult, error) {
-	var rows []*models.RunResult
-	if err := s.db.
-		Preload("TestCase.Categories").
-		Where("test_run_id = ? AND id IN ?", runID, ids).
-		Find(&rows).Error; err != nil {
+	rows, err := gatherInChunks(ids, func(chunk []string, part *[]*models.RunResult) error {
+		return s.db.Where("test_run_id = ? AND id IN ?", runID, chunk).Find(part).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	if len(rows) == 0 {
 		return rows, nil
+	}
+	if err := s.attachTestCases(rows); err != nil {
+		return nil, err
 	}
 	rrIDs := make([]string, len(rows))
 	for i, rr := range rows {
@@ -1406,4 +1411,35 @@ func (s *Store) GetRunResultsByIDs(runID string, ids []string) ([]*models.RunRes
 		rr.ClosedDefectLinkCount = closedCounts[rr.ID]
 	}
 	return rows, nil
+}
+
+// attachTestCases sets each result's TestCase, with the case's categories: what
+// Preload("TestCase.Categories") did, loaded in id chunks instead, because GORM binds every
+// distinct key of a preload in one IN and a run can hold more test cases than SQLite binds in a
+// statement. Results sharing a test case (retries) share the one *TestCase, as with the preload.
+func (s *Store) attachTestCases(results []*models.RunResult) error {
+	seen := make(map[string]bool, len(results))
+	ids := make([]string, 0, len(results))
+	for _, rr := range results {
+		if rr.TestCaseID != nil && !seen[*rr.TestCaseID] {
+			seen[*rr.TestCaseID] = true
+			ids = append(ids, *rr.TestCaseID)
+		}
+	}
+	cases, err := gatherInChunks(ids, func(chunk []string, part *[]*models.TestCase) error {
+		return s.db.Preload("Categories").Where("id IN ?", chunk).Find(part).Error
+	})
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*models.TestCase, len(cases))
+	for _, tc := range cases {
+		byID[tc.ID] = tc
+	}
+	for _, rr := range results {
+		if rr.TestCaseID != nil {
+			rr.TestCase = byID[*rr.TestCaseID]
+		}
+	}
+	return nil
 }

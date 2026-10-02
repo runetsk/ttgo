@@ -72,11 +72,10 @@ func (s *Store) GetFolderTree() ([]*models.Folder, error) {
 	}
 
 	// Populate open/closed defect counts per test case.
+	// Every test case is in the tree, so this counts every linked one rather than binding all their
+	// ids: past SQLite's per-statement limit that failed, and with the error discarded every
+	// defect badge in the tree vanished.
 	if len(allTestCases) > 0 {
-		tcIDs := make([]string, len(allTestCases))
-		for i, tc := range allTestCases {
-			tcIDs[i] = tc.ID
-		}
 		type cnt struct {
 			TestCaseID string
 			Status     string
@@ -86,7 +85,7 @@ func (s *Store) GetFolderTree() ([]*models.Folder, error) {
 		_ = s.db.Raw(`
 			SELECT dl.test_case_id, d.status, COUNT(DISTINCT d.id) as n
 			FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
-			WHERE dl.test_case_id IN ? GROUP BY dl.test_case_id, d.status`, tcIDs).Scan(&counts).Error
+			WHERE dl.test_case_id IS NOT NULL GROUP BY dl.test_case_id, d.status`).Scan(&counts).Error
 		openByTC, closedByTC := map[string]int{}, map[string]int{}
 		for _, c := range counts {
 			if c.Status == "closed" {

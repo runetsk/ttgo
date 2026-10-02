@@ -62,21 +62,21 @@ func (s *Store) ListChildRequirements(parentID string) ([]*models.Requirement, e
 	return reqs, nil
 }
 
-// GetRequirementChildCounts returns a map of requirement ID → child count for the given IDs.
+// GetRequirementChildCounts returns a map of requirement ID → child count for the given IDs,
+// counted in id chunks (the caller passes every root requirement, which has no bound).
 func (s *Store) GetRequirementChildCounts(ids []string) (map[string]int, error) {
-	if len(ids) == 0 {
-		return map[string]int{}, nil
-	}
 	type result struct {
 		ParentID string
 		Count    int
 	}
-	var results []result
-	if err := s.db.Model(&models.Requirement{}).
-		Select("parent_id, count(*) as count").
-		Where("parent_id IN ?", ids).
-		Group("parent_id").
-		Find(&results).Error; err != nil {
+	results, err := gatherInChunks(ids, func(chunk []string, part *[]result) error {
+		return s.db.Model(&models.Requirement{}).
+			Select("parent_id, count(*) as count").
+			Where("parent_id IN ?", chunk).
+			Group("parent_id").
+			Find(part).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	counts := make(map[string]int, len(results))

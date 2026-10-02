@@ -103,8 +103,11 @@ func (s *Store) ApplyNarration(repID string, d failureanalysis.NarrationDelta) (
 	if err != nil || len(ids) == 0 {
 		return nil, err
 	}
-	var out []*models.RunResultAnalysis
-	if err := s.db.Where("id IN ?", ids).Find(&out).Error; err != nil {
+	// Read back in id chunks: a group can have more clones than SQLite binds in one statement.
+	out, err := gatherInChunks(ids, func(chunk []string, part *[]*models.RunResultAnalysis) error {
+		return s.db.Where("id IN ?", chunk).Find(part).Error
+	})
+	if err != nil {
 		return nil, err
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID == repID && out[j].ID != repID })

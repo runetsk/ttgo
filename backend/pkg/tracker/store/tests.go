@@ -137,7 +137,6 @@ func (s *Store) updateTestCaseTx(tx *gorm.DB, test *models.TestCase) error {
 }
 
 func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error) {
-	var tests []*models.TestCase
 	query := s.db.Model(&models.TestCase{})
 
 	if len(filter.FolderIDs) > 0 {
@@ -173,13 +172,11 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 			Where("suite_test_cases.suite_id = ?", *filter.CategoryID)
 	}
 
-	// Preload categories always; preload Steps / CustomValues only for full view.
-	query = query.Preload("Categories")
-	if !filter.ListView {
-		query = query.Preload("Steps").Preload("CustomValues")
-	}
-
+	var tests []*models.TestCase
 	if err := query.Find(&tests).Error; err != nil {
+		return nil, err
+	}
+	if err := s.attachTestCaseAssociations(tests, !filter.ListView); err != nil {
 		return nil, err
 	}
 
@@ -192,18 +189,19 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 			tcMap[tc.ID] = tc
 		}
 
-		// Populate linked requirements in bulk.
+		// Populate linked requirements in bulk. This and the counts below go in id chunks too.
 		type reqLink struct {
 			TestCaseID string
 			models.Requirement
 		}
-		var links []reqLink
-		_ = s.db.Model(&models.Requirement{}).
-			Select("requirement_test_case_links.test_case_id, requirements.*").
-			Joins("JOIN requirement_test_case_links ON requirement_test_case_links.requirement_id = requirements.id").
-			Where("requirement_test_case_links.test_case_id IN ?", tcIDs).
-			Order("requirements.identifier").
-			Scan(&links).Error
+		links, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]reqLink) error {
+			return s.db.Model(&models.Requirement{}).
+				Select("requirement_test_case_links.test_case_id, requirements.*").
+				Joins("JOIN requirement_test_case_links ON requirement_test_case_links.requirement_id = requirements.id").
+				Where("requirement_test_case_links.test_case_id IN ?", chunk).
+				Order("requirements.identifier").
+				Scan(part).Error
+		})
 		for _, l := range links {
 			tc := tcMap[l.TestCaseID]
 			if tc == nil {
@@ -219,12 +217,13 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 				TestCaseID string
 				Count      int
 			}
-			var stepCounts []stepCount
-			_ = s.db.Model(&models.TestStep{}).
-				Where("test_case_id IN ?", tcIDs).
-				Select("test_case_id, count(*) as count").
-				Group("test_case_id").
-				Scan(&stepCounts).Error
+			stepCounts, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]stepCount) error {
+				return s.db.Model(&models.TestStep{}).
+					Where("test_case_id IN ?", chunk).
+					Select("test_case_id, count(*) as count").
+					Group("test_case_id").
+					Scan(part).Error
+			})
 			for _, sc := range stepCounts {
 				if tc := tcMap[sc.TestCaseID]; tc != nil {
 					tc.StepsCount = sc.Count
@@ -238,11 +237,12 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 			Status     string
 			N          int
 		}
-		var counts []cnt
-		_ = s.db.Raw(`
-			SELECT dl.test_case_id, d.status, COUNT(DISTINCT d.id) as n
-			FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
-			WHERE dl.test_case_id IN ? GROUP BY dl.test_case_id, d.status`, tcIDs).Scan(&counts).Error
+		counts, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]cnt) error {
+			return s.db.Raw(`
+				SELECT dl.test_case_id, d.status, COUNT(DISTINCT d.id) as n
+				FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
+				WHERE dl.test_case_id IN ? GROUP BY dl.test_case_id, d.status`, chunk).Scan(part).Error
+		})
 		openByTC, closedByTC := map[string]int{}, map[string]int{}
 		for _, c := range counts {
 			if c.Status == "closed" {
@@ -258,6 +258,42 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 	}
 
 	return tests, nil
+}
+
+// attachTestCaseAssociations loads the listing's associations: Categories always, Steps and
+// CustomValues for the full view. They are preloaded onto id-only stand-ins in id chunks and
+// copied across, rather than preloaded with the listing itself: GORM binds every key of a preload
+// in one IN, so a listing of more test cases than SQLite binds in a statement failed outright.
+func (s *Store) attachTestCaseAssociations(tests []*models.TestCase, full bool) error {
+	ids := make([]string, len(tests))
+	for i, tc := range tests {
+		ids[i] = tc.ID
+	}
+	stubs, err := gatherInChunks(ids, func(chunk []string, part *[]*models.TestCase) error {
+		q := s.db.Select("id").Preload("Categories")
+		if full {
+			q = q.Preload("Steps").Preload("CustomValues")
+		}
+		return q.Where("id IN ?", chunk).Find(part).Error
+	})
+	if err != nil {
+		return err
+	}
+	byID := make(map[string]*models.TestCase, len(stubs))
+	for _, stub := range stubs {
+		byID[stub.ID] = stub
+	}
+	for _, tc := range tests {
+		stub := byID[tc.ID]
+		if stub == nil {
+			continue
+		}
+		tc.Categories = stub.Categories
+		if full {
+			tc.Steps, tc.CustomValues = stub.Steps, stub.CustomValues
+		}
+	}
+	return nil
 }
 
 func (s *Store) GetTestCase(id string) (*models.TestCase, error) {

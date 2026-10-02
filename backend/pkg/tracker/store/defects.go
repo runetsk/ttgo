@@ -25,18 +25,20 @@ func (s *Store) DismissReverification(testCaseID string) error {
 	})
 }
 
-// CountDefectLinksByRunResults returns open/closed defect counts per run-result ID.
+// CountDefectLinksByRunResults returns open/closed defect counts per run-result ID. The ids are
+// chunked: a run, or a failure group, can hold more results than SQLite binds in one statement.
 func (s *Store) CountDefectLinksByRunResults(runResultIDs []string) (open map[string]int, closed map[string]int, err error) {
 	type row struct {
 		RunResultID string
 		Status      string
 		N           int
 	}
-	var rows []row
-	err = s.db.Raw(`
-		SELECT dl.run_result_id, d.status, COUNT(DISTINCT d.id) as n
-		FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
-		WHERE dl.run_result_id IN ? GROUP BY dl.run_result_id, d.status`, runResultIDs).Scan(&rows).Error
+	rows, err := gatherInChunks(runResultIDs, func(chunk []string, part *[]row) error {
+		return s.db.Raw(`
+			SELECT dl.run_result_id, d.status, COUNT(DISTINCT d.id) as n
+			FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
+			WHERE dl.run_result_id IN ? GROUP BY dl.run_result_id, d.status`, chunk).Scan(part).Error
+	})
 	open, closed = map[string]int{}, map[string]int{}
 	for _, r := range rows {
 		if r.Status == "closed" {
@@ -185,11 +187,14 @@ func (s *Store) enrichDefects(defects []models.Defect) error {
 		DefectID string
 		N        int
 	}
-	var counts []cnt
-	if err := s.db.Model(&models.DefectLink{}).
-		Select("defect_id, COUNT(DISTINCT test_case_id) as n").
-		Where("defect_id IN ? AND test_case_id IS NOT NULL", ids).
-		Group("defect_id").Scan(&counts).Error; err != nil {
+	// Chunked: ListDefects is unpaged, so this can be every defect in the install.
+	counts, err := gatherInChunks(ids, func(chunk []string, part *[]cnt) error {
+		return s.db.Model(&models.DefectLink{}).
+			Select("defect_id, COUNT(DISTINCT test_case_id) as n").
+			Where("defect_id IN ? AND test_case_id IS NOT NULL", chunk).
+			Group("defect_id").Scan(part).Error
+	})
+	if err != nil {
 		return err
 	}
 	byID := make(map[string]int, len(counts))

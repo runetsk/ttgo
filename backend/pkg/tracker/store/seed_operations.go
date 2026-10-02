@@ -214,6 +214,8 @@ func SeedDemo(tx *gorm.DB) (SeedResult, error) {
 // Entities are deleted in reverse dependency order to avoid FK constraint issues.
 // Missing entities (manually deleted) are silently skipped.
 // The caller is responsible for wrapping this in db.Transaction().
+// Ids go in chunks: the AI demo marks every one of its results, tens of thousands at the larger
+// failure scales, more than SQLite binds in one statement.
 func RemoveSeed(tx *gorm.DB) (SeedDeleteResult, error) {
 	var seeds []models.DemoSeed
 	if err := tx.Find(&seeds).Error; err != nil {
@@ -228,119 +230,123 @@ func RemoveSeed(tx *gorm.DB) (SeedDeleteResult, error) {
 	var counts SeedCounts
 
 	if ids := byType["comment"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.Comment{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.Comment{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.Comments = len(ids)
 	}
 
 	if ids := byType["run_result_analysis"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.RunResultAnalysis{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.RunResultAnalysis{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.RunResultAnalyses = len(ids)
 	}
 
 	if ids := byType["run_analysis_job"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.RunAnalysisJob{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.RunAnalysisJob{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 	}
 
 	if ids := byType["defect_link"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.DefectLink{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.DefectLink{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.DefectLinks = len(ids)
 	}
 
 	if ids := byType["defect"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.Defect{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.Defect{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.Defects = len(ids)
 	}
 
 	if ids := byType["llm_provider"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.LLMProviderConfig{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.LLMProviderConfig{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.LLMProviders = len(ids)
 	}
 
 	if ids := byType["run_result"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.RunResult{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.RunResult{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.RunResults = len(ids)
 	}
 
 	if ids := byType["test_run"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.TestRun{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.TestRun{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.TestRuns = len(ids)
 	}
 
 	if categoryIDs := byType["category"]; len(categoryIDs) > 0 {
-		if err := tx.Where("suite_id IN ?", categoryIDs).Delete(&models.CategoryTestCase{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.CategoryTestCase{}, "suite_id", categoryIDs); err != nil {
 			return SeedDeleteResult{}, err
 		}
 	}
 	if tcIDs := byType["test_case"]; len(tcIDs) > 0 {
-		if err := tx.Where("test_case_id IN ?", tcIDs).Delete(&models.CategoryTestCase{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.CategoryTestCase{}, "test_case_id", tcIDs); err != nil {
 			return SeedDeleteResult{}, err
 		}
 	}
 	if ids := byType["test_case"]; len(ids) > 0 {
-		if err := tx.Where("test_case_id IN ?", ids).Delete(&models.RequirementTestCaseLink{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.RequirementTestCaseLink{}, "test_case_id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 	}
 	if ids := byType["test_case"]; len(ids) > 0 {
-		if err := tx.Where("test_case_id IN ?", ids).Delete(&models.TestStep{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.TestStep{}, "test_case_id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 	}
 	if ids := byType["test_case"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.TestCase{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.TestCase{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.TestCases = len(ids)
 	}
 	if ids := byType["category"]; len(ids) > 0 {
-		if err := tx.Where("id IN ?", ids).Delete(&models.Category{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.Category{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.Categories = len(ids)
 	}
 	if rfIDs := byType["run_folder"]; len(rfIDs) > 0 {
-		if err := tx.Model(&models.TestRun{}).
-			Where("run_folder_id IN ?", rfIDs).
-			Update("run_folder_id", nil).Error; err != nil {
-			return SeedDeleteResult{}, err
+		for _, chunk := range idChunks(rfIDs) {
+			if err := tx.Model(&models.TestRun{}).
+				Where("run_folder_id IN ?", chunk).
+				Update("run_folder_id", nil).Error; err != nil {
+				return SeedDeleteResult{}, err
+			}
 		}
-		if err := tx.Where("id IN ?", rfIDs).Delete(&models.RunFolder{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.RunFolder{}, "id", rfIDs); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.RunFolders = len(rfIDs)
 	}
 	if ids := byType["folder"]; len(ids) > 0 {
-		if err := tx.Model(&models.Folder{}).
-			Where("parent_id IN ?", ids).
-			Update("parent_id", nil).Error; err != nil {
-			return SeedDeleteResult{}, err
+		for _, chunk := range idChunks(ids) {
+			if err := tx.Model(&models.Folder{}).
+				Where("parent_id IN ?", chunk).
+				Update("parent_id", nil).Error; err != nil {
+				return SeedDeleteResult{}, err
+			}
 		}
-		if err := tx.Where("id IN ?", ids).Delete(&models.Folder{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.Folder{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.Folders = len(ids)
 	}
 	if ids := byType["requirement"]; len(ids) > 0 {
-		if err := tx.Where("requirement_id IN ?", ids).Delete(&models.RequirementTestCaseLink{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.RequirementTestCaseLink{}, "requirement_id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
-		if err := tx.Where("id IN ?", ids).Delete(&models.Requirement{}).Error; err != nil {
+		if err := chunkedDelete(tx, &models.Requirement{}, "id", ids); err != nil {
 			return SeedDeleteResult{}, err
 		}
 		counts.Requirements = len(ids)
