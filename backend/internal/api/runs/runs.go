@@ -106,7 +106,7 @@ func (h *Handler) CreateTestRun(w http.ResponseWriter, r *http.Request) {
 // @Param        updated_to    query     string  false  "Include runs updated on or before this date inclusive (YYYY-MM-DD, UTC)"
 // @Param        sort_by       query     string  false  "Sort column: name, status, created_at, updated_at"
 // @Param        order         query     string  false  "Sort direction: ASC or DESC (default DESC)"
-// @Param        limit         query     int     false  "Page size (default 50)"
+// @Param        limit         query     int     false  "Page size (default 50, max 200)"
 // @Param        offset        query     int     false  "Page offset"
 // @Param        run_folder_id query     string  false  "Filter by folder ID; use 'uncategorised' for runs with no folder"
 // @Success      200  {object}  object{runs=[]models.TestRun,total=int}
@@ -134,9 +134,11 @@ func (h *Handler) GetTestRuns(w http.ResponseWriter, r *http.Request) {
 		categoryIDs = []string{v}
 	}
 
+	// Bounded: a non-positive limit used to drop the LIMIT and return every run, and the page's
+	// aggregate queries bind a variable per run, past SQLite's limit on a large install.
 	limit := 50
 	if l, err := strconv.Atoi(q.Get("limit")); err == nil {
-		limit = l
+		limit = httpx.ClampLimit(l, 50, 200)
 	}
 	offset := 0
 	if o, err := strconv.Atoi(q.Get("offset")); err == nil {

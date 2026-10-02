@@ -5271,7 +5271,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "integer",
-                        "description": "Page size (default 50)",
+                        "description": "Page size (default 50, max 200)",
                         "name": "limit",
                         "in": "query"
                     },

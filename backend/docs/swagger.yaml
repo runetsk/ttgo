@@ -5216,7 +5216,7 @@ paths:
         in: query
         name: order
         type: string
-      - description: Page size (default 50)
+      - description: Page size (default 50, max 200)
         in: query
         name: limit
         type: integer

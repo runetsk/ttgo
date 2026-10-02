@@ -1309,3 +1309,32 @@ func TestSnapshotProvenance_BulkSplitsDirectFromCloneAndPassClears(t *testing.T)
 	assert.Equal(t, "", got.SuggestedPolicyVersion)
 	assert.Nil(t, got.SuggestedIsClone)
 }
+
+// TestListRunsClampsLimit: limit=0 (or below) dropped the LIMIT and returned every run, and the
+// page's aggregate queries then bound one SQL variable per run, past SQLite's limit on a large
+// install. The page size now defaults to 50 and is capped at 200.
+func TestListRunsClampsLimit(t *testing.T) {
+	env, cleanup := testServer(t)
+	defer cleanup()
+	const runs = 201
+	for i := 0; i < runs; i++ {
+		createJSON(t, env, "/api/runs", map[string]any{"name": fmt.Sprintf("Run %d", i)})
+	}
+
+	for _, tc := range []struct {
+		query string
+		want  int
+	}{
+		{"", 50}, {"?limit=0", 50}, {"?limit=-1", 50}, {"?limit=100", 100}, {"?limit=1000", 200},
+	} {
+		rr := doRequest(env, http.MethodGet, "/api/runs"+tc.query, nil)
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		var body struct {
+			Runs  []json.RawMessage `json:"runs"`
+			Total int               `json:"total"`
+		}
+		require.NoError(t, json.Unmarshal(rr.Body.Bytes(), &body))
+		assert.Len(t, body.Runs, tc.want, "GET /api/runs%s", tc.query)
+		assert.Equal(t, runs, body.Total, "GET /api/runs%s counts every run", tc.query)
+	}
+}
