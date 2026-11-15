@@ -79,3 +79,6 @@ frontend/multi_select_verification.png
 perf/.scratch/
 perf/.seed-manifest.json
 perf/results/
+
+# Dev stack scripts (scripts/dev-start.*): pids, logs, built server binary
+/.dev/

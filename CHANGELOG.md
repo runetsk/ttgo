@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **One-command dev stack.** `scripts/dev-start.sh` / `scripts/dev-start.ps1` build the backend and start it plus the Vite dev server in the background (backend on `:8090`, frontend on `:5173` proxying to it); `scripts/dev-stop.sh` / `scripts/dev-stop.ps1` stop both. Logs and PIDs live in the gitignored `.dev/`.
+
 ### Fixed
 - **Test edits persist accurately.** Saving existing step text or ordering and clearing a description now survives reload; version history records the saved state, and partial updates preserve omitted descriptions.
 - **Password resets revoke existing sessions.** Administrator password resets and account deactivation revoke sessions in the same transaction as the user update.

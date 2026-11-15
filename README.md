@@ -155,6 +155,15 @@ npm run dev
 
 Runs on `http://localhost:5173`.
 
+**Both at once**
+
+```bash
+scripts/dev-start.sh    # or scripts\dev-start.ps1 on Windows
+scripts/dev-stop.sh     # or scripts\dev-stop.ps1
+```
+
+Builds the backend and starts it on `:8090`, with the frontend on `:5173` proxying `/api` to it, both in the background; logs and PIDs go to `.dev/`. Override the ports with `TTGO_BACKEND_PORT` / `TTGO_FRONTEND_PORT`. The admin defaults to `admin@example.com` / `changeme123` unless `ADMIN_EMAIL` / `ADMIN_PASSWORD` are set.
+
 **CLI**
 
 ```bash
