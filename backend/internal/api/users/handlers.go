@@ -236,15 +236,10 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		updates["active"] = *req.Active
-
-		// If deactivating, evict live sessions
-		if !*req.Active {
-			_ = h.store.DeleteUserSessions(id) //nolint:errcheck
-		}
 	}
 	if req.Password != nil {
-		if len(*req.Password) < 8 {
-			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "password must be at least 8 characters"})
+		if len(*req.Password) < 8 || len(*req.Password) > 72 {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "password must be 8-72 characters"})
 			return
 		}
 		hash, err := bcrypt.GenerateFromPassword([]byte(*req.Password), 12)

@@ -128,7 +128,17 @@ func (s *Store) ListUsers(includeDeleted bool) ([]*models.User, error) {
 
 // UpdateUser applies a partial update to a user and reloads the record.
 func (s *Store) UpdateUser(id string, updates map[string]interface{}) (*models.User, error) {
-	if err := s.db.Model(&models.User{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&models.User{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return err
+		}
+		_, passwordChanged := updates["hashed_password"]
+		if active, ok := updates["active"].(bool); passwordChanged || (ok && !active) {
+			return tx.Where("user_id = ?", id).Delete(&models.UserSession{}).Error
+		}
+		return nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return s.GetUser(id)

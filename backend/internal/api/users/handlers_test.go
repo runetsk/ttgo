@@ -1,6 +1,7 @@
 package users_test
 
 import (
+	"bytes"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -24,6 +25,28 @@ func addTestAuth(t *testing.T, s *store.Store, req *http.Request) {
 	sess, err := s.CreateSession(user.ID)
 	require.NoError(t, err)
 	req.AddCookie(&http.Cookie{Name: "session_token", Value: sess.ID})
+}
+
+func TestAdminPasswordResetRevokesExistingSession(t *testing.T) {
+	st, err := newTestStore(t)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = st.Close() })
+	target, err := st.CreateUser("reset@test.com", "Reset", "old-password-hash", "member")
+	require.NoError(t, err)
+	sess, err := st.CreateSession(target.ID)
+	require.NoError(t, err)
+	r := httptest.NewRequest("PATCH", "/api/users/"+target.ID, bytes.NewBufferString(`{"password":"new-password-123"}`))
+	addTestAuth(t, st, r)
+	srv := api.NewServer(st)
+	defer srv.Shutdown()
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	r = httptest.NewRequest("GET", "/api/auth/me", nil)
+	r.AddCookie(&http.Cookie{Name: "session_token", Value: sess.ID})
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, r)
+	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 func TestDeleteUser_Success(t *testing.T) {
