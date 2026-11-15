@@ -51,7 +51,12 @@ func (m *Manager) performBackup(backupType, creatorID, creatorName string) (*mod
 	}
 
 	// Check available disk space before copying
-	srcInfo, err := os.Stat("tracker.db")
+	srcPath, err := m.store.DatabasePath()
+	if err != nil {
+		_ = m.store.FailBackup(id, err.Error())
+		return nil, err
+	}
+	srcInfo, err := os.Stat(srcPath)
 	if err != nil {
 		_ = m.store.FailBackup(id, fmt.Sprintf("cannot stat database: %v", err))
 		return nil, fmt.Errorf("cannot stat database: %w", err)
@@ -68,7 +73,6 @@ func (m *Manager) performBackup(backupType, creatorID, creatorName string) (*mod
 	}
 
 	// Copy the database file
-	srcPath := "tracker.db"
 	fileSize, err := store.CopyFile(srcPath, filePath)
 	if err != nil {
 		_ = m.store.FailBackup(id, fmt.Sprintf("file copy failed: %v", err))
@@ -250,6 +254,7 @@ func (m *Manager) Delete(w http.ResponseWriter, r *http.Request) {
 // @Tags         backups
 // @Produce      octet-stream
 // @Param        id  path  string  true  "Backup ID"
+// @Param        format  query  string  false  "Use archive for a signed ZIP that can be uploaded for restore"
 // @Success      200  {file}  binary
 // @Failure      400  {object}  map[string]string
 // @Failure      404  {object}  map[string]string
@@ -275,6 +280,19 @@ func (m *Manager) Download(w http.ResponseWriter, r *http.Request) {
 		uid = user.ID
 	}
 	m.logBackupEvent(uid, fmt.Sprintf("backup:downloaded:%s", id), fmt.Sprintf("type=%s", backup.Type))
+	if r.URL.Query().Get("format") == "archive" {
+		path := backupFilePath(id)
+		if ok, err := m.store.VerifyFile(path, backup.Signature); err != nil || !ok {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "backup integrity check failed"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="backup-%s.zip"`, id))
+		if err := writeBackupArchive(w, path, backup.Signature); err != nil {
+			slog.ErrorContext(r.Context(), "backup: archive download failed", "error", err)
+		}
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="backup-%s.db"`, id))
@@ -372,17 +390,11 @@ func (m *Manager) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy backup file over tracker.db
-	if _, err := store.CopyFile(srcPath, "tracker.db"); err != nil {
+	// Close SQLite before replacing the configured file so its WAL cannot replay
+	// over the restored bytes when the old connection closes.
+	if err := m.store.RestoreDatabase(srcPath); err != nil {
 		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), fmt.Sprintf("error=file copy failed: %v", err))
 		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("restore failed: %v", err)})
-		return
-	}
-
-	// Reopen database connection
-	if err := m.store.ReopenDB("tracker.db"); err != nil {
-		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), fmt.Sprintf("error=reopen failed: %v", err))
-		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("database reopen failed: %v", err)})
 		return
 	}
 
@@ -406,12 +418,13 @@ func (m *Manager) Restore(w http.ResponseWriter, r *http.Request) {
 // handleUploadRestore restores the database from an uploaded file.
 //
 // @Summary      Upload and restore backup
-// @Description  Upload a backup file and restore the database from it. Requires confirmation "CONFIRM RESTORE" as a form field. Max upload size 200 MB.
+// @Description  Upload a signed ZIP backup (or a raw database with a signature form field) and restore it. Requires confirmation "CONFIRM RESTORE". Max database size 200 MB.
 // @Tags         backups
 // @Accept       multipart/form-data
 // @Produce      json
 // @Param        file          formData  file    true  "Backup database file"
 // @Param        confirmation  formData  string  true  "Must be 'CONFIRM RESTORE'"
+// @Param        signature  formData  string  false  "Required for raw .db uploads; included in signed ZIP archives"
 // @Success      200  {object}  object{message=string,pre_restore_backup_id=string}
 // @Failure      400  {object}  map[string]string
 // @Failure      409  {object}  map[string]string
@@ -426,6 +439,7 @@ func (m *Manager) UploadRestore(w http.ResponseWriter, r *http.Request) {
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse multipart form (too large?)"})
 		return
 	}
+	defer r.MultipartForm.RemoveAll()
 
 	confirmation := r.FormValue("confirmation")
 	if confirmation != "CONFIRM RESTORE" {
@@ -454,9 +468,20 @@ func (m *Manager) UploadRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.Close()
+	defer os.Remove(tempPath)
+	dbPath, providedSig, err := prepareBackupUpload(tempPath, r.FormValue("signature"))
+	if err != nil {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	defer os.Remove(dbPath)
+	if info, err := os.Stat(dbPath); err != nil || info.Size() > maxBackupBytes {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "backup database exceeds 200 MB"})
+		return
+	}
 
 	// Validate the uploaded file
-	if err := store.ValidateBackupFile(tempPath); err != nil {
+	if err := store.ValidateBackupFile(dbPath); err != nil {
 		os.Remove(tempPath)
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("invalid backup file: %v", err)})
 		return
@@ -465,8 +490,7 @@ func (m *Manager) UploadRestore(w http.ResponseWriter, r *http.Request) {
 	// Require a valid HMAC signature: only a backup produced by THIS server (same
 	// key) verifies, which blocks installing an attacker-crafted DB (e.g. one
 	// carrying a known-password admin row) via upload-restore (F-017).
-	providedSig := r.FormValue("signature")
-	tempBytes, rerr := os.ReadFile(tempPath)
+	tempBytes, rerr := os.ReadFile(dbPath)
 	if rerr != nil || providedSig == "" || !m.store.VerifyFileBytes(tempBytes, providedSig) {
 		os.Remove(tempPath)
 		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "backup signature missing or invalid — only backups created by this server can be restored"})
@@ -507,8 +531,7 @@ func (m *Manager) UploadRestore(w http.ResponseWriter, r *http.Request) {
 		m.hub.Broadcast(apiws.NewEvent(apiws.EventMaintenanceChanged, "backups:*", map[string]interface{}{"maintenance": true}))
 	}
 
-	// Copy uploaded file over tracker.db
-	if _, err := store.CopyFile(tempPath, "tracker.db"); err != nil {
+	if err := m.store.RestoreDatabase(dbPath); err != nil {
 		os.Remove(tempPath)
 		m.logBackupEvent(uid, "restore:failed:upload", fmt.Sprintf("error=file copy failed: %v", err))
 		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("restore failed: %v", err)})
@@ -517,13 +540,6 @@ func (m *Manager) UploadRestore(w http.ResponseWriter, r *http.Request) {
 
 	// Clean up temp file
 	os.Remove(tempPath)
-
-	// Reopen database connection
-	if err := m.store.ReopenDB("tracker.db"); err != nil {
-		m.logBackupEvent(uid, "restore:failed:upload", fmt.Sprintf("error=reopen failed: %v", err))
-		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("database reopen failed: %v", err)})
-		return
-	}
 
 	m.logBackupEvent(uid, "restore:completed:upload", "")
 	slog.InfoContext(r.Context(), "backup: restore completed from upload", "filename", handler.Filename, "pre_restore_id", preRestoreBackup.ID)

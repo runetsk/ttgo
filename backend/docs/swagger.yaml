@@ -2701,6 +2701,10 @@ paths:
         name: id
         required: true
         type: string
+      - description: Use archive for a signed ZIP that can be uploaded for restore
+        in: query
+        name: format
+        type: string
       produces:
       - application/octet-stream
       responses:
@@ -2792,8 +2796,9 @@ paths:
     post:
       consumes:
       - multipart/form-data
-      description: Upload a backup file and restore the database from it. Requires
-        confirmation "CONFIRM RESTORE" as a form field. Max upload size 200 MB.
+      description: Upload a signed ZIP backup (or a raw database with a signature
+        form field) and restore it. Requires confirmation "CONFIRM RESTORE". Max database
+        size 200 MB.
       parameters:
       - description: Backup database file
         in: formData
@@ -2804,6 +2809,10 @@ paths:
         in: formData
         name: confirmation
         required: true
+        type: string
+      - description: Required for raw .db uploads; included in signed ZIP archives
+        in: formData
+        name: signature
         type: string
       produces:
       - application/json

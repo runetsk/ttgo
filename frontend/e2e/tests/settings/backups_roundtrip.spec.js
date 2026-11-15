@@ -1,0 +1,31 @@
+import { test, expect } from '../../fixtures/test.js';
+
+test('a signed backup downloaded in Settings can be uploaded and restored', async ({ page, api }, testInfo) => {
+    test.setTimeout(30000);
+    const folder = await api.createFolder('Backup round trip ' + Date.now());
+    await page.goto('/settings#backups');
+    const created = page.waitForResponse(r => r.url().endsWith('/api/backups') && r.request().method() === 'POST');
+    await page.getByRole('button', { name: '+ Create Backup', exact: true }).click();
+    const response = await created;
+    expect(response.status()).toBe(201);
+    const backup = await response.json();
+    const downloaded = page.waitForEvent('download');
+    await page.getByTitle('Download', { exact: true }).first().click();
+    const download = await downloaded;
+    expect(download.suggestedFilename()).toBe(`backup-${backup.id}.zip`);
+    const archive = testInfo.outputPath('backup.zip');
+    await download.saveAs(archive);
+    const edited = await page.request.patch(`/api/folders/${folder.id}`, { data: { name: 'After backup' } });
+    expect(edited.ok()).toBe(true);
+    await page.getByRole('button', { name: 'Restore', exact: true }).click();
+    await page.locator('input[type="file"]').setInputFiles(archive);
+    await page.getByRole('button', { name: 'Upload & Restore', exact: true }).click();
+    await page.getByTestId('modal-input').fill('CONFIRM RESTORE');
+    const restored = page.waitForResponse(r => r.url().endsWith('/api/backups/upload-restore'));
+    await page.getByTestId('modal-confirm-button').click();
+    const result = await restored;
+    expect(result.status()).toBe(200);
+    const fresh = await page.request.get(`/api/folders/${folder.id}`);
+    expect(fresh.ok()).toBe(true);
+    expect((await fresh.json()).name).toBe(folder.name);
+});

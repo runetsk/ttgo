@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 	"ttgo/pkg/tracker/models"
 
@@ -12,6 +13,57 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
+
+// DatabasePath asks SQLite for the main database filename, including when the
+// connection was opened with an absolute path or a URI DSN.
+func (s *Store) DatabasePath() (string, error) {
+	var databases []struct{ Name, File string }
+	if err := s.db.Raw("PRAGMA database_list").Scan(&databases).Error; err != nil {
+		return "", err
+	}
+	for _, db := range databases {
+		if db.Name == "main" && db.File != "" {
+			return db.File, nil
+		}
+	}
+	return "", fmt.Errorf("backups require a file-backed database")
+}
+
+// RestoreDatabase stages a complete copy before closing SQLite, then replaces
+// the configured file after the old connection has finished with its WAL.
+func (s *Store) RestoreDatabase(source string) error {
+	path, err := s.DatabasePath()
+	if err != nil {
+		return err
+	}
+	stage, err := os.CreateTemp(filepath.Dir(path), ".ttgo-restore-*.db")
+	if err != nil {
+		return err
+	}
+	stagePath := stage.Name()
+	if err := stage.Close(); err != nil {
+		os.Remove(stagePath)
+		return err
+	}
+	defer os.Remove(stagePath)
+	if _, err := CopyFile(source, stagePath); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sqlDB, err := s.db.DB()
+	if err != nil {
+		return err
+	}
+	if err := sqlDB.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(stagePath, path); err != nil {
+		_ = s.reopenDatabase(path)
+		return fmt.Errorf("failed to install restored database: %w", err)
+	}
+	return s.reopenDatabase(path)
+}
 
 // CreateBackup inserts a new backup record with in_progress status.
 func (s *Store) CreateBackup(id, backupType, filePath, creatorID, creatorName string) (*models.Backup, error) {

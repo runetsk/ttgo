@@ -150,7 +150,7 @@ export function BackupsSettings() {
             const url = window.URL.createObjectURL(new Blob([response.data]));
             const link = document.createElement('a');
             link.href = url;
-            link.setAttribute('download', `backup-${backup.id}.db`);
+            link.setAttribute('download', `backup-${backup.id}.zip`);
             document.body.appendChild(link);
             link.click();
             link.parentNode.removeChild(link);
@@ -448,13 +448,13 @@ export function BackupsSettings() {
                         Upload & Restore
                     </h3>
                     <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0 0 12px' }}>
-                        Upload a previously downloaded backup file (.db) from your local machine.
+                        Upload a signed backup (.zip) previously downloaded from this server.
                     </p>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                         <input
                             ref={fileInputRef}
                             type="file"
-                            accept=".db"
+                            accept=".zip"
                             onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
                             style={{ flex: 1, fontSize: '0.85rem' }}
                         />

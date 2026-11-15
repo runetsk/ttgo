@@ -602,7 +602,7 @@ export const backups = {
     create: () => api.post('/backups').then(res => res.data),
     get: (id) => api.get(`/backups/${id}`).then(res => res.data),
     delete: (id) => api.delete(`/backups/${id}`).then(res => res.data),
-    download: (id) => api.get(`/backups/${id}/download`, { responseType: 'blob' }),
+    download: (id) => api.get(`/backups/${id}/download`, { params: { format: 'archive' }, responseType: 'blob' }),
     restore: (id, confirmation) =>
         api.post(`/backups/${id}/restore`, { confirmation }).then(res => res.data),
     uploadRestore: (file, confirmation) => {

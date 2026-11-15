@@ -450,7 +450,10 @@ func (s *Store) ReopenDB(dsn string) error {
 	if err := sqlDB.Close(); err != nil {
 		return fmt.Errorf("failed to close database: %w", err)
 	}
+	return s.reopenDatabase(dsn)
+}
 
+func (s *Store) reopenDatabase(dsn string) error {
 	// Reopen with the same parameters
 	dsnWithParams := fmt.Sprintf("%s?_busy_timeout=5000&_journal_mode=wal&_foreign_keys=on", dsn)
 	db, err := gorm.Open(sqlite.Open(dsnWithParams), gormConfig())

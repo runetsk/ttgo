@@ -1444,7 +1444,7 @@ const docTemplate = `{
                         "BearerAuth": []
                     }
                 ],
-                "description": "Upload a backup file and restore the database from it. Requires confirmation \"CONFIRM RESTORE\" as a form field. Max upload size 200 MB.",
+                "description": "Upload a signed ZIP backup (or a raw database with a signature form field) and restore it. Requires confirmation \"CONFIRM RESTORE\". Max database size 200 MB.",
                 "consumes": [
                     "multipart/form-data"
                 ],
@@ -1469,6 +1469,12 @@ const docTemplate = `{
                         "name": "confirmation",
                         "in": "formData",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Required for raw .db uploads; included in signed ZIP archives",
+                        "name": "signature",
+                        "in": "formData"
                     }
                 ],
                 "responses": {
@@ -1634,6 +1640,12 @@ const docTemplate = `{
                         "name": "id",
                         "in": "path",
                         "required": true
+                    },
+                    {
+                        "type": "string",
+                        "description": "Use archive for a signed ZIP that can be uploaded for restore",
+                        "name": "format",
+                        "in": "query"
                     }
                 ],
                 "responses": {
