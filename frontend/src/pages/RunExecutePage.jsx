@@ -1,11 +1,12 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, Link, useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { useParams, Link, useNavigate, useSearchParams, useBlocker } from 'react-router-dom';
 import { getTestRun, getTest, updateRunResult, completeTestRun, uploadScreenshots } from '../api';
 import { latestAttempts } from '../utils/runResults';
 import SafeHTML from '../components/shared/SafeHTML';
 import { toast } from '../toast';
 import { STATUS_COLORS } from '../utils/statusColors';
 import { buildStepResults, parseStepVerdicts } from '../utils/stepResults';
+import { createExecutionSaves } from '../utils/executionSaves';
 
 export default function RunExecutePage() {
     const { runId } = useParams();
@@ -24,9 +25,38 @@ export default function RunExecutePage() {
     const [failNote, setFailNote] = useState('');
     const [failShotCount, setFailShotCount] = useState(0);
     const [uploadingFailShots, setUploadingFailShots] = useState(false);
-    const [stepVerdicts, setStepVerdicts] = useState({}); // order_index -> { status, note }
-    const stepSaveTimer = useRef(null);
+    const stepVerdicts = parseStepVerdicts(queue[currentIdx]?.steps);
+    const currentResultId = queue[currentIdx]?.id;
+    const [savingVerdict, setSavingVerdict] = useState(false);
+    const savingRef = useRef(false);
+    const saves = useMemo(() => createExecutionSaves(
+        (id, patch) => updateRunResult(runId, id, patch),
+        { onError: () => toast.error('Failed to save result. Your draft is kept; retry before leaving.') },
+    ), [runId]);
     const startedAtRef = useRef(null);
+
+    // Finish queued writes before leaving this page, including the Exit link.
+    const blocker = useBlocker(useCallback(({ currentLocation, nextLocation }) =>
+        nextLocation.pathname !== '/login' && currentLocation.pathname !== nextLocation.pathname && saves.hasPending(), [saves]));
+    useEffect(() => {
+        if (blocker.state !== 'blocked') return;
+        let cancelled = false;
+        saves.flush().then(() => { if (!cancelled) blocker.proceed(); })
+            .catch(() => { if (!cancelled) blocker.reset(); });
+        return () => { cancelled = true; };
+    }, [blocker, saves]);
+    useEffect(() => {
+        const beforeUnload = (event) => {
+            if (!saves.hasPending()) return;
+            event.preventDefault();
+            event.returnValue = '';
+        };
+        window.addEventListener('beforeunload', beforeUnload);
+        return () => {
+            window.removeEventListener('beforeunload', beforeUnload);
+            saves.flush().catch(() => {});
+        };
+    }, [saves]);
 
     // Restart the informal timer whenever a different test becomes current.
     useEffect(() => {
@@ -36,8 +66,7 @@ export default function RunExecutePage() {
         setFailNote('');
         setFailShotCount(0);
         setUploadingFailShots(false);
-        setStepVerdicts(parseStepVerdicts(queue[currentIdx]?.steps));
-    }, [currentIdx, queue]);
+    }, [currentResultId]);
 
     useEffect(() => {
         getTestRun(runId)
@@ -73,8 +102,14 @@ export default function RunExecutePage() {
         return () => { cancelled = true; };
     }, [currentTestCaseId, caseCache]);
 
-    const goPrev = useCallback(() => setCurrentIdx(i => Math.max(0, i - 1)), []);
-    const goNext = useCallback(() => setCurrentIdx(i => Math.min(queue.length - 1, i + 1)), [queue.length]);
+    const move = useCallback(async (offset) => {
+        if (savingRef.current) return;
+        try { await saves.flush(currentResultId); }
+        catch { return; }
+        setCurrentIdx(i => Math.max(0, Math.min(queue.length - 1, i + offset)));
+    }, [saves, currentResultId, queue.length]);
+    const goPrev = useCallback(() => move(-1), [move]);
+    const goNext = useCallback(() => move(1), [move]);
 
     // Advance to the next PENDING test after the current one (wrapping around);
     // stay put when none remain — the done banner takes over.
@@ -91,8 +126,9 @@ export default function RunExecutePage() {
 
     const submitVerdict = useCallback(async (status) => {
         const r = queue[currentIdx];
-        if (!r || r.status === status) return;
-        if (stepSaveTimer.current) clearTimeout(stepSaveTimer.current);
+        if (!r || r.status === status || savingRef.current) return;
+        savingRef.current = true;
+        setSavingVerdict(true);
         const payload = { status, duration_ms: Date.now() - startedAtRef.current };
         if (status === 'FAIL') {
             payload.defect_type = defectType;
@@ -103,10 +139,13 @@ export default function RunExecutePage() {
             payload.steps = buildStepResults(markedTc.steps || [], stepVerdicts);
         }
         try {
-            await updateRunResult(runId, r.id, payload);
+            await saves.save(r.id, payload);
         } catch {
             toast.error('Failed to save verdict');
             return; // leave the queue untouched; the user can retry
+        } finally {
+            savingRef.current = false;
+            setSavingVerdict(false);
         }
         const updated = queue.map((item, i) =>
             i === currentIdx
@@ -116,34 +155,33 @@ export default function RunExecutePage() {
         setQueue(updated);
         setFailPanelOpen(false);
         advance(currentIdx, updated);
-    }, [queue, currentIdx, runId, defectType, failNote, advance, caseCache, stepVerdicts]);
+    }, [queue, currentIdx, defectType, failNote, advance, caseCache, stepVerdicts, saves]);
 
     const persistSteps = useCallback((verdicts) => {
         const r = queue[currentIdx];
         const tc = r?.test_case_id ? caseCache[r.test_case_id] : null;
         if (!r || !tc) return;
         const steps = buildStepResults(tc.steps || [], verdicts);
-        if (stepSaveTimer.current) clearTimeout(stepSaveTimer.current);
-        stepSaveTimer.current = setTimeout(() => {
-            updateRunResult(runId, r.id, { steps }).catch(() => toast.error('Failed to save step result'));
-        }, 500);
-    }, [queue, currentIdx, caseCache, runId]);
+        setQueue(previous => previous.map(item => item.id === r.id ? { ...item, steps } : item));
+        saves.schedule(r.id, { steps });
+    }, [queue, currentIdx, caseCache, saves]);
 
     const markStep = useCallback((orderIndex, status) => {
+        if (savingRef.current) return;
         const next = { ...stepVerdicts, [orderIndex]: { status, note: stepVerdicts[orderIndex]?.note || '' } };
-        setStepVerdicts(next);
         persistSteps(next);
         if (status === 'FAIL') setFailPanelOpen(true);
     }, [stepVerdicts, persistSteps]);
 
     const setStepNote = useCallback((orderIndex, note) => {
+        if (savingRef.current) return;
         const next = { ...stepVerdicts, [orderIndex]: { status: stepVerdicts[orderIndex]?.status || '', note } };
-        setStepVerdicts(next);
         persistSteps(next);
     }, [stepVerdicts, persistSteps]);
 
     useEffect(() => {
         const onKey = (e) => {
+            if (savingRef.current) return;
             const tag = e.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable) return;
             if (failPanelOpen) return; // don't fire verdicts under the fail form
@@ -202,8 +240,10 @@ export default function RunExecutePage() {
                             <button
                                 className="primary-btn"
                                 data-testid="execute-complete-run"
+                                disabled={savingVerdict}
                                 onClick={async () => {
                                     try {
+                                        await saves.flush();
                                         await completeTestRun(runId);
                                         navigate(`/runs/run/${runId}`);
                                     } catch {
@@ -226,7 +266,8 @@ export default function RunExecutePage() {
                             <button
                                 key={r.id}
                                 data-testid={`execute-jump-${r.id}`}
-                                onClick={() => setCurrentIdx(i)}
+                                onClick={() => move(i - currentIdx)}
+                                disabled={savingVerdict}
                                 style={{
                                     display: 'flex', alignItems: 'center', gap: 8, width: '100%',
                                     padding: '7px 10px', borderRadius: 7, border: 'none', textAlign: 'left',
@@ -317,12 +358,15 @@ export default function RunExecutePage() {
                                                 </div>
                                                 <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
                                                     <button data-testid={`execute-step-pass-${s.order_index}`} title="Pass"
+                                                        disabled={savingVerdict}
                                                         onClick={() => markStep(s.order_index, 'PASS')}
                                                         style={btn(v.status === 'PASS', 'var(--accent-green)', 'rgba(34,197,94,0.1)')}>✓</button>
                                                     <button data-testid={`execute-step-fail-${s.order_index}`} title="Fail"
+                                                        disabled={savingVerdict}
                                                         onClick={() => markStep(s.order_index, 'FAIL')}
                                                         style={btn(v.status === 'FAIL', 'var(--accent-red)', 'rgba(239,68,68,0.1)')}>✕</button>
                                                     <button data-testid={`execute-step-skip-${s.order_index}`} title="Skip"
+                                                        disabled={savingVerdict}
                                                         onClick={() => markStep(s.order_index, 'SKIP')}
                                                         style={btn(v.status === 'SKIP', '#9ca3af', 'rgba(156,163,175,0.1)')}>⊘</button>
                                                 </div>
@@ -330,6 +374,7 @@ export default function RunExecutePage() {
                                             {v.status && (
                                                 <input type="text" className="modern-input"
                                                     data-testid={`execute-step-note-${s.order_index}`}
+                                                    disabled={savingVerdict}
                                                     placeholder="Note (optional)" value={v.note}
                                                     onChange={e => setStepNote(s.order_index, e.target.value)}
                                                     style={{ fontSize: '0.8rem', marginLeft: 34, width: 'calc(100% - 34px)' }} />
@@ -343,14 +388,17 @@ export default function RunExecutePage() {
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 18, flexWrap: 'wrap' }}>
                             <button data-testid="execute-pass" onClick={() => submitVerdict('PASS')}
+                                disabled={savingVerdict}
                                 style={{ padding: '9px 22px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', color: 'var(--accent-green)', background: 'rgba(34,197,94,0.12)', border: '1px solid rgba(34,197,94,0.35)' }}>
                                 ✓ Pass
                             </button>
                             <button data-testid="execute-fail" onClick={() => setFailPanelOpen(true)}
+                                disabled={savingVerdict}
                                 style={{ padding: '9px 22px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', color: 'var(--accent-red)', background: 'rgba(239,68,68,0.12)', border: '1px solid rgba(239,68,68,0.35)' }}>
                                 ✕ Fail
                             </button>
                             <button data-testid="execute-skip" onClick={() => submitVerdict('SKIP')}
+                                disabled={savingVerdict}
                                 style={{ padding: '9px 22px', borderRadius: 8, cursor: 'pointer', fontWeight: 700, fontSize: '0.9rem', color: '#9ca3af', background: 'rgba(156,163,175,0.12)', border: '1px solid rgba(156,163,175,0.35)' }}>
                                 ⊘ Skip
                             </button>
@@ -366,6 +414,7 @@ export default function RunExecutePage() {
                                 display: 'flex', flexDirection: 'column', gap: 10,
                             }}>
                                 <select className="modern-select" value={defectType}
+                                    disabled={savingVerdict}
                                     onChange={e => setDefectType(e.target.value)}
                                     data-testid="execute-defect-type" style={{ maxWidth: 260 }}>
                                     <option value="to_investigate">🔍 To Investigate</option>
@@ -374,6 +423,7 @@ export default function RunExecutePage() {
                                     <option value="system_issue">⚙️ System Issue</option>
                                 </select>
                                 <textarea className="modern-input" rows={3} placeholder="What went wrong? (optional)"
+                                    disabled={savingVerdict}
                                     value={failNote} onChange={e => setFailNote(e.target.value)}
                                     data-testid="execute-fail-note" style={{ width: '100%', resize: 'vertical' }} />
                                 <label
@@ -391,7 +441,7 @@ export default function RunExecutePage() {
                                         type="file"
                                         accept="image/png,image/jpeg,image/gif,image/webp"
                                         multiple
-                                        disabled={uploadingFailShots}
+                                        disabled={uploadingFailShots || savingVerdict}
                                         data-testid="execute-attach-screenshots-input"
                                         style={{ display: 'none' }}
                                         onChange={async (e) => {
@@ -414,6 +464,7 @@ export default function RunExecutePage() {
                                 </label>
                                 <div style={{ display: 'flex', gap: 8 }}>
                                     <button className="primary-btn" onClick={() => submitVerdict('FAIL')}
+                                        disabled={savingVerdict}
                                         data-testid="execute-fail-confirm" style={{ padding: '7px 18px', fontSize: '0.85rem' }}>
                                         Mark Failed
                                     </button>
@@ -426,11 +477,11 @@ export default function RunExecutePage() {
                         )}
 
                         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-                            <button className="action-btn" onClick={goPrev} disabled={currentIdx === 0}
+                            <button className="action-btn" onClick={goPrev} disabled={savingVerdict || currentIdx === 0}
                                 data-testid="execute-prev" style={{ padding: '6px 14px' }}>
                                 ‹ Prev
                             </button>
-                            <button className="action-btn" onClick={goNext} disabled={currentIdx >= queue.length - 1}
+                            <button className="action-btn" onClick={goNext} disabled={savingVerdict || currentIdx >= queue.length - 1}
                                 data-testid="execute-next" style={{ padding: '6px 14px' }}>
                                 Next ›
                             </button>
