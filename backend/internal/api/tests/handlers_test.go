@@ -194,6 +194,25 @@ func TestUpdateTest_BadJSON(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, w.Code)
 }
 
+func TestUpdateTestDescriptionPresence(t *testing.T) {
+	st := newStore(t)
+	_, tc := seedFolderAndTest(t, st)
+	w := do(t, st, "PUT", "/api/tests/"+tc.ID, map[string]string{"name": "renamed"})
+	require.Equal(t, http.StatusOK, w.Code)
+	var saved models.TestCase
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &saved))
+	require.False(t, saved.UpdatedAt.IsZero())
+	fresh, err := st.GetTestCase(tc.ID)
+	require.NoError(t, err)
+	require.Equal(t, "desc", fresh.Description)
+	w = do(t, st, "PUT", "/api/tests/"+tc.ID, map[string]string{"description": ""})
+	require.Equal(t, http.StatusOK, w.Code)
+	fresh, err = st.GetTestCase(tc.ID)
+	require.NoError(t, err)
+	require.Empty(t, fresh.Description)
+	require.Equal(t, "renamed", fresh.Name)
+}
+
 func TestDeleteTest(t *testing.T) {
 	st := newStore(t)
 	_, tc := seedFolderAndTest(t, st)

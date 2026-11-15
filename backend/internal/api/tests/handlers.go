@@ -272,7 +272,7 @@ func (h *Handler) UpdateTest(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name         string                    `json:"name"`
 		FolderID     string                    `json:"folder_id"`
-		Description  string                    `json:"description"`
+		Description  *string                   `json:"description"`
 		Steps        []models.TestStep         `json:"steps"`
 		CustomValues []models.CustomFieldValue `json:"custom_values"`
 		Categories   []models.Category         `json:"categories"`
@@ -292,17 +292,19 @@ func (h *Handler) UpdateTest(w http.ResponseWriter, r *http.Request) {
 
 	// Sanitize HTML-bearing fields before persisting (FR-002, FR-007).
 	p := h.sanitizer
-	req.Description = httpx.NormalizeEmptyHTML(p, req.Description)
+	if req.Description != nil {
+		description := httpx.NormalizeEmptyHTML(p, *req.Description)
+		req.Description = &description
+	}
 	for i := range req.Steps {
 		req.Steps[i].Action = httpx.NormalizeEmptyHTML(p, req.Steps[i].Action)
 		req.Steps[i].ExpectedResult = httpx.NormalizeEmptyHTML(p, req.Steps[i].ExpectedResult)
 	}
 
 	test := &models.TestCase{
-		ID:          testID,
-		Name:        req.Name,
-		FolderID:    req.FolderID,
-		Description: req.Description,
+		ID:       testID,
+		Name:     req.Name,
+		FolderID: req.FolderID,
 	}
 
 	if req.Steps != nil {
@@ -329,7 +331,7 @@ func (h *Handler) UpdateTest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.store.UpdateTestCase(test); err != nil {
+	if err := h.store.PatchTestCase(test, req.Description); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}

@@ -62,26 +62,46 @@ func (s *Store) createTestCaseTx(tx *gorm.DB, test *models.TestCase) error {
 }
 
 func (s *Store) UpdateTestCase(test *models.TestCase) error {
+	return s.PatchTestCase(test, &test.Description)
+}
+
+// PatchTestCase preserves the description when it is omitted and persists an
+// explicitly empty description. All fields and associations share one transaction.
+func (s *Store) PatchTestCase(test *models.TestCase, description *string) error {
 	return s.db.Transaction(func(tx *gorm.DB) error {
-		return s.updateTestCaseTx(tx, test)
+		return s.updateTestCaseTx(tx, test, description)
 	})
 }
 
-func (s *Store) updateTestCaseTx(tx *gorm.DB, test *models.TestCase) error {
-	if err := tx.Model(test).Updates(test).Error; err != nil {
+func (s *Store) updateTestCaseTx(tx *gorm.DB, test *models.TestCase, description *string) error {
+	updates := map[string]interface{}{}
+	if description != nil {
+		updates["description"] = *description
+	}
+	if test.Name != "" {
+		updates["name"] = test.Name
+	}
+	if test.FolderID != "" {
+		updates["folder_id"] = test.FolderID
+	}
+	if err := tx.Model(&models.TestCase{}).Where("id = ?", test.ID).Updates(updates).Error; err != nil {
 		return err
 	}
 
 	// If steps are provided, replace them
 	if test.Steps != nil {
+		// Association.Replace only updates membership, leaving existing content unchanged.
+		if err := tx.Where("test_case_id = ?", test.ID).Delete(&models.TestStep{}).Error; err != nil {
+			return err
+		}
 		for _, step := range test.Steps {
 			if step.ID == "" {
 				step.ID = uuid.New().String()
 			}
 			step.TestCaseID = test.ID
-		}
-		if err := tx.Model(test).Association("Steps").Replace(test.Steps); err != nil {
-			return err
+			if err := tx.Create(step).Error; err != nil {
+				return err
+			}
 		}
 	}
 
@@ -118,17 +138,11 @@ func (s *Store) updateTestCaseTx(tx *gorm.DB, test *models.TestCase) error {
 		First(&full, "id = ?", test.ID).Error; err != nil {
 		return err
 	}
-	// Merge updated top-level fields into the full record for snapshotting.
-	full.Name = test.Name
-	full.Description = test.Description
-	if test.Steps != nil {
-		full.Steps = test.Steps
-	}
-
 	snapJSON, err := buildSnapshot(&full)
 	if err != nil {
 		return err
 	}
+	*test = full
 	return createVersionTx(tx, &models.TestCaseVersion{
 		TestCaseID: test.ID,
 		EventType:  "edit",
