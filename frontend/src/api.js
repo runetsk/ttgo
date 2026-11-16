@@ -89,6 +89,16 @@ export const getTests = (folderIds = [], categoryId, opts = {}) => {
     return api.get('/tests', { params }).then(res => res.data);
 };
 
+// Server-side paginated/filtered library listing. `params` is a plain object of
+// query parameters (see utils/testQuery.buildTestPageParams). Returns
+// { tests, total, limit, offset }.
+export const getTestsPage = (params) => api.get('/tests/page', { params }).then(res => res.data);
+
+// Returns { ids, total } for the whole filtered set (capped at the bulk limit),
+// backing the grid's "select all matching" action.
+export const getTestCaseIds = (params) =>
+    api.get('/tests/page', { params: { ...params, select: 'all' } }).then(res => res.data);
+
 export const getTest = (id, config) => api.get(`/tests/${id}`, config).then(res => res.data);
 
 export const createTest = (name, folderId, description) => api.post('/tests', { name, folder_id: folderId, description }).then(res => res.data);

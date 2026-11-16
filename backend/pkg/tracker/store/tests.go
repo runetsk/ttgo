@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"ttgo/pkg/tracker/models"
 
 	"github.com/google/uuid"
@@ -71,6 +72,44 @@ func (s *Store) PatchTestCase(test *models.TestCase, description *string) error 
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		return s.updateTestCaseTx(tx, test, description)
 	})
+}
+
+// PatchTestCaseChecked applies the patch only when expectedToken matches the
+// token of the current persisted editable content (optimistic concurrency for
+// the first-party editor). An empty expectedToken skips the check, preserving the
+// behaviour of API/CLI writers that do not participate. The token comparison and
+// the mutation share one transaction, so no write can slip in between them.
+//
+// Returns:
+//   - (nil, nil) on success (test is mutated to the saved full record);
+//   - (latest, ErrEditConflict) when the token is stale — latest is the current
+//     persisted record, and nothing is written;
+//   - (nil, gorm.ErrRecordNotFound) when the record no longer exists;
+//   - (nil, ErrBusy) when the database stayed locked across one retry.
+func (s *Store) PatchTestCaseChecked(test *models.TestCase, description *string, expectedToken string) (*models.TestCase, error) {
+	var latest *models.TestCase
+	run := func() error {
+		latest = nil
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			if expectedToken != "" {
+				var current models.TestCase
+				if err := tx.Preload("Steps").Preload("Categories").Preload("CustomValues").
+					First(&current, "id = ?", test.ID).Error; err != nil {
+					return err
+				}
+				if models.TestCaseEditToken(&current) != expectedToken {
+					latest = &current
+					return ErrEditConflict
+				}
+			}
+			return s.updateTestCaseTx(tx, test, description)
+		})
+	}
+	err := runWithBusyRetry(run)
+	if errors.Is(err, ErrEditConflict) {
+		return latest, err
+	}
+	return nil, err
 }
 
 func (s *Store) updateTestCaseTx(tx *gorm.DB, test *models.TestCase, description *string) error {
@@ -193,85 +232,92 @@ func (s *Store) ListTestCases(filter TestCaseFilter) ([]*models.TestCase, error)
 	if err := s.attachTestCaseAssociations(tests, !filter.ListView); err != nil {
 		return nil, err
 	}
+	s.enrichListRows(tests, filter.ListView)
+	return tests, nil
+}
 
-	if len(tests) > 0 {
-		// Collect test case IDs for bulk lookups.
-		tcIDs := make([]string, len(tests))
-		tcMap := make(map[string]*models.TestCase, len(tests))
-		for i, tc := range tests {
-			tcIDs[i] = tc.ID
-			tcMap[tc.ID] = tc
+// enrichListRows loads per-row listing extras for an already-fetched slice of test
+// cases — linked requirements, (list-view) step counts, and open/closed defect
+// counts — in id chunks so it stays within SQLite's bind limit. Categories and
+// steps are attached separately by attachTestCaseAssociations. Shared by the array
+// listing and the paginated listing so both produce identical rows.
+func (s *Store) enrichListRows(tests []*models.TestCase, listView bool) {
+	if len(tests) == 0 {
+		return
+	}
+	tcIDs := make([]string, len(tests))
+	tcMap := make(map[string]*models.TestCase, len(tests))
+	for i, tc := range tests {
+		tcIDs[i] = tc.ID
+		tcMap[tc.ID] = tc
+	}
+
+	// Populate linked requirements in bulk.
+	type reqLink struct {
+		TestCaseID string
+		models.Requirement
+	}
+	links, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]reqLink) error {
+		return s.db.Model(&models.Requirement{}).
+			Select("requirement_test_case_links.test_case_id, requirements.*").
+			Joins("JOIN requirement_test_case_links ON requirement_test_case_links.requirement_id = requirements.id").
+			Where("requirement_test_case_links.test_case_id IN ?", chunk).
+			Order("requirements.identifier").
+			Scan(part).Error
+	})
+	for _, l := range links {
+		tc := tcMap[l.TestCaseID]
+		if tc == nil {
+			continue
 		}
+		req := l.Requirement
+		tc.LinkedRequirements = append(tc.LinkedRequirements, &req)
+	}
 
-		// Populate linked requirements in bulk. This and the counts below go in id chunks too.
-		type reqLink struct {
+	// List view: populate StepsCount in one aggregate query instead of preloading full step rows.
+	if listView {
+		type stepCount struct {
 			TestCaseID string
-			models.Requirement
+			Count      int
 		}
-		links, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]reqLink) error {
-			return s.db.Model(&models.Requirement{}).
-				Select("requirement_test_case_links.test_case_id, requirements.*").
-				Joins("JOIN requirement_test_case_links ON requirement_test_case_links.requirement_id = requirements.id").
-				Where("requirement_test_case_links.test_case_id IN ?", chunk).
-				Order("requirements.identifier").
+		stepCounts, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]stepCount) error {
+			return s.db.Model(&models.TestStep{}).
+				Where("test_case_id IN ?", chunk).
+				Select("test_case_id, count(*) as count").
+				Group("test_case_id").
 				Scan(part).Error
 		})
-		for _, l := range links {
-			tc := tcMap[l.TestCaseID]
-			if tc == nil {
-				continue
+		for _, sc := range stepCounts {
+			if tc := tcMap[sc.TestCaseID]; tc != nil {
+				tc.StepsCount = sc.Count
 			}
-			req := l.Requirement
-			tc.LinkedRequirements = append(tc.LinkedRequirements, &req)
-		}
-
-		// List view: populate StepsCount in one aggregate query instead of preloading full step rows.
-		if filter.ListView {
-			type stepCount struct {
-				TestCaseID string
-				Count      int
-			}
-			stepCounts, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]stepCount) error {
-				return s.db.Model(&models.TestStep{}).
-					Where("test_case_id IN ?", chunk).
-					Select("test_case_id, count(*) as count").
-					Group("test_case_id").
-					Scan(part).Error
-			})
-			for _, sc := range stepCounts {
-				if tc := tcMap[sc.TestCaseID]; tc != nil {
-					tc.StepsCount = sc.Count
-				}
-			}
-		}
-
-		// Populate open/closed defect counts per test case.
-		type cnt struct {
-			TestCaseID string
-			Status     string
-			N          int
-		}
-		counts, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]cnt) error {
-			return s.db.Raw(`
-				SELECT dl.test_case_id, d.status, COUNT(DISTINCT d.id) as n
-				FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
-				WHERE dl.test_case_id IN ? GROUP BY dl.test_case_id, d.status`, chunk).Scan(part).Error
-		})
-		openByTC, closedByTC := map[string]int{}, map[string]int{}
-		for _, c := range counts {
-			if c.Status == "closed" {
-				closedByTC[c.TestCaseID] += c.N
-			} else {
-				openByTC[c.TestCaseID] += c.N
-			}
-		}
-		for i := range tests {
-			tests[i].OpenDefectCount = openByTC[tests[i].ID]
-			tests[i].ClosedDefectCount = closedByTC[tests[i].ID]
 		}
 	}
 
-	return tests, nil
+	// Populate open/closed defect counts per test case.
+	type cnt struct {
+		TestCaseID string
+		Status     string
+		N          int
+	}
+	counts, _ := gatherInChunks(tcIDs, func(chunk []string, part *[]cnt) error {
+		return s.db.Raw(`
+			SELECT dl.test_case_id, d.status, COUNT(DISTINCT d.id) as n
+			FROM defect_links dl JOIN defects d ON d.id = dl.defect_id
+			WHERE dl.test_case_id IN ? GROUP BY dl.test_case_id, d.status`, chunk).Scan(part).Error
+	})
+	openByTC, closedByTC := map[string]int{}, map[string]int{}
+	for _, c := range counts {
+		if c.Status == "closed" {
+			closedByTC[c.TestCaseID] += c.N
+		} else {
+			openByTC[c.TestCaseID] += c.N
+		}
+	}
+	for i := range tests {
+		tests[i].OpenDefectCount = openByTC[tests[i].ID]
+		tests[i].ClosedDefectCount = closedByTC[tests[i].ID]
+	}
 }
 
 // attachTestCaseAssociations loads the listing's associations: Categories always, Steps and

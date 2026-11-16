@@ -70,6 +70,10 @@ type TestCase struct {
 	// Populated on demand by ListTestCases when called with TestCaseFilter.ListView=true.
 	// Not persisted — avoids the cost of Preload("Steps") when the caller only needs the count.
 	StepsCount int `json:"steps_count,omitempty" gorm:"-"`
+
+	// Transient optimistic-concurrency token for the first-party editor. Set only on
+	// detail/save responses (GetTest, UpdateTest); never persisted, omitted elsewhere.
+	EditToken string `json:"edit_token,omitempty" gorm:"-"`
 }
 
 // CategoryTestCase represents the many-to-many relationship between Categories and TestCases.

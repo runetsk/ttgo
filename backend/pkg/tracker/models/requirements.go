@@ -30,6 +30,10 @@ type Requirement struct {
 	LastJiraPostHash string     `json:"-"           gorm:"default:''"`                                    // dedup marker for post-to-jira (F-056)
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+
+	// Transient optimistic-concurrency token for the first-party editor. Set only on
+	// detail/save responses; never persisted, omitted elsewhere.
+	EditToken string `json:"edit_token,omitempty" gorm:"-"`
 }
 
 // RequirementTestCaseLink is the junction table recording that a test case

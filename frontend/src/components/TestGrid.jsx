@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getTests, createTest, assignCategory, deleteTest, deleteTests, updateFolder, exportTests } from '../api';
+import { getTestsPage, getTestCaseIds, createTest, assignCategory, deleteTest, deleteTests, updateFolder, exportTests } from '../api';
 import { useCategories } from '../contexts/CategoriesContext';
 import { toast } from '../toast';
 import Modal from './Modal';
@@ -10,7 +10,7 @@ import { useColumnWidths } from '../hooks/useColumnWidths';
 import { stripHtml } from '../utils/htmlUtils';
 import DateRangeFilter from './filters/DateRangeFilter';
 import CategoryFilter from './filters/CategoryFilter';
-import { inDateRange } from '../utils/dateFilter';
+import { buildTestPageParams } from '../utils/testQuery';
 import { activeColumns } from '../utils/columnFeatures';
 
 // T003: Column definitions for the Test Cases grid
@@ -30,7 +30,10 @@ const COLUMN_DEFS = [
 export default function TestGrid({ selectedFolders, selectedTestId }) {
     const [folderEditName, setFolderEditName] = useState(null); // null = not editing, string = draft value
     const folderNameInputRef = useRef(null);
-    const [tests, setTests] = useState([]);
+    const [tests, setTests] = useState([]);       // current page rows (server-paged)
+    const [total, setTotal] = useState(0);         // total matching rows (server)
+    const [refreshKey, setRefreshKey] = useState(0); // bump to re-fetch the current page
+    const [selectingAll, setSelectingAll] = useState(false);
     const { categories } = useCategories();
     const [selectedCategoryId, setSelectedCategoryId] = useState("");
     const [modal, setModal] = useState(null);
@@ -81,16 +84,8 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         resetWidths();
     }, [resetColumns, resetWidths]);
 
-    const loadTests = useCallback(() => {
-        if (selectedFolders && selectedFolders.length > 0) {
-            const ids = selectedFolders.map(f => f.id);
-            return getTests(ids, undefined, { view: 'list' }).then(data => setTests(data || []));
-        }
-        return Promise.resolve();
-    }, [selectedFolders]);
-
-    // Dedup ref to prevent StrictMode double-fire
-    const testsLoadingRef = useRef('');
+    // loadTests re-fetches the current page (after a create/delete/bulk change).
+    const loadTests = useCallback(() => setRefreshKey(k => k + 1), []);
     const handleExport = useCallback(() => {
         const fields = ['name', ...Object.entries(exportFields).filter(([, v]) => v).map(([k]) => k)];
         setExporting(true);
@@ -128,17 +123,9 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         setColumnFilters({ id: "", name: "", description: "", categories: [], steps_count: "", reverification_flagged: "", open_defects: "", linked_requirements: "", created_at: { from: null, to: null }, updated_at: { from: null, to: null } });
         if (!folderIdsKey) {
             setTests([]);
+            setTotal(0);
         }
     }
-
-    useEffect(() => {
-        if (folderIdsKey && folderIdsKey === testsLoadingRef.current) return;
-        testsLoadingRef.current = folderIdsKey;
-        if (folderIdsKey && selectedFolders && selectedFolders.length > 0) {
-            const ids = selectedFolders.map(f => f.id);
-            getTests(ids, undefined, { view: 'list' }).then(data => setTests(data || []));
-        }
-    }, [folderIdsKey, selectedFolders]);
 
     const handleCreate = () => {
         if (selectedFolders.length !== 1) return;
@@ -282,7 +269,63 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
     if (prevFiltersFingerprint !== filtersFingerprint) {
         setPrevFiltersFingerprint(filtersFingerprint);
         setCurrentPage(1);
+        setSelectedTestIds([]); // selection is reset when folders or filters change
     }
+
+    // Debounce the free-text inputs so typing doesn't fire a request per keystroke.
+    const [debText, setDebText] = useState({ q: '', id: '', name: '', description: '', steps_count: '', open_defects: '', linked_requirements: '' });
+    useEffect(() => {
+        const next = {
+            q: filterText,
+            id: columnFilters.id, name: columnFilters.name, description: columnFilters.description,
+            steps_count: columnFilters.steps_count, open_defects: columnFilters.open_defects,
+            linked_requirements: columnFilters.linked_requirements,
+        };
+        const h = setTimeout(() => setDebText(prev => {
+            // Return the same object when nothing changed so the fetch effect below
+            // does not re-run (avoids a redundant request on mount / unrelated changes).
+            const same = Object.keys(next).every(k => prev[k] === next[k]);
+            return same ? prev : next;
+        }), 300);
+        return () => clearTimeout(h);
+    }, [filterText, columnFilters.id, columnFilters.name, columnFilters.description, columnFilters.steps_count, columnFilters.open_defects, columnFilters.linked_requirements]);
+
+    // Fetch the current page from the server whenever the query changes. Text filters
+    // arrive via debText (debounced); folder, sort, page and the select/date filters
+    // apply immediately. A monotonic sequence id drops out-of-order/stale responses.
+    const reqSeq = useRef(0);
+    useEffect(() => {
+        if (!folderIdsKey) return;
+        const params = buildTestPageParams({
+            folderIds: folderIdsKey.split(','),
+            search: debText.q,
+            columnFilters: {
+                id: debText.id, name: debText.name, description: debText.description,
+                steps_count: debText.steps_count, open_defects: debText.open_defects,
+                linked_requirements: debText.linked_requirements,
+                categories: columnFilters.categories,
+                reverification_flagged: columnFilters.reverification_flagged,
+                created_at: columnFilters.created_at,
+                updated_at: columnFilters.updated_at,
+            },
+            sort: sortConfig, pageSize, page: currentPage,
+        });
+        const seq = ++reqSeq.current;
+        getTestsPage(params)
+            .then(res => {
+                if (seq !== reqSeq.current) return;
+                setTests(res.tests || []);
+                setTotal(res.total || 0);
+                // Correct an out-of-range page (e.g. after a deletion shrank the set).
+                const pages = Math.max(1, Math.ceil((res.total || 0) / pageSize));
+                if (currentPage > pages) setCurrentPage(pages);
+            })
+            .catch(() => {
+                if (seq !== reqSeq.current) return;
+                setTests([]);
+                setTotal(0);
+            });
+    }, [folderIdsKey, debText, columnFilters.categories, columnFilters.reverification_flagged, columnFilters.created_at, columnFilters.updated_at, sortConfig, currentPage, pageSize, refreshKey]);
 
     const getPageNumbers = (current, total) => {
         if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
@@ -316,72 +359,35 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
         );
     }
 
-    const filteredTests = (tests || []).filter(t => {
-        // Global search
-        const globalSearch = filterText.toLowerCase();
-        const globalMatch = filterText === "" ||
-            t.name.toLowerCase().includes(globalSearch) ||
-            t.id.toLowerCase().includes(globalSearch) ||
-            t.categories?.some(s => s.name.toLowerCase().includes(globalSearch));
-
-        if (!globalMatch) return false;
-
-        // Column filters
-        const idFilter = columnFilters.id.toLowerCase();
-        const nameFilter = columnFilters.name.toLowerCase();
-        const descFilter = columnFilters.description.toLowerCase();
-        const stepsFilter = columnFilters.steps_count.toLowerCase();
-        const defectsFilter = columnFilters.open_defects.toLowerCase();
-        const reqsFilter = columnFilters.linked_requirements.toLowerCase();
-
-        const idMatch = idFilter === "" || t.id.toLowerCase().includes(idFilter);
-        const nameMatch = nameFilter === "" || t.name.toLowerCase().includes(nameFilter);
-        const descMatch = descFilter === "" || stripHtml(t.description).toLowerCase().includes(descFilter);
-        const categoryMatch = columnFilters.categories.length === 0 || t.categories?.some(s => columnFilters.categories.includes(s.id));
-        const stepsMatch = stepsFilter === "" || String(t.steps_count ?? t.steps?.length ?? 0).includes(stepsFilter);
-        const reverifMatch = columnFilters.reverification_flagged === "" || (t.reverification_flagged ? 'yes' : 'no') === columnFilters.reverification_flagged;
-        const defectsMatch = defectsFilter === "" || String(t.open_defect_count || 0).includes(defectsFilter);
-        const reqsMatch = reqsFilter === "" || t.linked_requirements?.some(r => r.identifier.toLowerCase().includes(reqsFilter));
-        const createdMatch = inDateRange(t.created_at, columnFilters.created_at);
-        const updatedMatch = inDateRange(t.updated_at, columnFilters.updated_at);
-
-        return idMatch && nameMatch && descMatch && categoryMatch && stepsMatch && reverifMatch && defectsMatch && reqsMatch && createdMatch && updatedMatch;
-    });
-
-    const sortedTests = [...filteredTests].sort((a, b) => {
-        if (!sortConfig.key) return 0;
-
-        let aValue = a[sortConfig.key];
-        let bValue = b[sortConfig.key];
-
-        if (sortConfig.key === 'categories') {
-            aValue = a.categories?.map(s => s.name).sort().join(', ') || '';
-            bValue = b.categories?.map(s => s.name).sort().join(', ') || '';
-        } else if (sortConfig.key === 'description') {
-            aValue = stripHtml(a.description).toLowerCase();
-            bValue = stripHtml(b.description).toLowerCase();
-        } else if (sortConfig.key === 'steps_count') {
-            aValue = a.steps?.length || 0;
-            bValue = b.steps?.length || 0;
-        } else if (sortConfig.key === 'reverification_flagged') {
-            aValue = a.reverification_flagged ? 1 : 0;
-            bValue = b.reverification_flagged ? 1 : 0;
-        } else if (sortConfig.key === 'open_defects') {
-            aValue = a.open_defect_count || 0;
-            bValue = b.open_defect_count || 0;
-        } else if (sortConfig.key === 'linked_requirements') {
-            aValue = a.linked_requirements?.map(r => r.identifier).sort().join(', ') || '';
-            bValue = b.linked_requirements?.map(r => r.identifier).sort().join(', ') || '';
-        }
-
-        if (aValue < bValue) return sortConfig.direction === 'asc' ? -1 : 1;
-        if (aValue > bValue) return sortConfig.direction === 'asc' ? 1 : -1;
-        return 0;
-    });
-
+    // Filtering, sorting and paging now run on the server (GET /api/tests/page);
+    // `tests` is already the current page and `total` the full match count.
+    const pagedTests = tests;
     const isMultiRoot = selectedFolders.length > 1;
-    const totalPages = Math.max(1, Math.ceil(sortedTests.length / pageSize));
-    const pagedTests = sortedTests.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+    // "Select all matching" fetches every matching ID (capped at the bulk limit) so
+    // bulk actions can act on the whole filter, not just the visible page.
+    const selectAllMatching = () => {
+        const params = buildTestPageParams({
+            folderIds: folderIdsKey ? folderIdsKey.split(',') : [],
+            search: debText.q,
+            columnFilters: {
+                id: debText.id, name: debText.name, description: debText.description,
+                steps_count: debText.steps_count, open_defects: debText.open_defects,
+                linked_requirements: debText.linked_requirements,
+                categories: columnFilters.categories,
+                reverification_flagged: columnFilters.reverification_flagged,
+                created_at: columnFilters.created_at,
+                updated_at: columnFilters.updated_at,
+            },
+            sort: sortConfig, pageSize, page: 1,
+        });
+        setSelectingAll(true);
+        getTestCaseIds(params)
+            .then(res => setSelectedTestIds(res.ids || []))
+            .catch(() => toast.error('Could not select all matching test cases'))
+            .finally(() => setSelectingAll(false));
+    };
 
     const handleFolderRenameStart = () => {
         if (isMultiRoot) return;
@@ -408,7 +414,7 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
 
     return (
         <div className="test-grid-container" data-testid="test-grid">
-            <header className="grid-header" style={{ marginBottom: filteredTests.length > 0 ? 16 : 32 }}>
+            <header className="grid-header" style={{ marginBottom: total > 0 ? 16 : 32 }}>
                 <div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                         <span>Library</span>
@@ -525,6 +531,25 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                     borderRadius: 8, marginBottom: 24, animation: 'fadeIn 0.2s ease'
                 }}>
                     <div style={{ fontWeight: 600, color: 'var(--accent-indigo)' }}>{selectedTestIds.length} items selected</div>
+                    {selectedTestIds.length < total && (
+                        <button
+                            className="action-btn"
+                            onClick={selectAllMatching}
+                            disabled={selectingAll}
+                            data-testid="select-all-matching-button"
+                            style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+                            title="Select every test case matching the current filters"
+                        >
+                            {selectingAll ? 'Selecting…' : `Select all ${total} matching`}
+                        </button>
+                    )}
+                    <button
+                        className="action-btn"
+                        onClick={() => setSelectedTestIds([])}
+                        style={{ fontSize: '0.8rem', padding: '4px 10px' }}
+                    >
+                        Clear
+                    </button>
                     <div style={{ height: 20, width: 1, background: 'var(--border-color)' }}></div>
                     <div style={{ display: 'flex', gap: 8 }}>
                         <button className="action-btn" onClick={handleBulkDelete} style={{ color: 'var(--accent-red)' }} data-testid="bulk-delete-tests-button">🗑️ Delete</button>
@@ -837,18 +862,18 @@ export default function TestGrid({ selectedFolders, selectedTestId }) {
                 </table>
             </div>
 
-            {filteredTests.length === 0 && (
+            {total === 0 && (
                 <div style={{ textAlign: 'center', padding: '60px 0', color: 'var(--text-secondary)' }}>
                     <div style={{ fontSize: '2rem', marginBottom: 12 }}>🔍</div>
                     <p>No tests found matching your criteria</p>
                 </div>
             )}
 
-            {sortedTests.length > 0 && (
+            {total > 0 && (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 16, padding: '12px 0', flexWrap: 'wrap', gap: 8 }}>
                     {/* Left: count */}
                     <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)', minWidth: 160 }}>
-                        Showing {sortedTests.length === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{Math.min(currentPage * pageSize, sortedTests.length)} of {sortedTests.length}
+                        Showing {total === 0 ? 0 : (currentPage - 1) * pageSize + 1}–{(currentPage - 1) * pageSize + pagedTests.length} of {total}
                     </div>
 
                     {/* Center: page buttons */}

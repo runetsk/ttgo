@@ -3,6 +3,7 @@ package backups
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -20,19 +21,29 @@ import (
 	"github.com/google/uuid"
 )
 
+// restoreDrainTimeout bounds how long a restore waits for in-flight database
+// requests to finish before it gives up and aborts without touching the live file.
+const restoreDrainTimeout = 30 * time.Second
+
 type Manager struct {
-	store           *store.Store
-	hub             *apiws.Hub
-	backupMu        sync.Mutex
-	maintenanceMu   sync.RWMutex
-	maintenanceMode bool
+	store    *store.Store
+	hub      *apiws.Hub
+	backupMu sync.Mutex // serializes backup/restore operations
+	gate     *Gate      // admission + drain barrier for database work during restore
 }
 
 func NewManager(s *store.Store, hub *apiws.Hub) *Manager {
 	return &Manager{
 		store: s,
 		hub:   hub,
+		gate:  NewGate(),
 	}
+}
+
+// Admit exposes the operation gate's admission to the HTTP middleware: ordinary
+// database requests hold a lease through their work so a restore can drain them.
+func (m *Manager) Admit() (func(), bool) {
+	return m.gate.Admit()
 }
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
@@ -66,18 +77,19 @@ func (m *Manager) performBackup(backupType, creatorID, creatorName string) (*mod
 		return nil, err
 	}
 
-	// WAL checkpoint to ensure DB file is self-contained
-	if err := m.store.DB().Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error; err != nil {
-		_ = m.store.FailBackup(id, fmt.Sprintf("WAL checkpoint failed: %v", err))
-		return nil, fmt.Errorf("WAL checkpoint failed: %w", err)
+	// Snapshot via VACUUM INTO: one read transaction produces a consistent,
+	// self-contained copy (no WAL sidecar, no separate checkpoint) that stays
+	// coherent even if writes land while it runs.
+	if err := m.store.BackupToFile(filePath); err != nil {
+		_ = m.store.FailBackup(id, fmt.Sprintf("snapshot failed: %v", err))
+		return nil, fmt.Errorf("failed to snapshot database: %w", err)
 	}
-
-	// Copy the database file
-	fileSize, err := store.CopyFile(srcPath, filePath)
+	snapInfo, err := os.Stat(filePath)
 	if err != nil {
-		_ = m.store.FailBackup(id, fmt.Sprintf("file copy failed: %v", err))
-		return nil, fmt.Errorf("failed to copy database: %w", err)
+		_ = m.store.FailBackup(id, fmt.Sprintf("cannot stat snapshot: %v", err))
+		return nil, fmt.Errorf("cannot stat snapshot: %w", err)
 	}
+	fileSize := snapInfo.Size()
 
 	// Mark completed
 	if err := m.store.CompleteBackup(id, fileSize, filePath); err != nil {
@@ -362,27 +374,11 @@ func (m *Manager) Restore(w http.ResponseWriter, r *http.Request) {
 	// Log restore started
 	m.logBackupEvent(uid, fmt.Sprintf("restore:started:%s", id), fmt.Sprintf("source=server, backup_id=%s", id))
 
-	// Create pre-restore safety backup
-	preRestoreBackup, err := m.performBackup("pre-restore", uid, uname)
-	if err != nil {
-		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), fmt.Sprintf("error=pre-restore backup failed: %v", err))
-		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("pre-restore backup failed: %v", err)})
-		return
-	}
-
-	// Enter maintenance mode
-	m.setMaintenanceMode(true)
-	defer m.setMaintenanceMode(false)
-
-	// 018-websocket-realtime: broadcast maintenance started
-	if m.hub != nil {
-		m.hub.Broadcast(apiws.NewEvent(apiws.EventMaintenanceChanged, "backups:*", map[string]interface{}{"maintenance": true}))
-	}
-
-	// Integrity-check the on-disk backup against its stored signature (F-017),
-	// from the id-derived path rather than the stored FilePath (F-065). Fail closed:
-	// an empty signature (VerifyFile returns false) or a mismatch is rejected — all
-	// real backups are signed on creation and legacy ones are signed at startup.
+	// Integrity-check the on-disk backup against its stored signature (F-017) before
+	// touching anything, from the id-derived path rather than the stored FilePath
+	// (F-065). Fail closed: an empty signature (VerifyFile returns false) or a
+	// mismatch is rejected — all real backups are signed on creation and legacy
+	// ones are signed at startup.
 	srcPath := backupFilePath(id)
 	if ok, _ := m.store.VerifyFile(srcPath, backup.Signature); !ok {
 		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), "error=signature verification failed or missing")
@@ -390,10 +386,28 @@ func (m *Manager) Restore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Create pre-restore safety backup while the database is still live.
+	preRestoreBackup, err := m.performBackup("pre-restore", uid, uname)
+	if err != nil {
+		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), fmt.Sprintf("error=pre-restore backup failed: %v", err))
+		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("pre-restore backup failed: %v", err)})
+		return
+	}
+
+	// Enter maintenance: close admission and drain in-flight database requests so
+	// none is mid-transaction when SQLite is swapped. A drain timeout aborts the
+	// restore without touching the live file.
+	if err := m.enterMaintenance(); err != nil {
+		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), fmt.Sprintf("error=%v", err))
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": maintenanceError(err)})
+		return
+	}
+	defer m.exitMaintenance()
+
 	// Close SQLite before replacing the configured file so its WAL cannot replay
 	// over the restored bytes when the old connection closes.
 	if err := m.store.RestoreDatabase(srcPath); err != nil {
-		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), fmt.Sprintf("error=file copy failed: %v", err))
+		m.logBackupEvent(uid, fmt.Sprintf("restore:failed:%s", id), fmt.Sprintf("error=restore failed: %v", err))
 		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("restore failed: %v", err)})
 		return
 	}
@@ -401,12 +415,12 @@ func (m *Manager) Restore(w http.ResponseWriter, r *http.Request) {
 	m.logBackupEvent(uid, fmt.Sprintf("restore:completed:%s", id), "")
 	slog.InfoContext(r.Context(), "backup: restore completed", "backup_id", id, "pre_restore_id", preRestoreBackup.ID)
 
-	// 018-websocket-realtime: broadcast restore completed and maintenance ended
+	// 018-websocket-realtime: broadcast restore completed. The maintenance:false
+	// event is emitted by the deferred exitMaintenance on every exit path.
 	if m.hub != nil {
 		m.hub.Broadcast(apiws.NewEvent(apiws.EventBackupRestored, "backups:*", map[string]interface{}{
 			"pre_restore_backup_id": preRestoreBackup.ID,
 		}))
-		m.hub.Broadcast(apiws.NewEvent(apiws.EventMaintenanceChanged, "backups:*", map[string]interface{}{"maintenance": false}))
 	}
 
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{
@@ -522,18 +536,19 @@ func (m *Manager) UploadRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enter maintenance mode
-	m.setMaintenanceMode(true)
-	defer m.setMaintenanceMode(false)
-
-	// 018-websocket-realtime: broadcast maintenance started
-	if m.hub != nil {
-		m.hub.Broadcast(apiws.NewEvent(apiws.EventMaintenanceChanged, "backups:*", map[string]interface{}{"maintenance": true}))
+	// Enter maintenance: drain in-flight database work before swapping SQLite. A
+	// drain timeout aborts without touching the live file.
+	if err := m.enterMaintenance(); err != nil {
+		os.Remove(tempPath)
+		m.logBackupEvent(uid, "restore:failed:upload", fmt.Sprintf("error=%v", err))
+		httpx.JSON(w, http.StatusConflict, map[string]string{"error": maintenanceError(err)})
+		return
 	}
+	defer m.exitMaintenance()
 
 	if err := m.store.RestoreDatabase(dbPath); err != nil {
 		os.Remove(tempPath)
-		m.logBackupEvent(uid, "restore:failed:upload", fmt.Sprintf("error=file copy failed: %v", err))
+		m.logBackupEvent(uid, "restore:failed:upload", fmt.Sprintf("error=restore failed: %v", err))
 		httpx.JSON(w, http.StatusInternalServerError, map[string]string{"error": fmt.Sprintf("restore failed: %v", err)})
 		return
 	}
@@ -544,12 +559,12 @@ func (m *Manager) UploadRestore(w http.ResponseWriter, r *http.Request) {
 	m.logBackupEvent(uid, "restore:completed:upload", "")
 	slog.InfoContext(r.Context(), "backup: restore completed from upload", "filename", handler.Filename, "pre_restore_id", preRestoreBackup.ID)
 
-	// 018-websocket-realtime: broadcast restore completed and maintenance ended
+	// 018-websocket-realtime: broadcast restore completed. maintenance:false is
+	// emitted by the deferred exitMaintenance on every exit path.
 	if m.hub != nil {
 		m.hub.Broadcast(apiws.NewEvent(apiws.EventBackupRestored, "backups:*", map[string]interface{}{
 			"pre_restore_backup_id": preRestoreBackup.ID,
 		}))
-		m.hub.Broadcast(apiws.NewEvent(apiws.EventMaintenanceChanged, "backups:*", map[string]interface{}{"maintenance": false}))
 	}
 
 	httpx.JSON(w, http.StatusOK, map[string]interface{}{
@@ -672,16 +687,40 @@ func (m *Manager) MaintenanceStatus(w http.ResponseWriter, r *http.Request) {
 
 // ── Maintenance mode helpers ────────────────────────────────────────────────
 
-func (m *Manager) setMaintenanceMode(on bool) {
-	m.maintenanceMu.Lock()
-	m.maintenanceMode = on
-	m.maintenanceMu.Unlock()
+// IsInMaintenanceMode reports whether admission is currently closed (a restore is
+// draining or installing). Backed by the operation gate.
+func (m *Manager) IsInMaintenanceMode() bool {
+	return m.gate.Closed()
 }
 
-func (m *Manager) IsInMaintenanceMode() bool {
-	m.maintenanceMu.RLock()
-	defer m.maintenanceMu.RUnlock()
-	return m.maintenanceMode
+// enterMaintenance closes admission, drains in-flight database work, and
+// broadcasts the maintenance state. On a drain timeout or a concurrent restore it
+// returns the gate error without entering maintenance (the live file is untouched).
+func (m *Manager) enterMaintenance() error {
+	if err := m.gate.BeginMaintenance(restoreDrainTimeout); err != nil {
+		return err
+	}
+	if m.hub != nil {
+		m.hub.Broadcast(apiws.NewEvent(apiws.EventMaintenanceChanged, "backups:*", map[string]interface{}{"maintenance": true}))
+	}
+	return nil
+}
+
+// exitMaintenance reopens admission and broadcasts the cleared state. Runs on
+// every restore exit path (success or failure) so clients never see a stuck banner.
+func (m *Manager) exitMaintenance() {
+	m.gate.EndMaintenance()
+	if m.hub != nil {
+		m.hub.Broadcast(apiws.NewEvent(apiws.EventMaintenanceChanged, "backups:*", map[string]interface{}{"maintenance": false}))
+	}
+}
+
+// maintenanceError maps a gate error to a client message for the 409 response.
+func maintenanceError(err error) string {
+	if errors.Is(err, ErrMaintenanceInProgress) {
+		return "a restore is already in progress"
+	}
+	return "could not enter maintenance: active database operations did not finish in time, please retry"
 }
 
 // ── Scheduler ───────────────────────────────────────────────────────────────

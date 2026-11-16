@@ -126,7 +126,8 @@ func gormConfig() *gorm.Config {
 func New(dsn string) (*Store, error) {
 	// Add busy timeout, WAL mode, and foreign keys for performance and integrity
 	dsnWithParams := fmt.Sprintf("%s?_busy_timeout=5000&_journal_mode=wal&_foreign_keys=on", dsn)
-	db, err := gorm.Open(sqlite.Open(dsnWithParams), gormConfig())
+	registerSQLiteDriver()
+	db, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: customDriverName, DSN: dsnWithParams}), gormConfig())
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
@@ -454,9 +455,10 @@ func (s *Store) ReopenDB(dsn string) error {
 }
 
 func (s *Store) reopenDatabase(dsn string) error {
-	// Reopen with the same parameters
+	// Reopen with the same parameters and custom-function driver.
 	dsnWithParams := fmt.Sprintf("%s?_busy_timeout=5000&_journal_mode=wal&_foreign_keys=on", dsn)
-	db, err := gorm.Open(sqlite.Open(dsnWithParams), gormConfig())
+	registerSQLiteDriver()
+	db, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: customDriverName, DSN: dsnWithParams}), gormConfig())
 	if err != nil {
 		return fmt.Errorf("failed to reopen database: %w", err)
 	}

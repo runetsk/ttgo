@@ -220,6 +220,48 @@ func TestDeleteBackup(t *testing.T) {
 	}
 }
 
+// TestRestore_RoundTrip drives a full create-then-restore through the HTTP server:
+// the backup is taken via VACUUM INTO, the restore drains admission through the
+// operation gate, swaps SQLite and validates it, and the seeded data survives.
+func TestRestore_RoundTrip(t *testing.T) {
+	st, srv := newFileBackedServer(t)
+
+	root, err := st.CreateFolder("Root", nil)
+	require.NoError(t, err)
+	require.NoError(t, st.CreateTestCase(&models.TestCase{Name: "Keep", FolderID: root.ID}))
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/backups", nil)
+	addTestAuth(t, st, createReq)
+	createW := httptest.NewRecorder()
+	srv.ServeHTTP(createW, createReq)
+	require.Equal(t, http.StatusCreated, createW.Code, "body: %s", createW.Body.String())
+	var created models.Backup
+	require.NoError(t, json.Unmarshal(createW.Body.Bytes(), &created))
+	require.Equal(t, "completed", created.Status)
+
+	restoreReq := httptest.NewRequest(http.MethodPost, "/api/backups/"+created.ID+"/restore",
+		bytes.NewReader([]byte(`{"confirmation":"CONFIRM RESTORE"}`)))
+	restoreReq.Header.Set("Content-Type", "application/json")
+	addTestAuth(t, st, restoreReq)
+	restoreW := httptest.NewRecorder()
+	srv.ServeHTTP(restoreW, restoreReq)
+	require.Equal(t, http.StatusOK, restoreW.Code, "body: %s", restoreW.Body.String())
+
+	// Admission reopened after the restore, and the seeded data survived.
+	assert.False(t, st == nil)
+	tests, err := st.ListTestCases(store.TestCaseFilter{FolderIDs: []string{root.ID}})
+	require.NoError(t, err)
+	require.Len(t, tests, 1)
+	assert.Equal(t, "Keep", tests[0].Name)
+
+	// The server still serves ordinary requests (gate reopened).
+	listReq := httptest.NewRequest(http.MethodGet, "/api/tests?folder_ids="+root.ID, nil)
+	addTestAuth(t, st, listReq)
+	listW := httptest.NewRecorder()
+	srv.ServeHTTP(listW, listReq)
+	assert.Equal(t, http.StatusOK, listW.Code)
+}
+
 // TestUploadRestore_BadSignature verifies uploading a garbage (non-SQLite)
 // "backup" file is rejected with 400 and, critically, that the live database
 // is left intact — a bad-signature restore must never clobber it.

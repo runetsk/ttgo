@@ -380,12 +380,23 @@ func (s *Server) dispatchToEndpoint(webhookID, runID, url, secret string, payloa
 	}
 }
 
-// maintenanceCheck middleware returns 503 if the system is in maintenance mode.
-// Excluded paths: /api/backups, /api/backup-schedule, /api/maintenance-status.
+// maintenanceCheck is the admission half of the restore operation gate. Ordinary
+// API requests hold a lease through their database work (via s.backups.Admit) so a
+// restore can drain them before it closes and swaps SQLite; once a restore has
+// closed admission, new requests get 503. Backup control, the public maintenance
+// status and swagger are never gated so an operator can still drive and watch a
+// restore. A WebSocket upgrade is admitted without a lease — it would otherwise
+// hold one for the connection's whole lifetime and never drain — but a new upgrade
+// is rejected during maintenance.
 func (s *Server) maintenanceCheck(next http.Handler) http.Handler {
+	maintenance503 := func(w http.ResponseWriter) {
+		w.Header().Set("Retry-After", "2")
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{
+			"error": "System is under maintenance — restore in progress",
+		})
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
-		// Skip maintenance check for backup-related endpoints
 		if strings.HasPrefix(path, "/api/backups") ||
 			strings.HasPrefix(path, "/api/backup-schedule") ||
 			path == "/api/maintenance-status" ||
@@ -394,11 +405,22 @@ func (s *Server) maintenanceCheck(next http.Handler) http.Handler {
 			return
 		}
 
-		if s.backups != nil && s.backups.IsInMaintenanceMode() {
-			httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{
-				"error": "System is under maintenance — restore in progress",
-			})
+		if path == "/api/ws" {
+			if s.backups != nil && s.backups.IsInMaintenanceMode() {
+				maintenance503(w)
+				return
+			}
+			next.ServeHTTP(w, r)
 			return
+		}
+
+		if s.backups != nil {
+			release, ok := s.backups.Admit()
+			if !ok {
+				maintenance503(w)
+				return
+			}
+			defer release()
 		}
 		next.ServeHTTP(w, r)
 	})

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"html"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 	"ttgo/internal/api/httpx"
@@ -57,6 +58,132 @@ func (h *Handler) GetTests(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, tests)
 }
 
+// handleGetTestsPage godoc
+// @Summary      List test cases (paginated)
+// @Description  Server-side filtered, sorted and paginated test cases for the library grid. Returns {tests,total,limit,offset}.
+// @Tags         tests
+// @Produce      json
+// @Param        folder_ids   query  string  false  "Comma-separated folder IDs (descendants included)"
+// @Param        search       query  string  false  "Global search over name, ID and category name"
+// @Param        sort         query  string  false  "Sort key (name, id, created_at, updated_at, description, steps_count, open_defects, reverification_flagged, categories, linked_requirements)"
+// @Param        dir          query  string  false  "asc or desc"
+// @Param        limit        query  int     false  "Page size (1-200, default 50)"
+// @Param        offset       query  int     false  "Row offset (default 0)"
+// @Success      200  {object}  object{tests=[]models.TestCase,total=int,limit=int,offset=int}
+// @Failure      400  {object}  map[string]string
+// @Failure      500  {object}  map[string]string
+// @Router       /tests/page [get]
+func (h *Handler) GetTestsPage(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+
+	limit := 50
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 200 {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be between 1 and 200"})
+			return
+		}
+		limit = n
+	}
+	offset := 0
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "offset must be >= 0"})
+			return
+		}
+		offset = n
+	}
+
+	sortKey := q.Get("sort")
+	if sortKey == "" {
+		sortKey = "name"
+	} else if !store.IsValidTestPageSort(sortKey) {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "invalid sort key"})
+		return
+	}
+	dir := q.Get("dir")
+	if dir == "" {
+		dir = "asc"
+	} else if dir != "asc" && dir != "desc" {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "dir must be asc or desc"})
+		return
+	}
+
+	parseTime := func(key string) (*time.Time, bool) {
+		raw := q.Get(key)
+		if raw == "" {
+			return nil, true
+		}
+		ts, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			return nil, false
+		}
+		return &ts, true
+	}
+	createdFrom, ok1 := parseTime("created_from")
+	createdTo, ok2 := parseTime("created_to")
+	updatedFrom, ok3 := parseTime("updated_from")
+	updatedTo, ok4 := parseTime("updated_to")
+	if !ok1 || !ok2 || !ok3 || !ok4 {
+		httpx.JSON(w, http.StatusBadRequest, map[string]string{"error": "date filters must be RFC3339 timestamps"})
+		return
+	}
+
+	splitCSV := func(key string) []string {
+		raw := q.Get(key)
+		if raw == "" {
+			return nil
+		}
+		return strings.Split(raw, ",")
+	}
+
+	query := store.TestPageQuery{
+		FolderIDs:         splitCSV("folder_ids"),
+		Search:            q.Get("search"),
+		ID:                q.Get("id"),
+		Name:              q.Get("name"),
+		Description:       q.Get("description"),
+		CategoryIDs:       splitCSV("category_ids"),
+		StepsCount:        q.Get("steps_count"),
+		OpenDefects:       q.Get("open_defects"),
+		Reverification:    q.Get("reverification"),
+		LinkedRequirement: q.Get("linked_requirement"),
+		CreatedFrom:       createdFrom,
+		CreatedTo:         createdTo,
+		UpdatedFrom:       updatedFrom,
+		UpdatedTo:         updatedTo,
+		Sort:              sortKey,
+		Direction:         dir,
+		Limit:             limit,
+		Offset:            offset,
+	}
+
+	// "select=all" returns just the matching IDs (capped at the bulk-operation
+	// limit) so the grid can select the whole filtered set across pages.
+	if q.Get("select") == "all" {
+		ids, total, err := h.store.ListTestCaseIDs(query, httpx.MaxBulkIDs)
+		if err != nil {
+			httpx.Error(w, http.StatusInternalServerError, err)
+			return
+		}
+		httpx.JSON(w, http.StatusOK, map[string]interface{}{"ids": ids, "total": total})
+		return
+	}
+
+	rows, total, err := h.store.ListTestCasesPage(query)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, err)
+		return
+	}
+	httpx.JSON(w, http.StatusOK, map[string]interface{}{
+		"tests":  rows,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
 // handleGetTestByCustomField godoc
 // @Summary      Find a test case by custom field value
 // @Description  Returns the test case whose custom field matches the given name and value
@@ -102,6 +229,7 @@ func (h *Handler) GetTest(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, err)
 		return
 	}
+	test.EditToken = models.TestCaseEditToken(test)
 	httpx.JSON(w, http.StatusOK, test)
 }
 
@@ -276,6 +404,10 @@ func (h *Handler) UpdateTest(w http.ResponseWriter, r *http.Request) {
 		Steps        []models.TestStep         `json:"steps"`
 		CustomValues []models.CustomFieldValue `json:"custom_values"`
 		Categories   []models.Category         `json:"categories"`
+		// Optional optimistic-concurrency token from the first-party editor. When
+		// present, the save is rejected with 409 if the record changed since it was
+		// loaded. Absent (API/CLI writers) means no conflict protection.
+		ExpectedEditToken string `json:"expected_edit_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -331,10 +463,28 @@ func (h *Handler) UpdateTest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.store.PatchTestCase(test, req.Description); err != nil {
+	latest, err := h.store.PatchTestCaseChecked(test, req.Description, req.ExpectedEditToken)
+	switch {
+	case errors.Is(err, store.ErrEditConflict):
+		latest.EditToken = models.TestCaseEditToken(latest)
+		httpx.JSON(w, http.StatusConflict, map[string]interface{}{
+			"code":  "edit_conflict",
+			"error": "This test case changed since you opened it.",
+			"test":  latest,
+		})
+		return
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"code": "not_found", "error": "test case not found"})
+		return
+	case errors.Is(err, store.ErrBusy):
+		w.Header().Set("Retry-After", "1")
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database busy, please retry"})
+		return
+	case err != nil:
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
+	test.EditToken = models.TestCaseEditToken(test)
 	httpx.JSON(w, http.StatusOK, test)
 }
 

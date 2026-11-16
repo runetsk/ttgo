@@ -8,6 +8,7 @@ import (
 
 func Mount(api *routegroup.Bundle, h *Handler, requireAuth routing.AuthMiddleware) {
 	api.HandleFunc("GET /tests", requireAuth("read", h.GetTests))
+	api.HandleFunc("GET /tests/page", requireAuth("read", h.GetTestsPage))
 	api.HandleFunc("GET /tests/by-custom-field", requireAuth("read", h.GetTestByCustomField))
 	api.HandleFunc("GET /tests/{id}", requireAuth("read", h.GetTest))
 	api.HandleFunc("POST /tests", requireAuth("write", h.CreateTest))

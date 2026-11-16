@@ -12,9 +12,11 @@ import (
 	"ttgo/internal/api/httpx"
 	apiws "ttgo/internal/api/websocket"
 	"ttgo/pkg/tracker/models"
+	"ttgo/pkg/tracker/store"
 
 	"github.com/google/uuid"
 	"github.com/microcosm-cc/bluemonday"
+	"gorm.io/gorm"
 )
 
 // jiraPostHash is a stable content fingerprint of the linked test cases, used to
@@ -159,6 +161,7 @@ func (h *Handler) GetRequirement(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusNotFound, err)
 		return
 	}
+	req.EditToken = models.RequirementEditToken(req)
 	httpx.JSON(w, http.StatusOK, req)
 }
 
@@ -190,6 +193,8 @@ func (h *Handler) UpdateRequirement(w http.ResponseWriter, r *http.Request) {
 		Identifier  string `json:"identifier"`
 		Title       string `json:"title"`
 		Description string `json:"description"`
+		// Optional optimistic-concurrency token from the first-party editor (see UpdateTest).
+		ExpectedEditToken string `json:"expected_edit_token"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		httpx.Error(w, http.StatusBadRequest, err)
@@ -208,14 +213,31 @@ func (h *Handler) UpdateRequirement(w http.ResponseWriter, r *http.Request) {
 	existing.Title = req.Title
 	existing.Description = h.sanitizer.Sanitize(req.Description) // stored-XSS guard (F-011)
 
-	if err := h.store.UpdateRequirement(existing); err != nil {
-		if errors.Is(err, models.ErrDuplicateRequirementIdentifier) {
-			httpx.Error(w, http.StatusConflict, err)
-			return
-		}
+	latest, err := h.store.UpdateRequirementChecked(existing, req.ExpectedEditToken)
+	switch {
+	case errors.Is(err, store.ErrEditConflict):
+		latest.EditToken = models.RequirementEditToken(latest)
+		httpx.JSON(w, http.StatusConflict, map[string]interface{}{
+			"code":  "edit_conflict",
+			"error": "This requirement changed since you opened it.",
+			"requirement": latest,
+		})
+		return
+	case errors.Is(err, models.ErrDuplicateRequirementIdentifier):
+		httpx.Error(w, http.StatusConflict, err)
+		return
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		httpx.JSON(w, http.StatusNotFound, map[string]string{"code": "not_found", "error": "requirement not found"})
+		return
+	case errors.Is(err, store.ErrBusy):
+		w.Header().Set("Retry-After", "1")
+		httpx.JSON(w, http.StatusServiceUnavailable, map[string]string{"error": "database busy, please retry"})
+		return
+	case err != nil:
 		httpx.Error(w, http.StatusInternalServerError, err)
 		return
 	}
+	existing.EditToken = models.RequirementEditToken(existing)
 	h.broadcastRequirementUpdate("requirement:"+existing.ID, existing)
 
 	httpx.JSON(w, http.StatusOK, existing)

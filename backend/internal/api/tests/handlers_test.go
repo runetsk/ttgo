@@ -106,6 +106,86 @@ func TestGetTests_ListView(t *testing.T) {
 	assert.Equal(t, http.StatusOK, w.Code)
 }
 
+func TestGetTestsPage_Basic(t *testing.T) {
+	st := newStore(t)
+	root, tc := seedFolderAndTest(t, st)
+	w := do(t, st, "GET", "/api/tests/page?folder_ids="+root.ID, nil)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var resp struct {
+		Tests  []models.TestCase `json:"tests"`
+		Total  int64             `json:"total"`
+		Limit  int               `json:"limit"`
+		Offset int               `json:"offset"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(1), resp.Total)
+	assert.Equal(t, 50, resp.Limit)
+	require.Len(t, resp.Tests, 1)
+	assert.Equal(t, tc.ID, resp.Tests[0].ID)
+}
+
+func TestGetTestsPage_Validation(t *testing.T) {
+	st := newStore(t)
+	for _, path := range []string{
+		"/api/tests/page?limit=0",
+		"/api/tests/page?limit=201",
+		"/api/tests/page?limit=abc",
+		"/api/tests/page?offset=-1",
+		"/api/tests/page?sort=bogus",
+		"/api/tests/page?dir=sideways",
+		"/api/tests/page?created_from=notadate",
+	} {
+		w := do(t, st, "GET", path, nil)
+		assert.Equalf(t, http.StatusBadRequest, w.Code, "path %s should be rejected", path)
+	}
+}
+
+func TestGetTestsPage_SearchAndSort(t *testing.T) {
+	st := newStore(t)
+	root, err := st.CreateFolder("Root", nil)
+	require.NoError(t, err)
+	require.NoError(t, st.CreateTestCase(&models.TestCase{Name: "zebra", FolderID: root.ID}))
+	require.NoError(t, st.CreateTestCase(&models.TestCase{Name: "alpha", FolderID: root.ID}))
+
+	w := do(t, st, "GET", "/api/tests/page?folder_ids="+root.ID+"&sort=name&dir=desc", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var sorted struct {
+		Tests []models.TestCase `json:"tests"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &sorted))
+	require.Len(t, sorted.Tests, 2)
+	assert.Equal(t, "zebra", sorted.Tests[0].Name, "name desc puts zebra first")
+
+	w = do(t, st, "GET", "/api/tests/page?folder_ids="+root.ID+"&search=alph", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var searched struct {
+		Tests []models.TestCase `json:"tests"`
+		Total int64             `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &searched))
+	assert.Equal(t, int64(1), searched.Total)
+	require.Len(t, searched.Tests, 1)
+	assert.Equal(t, "alpha", searched.Tests[0].Name)
+}
+
+func TestGetTestsPage_SelectAll(t *testing.T) {
+	st := newStore(t)
+	root, err := st.CreateFolder("Root", nil)
+	require.NoError(t, err)
+	require.NoError(t, st.CreateTestCase(&models.TestCase{Name: "a", FolderID: root.ID}))
+	require.NoError(t, st.CreateTestCase(&models.TestCase{Name: "b", FolderID: root.ID}))
+
+	w := do(t, st, "GET", "/api/tests/page?folder_ids="+root.ID+"&select=all", nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp struct {
+		IDs   []string `json:"ids"`
+		Total int64    `json:"total"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, int64(2), resp.Total)
+	assert.Len(t, resp.IDs, 2)
+}
+
 func TestGetTestByCustomField_MissingParams(t *testing.T) {
 	st := newStore(t)
 	w := do(t, st, "GET", "/api/tests/by-custom-field", nil)
@@ -179,6 +259,79 @@ func TestUpdateTest_Success(t *testing.T) {
 		"folder_id":   root.ID,
 		"description": "<p>new</p>",
 		"steps":       []map[string]interface{}{{"action": "<p>go</p>", "expected_result": "<p>ok</p>"}},
+	})
+	assert.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestGetTest_IncludesEditToken(t *testing.T) {
+	st := newStore(t)
+	_, tc := seedFolderAndTest(t, st)
+	w := do(t, st, "GET", "/api/tests/"+tc.ID, nil)
+	require.Equal(t, http.StatusOK, w.Code)
+	var got models.TestCase
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &got))
+	assert.NotEmpty(t, got.EditToken, "detail response must carry an edit_token")
+}
+
+func TestUpdateTest_EditTokenSuccess(t *testing.T) {
+	st := newStore(t)
+	root, tc := seedFolderAndTest(t, st)
+
+	g := do(t, st, "GET", "/api/tests/"+tc.ID, nil)
+	var loaded models.TestCase
+	require.NoError(t, json.Unmarshal(g.Body.Bytes(), &loaded))
+
+	w := do(t, st, "PUT", "/api/tests/"+tc.ID, map[string]interface{}{
+		"name":                "renamed",
+		"folder_id":           root.ID,
+		"expected_edit_token": loaded.EditToken,
+	})
+	require.Equal(t, http.StatusOK, w.Code)
+	var saved models.TestCase
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &saved))
+	assert.NotEmpty(t, saved.EditToken)
+	assert.NotEqual(t, loaded.EditToken, saved.EditToken, "the saved response carries a fresh token")
+}
+
+func TestUpdateTest_EditTokenConflict(t *testing.T) {
+	st := newStore(t)
+	root, tc := seedFolderAndTest(t, st)
+
+	g := do(t, st, "GET", "/api/tests/"+tc.ID, nil)
+	var loaded models.TestCase
+	require.NoError(t, json.Unmarshal(g.Body.Bytes(), &loaded))
+
+	// Another writer changes the record after this editor loaded it.
+	require.NoError(t, st.PatchTestCase(&models.TestCase{ID: tc.ID, Name: "Changed elsewhere"}, nil))
+
+	w := do(t, st, "PUT", "/api/tests/"+tc.ID, map[string]interface{}{
+		"name":                "my edit",
+		"folder_id":           root.ID,
+		"expected_edit_token": loaded.EditToken,
+	})
+	require.Equal(t, http.StatusConflict, w.Code)
+	var resp struct {
+		Code string          `json:"code"`
+		Test models.TestCase `json:"test"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "edit_conflict", resp.Code)
+	assert.Equal(t, "Changed elsewhere", resp.Test.Name, "conflict body carries the latest record")
+	assert.NotEmpty(t, resp.Test.EditToken)
+
+	// The conflicting write did not apply.
+	fresh, err := st.GetTestCase(tc.ID)
+	require.NoError(t, err)
+	assert.Equal(t, "Changed elsewhere", fresh.Name)
+}
+
+func TestUpdateTest_NoTokenSkipsConflictCheck(t *testing.T) {
+	st := newStore(t)
+	root, tc := seedFolderAndTest(t, st)
+	// No expected_edit_token → behaves exactly as before (no conflict protection).
+	w := do(t, st, "PUT", "/api/tests/"+tc.ID, map[string]interface{}{
+		"name":      "api write",
+		"folder_id": root.ID,
 	})
 	assert.Equal(t, http.StatusOK, w.Code)
 }

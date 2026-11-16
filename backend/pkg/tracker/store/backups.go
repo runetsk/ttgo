@@ -29,28 +29,51 @@ func (s *Store) DatabasePath() (string, error) {
 	return "", fmt.Errorf("backups require a file-backed database")
 }
 
-// RestoreDatabase stages a complete copy before closing SQLite, then replaces
-// the configured file after the old connection has finished with its WAL.
+// BackupToFile writes a self-contained snapshot of the live database to dest via
+// VACUUM INTO: one read transaction produces a consistent, compact copy with no
+// WAL sidecar, so a backup taken while writes are in flight is still coherent.
+// dest must not already exist (callers use a fresh unique path).
+func (s *Store) BackupToFile(dest string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	// VACUUM INTO cannot run inside an explicit transaction.
+	return s.db.Exec("VACUUM INTO ?", dest).Error
+}
+
+// RestoreDatabase replaces the live database with source. It keeps a file-level
+// rollback copy of the current database, closes SQLite (so no WAL can replay over
+// the restored bytes), installs the replacement, then reopens and validates it.
+// If the replacement fails to open or validate, the previous database is restored
+// from the rollback copy before returning the error; if that rollback also fails,
+// the database is left closed and the error says so (the caller keeps maintenance
+// active). The caller is responsible for draining in-flight work beforehand.
 func (s *Store) RestoreDatabase(source string) error {
 	path, err := s.DatabasePath()
 	if err != nil {
 		return err
 	}
-	stage, err := os.CreateTemp(filepath.Dir(path), ".ttgo-restore-*.db")
+	dir := filepath.Dir(path)
+
+	// Stage the incoming database beside the live file.
+	stagePath, err := stageCopy(source, dir, ".ttgo-restore-*.db")
 	if err != nil {
 		return err
 	}
-	stagePath := stage.Name()
-	if err := stage.Close(); err != nil {
-		os.Remove(stagePath)
-		return err
-	}
 	defer os.Remove(stagePath)
-	if _, err := CopyFile(source, stagePath); err != nil {
-		return err
-	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Fold the WAL into the main file, then copy it as a rollback image. We cannot
+	// rely on the pre-restore safety backup for rollback: restoring an older
+	// database can erase that backup's own metadata row.
+	_ = s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)").Error
+	rollbackPath, err := stageCopy(path, dir, ".ttgo-rollback-*.db")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(rollbackPath)
+
 	sqlDB, err := s.db.DB()
 	if err != nil {
 		return err
@@ -58,11 +81,69 @@ func (s *Store) RestoreDatabase(source string) error {
 	if err := sqlDB.Close(); err != nil {
 		return err
 	}
+	// Discard the old WAL/SHM so SQLite cannot replay them over the new main file.
+	os.Remove(path + "-wal")
+	os.Remove(path + "-shm")
+
 	if err := os.Rename(stagePath, path); err != nil {
+		// The live file is still in place; reopen it.
 		_ = s.reopenDatabase(path)
 		return fmt.Errorf("failed to install restored database: %w", err)
 	}
-	return s.reopenDatabase(path)
+
+	if err := s.reopenDatabase(path); err != nil {
+		return s.rollbackDatabase(path, rollbackPath, fmt.Errorf("restored database failed to open: %w", err))
+	}
+	if err := s.validateOpenDB(); err != nil {
+		return s.rollbackDatabase(path, rollbackPath, fmt.Errorf("restored database failed validation: %w", err))
+	}
+	return nil
+}
+
+// stageCopy copies src to a fresh temp file in dir (named by pattern) and returns
+// its path.
+func stageCopy(src, dir, pattern string) (string, error) {
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return "", err
+	}
+	p := f.Name()
+	if cerr := f.Close(); cerr != nil {
+		os.Remove(p)
+		return "", cerr
+	}
+	if _, err := CopyFile(src, p); err != nil {
+		os.Remove(p)
+		return "", err
+	}
+	return p, nil
+}
+
+// rollbackDatabase reinstalls prev over path and reopens it, returning cause. Must
+// be called with s.mu held. If the rollback itself fails the database is left
+// closed and the returned error wraps both failures.
+func (s *Store) rollbackDatabase(path, prev string, cause error) error {
+	if s.db != nil {
+		if sqlDB, err := s.db.DB(); err == nil {
+			_ = sqlDB.Close()
+		}
+	}
+	os.Remove(path + "-wal")
+	os.Remove(path + "-shm")
+	if _, cerr := CopyFile(prev, path); cerr != nil {
+		return fmt.Errorf("%w; rollback also failed: %v", cause, cerr)
+	}
+	if rerr := s.reopenDatabase(path); rerr != nil {
+		return fmt.Errorf("%w; rollback reopen failed: %v", cause, rerr)
+	}
+	return cause
+}
+
+// validateOpenDB sanity-checks the freshly reopened database. Must be called with
+// s.mu held.
+func (s *Store) validateOpenDB() error {
+	var n int64
+	return s.db.Raw("SELECT count(*) FROM users").Scan(&n).Error
 }
 
 // CreateBackup inserts a new backup record with in_progress status.

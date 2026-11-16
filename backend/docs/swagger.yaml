@@ -730,6 +730,11 @@ definitions:
         type: string
       description:
         type: string
+      edit_token:
+        description: |-
+          Transient optimistic-concurrency token for the first-party editor. Set only on
+          detail/save responses; never persisted, omitted elsewhere.
+        type: string
       id:
         type: string
       identifier:
@@ -1253,6 +1258,11 @@ definitions:
           $ref: '#/definitions/ttgo_pkg_tracker_models.CustomFieldValue'
         type: array
       description:
+        type: string
+      edit_token:
+        description: |-
+          Transient optimistic-concurrency token for the first-party editor. Set only on
+          detail/save responses (GetTest, UpdateTest); never persisted, omitted elsewhere.
         type: string
       folder_id:
         type: string
@@ -5069,7 +5079,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/internal_api_ai.SemanticMergeView'
+            $ref: '#/definitions/ttgo_internal_api_ai.SemanticMergeView'
         "404":
           description: Not Found
           schema:
@@ -7713,6 +7723,69 @@ paths:
               type: string
             type: object
       summary: Export test cases as JSON
+      tags:
+      - tests
+  /tests/page:
+    get:
+      description: Server-side filtered, sorted and paginated test cases for the library
+        grid. Returns {tests,total,limit,offset}.
+      parameters:
+      - description: Comma-separated folder IDs (descendants included)
+        in: query
+        name: folder_ids
+        type: string
+      - description: Global search over name, ID and category name
+        in: query
+        name: search
+        type: string
+      - description: Sort key (name, id, created_at, updated_at, description, steps_count,
+          open_defects, reverification_flagged, categories, linked_requirements)
+        in: query
+        name: sort
+        type: string
+      - description: asc or desc
+        in: query
+        name: dir
+        type: string
+      - description: Page size (1-200, default 50)
+        in: query
+        name: limit
+        type: integer
+      - description: Row offset (default 0)
+        in: query
+        name: offset
+        type: integer
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            properties:
+              limit:
+                type: integer
+              offset:
+                type: integer
+              tests:
+                items:
+                  $ref: '#/definitions/ttgo_pkg_tracker_models.TestCase'
+                type: array
+              total:
+                type: integer
+            type: object
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties:
+              type: string
+            type: object
+      summary: List test cases (paginated)
       tags:
       - tests
   /tokens:

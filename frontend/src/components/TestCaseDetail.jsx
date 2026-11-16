@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import StepsEditor from './StepsEditor';
 import RichTextField from './RichTextField';
@@ -9,6 +9,21 @@ import { updateTest, getCustomFields, getTest, getFolderTree, listTestExecutions
 import { useCategories } from '../contexts/CategoriesContext';
 import { isFailureStatus } from '../utils/resultStatus';
 import { useAbortController } from '../hooks/useAbortController';
+import { useUnsavedGuard } from '../hooks/useUnsavedGuard';
+import { testCaseSnapshot, isDirty, reconcileRefresh, parseEditConflict } from '../utils/editorDraft';
+
+const DISCARD_MESSAGE = 'You have unsaved changes to this test case. Discard them?';
+
+// The editable fields of a test, in the shape the draft helper compares.
+function editableOf(test) {
+    return {
+        name: test?.name ?? '',
+        description: test?.description ?? '',
+        steps: test?.steps ?? [],
+        categories: test?.categories ?? [],
+        customValues: test?.custom_values ?? [],
+    };
+}
 
 function formatRelative(iso) {
     if (!iso) return '';
@@ -65,6 +80,20 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
     const { categories: allCategories } = useCategories();
     const [assignedCategories, setAssignedCategories] = useState([]);
     const [selectedCategoryId, setSelectedCategoryId] = useState("");
+
+    // Immutable saved baseline the editable fields are compared against, tagged with
+    // the record id so switching to a different test always loads it while a refresh
+    // of the *same* record never clobbers unsaved edits. latestServer holds a newer
+    // same-record copy kept aside for the "Load latest" discard.
+    const [baseline, setBaseline] = useState(null); // { id, editable, token }
+    const [externallyChanged, setExternallyChanged] = useState(false);
+    const [latestServer, setLatestServer] = useState(null); // { editable, token } | null
+    // Set when a save is rejected with 409 edit_conflict: { latest } holds the
+    // server's current test case (including its edit_token) for the comparison.
+    const [editConflict, setEditConflict] = useState(null);
+    const baselineRef = useRef(null);
+    const draftRef = useRef(editableOf(null));
+    const savingRef = useRef(false);
 
     const [saving, setSaving] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
@@ -162,18 +191,58 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
         }
     }, [testId, initialTest, onTestLoad, getSignal]);
 
-    // Update state when test data is available
+    // Seed the editable fields when test data arrives. A different record (or the
+    // first load) is always adopted; a refresh of the *same* record is reconciled so
+    // it never overwrites unsaved edits (switching records is the parent's concern).
     useEffect(() => {
-        if (test) {
-            // eslint-disable-next-line react-hooks/set-state-in-effect -- re-seeds editable form-draft fields whenever the underlying test record changes (load/switch/save); fields stay independently user-editable afterward
-            setName(test.name);
-            setDescription(test.description || "");
-            setSteps(test.steps || []);
-            setCustomValues(test.custom_values || []);
-            setAssignedCategories(test.categories || []);
+        if (!test) return;
+        const server = editableOf(test);
+        const sameRecord = baselineRef.current && baselineRef.current.id === test.id;
+        let adopt = true;
+        let changed = false;
+        if (sameRecord) {
+            const r = reconcileRefresh({
+                baselineSnap: testCaseSnapshot(baselineRef.current.editable),
+                draftSnap: testCaseSnapshot(draftRef.current),
+                saving: savingRef.current,
+                serverSnap: testCaseSnapshot(server),
+            });
+            adopt = r.adopt;
+            changed = r.externallyChanged;
+        }
+        if (adopt) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- async load result: seeds the editable draft from a newly loaded/adopted test record; fields stay user-editable afterward
+            setName(server.name);
+            setDescription(server.description);
+            setSteps(server.steps);
+            setCustomValues(server.customValues);
+            setAssignedCategories(server.categories);
+            setBaseline({ id: test.id, editable: server, token: test.edit_token || '' });
+            setExternallyChanged(false);
+            setLatestServer(null);
             setError(null);
+        } else {
+            setExternallyChanged(changed);
+            setLatestServer(changed ? { editable: server, token: test.edit_token || '' } : null);
         }
     }, [test]);
+
+    const draftEditable = useMemo(
+        () => ({ name, description, steps, categories: assignedCategories, customValues }),
+        [name, description, steps, assignedCategories, customValues],
+    );
+    const dirty = useMemo(
+        () => (baseline ? isDirty(testCaseSnapshot(baseline.editable), testCaseSnapshot(draftEditable)) : false),
+        [baseline, draftEditable],
+    );
+
+    // Keep the refs the seed effect reads in sync with live draft/baseline/saving.
+    useEffect(() => { draftRef.current = draftEditable; }, [draftEditable]);
+    useEffect(() => { baselineRef.current = baseline; }, [baseline]);
+    useEffect(() => { savingRef.current = saving; }, [saving]);
+
+    // Warn before a navigation would drop unsaved edits.
+    useUnsavedGuard(dirty, DISCARD_MESSAGE);
 
     // Fetch folder list when this test is orphaned so user can pick a new folder
     useEffect(() => {
@@ -229,7 +298,23 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
         setAssignedCategories(assignedCategories.filter(s => s.id !== categoryId));
     };
 
-    const handleSave = () => {
+    // adoptEditable replaces the draft, baseline and token with a server record's
+    // editable content (used by "Load latest" and the conflict "Use latest").
+    const adoptEditable = (editable, token) => {
+        setName(editable.name);
+        setDescription(editable.description);
+        setSteps(editable.steps);
+        setCustomValues(editable.customValues);
+        setAssignedCategories(editable.categories);
+        setBaseline({ id: test.id, editable, token: token || '' });
+        setExternallyChanged(false);
+        setLatestServer(null);
+        setEditConflict(null);
+    };
+
+    // submit saves the current draft against expectedToken. On 409 edit_conflict it
+    // opens the comparison panel instead of overwriting the other change.
+    const submit = (expectedToken) => {
         setSaving(true);
         setError(null);
 
@@ -239,21 +324,37 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
             description,
             steps,
             custom_values: customValues,
-            categories: assignedCategories
+            categories: assignedCategories,
+            expected_edit_token: expectedToken,
         };
 
         updateTest(updatedTest)
             .then(savedTest => {
+                // Advance the baseline (incl. its new token) to the saved response so
+                // the editor is clean before it closes.
+                setBaseline({ id: savedTest?.id ?? test.id, editable: editableOf(savedTest), token: savedTest?.edit_token || '' });
+                setExternallyChanged(false);
+                setLatestServer(null);
+                setEditConflict(null);
                 if (onUpdate) onUpdate(savedTest);
-                handleClose();
+                closeNow();
             })
             .catch(err => {
-                setError(err.message || "Failed to save");
+                const latest = parseEditConflict(err, 'test');
+                if (latest) {
+                    setEditConflict({ latest });
+                } else {
+                    setError(err.message || "Failed to save");
+                }
                 setSaving(false);
             });
     };
 
-    const handleClose = () => {
+    const handleSave = () => submit(baseline?.token || '');
+
+    // closeNow closes unconditionally; handleClose guards it behind a discard
+    // confirmation when there are unsaved edits (Cancel, ×, overlay dismissal).
+    const closeNow = () => {
         if (onClose) {
             onClose(test?.folder_id);
         } else {
@@ -261,8 +362,75 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
         }
     };
 
+    const handleClose = () => {
+        if (dirty && !window.confirm(DISCARD_MESSAGE)) return;
+        closeNow();
+    };
+
+    const handleLoadLatest = () => {
+        const src = latestServer || (baseline ? { editable: baseline.editable, token: baseline.token } : null);
+        if (!src) return;
+        adoptEditable(src.editable, src.token);
+    };
+
+    // Conflict-panel actions.
+    const conflictUseLatest = () => adoptEditable(editableOf(editConflict.latest), editConflict.latest.edit_token || '');
+    const conflictKeepEditing = () => setEditConflict(null);
+    const conflictSaveReviewed = () => submit(editConflict.latest.edit_token || '');
+
     if (loading) return <div style={{ padding: 24 }}>Loading...</div>;
     if (!test && !loading) return <div style={{ padding: 24 }}>Test not found</div>;
+
+    const changedNotice = externallyChanged ? (
+        <div
+            role="status"
+            data-testid="test-case-externally-changed"
+            style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                background: 'rgba(245,158,11,0.12)', color: 'var(--warning-color, #f59e0b)',
+                border: '1px solid rgba(245,158,11,0.35)', borderRadius: 6,
+                padding: '10px 14px', marginBottom: 16, fontSize: '0.85rem',
+            }}
+        >
+            <span>This test case changed on the server. Your unsaved edits are kept.</span>
+            <button className="action-btn" style={{ fontSize: '0.8rem' }} onClick={handleLoadLatest} disabled={saving}>
+                Load latest
+            </button>
+        </div>
+    ) : null;
+
+    const conflictNotice = editConflict ? (
+        <div
+            data-testid="test-case-edit-conflict"
+            style={{
+                background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.35)',
+                borderRadius: 6, padding: '14px 16px', marginBottom: 16,
+            }}
+        >
+            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-red, #f87171)', marginBottom: 6 }}>
+                This test case changed since you opened it
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, fontSize: '0.8rem', marginBottom: 12 }}>
+                <div>
+                    <div style={{ textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', fontSize: '0.7rem', marginBottom: 4 }}>Your edits</div>
+                    <div style={{ fontWeight: 600 }}>{name || <em>(no name)</em>}</div>
+                    <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>{steps.length} step{steps.length === 1 ? '' : 's'} · {assignedCategories.length} categor{assignedCategories.length === 1 ? 'y' : 'ies'}</div>
+                </div>
+                <div>
+                    <div style={{ textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', fontSize: '0.7rem', marginBottom: 4 }}>Latest on server</div>
+                    <div style={{ fontWeight: 600 }}>{editConflict.latest.name || <em>(no name)</em>}</div>
+                    <div style={{ color: 'var(--text-secondary)', marginTop: 2 }}>
+                        {(editConflict.latest.steps || []).length} step{(editConflict.latest.steps || []).length === 1 ? '' : 's'} · {(editConflict.latest.categories || []).length} categor{(editConflict.latest.categories || []).length === 1 ? 'y' : 'ies'}
+                    </div>
+                </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="action-btn" style={{ fontSize: '0.8rem' }} onClick={conflictUseLatest} disabled={saving}>Use latest</button>
+                <button className="action-btn" style={{ fontSize: '0.8rem' }} onClick={conflictKeepEditing} disabled={saving}>Keep editing</button>
+                <button className="primary-btn" style={{ fontSize: '0.8rem' }} onClick={conflictSaveReviewed} disabled={saving}>Save reviewed version</button>
+            </div>
+        </div>
+    ) : null;
 
     const content = (
         <>
@@ -395,6 +563,8 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                         </div>
                     </div>
                 )}
+                {changedNotice}
+                {conflictNotice}
                 {error && <div className="error-banner" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)', padding: 12, borderRadius: 6, marginBottom: 16 }}>{error}</div>}
 
                 <div data-testid="test-case-description-input" style={{ marginBottom: 16 }}>
@@ -661,6 +831,8 @@ export default function TestCaseDetail({ test: initialTest, onClose, onUpdate, o
                             </div>
                         </div>
                     )}
+                    {changedNotice}
+                    {conflictNotice}
                     {error && <div className="error-banner" style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--accent-red)', padding: 12, borderRadius: 6, marginBottom: 16 }}>{error}</div>}
 
                     {activeTab === 'steps' && (

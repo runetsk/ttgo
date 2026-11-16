@@ -105,6 +105,49 @@ func (s *Store) UpdateRequirement(r *models.Requirement) error {
 	return nil
 }
 
+// UpdateRequirementChecked updates a requirement only when expectedToken matches
+// the token of the current persisted content (optimistic concurrency for the
+// first-party editor). An empty expectedToken skips the check. Returns
+// (nil, nil) on success, (latest, ErrEditConflict) when the token is stale,
+// (nil, gorm.ErrRecordNotFound) when the record is gone, or (nil, ErrBusy) when
+// the database stayed locked across one retry.
+func (s *Store) UpdateRequirementChecked(r *models.Requirement, expectedToken string) (*models.Requirement, error) {
+	var latest *models.Requirement
+	run := func() error {
+		latest = nil
+		return s.db.Transaction(func(tx *gorm.DB) error {
+			if expectedToken != "" {
+				var current models.Requirement
+				if err := tx.First(&current, "id = ?", r.ID).Error; err != nil {
+					return err
+				}
+				if models.RequirementEditToken(&current) != expectedToken {
+					latest = &current
+					return ErrEditConflict
+				}
+			}
+			if err := tx.Model(&models.Requirement{}).Where("id = ?", r.ID).Updates(map[string]interface{}{
+				"identifier":  r.Identifier,
+				"title":       r.Title,
+				"description": r.Description,
+				"updated_at":  time.Now(),
+			}).Error; err != nil {
+				if isUniqueConstraintError(err) {
+					return models.ErrDuplicateRequirementIdentifier
+				}
+				return err
+			}
+			_ = s.store_logRequirementEvent(r.ID, "updated") //nolint:errcheck
+			return nil
+		})
+	}
+	err := runWithBusyRetry(run)
+	if errors.Is(err, ErrEditConflict) {
+		return latest, err
+	}
+	return nil, err
+}
+
 // DeleteRequirement removes a requirement by ID, cascading to descendants and links.
 func (s *Store) DeleteRequirement(id string) error {
 	return s.DeleteRequirements([]string{id})

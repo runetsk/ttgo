@@ -5071,7 +5071,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/internal_api_ai.SemanticMergeView"
+                            "$ref": "#/definitions/ttgo_internal_api_ai.SemanticMergeView"
                         }
                     },
                     "404": {
@@ -8539,6 +8539,99 @@ const docTemplate = `{
                 }
             }
         },
+        "/tests/page": {
+            "get": {
+                "description": "Server-side filtered, sorted and paginated test cases for the library grid. Returns {tests,total,limit,offset}.",
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "tests"
+                ],
+                "summary": "List test cases (paginated)",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "Comma-separated folder IDs (descendants included)",
+                        "name": "folder_ids",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Global search over name, ID and category name",
+                        "name": "search",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "Sort key (name, id, created_at, updated_at, description, steps_count, open_defects, reverification_flagged, categories, linked_requirements)",
+                        "name": "sort",
+                        "in": "query"
+                    },
+                    {
+                        "type": "string",
+                        "description": "asc or desc",
+                        "name": "dir",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Page size (1-200, default 50)",
+                        "name": "limit",
+                        "in": "query"
+                    },
+                    {
+                        "type": "integer",
+                        "description": "Row offset (default 0)",
+                        "name": "offset",
+                        "in": "query"
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "type": "object",
+                            "properties": {
+                                "limit": {
+                                    "type": "integer"
+                                },
+                                "offset": {
+                                    "type": "integer"
+                                },
+                                "tests": {
+                                    "type": "array",
+                                    "items": {
+                                        "$ref": "#/definitions/ttgo_pkg_tracker_models.TestCase"
+                                    }
+                                },
+                                "total": {
+                                    "type": "integer"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Bad Request",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": {
+                                "type": "string"
+                            }
+                        }
+                    }
+                }
+            }
+        },
         "/tests/{id}": {
             "get": {
                 "description": "Returns a single test case by ID",
@@ -10903,6 +10996,10 @@ const docTemplate = `{
                 "description": {
                     "type": "string"
                 },
+                "edit_token": {
+                    "description": "Transient optimistic-concurrency token for the first-party editor. Set only on\ndetail/save responses; never persisted, omitted elsewhere.",
+                    "type": "string"
+                },
                 "id": {
                     "type": "string"
                 },
@@ -11493,6 +11590,10 @@ const docTemplate = `{
                     }
                 },
                 "description": {
+                    "type": "string"
+                },
+                "edit_token": {
+                    "description": "Transient optimistic-concurrency token for the first-party editor. Set only on\ndetail/save responses (GetTest, UpdateTest); never persisted, omitted elsewhere.",
                     "type": "string"
                 },
                 "folder_id": {

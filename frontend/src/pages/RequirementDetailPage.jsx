@@ -8,6 +8,8 @@ import { toast } from '../toast';
 import { useSubscription } from '../hooks/useSubscription';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useAbortController } from '../hooks/useAbortController';
+import { useUnsavedGuard } from '../hooks/useUnsavedGuard';
+import { requirementSnapshot, reconcileRefresh, parseEditConflict } from '../utils/editorDraft';
 import SafeHTML from '../components/shared/SafeHTML';
 
 const covBadge = (covered) => ({
@@ -61,11 +63,31 @@ export default function RequirementDetailPage() {
     const [formError, setFormError] = useState('');
     const [saving, setSaving] = useState(false);
 
-    // Track original values to detect changes
+    // Track original values to detect changes. origId/origTitle/origDesc are the
+    // immutable saved *baseline* the draft (formId/formTitle/formDesc) is compared
+    // against; a server refresh only replaces them when the editor is clean.
     const [origId, setOrigId] = useState('');
     const [origTitle, setOrigTitle] = useState('');
     const [origDesc, setOrigDesc] = useState('');
+    // A refresh that arrives while the editor is dirty is kept aside, not applied:
+    // externallyChanged drives the "your edits are kept" notice, and latestServer
+    // holds the newer server values so Discard can load them.
+    const [externallyChanged, setExternallyChanged] = useState(false);
+    const [latestServer, setLatestServer] = useState(null);
+    // Optimistic-concurrency token of the loaded baseline, sent back on save so the
+    // server can reject a save that would overwrite someone else's change.
+    const [baselineToken, setBaselineToken] = useState('');
+    // Set when a save is rejected with 409 edit_conflict: { latest } holds the
+    // server's current record (including its edit_token) for the comparison panel.
+    const [editConflict, setEditConflict] = useState(null);
     const getSignal = useAbortController();
+
+    // Refs mirror the current draft/baseline/saving so loadData (a [reqId]-stable
+    // callback invoked from WebSocket refreshes) can read live values without
+    // capturing them in a stale closure.
+    const draftRef = useRef({ identifier: '', title: '', description: '' });
+    const baselineRef = useRef({ identifier: '', title: '', description: '' });
+    const savingRef = useRef(false);
 
     const loadData = useCallback((signal) => {
         if (!reqRef.current) setLoading(true);
@@ -73,17 +95,38 @@ export default function RequirementDetailPage() {
         Promise.all([reqApi.get(reqId, signal ? { signal } : undefined), tracApi.getMatrix(signal ? { signal } : undefined)])
             .then(([reqData, matrixData]) => {
                 if (signal?.aborted) return;
+                // Related information (metadata, coverage, children) always refreshes.
                 setReq(reqData);
-                const id = reqData.identifier || '';
-                const title = reqData.title || '';
-                const desc = reqData.description || '';
-                setFormId(id);
-                setFormTitle(title);
-                setFormDesc(desc);
-                setOrigId(id);
-                setOrigTitle(title);
-                setOrigDesc(desc);
-                setEditingDesc(false);
+                const server = {
+                    identifier: reqData.identifier || '',
+                    title: reqData.title || '',
+                    description: reqData.description || '',
+                    edit_token: reqData.edit_token || '',
+                };
+                // The editable fields only refresh when it is safe — a clean, idle
+                // editor. A dirty or saving editor keeps its draft; the newer server
+                // copy is held aside for the notice and for Discard.
+                const { adopt, externallyChanged: changed } = reconcileRefresh({
+                    baselineSnap: requirementSnapshot(baselineRef.current),
+                    draftSnap: requirementSnapshot(draftRef.current),
+                    saving: savingRef.current,
+                    serverSnap: requirementSnapshot(server),
+                });
+                if (adopt) {
+                    setFormId(server.identifier);
+                    setFormTitle(server.title);
+                    setFormDesc(server.description);
+                    setOrigId(server.identifier);
+                    setOrigTitle(server.title);
+                    setOrigDesc(server.description);
+                    setBaselineToken(server.edit_token);
+                    setEditingDesc(false);
+                    setExternallyChanged(false);
+                    setLatestServer(null);
+                } else {
+                    setExternallyChanged(changed);
+                    setLatestServer(changed ? server : null);
+                }
                 const row = matrixData?.rows?.find(r => String(r.requirement_id) === String(reqId));
                 setLinkedTests(row?.linked_test_cases || []);
                 // Fetch children if this requirement might be a parent
@@ -124,7 +167,33 @@ export default function RequirementDetailPage() {
         return formId !== origId || formTitle !== origTitle || formDesc !== origDesc;
     }, [formId, formTitle, formDesc, origId, origTitle, origDesc]);
 
-    const handleSave = () => {
+    // Keep the refs loadData reads in sync with the live draft/baseline/saving state.
+    useEffect(() => { draftRef.current = { identifier: formId, title: formTitle, description: formDesc }; }, [formId, formTitle, formDesc]);
+    useEffect(() => { baselineRef.current = { identifier: origId, title: origTitle, description: origDesc }; }, [origId, origTitle, origDesc]);
+    useEffect(() => { savingRef.current = saving; }, [saving]);
+
+    // Warn before a navigation would drop unsaved edits.
+    useUnsavedGuard(hasChanges, 'You have unsaved changes to this requirement. Leave and discard them?');
+
+    // adoptRequirement replaces the draft, baseline and token with a server record
+    // (used by a clean refresh, a successful save, Discard and "Use latest").
+    const adoptRequirement = (rec) => {
+        setFormId(rec.identifier ?? '');
+        setFormTitle(rec.title ?? '');
+        setFormDesc(rec.description ?? '');
+        setOrigId(rec.identifier ?? '');
+        setOrigTitle(rec.title ?? '');
+        setOrigDesc(rec.description ?? '');
+        setBaselineToken(rec.edit_token ?? '');
+        setEditingDesc(false);
+        setFormError('');
+        setExternallyChanged(false);
+        setLatestServer(null);
+    };
+
+    // submit saves the current draft against expectedToken. On 409 edit_conflict it
+    // opens the comparison panel instead of overwriting the other change.
+    const submit = (expectedToken) => {
         if (!formId.trim()) { setFormError('Identifier is required.'); return; }
         if (!formTitle.trim()) { setFormError('Title is required.'); return; }
         setSaving(true);
@@ -133,19 +202,47 @@ export default function RequirementDetailPage() {
             identifier: formId.trim(),
             title: formTitle.trim(),
             description: formDesc,
+            expected_edit_token: expectedToken,
         })
-            .then(() => loadData())
-            .catch(err => setFormError(err.response?.data?.error || err.message || 'An error occurred.'))
+            .then((saved) => {
+                // Advance the baseline to the actual saved response (incl. its new
+                // token) so the follow-up loadData adopts rather than seeing a stale
+                // baseline as a conflict.
+                setFormId(saved?.identifier ?? formId.trim());
+                setFormTitle(saved?.title ?? formTitle.trim());
+                setFormDesc(saved?.description ?? formDesc);
+                setOrigId(saved?.identifier ?? formId.trim());
+                setOrigTitle(saved?.title ?? formTitle.trim());
+                setOrigDesc(saved?.description ?? formDesc);
+                setBaselineToken(saved?.edit_token ?? '');
+                setExternallyChanged(false);
+                setLatestServer(null);
+                setEditConflict(null);
+                loadData();
+            })
+            .catch(err => {
+                const latest = parseEditConflict(err, 'requirement');
+                if (latest) {
+                    setEditConflict({ latest });
+                } else {
+                    setFormError(err.response?.data?.error || err.message || 'An error occurred.');
+                }
+            })
             .finally(() => setSaving(false));
     };
 
+    const handleSave = () => submit(baselineToken);
+
     const handleDiscard = () => {
-        setFormId(origId);
-        setFormTitle(origTitle);
-        setFormDesc(origDesc);
-        setEditingDesc(false);
-        setFormError('');
+        // Discarding loads the latest server state: the newer copy held aside by a
+        // refresh if there is one, otherwise the baseline the draft started from.
+        adoptRequirement(latestServer || { identifier: origId, title: origTitle, description: origDesc, edit_token: baselineToken });
     };
+
+    // Conflict-panel actions.
+    const conflictUseLatest = () => adoptRequirement(editConflict.latest);
+    const conflictKeepEditing = () => setEditConflict(null);
+    const conflictSaveReviewed = () => submit(editConflict.latest.edit_token || '');
 
     const handleAIGenerate = () => {
         if (aiGen.hasUnsaved && !window.confirm('You have un-accepted AI drafts. Opening a new session will discard them. Continue?')) return;
@@ -270,6 +367,61 @@ export default function RequirementDetailPage() {
             </div>
 
             <ErrorAlert message={formError} />
+
+            {externallyChanged && (
+                <div
+                    role="status"
+                    data-testid="requirement-externally-changed"
+                    style={{
+                        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+                        background: 'rgba(245,158,11,0.12)', color: 'var(--warning-color, #f59e0b)',
+                        border: '1px solid rgba(245,158,11,0.35)', borderRadius: 6,
+                        padding: '10px 14px', marginBottom: 16, fontSize: '0.85rem',
+                    }}
+                >
+                    <span>This requirement changed on the server. Your unsaved edits are kept.</span>
+                    <button className="action-btn" style={{ fontSize: '0.8rem' }} onClick={handleDiscard} disabled={saving}>
+                        Load latest
+                    </button>
+                </div>
+            )}
+
+            {/* Edit-conflict panel: a save was rejected because the server copy changed. */}
+            {editConflict && (
+                <div
+                    className="glass-panel"
+                    data-testid="requirement-edit-conflict"
+                    style={{ padding: '18px 24px', marginBottom: 16, border: '1px solid rgba(248,113,113,0.35)' }}
+                >
+                    <h3 style={{ margin: '0 0 6px', fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-red, #f87171)' }}>
+                        This requirement changed since you opened it
+                    </h3>
+                    <p style={{ margin: '0 0 14px', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                        Review the latest saved version against your edits, then choose what to keep.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                        <div>
+                            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: 6 }}>Your edits</div>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{formId} — {formTitle}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                                <SafeHTML html={formDesc || '<em>(no description)</em>'} />
+                            </div>
+                        </div>
+                        <div>
+                            <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-secondary)', marginBottom: 6 }}>Latest on server</div>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{editConflict.latest.identifier} — {editConflict.latest.title}</div>
+                            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: 4 }}>
+                                <SafeHTML html={editConflict.latest.description || '<em>(no description)</em>'} />
+                            </div>
+                        </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                        <button className="action-btn" style={{ fontSize: '0.82rem' }} onClick={conflictUseLatest} disabled={saving}>Use latest</button>
+                        <button className="action-btn" style={{ fontSize: '0.82rem' }} onClick={conflictKeepEditing} disabled={saving}>Keep editing</button>
+                        <button className="primary-btn" style={{ fontSize: '0.82rem' }} onClick={conflictSaveReviewed} disabled={saving}>Save reviewed version</button>
+                    </div>
+                </div>
+            )}
 
             {/* Conflict resolution panel */}
             {conflictData && (
